@@ -1,0 +1,496 @@
+#!/usr/bin/env node
+
+const assert = require("assert");
+const path = require("path");
+
+function sanitizeResourceName(name) {
+  return name
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[()[\]{}]/g, "")
+    .replace(/[^a-z0-9\-_]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function globalHomeRoot(config = {}) {
+  if (config.globalHomeDirectory) return config.globalHomeDirectory;
+  if (config.globalResourceHomePreset === "claude") return "~/.claude";
+  if (config.globalResourceHomePreset === "agents") return "~/.agents";
+  return "~/.copilot";
+}
+
+function getInstallFileName(skill, fileName) {
+  if (skill.kind !== "mcp" || !skill.source) return fileName;
+  const normalizedFileName = fileName.replace(/^\./, "");
+  if (normalizedFileName.toLowerCase() !== "mcp.json") return fileName;
+  return `${sanitizeResourceName(skill.source)}-${normalizedFileName}`;
+}
+
+function targetPath(
+  workspaceRoot,
+  skill,
+  targetScope = "workspace",
+  customRoot,
+  config = {},
+) {
+  const normalizedRemotePath = skill.path.replace(/\\/g, "/");
+  const fileName = getInstallFileName(
+    skill,
+    path.posix.basename(normalizedRemotePath),
+  );
+  const resourceFolderName = sanitizeResourceName(
+    skill.kind === "skill"
+      ? skill.name
+      : path.posix.basename(path.posix.dirname(normalizedRemotePath)) ||
+          skill.name,
+  );
+
+  if (targetScope === "custom") {
+    if (skill.kind === "skill") {
+      return path.posix.join(customRoot, sanitizeResourceName(skill.name));
+    }
+    if (skill.kind === "hook") {
+      return path.posix.join(customRoot, resourceFolderName, "README.md");
+    }
+    return path.posix.join(customRoot, fileName);
+  }
+
+  if (targetScope === "globalHome") {
+    const root = globalHomeRoot(config);
+    if (skill.kind === "skill")
+      return path.posix.join(root, "skills", sanitizeResourceName(skill.name));
+    if (skill.kind === "agent")
+      return path.posix.join(root, "agents", fileName);
+    if (skill.kind === "instruction")
+      return path.posix.join(root, "instructions", fileName);
+    if (skill.kind === "prompt")
+      return path.posix.join(root, "prompts", fileName);
+    if (skill.kind === "mcp") return path.posix.join(root, "mcp", fileName);
+    return path.posix.join(root, "hooks", resourceFolderName, "README.md");
+  }
+
+  if (targetScope === "userData") {
+    const globalRoot = globalHomeRoot(config);
+    if (skill.kind === "skill")
+      return path.posix.join(
+        globalRoot,
+        "skills",
+        sanitizeResourceName(skill.name),
+      );
+    if (skill.kind === "hook")
+      return path.posix.join(
+        globalRoot,
+        "hooks",
+        resourceFolderName,
+        "README.md",
+      );
+    if (skill.kind === "agent")
+      return path.posix.join(
+        config.userAgentsDirectory ||
+          config.userPromptsDirectory ||
+          "<VSCodeUser>/prompts",
+        fileName,
+      );
+    if (skill.kind === "instruction")
+      return path.posix.join(
+        config.userInstructionsDirectory || "<VSCodeUser>/instructions",
+        fileName,
+      );
+    if (skill.kind === "mcp")
+      return path.posix.join(globalRoot, "mcp", fileName);
+    return path.posix.join(
+      config.userPromptsDirectory || "<VSCodeUser>/prompts",
+      fileName,
+    );
+  }
+
+  if (skill.kind === "skill") {
+    return path.posix.join(
+      workspaceRoot,
+      ".github/skills",
+      sanitizeResourceName(skill.name),
+    );
+  }
+  if (skill.kind === "agent")
+    return path.posix.join(
+      workspaceRoot,
+      config.workspaceAgentsDirectory || ".github/agents",
+      fileName,
+    );
+  if (skill.kind === "instruction")
+    return path.posix.join(
+      workspaceRoot,
+      config.workspaceInstructionsDirectory || ".github/instructions",
+      fileName,
+    );
+  if (skill.kind === "prompt")
+    return path.posix.join(
+      workspaceRoot,
+      config.workspacePromptsDirectory || ".github/prompts",
+      fileName,
+    );
+  if (skill.kind === "mcp")
+    return path.posix.join(
+      workspaceRoot,
+      config.workspaceMcpDirectory || ".github/mcp",
+      fileName,
+    );
+  return path.posix.join(
+    workspaceRoot,
+    config.workspaceHooksDirectory || ".github/hooks",
+    resourceFolderName,
+    "README.md",
+  );
+}
+
+function uninstallTargetPath(workspaceRoot, configuredSkillsDir, relativePath) {
+  const normalizedPath = relativePath.replace(/\\/g, "/");
+  const isAbsolute = path.isAbsolute(relativePath);
+  const isSkill =
+    normalizedPath.toLowerCase() === "skill.md" ||
+    normalizedPath.toLowerCase().endsWith("/skill.md");
+  const isHook = /^(.+\/)?hooks\/[^/]+\/readme\.md$/i.test(normalizedPath);
+
+  if (isAbsolute) {
+    if (isSkill || isHook) {
+      return path.posix.dirname(normalizedPath);
+    }
+    return normalizedPath;
+  }
+
+  if (isSkill) {
+    const folderPath = normalizedPath.replace(/\/SKILL\.md$/i, "");
+    const skillsRoot = configuredSkillsDir.replace(/^\/+|\/+$/g, "");
+    if (folderPath === skillsRoot || folderPath.startsWith(`${skillsRoot}/`)) {
+      return path.posix.join(workspaceRoot, folderPath);
+    }
+    return path.posix.join(workspaceRoot, skillsRoot, folderPath);
+  }
+
+  if (isHook) {
+    return path.posix.dirname(path.posix.join(workspaceRoot, normalizedPath));
+  }
+
+  return path.posix.join(workspaceRoot, normalizedPath);
+}
+
+function test(name, fn) {
+  try {
+    fn();
+    console.log(`PASS ${name}`);
+  } catch (error) {
+    console.error(`FAIL ${name}`);
+    throw error;
+  }
+}
+
+test("workspace targets are resource-kind aware", () => {
+  assert.strictEqual(
+    targetPath("/repo", {
+      kind: "skill",
+      name: "Code Tour",
+      path: "skills/code-tour/SKILL.md",
+    }),
+    "/repo/.github/skills/code-tour",
+  );
+  assert.strictEqual(
+    targetPath("/repo", {
+      kind: "agent",
+      name: "Planner",
+      path: "agents/planner.agent.md",
+    }),
+    "/repo/.github/agents/planner.agent.md",
+  );
+  assert.strictEqual(
+    targetPath("/repo", {
+      kind: "instruction",
+      name: "TS",
+      path: "instructions/typescript.instructions.md",
+    }),
+    "/repo/.github/instructions/typescript.instructions.md",
+  );
+  assert.strictEqual(
+    targetPath("/repo", {
+      kind: "prompt",
+      name: "Review",
+      path: "prompts/review.prompt.md",
+    }),
+    "/repo/.github/prompts/review.prompt.md",
+  );
+  assert.strictEqual(
+    targetPath("/repo", {
+      kind: "hook",
+      name: "Pre Review",
+      path: "hooks/pre-review/README.md",
+    }),
+    "/repo/.github/hooks/pre-review/README.md",
+  );
+  assert.strictEqual(
+    targetPath("/repo", {
+      kind: "mcp",
+      name: "GitHub MCP",
+      path: ".vscode/mcp.json",
+    }),
+    "/repo/.github/mcp/mcp.json",
+  );
+});
+
+test("global and user targets preserve native conventions", () => {
+  assert.strictEqual(
+    targetPath(
+      "/repo",
+      { kind: "agent", name: "Planner", path: "agents/planner.agent.md" },
+      "globalHome",
+    ),
+    "~/.copilot/agents/planner.agent.md",
+  );
+  assert.strictEqual(
+    targetPath(
+      "/repo",
+      { kind: "prompt", name: "Review", path: "prompts/review.prompt.md" },
+      "userData",
+    ),
+    "<VSCodeUser>/prompts/review.prompt.md",
+  );
+  assert.strictEqual(
+    targetPath(
+      "/repo",
+      { kind: "agent", name: "Planner", path: "agents/planner.agent.md" },
+      "userData",
+    ),
+    "<VSCodeUser>/prompts/planner.agent.md",
+  );
+  assert.strictEqual(
+    targetPath(
+      "/repo",
+      { kind: "agent", name: "Planner", path: "agents/planner.agent.md" },
+      "userData",
+      undefined,
+      { userAgentsDirectory: "~/custom-agents" },
+    ),
+    "~/custom-agents/planner.agent.md",
+  );
+  assert.strictEqual(
+    targetPath(
+      "/repo",
+      {
+        kind: "instruction",
+        name: "TypeScript",
+        path: "instructions/typescript.instructions.md",
+      },
+      "userData",
+    ),
+    "<VSCodeUser>/instructions/typescript.instructions.md",
+  );
+  assert.strictEqual(
+    targetPath(
+      "/repo",
+      { kind: "hook", name: "Pre Review", path: "hooks/pre-review/README.md" },
+      "userData",
+    ),
+    "~/.copilot/hooks/pre-review/README.md",
+  );
+  assert.strictEqual(
+    targetPath(
+      "/repo",
+      { kind: "mcp", name: "GitHub MCP", path: "mcp/github.json" },
+      "userData",
+    ),
+    "~/.copilot/mcp/github.json",
+  );
+});
+
+test("configured roots override default non-skill targets", () => {
+  assert.strictEqual(
+    targetPath(
+      "/repo",
+      { kind: "agent", name: "Planner", path: "agents/planner.agent.md" },
+      "workspace",
+      undefined,
+      { workspaceAgentsDirectory: ".config/agents" },
+    ),
+    "/repo/.config/agents/planner.agent.md",
+  );
+  assert.strictEqual(
+    targetPath(
+      "/repo",
+      {
+        kind: "instruction",
+        name: "A11y",
+        path: "instructions/a11y.instructions.md",
+      },
+      "workspace",
+      undefined,
+      { workspaceInstructionsDirectory: ".rules/instructions" },
+    ),
+    "/repo/.rules/instructions/a11y.instructions.md",
+  );
+  assert.strictEqual(
+    targetPath(
+      "/repo",
+      { kind: "prompt", name: "Review", path: "prompts/review.prompt.md" },
+      "userData",
+      undefined,
+      { userPromptsDirectory: "~/custom-prompts" },
+    ),
+    "~/custom-prompts/review.prompt.md",
+  );
+  assert.strictEqual(
+    targetPath(
+      "/repo",
+      { kind: "hook", name: "Pre Review", path: "hooks/pre-review/README.md" },
+      "globalHome",
+      undefined,
+      { globalHomeDirectory: "~/claude-resources" },
+    ),
+    "~/claude-resources/hooks/pre-review/README.md",
+  );
+  assert.strictEqual(
+    targetPath(
+      "/repo",
+      { kind: "skill", name: "Review PR", path: "skills/review-pr" },
+      "globalHome",
+      undefined,
+      { globalResourceHomePreset: "claude" },
+    ),
+    "~/.claude/skills/review-pr",
+  );
+  assert.strictEqual(
+    targetPath(
+      "/repo",
+      { kind: "agent", name: "Planner", path: "agents/planner.agent.md" },
+      "globalHome",
+      undefined,
+      { globalResourceHomePreset: "agents" },
+    ),
+    "~/.agents/agents/planner.agent.md",
+  );
+  assert.strictEqual(
+    targetPath(
+      "/repo",
+      { kind: "mcp", name: "GitHub MCP", path: "mcp/github.json" },
+      "userData",
+      undefined,
+      { globalHomeDirectory: "~/custom-home" },
+    ),
+    "~/custom-home/mcp/github.json",
+  );
+});
+
+test("custom targets keep skills and hooks directory-shaped", () => {
+  assert.strictEqual(
+    targetPath(
+      "/repo",
+      { kind: "skill", name: "Code Tour", path: "skills/code-tour/SKILL.md" },
+      "custom",
+      "/custom",
+    ),
+    "/custom/code-tour",
+  );
+  assert.strictEqual(
+    targetPath(
+      "/repo",
+      { kind: "hook", name: "Pre Review", path: "hooks/pre-review/README.md" },
+      "custom",
+      "/custom",
+    ),
+    "/custom/pre-review/README.md",
+  );
+  assert.strictEqual(
+    targetPath(
+      "/repo",
+      { kind: "mcp", name: "GitHub MCP", path: "mcp/github.json" },
+      "custom",
+      "/custom",
+    ),
+    "/custom/github.json",
+  );
+});
+
+test("generic MCP config file names are source-prefixed to avoid collisions", () => {
+  assert.strictEqual(
+    targetPath("/repo", {
+      kind: "mcp",
+      name: "azure",
+      source: "microsoft-azure-skills",
+      path: ".mcp.json",
+    }),
+    "/repo/.github/mcp/microsoft-azure-skills-mcp.json",
+  );
+  assert.strictEqual(
+    targetPath(
+      "/repo",
+      {
+        kind: "mcp",
+        name: "Plugin MCP",
+        source: "aws-agent-plugins",
+        path: "plugins/aws/mcp.json",
+      },
+      "globalHome",
+    ),
+    "~/.copilot/mcp/aws-agent-plugins-mcp.json",
+  );
+  assert.strictEqual(
+    targetPath(
+      "/repo",
+      {
+        kind: "mcp",
+        name: "GitHub MCP",
+        source: "github-awesome-copilot",
+        path: "mcp/github.json",
+      },
+      "globalHome",
+    ),
+    "~/.copilot/mcp/github.json",
+  );
+});
+
+test("uninstall by path avoids duplicating configured skills directory", () => {
+  assert.strictEqual(
+    uninstallTargetPath(
+      "/repo",
+      ".github/skills",
+      ".github/skills/code-tour/SKILL.md",
+    ),
+    "/repo/.github/skills/code-tour",
+  );
+  assert.strictEqual(
+    uninstallTargetPath("/repo", ".github/skills", "nested/code-tour/SKILL.md"),
+    "/repo/.github/skills/nested/code-tour",
+  );
+  assert.strictEqual(
+    uninstallTargetPath(
+      "/repo",
+      ".github/skills",
+      ".github/agents/planner.agent.md",
+    ),
+    "/repo/.github/agents/planner.agent.md",
+  );
+  assert.strictEqual(
+    uninstallTargetPath(
+      "/repo",
+      ".github/skills",
+      ".github/hooks/pre-review/README.md",
+    ),
+    "/repo/.github/hooks/pre-review",
+  );
+  assert.strictEqual(
+    uninstallTargetPath(
+      "/repo",
+      ".github/skills",
+      "/external/agents/planner.agent.md",
+    ),
+    "/external/agents/planner.agent.md",
+  );
+  assert.strictEqual(
+    uninstallTargetPath(
+      "/repo",
+      ".github/skills",
+      "/external/hooks/pre-review/README.md",
+    ),
+    "/external/hooks/pre-review",
+  );
+});
+
+console.log("Resource target tests passed");

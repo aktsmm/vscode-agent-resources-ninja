@@ -1,0 +1,597 @@
+# 🥷 Agent Resources Ninja
+
+<p align="center">
+  <strong>Search, Install, and Manage Agent Resources for AI Coding Assistants</strong>
+</p>
+
+> Agent Resources Ninja is a new resource-oriented VS Code extension for managing skills, agents, prompts, instructions, hooks, and related AI coding resources.
+
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=yamapan.agent-resources-ninja">
+    <img src="https://img.shields.io/badge/VS%20Code-Marketplace-007ACC?style=for-the-badge&logo=visual-studio-code&logoColor=white" alt="VS Code Marketplace">
+  </a>
+  <a href="https://github.com/aktsmm/vscode-agent-resources-ninja/blob/master/LICENSE">
+    <img src="https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey?style=for-the-badge" alt="License CC BY-NC-SA 4.0">
+  </a>
+  <a href="https://github.com/aktsmm/vscode-agent-resources-ninja">
+    <img src="https://img.shields.io/badge/GitHub-Source-181717?style=for-the-badge&logo=github&logoColor=white" alt="GitHub">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=yamapan.agent-resources-ninja">
+    <img src="https://img.shields.io/badge/Install%20Now-VS%20Code%20Marketplace-007ACC?style=for-the-badge&logo=visual-studio-code&logoColor=white" alt="Install from VS Code Marketplace">
+  </a>
+</p>
+
+<p align="center">
+  <b>GitHub Copilot • Claude Code • Cursor • Windsurf • Cline</b>
+</p>
+
+<p align="center">
+  <a href="#features">Features</a> •
+  <a href="#installation">Installation</a> •
+  <a href="#usage">Usage</a> •
+  <a href="#copilot-chat">Copilot Chat</a> •
+  <a href="#settings">Settings</a> •
+  <a href="#development">Development</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/aktsmm/vscode-agent-resources-ninja/blob/master/README_ja.md">Japanese / 日本語版はこちら</a>
+</p>
+
+---
+
+## Output Formats
+
+### Format Options
+
+| Format      | Description                                   | IMPORTANT Prompt | Detailed Table | Compressed Index |
+| ----------- | --------------------------------------------- | ---------------- | -------------- | ---------------- |
+| **Full**    | IMPORTANT prompt + detailed table (default)   | Yes              | Yes, 200 chars | No               |
+| **Compact** | IMPORTANT prompt + compressed index           | Yes              | No             | Yes, 100 chars   |
+| **Legacy**  | Simple table only for compatibility scenarios | No               | Yes, 200 chars | No               |
+
+### IMPORTANT Prompt
+
+The `full` and `compact` formats include the **IMPORTANT prompt** that instructs agents to prioritize skill files:
+
+```markdown
+> **IMPORTANT**: Prefer skill-led reasoning over pre-training-led reasoning.
+> Read the relevant SKILL.md before working on tasks covered by these skills.
+```
+
+### Example Output - Full Format (Default)
+
+```markdown
+<!-- resource-ninja-START -->
+
+## Agent Skills
+
+> **IMPORTANT**: Prefer skill-led reasoning over pre-training-led reasoning.
+> Read the relevant SKILL.md before working on tasks covered by these skills.
+
+### Skills
+
+| Skill                                | Description                                         |
+| ------------------------------------ | --------------------------------------------------- |
+| [docx](.github/skills/docx/SKILL.md) | Process Word documents (.docx). Use for .docx files |
+| [pdf](.github/skills/pdf/SKILL.md)   | PDF manipulation toolkit. Extract text, create PDFs |
+
+<!-- resource-ninja-END -->
+```
+
+### How to Change Format
+
+Settings → **Output Format** → Select `full`, `compact`, or `legacy`
+
+---
+
+## 🥷 Features
+
+### 🧭 Resource Management
+
+- Browse **Workspace Resources**, **User / Global Resource Home**, and **Remote Resources** from the Activity Bar
+- Manage multiple resource kinds: skills, agents, prompts, instructions, hooks, and MCP config resources
+- Browse remote resources by source or by Resource Type
+- Inspect user/global resources from VS Code User Data and the selected Global Resource Home
+- Choose explicit install targets: Workspace, User Profile, Global Resource Home, or Custom
+
+### 📁 Local Resource Management
+
+- Auto-detect skills, agents, prompts, instructions, hooks, and MCP config resources in workspace
+- Automatically sync to instruction file (with `resourceNinja.includeLocalResources` setting)
+- Manual register / unregister commands
+- Create new skills, agents, prompts, instructions, hooks, and MCP config resources from templates
+- Create Resource and Settings actions are available from every resource view; instruction index open/update actions are available from Workspace Resources and User / Global Resource Home.
+- Create Resource uses the same configured Workspace, User Profile, and Global Resource Home roots as install/scan paths, so the previewed destination matches the created file.
+
+### 🔍 Resource Search & Discovery
+
+- Search resources by keyword (local & GitHub)
+- Filter QuickPick search results by resource kind: skills, agents, instructions, prompts, hooks, or MCP config resources
+- **Install Sets** are curated, selectable install groups. **Plugin Contents** are browse groups for resources found under plugin paths; install the whole indexed plugin group with a checklist, or install individual resources.
+- **Multi-keyword Search** - Scored by name, path, description relevance
+- **Parallel Fetch** - Fast results with 50 concurrent requests
+- **Fallback Search** - Auto-retry with fewer keywords if no results
+- Search results with descriptions & category tags
+- Star counts & organization badges
+- Install / Preview / Favorite directly from search results
+
+### 📦 Install & Manage
+
+- Double-click installation defaults to Workspace, with a setting for Ask / User Profile / Global Resource Home
+- Context menu installation always shows the target picker for Workspace, User Profile, Global Resource Home, or Custom
+- MCP config resources are copied to the Workspace MCP Directory first, then you can keep them for review or explicitly merge compatible servers into `.vscode/mcp.json`; existing server keys always require overwrite confirmation.
+- Auto-update **instruction file** (AGENTS.md / copilot-instructions.md / CLAUDE.md)
+- **Table Format** - Resources displayed in table with "When to Use" column
+- **Auto-extract "When to Use"** - Extracted from SKILL.md `## When to Use` section
+- **Edit Description** - Right-click installed skills to customize the instruction-file description
+- Uninstall functionality
+- **Reinstall All** - Batch reinstall installed skills from latest source metadata (with auto index update)
+- **Install Feedback** - NEW badge, status bar notification, auto-select in tree view
+- **Open Folder** - Quick access to installed resource folder
+- **Index Integrity Check** - Auto-detect missing resources and prompt for index update
+
+### 🔧 Multi-Tool Support
+
+- **Auto-detection** of AI tools in workspace (Cursor, Windsurf, Cline, Claude Code, GitHub Copilot)
+- Automatic format selection based on detected tool
+- Manual override available in settings
+- Supported output formats:
+  - Markdown (AGENTS.md, CLAUDE.md, copilot-instructions.md)
+  - Cursor Rules (.cursor/rules/)
+  - Windsurf Rules (.windsurfrules)
+  - Cline Rules (.clinerules)
+
+### 💬 GitHub Copilot Chat Integration
+
+- `@resources` commands for direct chat operations
+- `/search`, `/install`, `/list`, `/recommend`
+- Project-based resource recommendations
+
+### 🤖 MCP Tools Integration
+
+- Automatically available as tools in **Agent Mode**
+- **9 Tools**: `#searchResources`, `#installResource`, `#uninstallResource`, `#listResources`, `#recommendResources`, `#updateResourceIndex`, `#webSearchResources`, `#addResourceSource`, `#localizeResource`
+- Trust badges (Official / Curated / Community)
+- Auto-update instruction file for skill installs where applicable
+
+### 🌐 Multi-language & UI
+
+- Japanese / English UI (auto-detect + manual switch)
+- Resource preview in Webview
+- Favorites feature
+
+## 🎬 Demo
+
+![Demo](https://raw.githubusercontent.com/aktsmm/vscode-agent-resources-ninja/master/docs/screenshots/demo.gif)
+
+## 📥 Installation
+
+### VS Code Marketplace
+
+```
+ext install yamapan.agent-resources-ninja
+```
+
+Or search for **"Agent Resources Ninja"** in VS Code Extensions (`Ctrl+Shift+X`)
+
+### Manual Installation
+
+1. Download `.vsix` from [Releases](https://github.com/aktsmm/vscode-agent-resources-ninja/releases)
+2. In VS Code: `Ctrl+Shift+P` → `Extensions: Install from VSIX...`
+3. Select the downloaded `.vsix` file
+
+## 📚 Included Resource Sources
+
+Preset index includes skills, agents, prompts, instructions, hooks, and MCP config resources from official, curated, and community sources out of the box.
+
+| Source                                                                                                                        | Type      | Description                                                                     |
+| ----------------------------------------------------------------------------------------------------------------------------- | --------- | ------------------------------------------------------------------------------- |
+| [anthropics/skills](https://github.com/anthropics/skills)                                                                     | Official  | Anthropic official Claude Skills                                                |
+| [openai/skills](https://github.com/openai/skills)                                                                             | Official  | OpenAI official Codex Skills (1.7k+)                                            |
+| [github/awesome-copilot](https://github.com/github/awesome-copilot)                                                           | Official  | GitHub official Copilot resources, including plugin-published skills and agents |
+| [MicrosoftDocs/Agent-Skills](https://github.com/MicrosoftDocs/Agent-Skills)                                                   | Official  | Microsoft official Azure agent skills                                           |
+| [microsoft/GitHub-Copilot-for-Azure](https://github.com/microsoft/GitHub-Copilot-for-Azure)                                   | Official  | GitHub Copilot for Azure plugin skills                                          |
+| [microsoft/azure-skills](https://github.com/microsoft/azure-skills)                                                           | Official  | Microsoft Azure Skills plugin resources, including Azure skills and MCP config  |
+| [awslabs/agent-plugins](https://github.com/awslabs/agent-plugins)                                                             | Official  | AWS Labs agent plugin skills                                                    |
+| [elastic/agent-skills](https://github.com/elastic/agent-skills)                                                               | Official  | Elastic official agent skills                                                   |
+| [google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli)                                                       | Official  | Gemini CLI official skills                                                      |
+| [openai/codex](https://github.com/openai/codex)                                                                               | Official  | Codex repository skills                                                         |
+| [anthropics/claude-code](https://github.com/anthropics/claude-code)                                                           | Official  | Claude Code plugin skills                                                       |
+| [cline/cline](https://github.com/cline/cline)                                                                                 | Official  | Cline repository skills                                                         |
+| [aaif-goose/goose](https://github.com/aaif-goose/goose)                                                                       | Official  | Goose repository skills from AAIF                                               |
+| [ComposioHQ/awesome-claude-skills](https://github.com/ComposioHQ/awesome-claude-skills)                                       | Curated   | Curated Claude Skills list                                                      |
+| [Code-and-Sorts/awesome-copilot-agents](https://github.com/Code-and-Sorts/awesome-copilot-agents)                             | Curated   | Copilot agents, instructions, prompts, and skills                               |
+| [obra/superpowers](https://github.com/obra/superpowers)                                                                       | Community | High-quality skills & agents                                                    |
+| [glittercowboy/taches-cc-resources](https://github.com/glittercowboy/taches-cc-resources)                                     | Community | Claude Code resources and skills                                                |
+| [muratcankoylan/Agent-Skills-for-Context-Engineering](https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering) | Community | Context Engineering skills (5k+)                                                |
+| [danielmiessler/Personal_AI_Infrastructure](https://github.com/danielmiessler/Personal_AI_Infrastructure)                     | Community | PAI Packs - Skills & Features                                                   |
+| [EveryInc/compound-engineering-plugin](https://github.com/EveryInc/compound-engineering-plugin)                               | Community | Compound Engineering (3.5k+)                                                    |
+| [Wirasm/PRPs-agentic-eng](https://github.com/Wirasm/PRPs-agentic-eng)                                                         | Community | PRP (Prompt Recipe Patterns)                                                    |
+| [qdhenry/Claude-Command-Suite](https://github.com/qdhenry/Claude-Command-Suite)                                               | Community | Claude commands & skills                                                        |
+
+Azure appears through two official Microsoft sources. `microsoft/GitHub-Copilot-for-Azure` indexes plugin-embedded skills from the Copilot for Azure repository, while `microsoft/azure-skills` indexes the top-level Azure Skills Plugin distribution and its Azure MCP config. The Azure Skills bundle is selectable: skills can be installed together, and the MCP config can be copied for review or explicitly merged into `.vscode/mcp.json`.
+
+When two sources provide the same resource name, search results show the friendly source name and add source/path details for duplicates. Distribution-ready top-level paths are listed ahead of embedded plugin paths when relevance is otherwise tied.
+
+Generic MCP config file names such as `mcp.json` and `.mcp.json` are installed with a source prefix, for example `microsoft-azure-skills-mcp.json`, to avoid overwriting MCP configs from another source. MCP files are copied first, and merging into `.vscode/mcp.json` is an explicit install-time choice with backup and overwrite confirmation.
+
+> Use `Update Index` to refresh the latest resources and metadata from these sources.
+> Official product and plugin repositories are path-filtered so bundled presets include distribution-ready resource roots, not samples, manifests, or test fixtures.
+> For `github/awesome-copilot`, resources published from `plugins/` are indexed from distribution-ready top-level resource paths when available, avoiding duplicate raw plugin paths.
+
+## 🥷 Usage
+
+### Sidebar Operations
+
+1. Click the **spiral shuriken icon** in the Activity Bar
+2. **Workspace Resources** - Installed & local resources list
+
+- Groups resources by kind: skills, agents, instructions, prompts, hooks, and MCP config resources
+- Installed workspace resources with the same display name used in Remote Resources
+- Local workspace resources that can be registered in the instruction file
+- Built-in VS Code / Copilot resources are centralized in **User / Global Resource Home** to avoid duplicating environment resources in the workspace list
+- Create new skills, agents, instructions, prompts, hooks, or MCP config resources from the toolbar
+- Choose Workspace, User Profile, Global Resource Home, or a custom folder when creating resources
+- Newly installed resources (temporary badge)
+- Toolbar: Instruction File / Create / Refresh / Settings
+- Menu: Reinstall All Skills / Uninstall All / Multiple selection
+- Open resource folder (right-click menu)
+
+3. **User / Global Resource Home** - Browser for this machine
+
+- VS Code User `prompts` (including `.agent.md`), `instructions`, and legacy `agents`
+- Global Resource Home resources under the selected preset (`~/.copilot`, `~/.claude`, or `~/.agents`)
+
+- Built-in VS Code / GitHub Copilot Chat / GitHub Copilot CLI resources are hidden by default and can be toggled into source-specific groups, including Copilot Chat `/create-*` prompt skills bundled under `assets/prompts`
+- Non-built-in User / Global Resource Home resources can be opened, revealed, copied, or deleted from the right-click menu
+- Built-in resources are read-only and can never be selected as install targets
+- Workspace `.github` resources stay in **Workspace Resources**
+
+4. **Remote Resources** - Browse web resources by source repository
+   - **Favorites** section at top
+
+- Toggle between repository-first and resource-type-first layouts from the toolbar
+- Repository-first groups by source, then skills, agents, instructions, prompts, hooks, and MCP config resources
+- Resource-type-first groups by skills, agents, instructions, prompts, hooks, and MCP config resources, then source
+- Repository sections are ordered Official → Curated → Community
+- Shows installed status with green icons
+- Double-click install from list; optional single-click install uses the configured default target
+
+### Icon Legend
+
+| Icon               | Meaning                                                |
+| ------------------ | ------------------------------------------------------ |
+| check (green)      | Installed resource                                     |
+| circle (yellow)    | Local resource (not registered in instruction file)    |
+| NEW badge          | Recently installed (temporary badge)                   |
+| star-full (yellow) | Favorites section                                      |
+| verified (blue)    | Official source (Anthropic, OpenAI, GitHub, Microsoft) |
+| star (yellow)      | Curated awesome-list                                   |
+| repo               | Community repository                                   |
+
+### Command Palette
+
+| Command                                            | Description                                                  |
+| -------------------------------------------------- | ------------------------------------------------------------ |
+| `Agent Resources Ninja: Search Resources`          | Search and install resources                                 |
+| `Agent Resources Ninja: Update Index`              | Update index from all sources                                |
+| `Agent Resources Ninja: Search on GitHub`          | Search resources on GitHub                                   |
+| `Agent Resources Ninja: Add Source Repository`     | Add new source repository                                    |
+| `Agent Resources Ninja: Remove Source Repository`  | Remove source repository                                     |
+| `Agent Resources Ninja: Uninstall Resource`        | Uninstall a resource                                         |
+| `Agent Resources Ninja: Show Workspace Resources`  | Show workspace resources                                     |
+| `Agent Resources Ninja: Create New Resource`       | Create a local skill, agent, prompt, instruction, or hook    |
+| `Agent Resources Ninja: Register Local Resource`   | Register a local skill in the instruction file               |
+| `Agent Resources Ninja: Unregister Local Resource` | Unregister a local skill from the instruction file           |
+| `Agent Resources Ninja: Reinstall All`             | Reinstall installed skills from latest source metadata       |
+| `Agent Resources Ninja: Uninstall All`             | Uninstall all installed workspace skills (with confirmation) |
+| `Agent Resources Ninja: Uninstall Multiple`        | Select multiple installed skills to uninstall                |
+| `Agent Resources Ninja: Reinstall Multiple`        | Select multiple installed skills to reinstall                |
+| `Agent Resources Ninja: Update Instruction`        | Update instruction file manually                             |
+| `Agent Resources Ninja: Open Resource Folder`      | Open installed resource folder in OS                         |
+
+### Quick Start
+
+```
+1. Ctrl+Shift+P → "Agent Resources Ninja: Search Resources"
+2. Enter keywords (e.g., "pdf", "azure", "git")
+3. Select resource → Choose action (Install / Preview / Favorite / GitHub)
+4. Choose install target from the context menu, or double-click to install to the default target
+5. Done! Skill installs can auto-update the matching instruction file
+```
+
+### Install Targets
+
+| Target               | Best for                                            | Resource placement                                                                                                                                         |
+| -------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Workspace            | Project-specific resources                          | Configured workspace directories; defaults to `.github/skills`, `.github/agents`, `.github/instructions`, `.github/prompts`, `.github/hooks`               |
+| User Profile         | VS Code user customizations and shared skills/hooks | Agents and prompts use VS Code User `prompts` by default; instructions use VS Code User `instructions`; skills/hooks use the selected Global Resource Home |
+| Global Resource Home | Shared resources for Copilot CLI, Claude, or agents | Selected preset (`~/.copilot`, `~/.claude`, `~/.agents`) or override, with kind-specific subfolders                                                        |
+| Custom               | Manual placement                                    | Chosen folder                                                                                                                                              |
+
+The install picker shows a destination preview for the selected resource kind before writing files. Built-in VS Code / Copilot resources are scan-only and are never used as install targets.
+
+### Search Tips 💡
+
+| Example            | Effect                                 |
+| ------------------ | -------------------------------------- |
+| `azure`            | Keyword search                         |
+| `azure devops`     | Multiple keywords, ranked by relevance |
+| `username keyword` | First word searched as username        |
+| `user:anthropics`  | Explicit user search                   |
+| `repo:owner/repo`  | Repository search                      |
+
+> If no results found, keywords are automatically reduced and retried.
+
+## 💬 Copilot Chat
+
+Use `@resources` in GitHub Copilot Chat for resource operations:
+
+```
+@resources /search MCP server      # Search resources
+@resources /install github-mcp     # Install a resource
+@resources /list                   # List workspace resources
+@resources /recommend              # Project-based recommendations
+@resources what tools for Python?  # Natural language search
+```
+
+### Commands
+
+| Command           | Description                        |
+| ----------------- | ---------------------------------- |
+| `/search <query>` | Search resources by keyword        |
+| `/install <name>` | Install a resource                 |
+| `/list`           | List workspace resources           |
+| `/recommend`      | Recommendations based on workspace |
+
+> Search results include install buttons for direct installation
+
+## 🤖 MCP Tools (Agent Mode)
+
+In GitHub Copilot's **Agent Mode**, tools are automatically available.
+
+### Tool List
+
+| Tool Reference         | Description                       |
+| ---------------------- | --------------------------------- |
+| `#searchResources`     | Search resources by keyword       |
+| `#installResource`     | Install a resource                |
+| `#uninstallResource`   | Uninstall a resource              |
+| `#listResources`       | List workspace resources          |
+| `#recommendResources`  | Get project-based recommendations |
+| `#updateResourceIndex` | Update resource index             |
+| `#webSearchResources`  | Web search resources on GitHub    |
+| `#addResourceSource`   | Add new resource source           |
+
+### Usage Examples
+
+```
+💬 "Find Azure-related resources"
+  → #searchResources automatically invoked, displays results
+
+💬 "Install the bicep-mcp resource"
+  → #installResource installs, auto-updates instruction file
+
+💬 "Search GitHub for MCP servers"
+  → #webSearchResources searches GitHub repositories
+
+💬 "What resources would you recommend for this project?"
+  → #recommendResources analyzes workspace and recommends
+```
+
+### Features
+
+- **Trust Badges**: Shows Official / Curated / Community
+- **Recommended Resources**: Suggests best resources from search results
+- **Index Update Info**: Shows last update date with warnings if outdated
+- **Settings Integration**: Respects `resourceNinja.autoUpdateInstruction` / `resourceNinja.includeLocalResources`
+- **Token Efficiency**: Save conversation context by using MCP tools
+
+### Disable MCP Tools
+
+If you don't need MCP tools, you can disable them from GitHub Copilot Chat:
+
+1. Copilot Chat panel → Settings → Tools
+2. Toggle off "Agent Resources Ninja" tools
+
+## ⚙️ Settings
+
+Settings are ordered by the workflow users usually follow:
+
+| Group                   | Settings                                                                                     | Purpose                                                                   |
+| ----------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Install behavior        | `defaultInstallTarget`, `singleClickInstall`                                                 | Decide where click installs go                                            |
+| Workspace roots         | `resourcesDirectory`, `workspace*Directory`                                                  | Project-specific resources tracked with the workspace                     |
+| User roots              | `user*Directory`                                                                             | VS Code User Profile agents, prompts, and instructions                    |
+| Global Resource Home    | `globalResourceHomePreset`, `globalHomeDirectory`                                            | Shared resources for Copilot CLI, Claude-compatible tools, or open agents |
+| Instruction sync        | `autoUpdateInstruction`, `instructionFile`, `customInstructionPath`, `includeLocalResources` | Optional Agent Skills index generation                                    |
+| Display and maintenance | `outputFormat`, `showBuiltInResources`, `remoteResourceViewMode`, `language`, `githubToken`  | Presentation, discovery, and GitHub API behavior                          |
+
+`globalResourceHomePreset` is the common case. `globalHomeDirectory` is an override: when it is not empty, it wins over the preset. Choose `custom` only when you also provide an override path.
+
+| Order | Setting                                        | Default                | Description                                                                              |
+| :---: | ---------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------- |
+|   0   | `resourceNinja.defaultInstallTarget`           | `workspace`            | Default target for click/double-click installs                                           |
+|   1   | `resourceNinja.singleClickInstall`             | `false`                | Install resources with single click                                                      |
+|   2   | `resourceNinja.resourcesDirectory`             | `.github/skills`       | Workspace skill directory                                                                |
+|   3   | `resourceNinja.workspaceAgentsDirectory`       | `.github/agents`       | Workspace agent directory                                                                |
+|   4   | `resourceNinja.workspaceInstructionsDirectory` | `.github/instructions` | Workspace instruction directory                                                          |
+|   5   | `resourceNinja.workspacePromptsDirectory`      | `.github/prompts`      | Workspace prompt directory                                                               |
+|   6   | `resourceNinja.workspaceHooksDirectory`        | `.github/hooks`        | Workspace hook directory                                                                 |
+|   7   | `resourceNinja.workspaceMcpDirectory`          | `.github/mcp`          | Safe workspace MCP config staging directory before optional `.vscode/mcp.json` merge      |
+|   8   | `resourceNinja.userAgentsDirectory`            | `""`                   | Optional User Profile agent override; empty stores `.agent.md` in VS Code User `prompts` |
+|   9   | `resourceNinja.userInstructionsDirectory`      | `""`                   | Optional User Profile instruction directory override                                     |
+|  10   | `resourceNinja.userPromptsDirectory`           | `""`                   | Optional User Profile prompt directory override                                          |
+|  11   | `resourceNinja.globalResourceHomePreset`       | `copilot`              | Known Global Resource Home preset (`~/.copilot`, `~/.claude`, `~/.agents`)               |
+|  12   | `resourceNinja.globalHomeDirectory`            | `""`                   | Optional custom Global Resource Home override                                            |
+|  13   | `resourceNinja.autoUpdateInstruction`          | `true`                 | Auto-update the Agent Skills index after skill changes                                   |
+|  14   | `resourceNinja.instructionFile`                | `AGENTS.md`            | Agent Skills index sync target _(requires Auto Update)_                                  |
+|  15   | `resourceNinja.customInstructionPath`          | `""`                   | Custom Agent Skills index path _(only when 'custom' selected)_                           |
+|  16   | `resourceNinja.includeLocalResources`          | `true`                 | Include local `SKILL.md` files in the Agent Skills index                                 |
+|  17   | `resourceNinja.autoUpdateResourcesOnUpgrade`   | `prompt`               | Update installed remote skills on extension upgrade                                      |
+|  21   | `resourceNinja.outputFormat`                   | `full`                 | Output format (full / compact / legacy)                                                  |
+|  22   | `resourceNinja.showBuiltInResources`           | `false`                | Show built-in resources in User / Global Resource Home                                   |
+|  23   | `resourceNinja.remoteResourceViewMode`         | `repositoryFirst`      | Remote Resources layout (repository-first / resource-type-first)                         |
+|  24   | `resourceNinja.language`                       | `auto`                 | UI language (auto / en / ja)                                                             |
+|  25   | `resourceNinja.githubToken`                    | `""`                   | GitHub Token (for API rate limit)                                                        |
+
+> Settings are displayed in the order above
+
+### Output Format Details
+
+| Format    | Content                                     | Best For                       |
+| --------- | ------------------------------------------- | ------------------------------ |
+| `full`    | IMPORTANT + Detailed table only (200 chars) | Complete information (default) |
+| `compact` | IMPORTANT + Compressed (100 chars)          | Token-efficient prompts        |
+| `legacy`  | Simple table only (no IMPORTANT)            | Backward compatibility         |
+
+### How Instruction File Sync Works
+
+When `autoUpdateInstruction` is enabled:
+
+1. **Workspace/User Profile/Global Resource Home skill install/uninstall** → Instruction file is automatically updated
+2. **Workspace instruction targets** index workspace skills; **Global Resource Home targets** such as `~/.copilot/copilot-instructions.md` index Global Resource Home skills
+3. **Local `SKILL.md` detected** → Added to the workspace skills index (if `resourceNinja.includeLocalResources` is true)
+4. **Register/Unregister command** → Manual control for local workspace skills
+
+Agents, prompts, instructions, and hooks are installed to native paths and managed from the resource views; they are not copied into the generated Agent Skills index.
+
+The instruction file contains a managed section with **IMPORTANT prompt** and **Description column**:
+
+```markdown
+<!-- resource-ninja-START -->
+
+## Agent Skills
+
+> **IMPORTANT**: Prefer skill-led reasoning over pre-training-led reasoning.
+> Read the relevant SKILL.md before working on tasks covered by these skills.
+
+### Skills
+
+| Skill                                            | Description                          |
+| ------------------------------------------------ | ------------------------------------ |
+| [skill-name](.github/skills/skill-name/SKILL.md) | Description text \| When to use text |
+
+<!-- resource-ninja-END -->
+```
+
+**Description column format**: `{description:80} | {whenToUse:80}` (max 160 chars total)
+
+### Instruction File Options
+
+| Value                                            | File Path                                        | Use Case                    |
+| ------------------------------------------------ | ------------------------------------------------ | --------------------------- |
+| `AGENTS.md`                                      | `AGENTS.md` (root)                               | Recommended: General        |
+| `~/.copilot/copilot-instructions.md`             | `~/.copilot/copilot-instructions.md`             | Copilot CLI global local    |
+| `.github/copilot-instructions.md`                | `.github/copilot-instructions.md`                | GitHub Copilot              |
+| `.github/instructions/SkillList.instructions.md` | `.github/instructions/SkillList.instructions.md` | Copilot Instructions folder |
+| `CLAUDE.md`                                      | `CLAUDE.md` (root)                               | Claude Code                 |
+| `custom`                                         | Any path (set in customInstructionPath)          | Custom                      |
+
+## 🔑 GitHub Token Setup
+
+> **Recommended**: A GitHub Token raises API limits from 60 to 5000 requests/hour. Without it, GitHub Search may hit rate limits quickly.
+
+Set up a GitHub Token for more reliable search:
+
+### Option 1: VS Code Settings
+
+Find `Agent Resources Ninja: GitHub Token` in settings and enter your token:
+
+```json
+{
+  "resourceNinja.githubToken": "ghp_xxxxxxxxxxxx"
+}
+```
+
+👉 [Create a GitHub Token](https://github.com/settings/tokens/new?description=Agent%20Resources%20Ninja)
+
+For public resources, leave scopes unchecked. Add private repository scopes only if you intentionally index private repositories.
+
+### Option 2: GitHub CLI (Recommended)
+
+```bash
+gh auth login
+```
+
+> If GitHub CLI is installed, the token is automatically retrieved (no configuration needed)
+
+## 🛠️ Development
+
+```bash
+# Install dependencies
+npm install
+
+# Compile
+npm run compile
+
+# Build in watch mode
+npm run watch
+
+# Package
+npm run package
+
+# Lint
+npm run lint
+
+# Focused regression tests
+node scripts/test-resource-kinds.js
+node scripts/test-resource-targets.js
+node scripts/test-user-data-paths.js
+node scripts/test-manifest-consistency.js
+node scripts/test-logger.js
+node scripts/test-whenToUse.js
+node scripts/test-search-logic.js
+
+# Extension Host smoke test
+npm test
+
+# Dependency audit
+npm audit --audit-level=moderate
+```
+
+### Debugging
+
+1. Press `F5` in VS Code
+2. Test the extension in a new VS Code window
+3. Run `Agent Resources Ninja` commands from Command Palette (`Ctrl+Shift+P`)
+
+### Diagnostics
+
+- Extension diagnostics are written to **Output → Agent Resources Ninja**.
+- Runtime code does not write diagnostic logs to the process console; this keeps local Extension Host and `vscode-test` runs less prone to pipe-related failures.
+- If a VS Code/Electron `EPIPE` dialog appears while testing, rerun `npm test` from a normal terminal first, then check **Output → Agent Resources Ninja** for extension-level diagnostics.
+
+## 🤝 Contributing
+
+1. Fork this repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📄 License
+
+[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) © [yamapan](https://github.com/aktsmm)
+
+- Free for non-commercial use, modification, and redistribution
+- Commercial use requires permission
+- Microsoft employees may use for work purposes
+
+> Use of this content for AI/ML training, data mining, or other analytical purposes is prohibited.
+
+## 🔗 Related Projects
+
+- [anthropics/skills](https://github.com/anthropics/skills) - Official Claude Skills
+- [github/awesome-copilot](https://github.com/github/awesome-copilot) - Official Copilot Resources
+- [microsoft/skills](https://github.com/microsoft/skills) - Upstream Microsoft Skills reference (not bundled in preset)
+- [MicrosoftDocs/Agent-Skills](https://github.com/MicrosoftDocs/Agent-Skills) - Official Azure Agent Skills (bundled in preset)
+- [ComposioHQ/awesome-claude-skills](https://github.com/ComposioHQ/awesome-claude-skills) - Curated Skills List
+
+## 👤 Author
+
+yamapan (https://github.com/aktsmm)

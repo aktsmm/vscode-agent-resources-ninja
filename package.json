@@ -1,0 +1,1390 @@
+{
+  "name": "agent-resources-ninja",
+  "displayName": "%displayName%",
+  "description": "%description%",
+  "version": "0.2.0",
+  "publisher": "yamapan",
+  "license": "CC-BY-NC-SA-4.0",
+  "icon": "resources/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aktsmm/vscode-agent-resources-ninja"
+  },
+  "keywords": [
+    "agent resources",
+    "agent skills",
+    "claude",
+    "claude code",
+    "copilot",
+    "github copilot",
+    "ai assistant",
+    "skills",
+    "anthropic",
+    "mcp",
+    "agents",
+    "ninja"
+  ],
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Other"
+  ],
+  "activationEvents": [
+    "onChatParticipant:resources",
+    "onLanguageModelTool:resourceNinja_search",
+    "onLanguageModelTool:resourceNinja_install",
+    "onLanguageModelTool:resourceNinja_list",
+    "onLanguageModelTool:resourceNinja_recommend",
+    "onLanguageModelTool:resourceNinja_uninstall",
+    "onLanguageModelTool:resourceNinja_updateIndex",
+    "onLanguageModelTool:resourceNinja_webSearch",
+    "onLanguageModelTool:resourceNinja_addSource",
+    "onLanguageModelTool:resourceNinja_localize"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "chatParticipants": [
+      {
+        "id": "resources",
+        "name": "resources",
+        "fullName": "Agent Resources Ninja",
+        "description": "Search, install and manage agent resources",
+        "isSticky": false,
+        "commands": [
+          {
+            "name": "search",
+            "description": "Search for agent resources"
+          },
+          {
+            "name": "install",
+            "description": "Install an agent resource"
+          },
+          {
+            "name": "list",
+            "description": "List workspace resources"
+          },
+          {
+            "name": "recommend",
+            "description": "Recommend resources for current project"
+          }
+        ]
+      }
+    ],
+    "languageModelTools": [
+      {
+        "name": "resourceNinja_search",
+        "tags": [
+          "skills",
+          "agent",
+          "resource-ninja",
+          "ninja",
+          "忍者",
+          "スキル",
+          "エージェントスキル",
+          "agents",
+          "prompts",
+          "instructions",
+          "hooks"
+        ],
+        "toolReferenceName": "searchResources",
+        "displayName": "Search Agent Resources",
+        "icon": "$(search)",
+        "modelDescription": "Search for agent resources such as skills, agents, prompts, instructions, and hooks / エージェントリソースを検索 / NINJA. For GitHub Copilot, Claude Code, or other AI coding assistants. Find resources by name, description, kind, or category.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Search query (resource name, description, kind, or category like 'github', 'python', 'mcp')"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "skill",
+                "agent",
+                "instruction",
+                "prompt",
+                "hook",
+                "mcp",
+                "all"
+              ],
+              "description": "Optional resource kind filter. Use 'all' or omit to search all resource kinds."
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      },
+      {
+        "name": "resourceNinja_install",
+        "tags": [
+          "skills",
+          "agent",
+          "resource-ninja",
+          "ninja",
+          "忍者",
+          "スキル",
+          "エージェントスキル"
+        ],
+        "toolReferenceName": "installResource",
+        "displayName": "Install Agent Resource",
+        "icon": "$(cloud-download)",
+        "modelDescription": "Install an agent resource / エージェントリソースをインストール / NINJA. Supports skills, agents, prompts, instructions, hooks, and MCP config resources with explicit target selection.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "resourceName": {
+              "type": "string",
+              "description": "Exact name of the resource to install. Search first when unsure."
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "skill",
+                "agent",
+                "instruction",
+                "prompt",
+                "hook",
+                "mcp"
+              ],
+              "description": "Optional resource kind filter used to disambiguate resources with similar names."
+            }
+          },
+          "required": [
+            "resourceName"
+          ]
+        }
+      },
+      {
+        "name": "resourceNinja_list",
+        "tags": [
+          "skills",
+          "agent",
+          "resource-ninja",
+          "ninja",
+          "忍者",
+          "スキル",
+          "エージェントスキル"
+        ],
+        "toolReferenceName": "listResources",
+        "displayName": "List Workspace Resources",
+        "icon": "$(list-tree)",
+        "modelDescription": "List workspace agent resources / ワークスペース内エージェントリソース一覧 / NINJA. Shows skills, agents, prompts, instructions, hooks, and MCP config resources available in the current workspace.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "resourceNinja_recommend",
+        "tags": [
+          "skills",
+          "agent",
+          "resource-ninja",
+          "ninja",
+          "忍者",
+          "スキル",
+          "エージェントスキル"
+        ],
+        "toolReferenceName": "recommendResources",
+        "displayName": "Recommend Resources",
+        "icon": "$(lightbulb)",
+        "modelDescription": "Recommend agent resources for your project / プロジェクトに合ったエージェントリソースを推奨 / NINJA. Analyzes languages, frameworks, and file patterns.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "resourceNinja_uninstall",
+        "tags": [
+          "skills",
+          "agent",
+          "resource-ninja",
+          "uninstall",
+          "remove",
+          "delete",
+          "削除",
+          "アンインストール"
+        ],
+        "toolReferenceName": "uninstallResource",
+        "displayName": "Uninstall Resource",
+        "icon": "$(trash)",
+        "modelDescription": "Uninstall an agent resource / エージェントリソースをアンインストール / 削除 / NINJA. Removes a workspace resource; skill uninstall also updates the instruction sync target when enabled.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "resourceName": {
+              "type": "string",
+              "description": "Exact name of the installed workspace resource to uninstall. List resources first when unsure."
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "skill",
+                "agent",
+                "instruction",
+                "prompt",
+                "hook",
+                "mcp"
+              ],
+              "description": "Optional installed resource kind filter used to disambiguate resources with similar names."
+            }
+          },
+          "required": [
+            "resourceName"
+          ]
+        }
+      },
+      {
+        "name": "resourceNinja_updateIndex",
+        "tags": [
+          "skills",
+          "agent",
+          "resource-ninja",
+          "update",
+          "refresh",
+          "sync",
+          "更新",
+          "同期"
+        ],
+        "toolReferenceName": "updateResourceIndex",
+        "displayName": "Update Resource Index",
+        "icon": "$(sync)",
+        "modelDescription": "Update the resource index from all sources / リソースインデックスを更新 / 同期 / NINJA. Fetches latest resources from GitHub repositories.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "resourceNinja_webSearch",
+        "tags": [
+          "skills",
+          "agent",
+          "resource-ninja",
+          "github",
+          "search",
+          "web",
+          "検索",
+          "GitHub"
+        ],
+        "toolReferenceName": "webSearchResources",
+        "displayName": "Search Resources on GitHub",
+        "icon": "$(globe)",
+        "modelDescription": "Search for agent resources on GitHub / GitHubでエージェントリソースを検索 / Web検索 / NINJA. Finds SKILL.md, .agent.md, .prompt.md, .instructions.md, and hook README files across GitHub repositories.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Search query for GitHub (e.g., 'azure', 'python', 'mcp')"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      },
+      {
+        "name": "resourceNinja_addSource",
+        "tags": [
+          "skills",
+          "agent",
+          "resource-ninja",
+          "source",
+          "repository",
+          "add",
+          "ソース",
+          "リポジトリ"
+        ],
+        "toolReferenceName": "addResourceSource",
+        "displayName": "Add Resource Source",
+        "icon": "$(repo)",
+        "modelDescription": "Add a new GitHub repository as a resource source / 新しいリポジトリをリソースソースとして追加 / NINJA. Repository may contain SKILL.md, .agent.md, .prompt.md, .instructions.md, or hook README files.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "repoUrl": {
+              "type": "string",
+              "description": "GitHub repository URL (e.g., 'https://github.com/owner/repo' or 'owner/repo')"
+            }
+          },
+          "required": [
+            "repoUrl"
+          ]
+        }
+      },
+      {
+        "name": "resourceNinja_localize",
+        "tags": [
+          "skills",
+          "agent",
+          "resource-ninja",
+          "localize",
+          "translate",
+          "i18n",
+          "翻訳",
+          "ローカライズ"
+        ],
+        "toolReferenceName": "localizeResource",
+        "displayName": "Localize Resource Description",
+        "icon": "$(globe)",
+        "modelDescription": "Translate/localize resource descriptions in the index. Provide resourceName and description_en (English) and/or description_ja (Japanese) to update.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "resourceName": {
+              "type": "string",
+              "description": "Name of the resource to localize"
+            },
+            "description_en": {
+              "type": "string",
+              "description": "English description for the resource"
+            },
+            "description_ja": {
+              "type": "string",
+              "description": "Japanese description for the resource (日本語の説明)"
+            }
+          },
+          "required": [
+            "resourceName"
+          ]
+        }
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "resource-ninja",
+          "title": "Agent Resources Ninja",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "resource-ninja": [
+        {
+          "id": "resourceNinja.installedView",
+          "name": "%view.workspace%",
+          "icon": "resources/icon.svg"
+        },
+        {
+          "id": "resourceNinja.userResourcesView",
+          "name": "%view.userResources%",
+          "icon": "resources/icon.svg"
+        },
+        {
+          "id": "resourceNinja.browseView",
+          "name": "%view.browse%",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "resourceNinja.installedView",
+        "contents": "%viewsWelcome.workspace%"
+      },
+      {
+        "view": "resourceNinja.userResourcesView",
+        "contents": "%viewsWelcome.userResources%"
+      },
+      {
+        "view": "resourceNinja.browseView",
+        "contents": "%viewsWelcome.remote%"
+      }
+    ],
+    "commands": [
+      {
+        "command": "resourceNinja.search",
+        "title": "%command.search%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(search)"
+      },
+      {
+        "command": "resourceNinja.install",
+        "title": "%command.install%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(add)"
+      },
+      {
+        "command": "resourceNinja.uninstall",
+        "title": "%command.uninstall%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "resourceNinja.showInstalled",
+        "title": "%command.showInstalled%",
+        "category": "Agent Resources Ninja"
+      },
+      {
+        "command": "resourceNinja.refresh",
+        "title": "%command.refresh%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "resourceNinja.reinstallAll",
+        "title": "%command.reinstallAll%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "resourceNinja.reinstall",
+        "title": "%command.reinstall%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "resourceNinja.uninstallAll",
+        "title": "%command.uninstallAll%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "resourceNinja.uninstallMultiple",
+        "title": "%command.uninstallMultiple%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "resourceNinja.reinstallMultiple",
+        "title": "%command.reinstallMultiple%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "resourceNinja.editWhenToUse",
+        "title": "%command.editWhenToUse%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "resourceNinja.openResourceFile",
+        "title": "%command.openResourceFile%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "resourceNinja.openResourceFolder",
+        "title": "%command.openResourceFolder%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "resourceNinja.updateIndex",
+        "title": "%command.updateIndex%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "resourceNinja.updateSourceIndex",
+        "title": "%command.updateSourceIndex%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "resourceNinja.addSource",
+        "title": "%command.addSource%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(add)"
+      },
+      {
+        "command": "resourceNinja.webSearch",
+        "title": "%command.webSearch%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "resourceNinja.removeSource",
+        "title": "%command.removeSource%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "resourceNinja.preview",
+        "title": "%command.preview%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "resourceNinja.toggleFavorite",
+        "title": "%command.toggleFavorite%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(star)"
+      },
+      {
+        "command": "resourceNinja.showFavorites",
+        "title": "%command.showFavorites%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(star-full)"
+      },
+      {
+        "command": "resourceNinja.openOnGitHub",
+        "title": "%command.openOnGitHub%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(github)"
+      },
+      {
+        "command": "resourceNinja.browseByCategory",
+        "title": "%command.browseByCategory%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "resourceNinja.showRecent",
+        "title": "%command.showRecent%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(history)"
+      },
+      {
+        "command": "resourceNinja.registerLocalResource",
+        "title": "%command.registerLocalResource%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(add)"
+      },
+      {
+        "command": "resourceNinja.unregisterLocalResource",
+        "title": "%command.unregisterLocalResource%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "resourceNinja.createSkill",
+        "title": "%command.createSkill%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "resourceNinja.createResource",
+        "title": "%command.createResource%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "resourceNinja.refreshLocal",
+        "title": "%command.refresh%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "resourceNinja.toggleBuiltInResources",
+        "title": "%command.toggleBuiltInResources%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "resourceNinja.showBuiltInResources",
+        "title": "%command.showBuiltInResources%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "resourceNinja.hideBuiltInResources",
+        "title": "%command.hideBuiltInResources%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "resourceNinja.toggleRemoteResourceViewMode",
+        "title": "%command.toggleRemoteResourceViewMode%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(layout)"
+      },
+      {
+        "command": "resourceNinja.refreshUserResources",
+        "title": "%command.refresh%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "resourceNinja.openUserResource",
+        "title": "%command.openResource%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "resourceNinja.revealUserResource",
+        "title": "%command.revealResource%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "resourceNinja.copyUserResourcePath",
+        "title": "%command.copyPath%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "resourceNinja.deleteUserResource",
+        "title": "%command.deleteUserResource%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "resourceNinja.updateInstruction",
+        "title": "%command.updateInstruction%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "resourceNinja.updateGlobalInstruction",
+        "title": "%command.updateGlobalInstruction%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "resourceNinja.openInstructionFile",
+        "title": "%command.openInstructionFile%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(file-text)"
+      },
+      {
+        "command": "resourceNinja.openGlobalInstructionFile",
+        "title": "%command.openGlobalInstructionFile%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(file-text)"
+      },
+      {
+        "command": "resourceNinja.openSettings",
+        "title": "%command.openSettings%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "resourceNinja.resetSettings",
+        "title": "%command.resetSettings%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(warning)"
+      },
+      {
+        "command": "resourceNinja.installBundle",
+        "title": "%command.installBundle%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "resourceNinja.installPluginResources",
+        "title": "%command.installPluginResources%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "resourceNinja.deletePluginResources",
+        "title": "%command.deletePluginResources%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "resourceNinja.copyUrl",
+        "title": "%command.copyUrl%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(link)"
+      },
+      {
+        "command": "resourceNinja.copyPath",
+        "title": "%command.copyPath%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "resourceNinja.openInTerminal",
+        "title": "%command.openInTerminal%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "resourceNinja.reportBug",
+        "title": "%command.reportBug%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(bug)"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "resourceNinja.install",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.uninstall",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.reinstall",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.reinstallAll",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.uninstallAll",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.uninstallMultiple",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.reinstallMultiple",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.editWhenToUse",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.openResourceFile",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.openResourceFolder",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.updateSourceIndex",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.toggleFavorite",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.openOnGitHub",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.removeSource",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.preview",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.registerLocalResource",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.unregisterLocalResource",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.createSkill",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.refreshLocal",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.refreshUserResources",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.openUserResource",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.openGlobalInstructionFile",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.updateGlobalInstruction",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.revealUserResource",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.copyUserResourcePath",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.deleteUserResource",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.installBundle",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.installPluginResources",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.deletePluginResources",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.copyUrl",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.copyPath",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.openInTerminal",
+          "when": "false"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "resourceNinja.openInstructionFile",
+          "when": "view == resourceNinja.installedView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "resourceNinja.updateInstruction",
+          "when": "view == resourceNinja.installedView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "resourceNinja.createResource",
+          "when": "view == resourceNinja.installedView",
+          "group": "navigation@3"
+        },
+        {
+          "command": "resourceNinja.reinstallAll",
+          "when": "view == resourceNinja.installedView && resourceNinja.hasInstalledSkills",
+          "group": "navigation@4"
+        },
+        {
+          "command": "resourceNinja.uninstallAll",
+          "when": "view == resourceNinja.installedView && resourceNinja.hasInstalledSkills",
+          "group": "actions@1"
+        },
+        {
+          "command": "resourceNinja.uninstallMultiple",
+          "when": "view == resourceNinja.installedView && resourceNinja.hasInstalledSkills",
+          "group": "actions@2"
+        },
+        {
+          "command": "resourceNinja.reinstallMultiple",
+          "when": "view == resourceNinja.installedView && resourceNinja.hasInstalledSkills",
+          "group": "actions@3"
+        },
+        {
+          "command": "resourceNinja.refresh",
+          "when": "view == resourceNinja.installedView",
+          "group": "z_refresh@1"
+        },
+        {
+          "command": "resourceNinja.openSettings",
+          "when": "view == resourceNinja.installedView",
+          "group": "z_settings@1"
+        },
+        {
+          "command": "resourceNinja.resetSettings",
+          "when": "view == resourceNinja.installedView",
+          "group": "z_settings@2"
+        },
+        {
+          "command": "resourceNinja.reportBug",
+          "when": "view == resourceNinja.installedView",
+          "group": "z_support@1"
+        },
+        {
+          "command": "resourceNinja.search",
+          "when": "view == resourceNinja.browseView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "resourceNinja.webSearch",
+          "when": "view == resourceNinja.browseView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "resourceNinja.updateIndex",
+          "when": "view == resourceNinja.browseView",
+          "group": "navigation@3"
+        },
+        {
+          "command": "resourceNinja.addSource",
+          "when": "view == resourceNinja.browseView",
+          "group": "navigation@4"
+        },
+        {
+          "command": "resourceNinja.toggleRemoteResourceViewMode",
+          "when": "view == resourceNinja.browseView",
+          "group": "navigation@5"
+        },
+        {
+          "command": "resourceNinja.createResource",
+          "when": "view == resourceNinja.browseView",
+          "group": "navigation@6"
+        },
+        {
+          "command": "resourceNinja.openSettings",
+          "when": "view == resourceNinja.browseView",
+          "group": "z_settings@1"
+        },
+        {
+          "command": "resourceNinja.resetSettings",
+          "when": "view == resourceNinja.browseView",
+          "group": "z_settings@2"
+        },
+        {
+          "command": "resourceNinja.reportBug",
+          "when": "view == resourceNinja.browseView",
+          "group": "z_support@1"
+        },
+        {
+          "command": "resourceNinja.openGlobalInstructionFile",
+          "when": "view == resourceNinja.userResourcesView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "resourceNinja.updateGlobalInstruction",
+          "when": "view == resourceNinja.userResourcesView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "resourceNinja.createResource",
+          "when": "view == resourceNinja.userResourcesView",
+          "group": "navigation@3"
+        },
+        {
+          "command": "resourceNinja.refreshUserResources",
+          "when": "view == resourceNinja.userResourcesView",
+          "group": "navigation@4"
+        },
+        {
+          "command": "resourceNinja.showBuiltInResources",
+          "when": "view == resourceNinja.userResourcesView && !resourceNinja.builtInResourcesVisible",
+          "group": "navigation@5"
+        },
+        {
+          "command": "resourceNinja.hideBuiltInResources",
+          "when": "view == resourceNinja.userResourcesView && resourceNinja.builtInResourcesVisible",
+          "group": "navigation@5"
+        },
+        {
+          "command": "resourceNinja.openSettings",
+          "when": "view == resourceNinja.userResourcesView",
+          "group": "z_settings@1"
+        },
+        {
+          "command": "resourceNinja.resetSettings",
+          "when": "view == resourceNinja.userResourcesView",
+          "group": "z_settings@2"
+        },
+        {
+          "command": "resourceNinja.reportBug",
+          "when": "view == resourceNinja.userResourcesView",
+          "group": "z_support@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "resourceNinja.install",
+          "when": "view == resourceNinja.browseView && viewItem == skill",
+          "group": "inline@1"
+        },
+        {
+          "command": "resourceNinja.preview",
+          "when": "view == resourceNinja.browseView && viewItem == skill",
+          "group": "inline@2"
+        },
+        {
+          "command": "resourceNinja.toggleFavorite",
+          "when": "view == resourceNinja.browseView && viewItem == skill",
+          "group": "inline@3"
+        },
+        {
+          "command": "resourceNinja.openOnGitHub",
+          "when": "view == resourceNinja.browseView && (viewItem == skill || viewItem == source || viewItem == remoteKindSource)",
+          "group": "inline@4"
+        },
+        {
+          "command": "resourceNinja.uninstall",
+          "when": "view == resourceNinja.installedView && (viewItem == installedSkill || viewItem == installedResource)",
+          "group": "inline"
+        },
+        {
+          "command": "resourceNinja.reinstall",
+          "when": "view == resourceNinja.installedView && viewItem == installedSkill",
+          "group": "inline"
+        },
+        {
+          "command": "resourceNinja.editWhenToUse",
+          "when": "view == resourceNinja.installedView && viewItem == installedSkill",
+          "group": "navigation"
+        },
+        {
+          "command": "resourceNinja.openResourceFolder",
+          "when": "view == resourceNinja.installedView && (viewItem == installedSkill || viewItem == installedResource || viewItem == localSkill || viewItem == localResource || viewItem == builtInResource)",
+          "group": "inline"
+        },
+        {
+          "command": "resourceNinja.openResourceFile",
+          "when": "view == resourceNinja.installedView && (viewItem == installedSkill || viewItem == installedResource || viewItem == localSkill || viewItem == localResource || viewItem == builtInResource)",
+          "group": "inline"
+        },
+        {
+          "command": "resourceNinja.removeSource",
+          "when": "view == resourceNinja.browseView && viewItem == source",
+          "group": "inline"
+        },
+        {
+          "command": "resourceNinja.updateSourceIndex",
+          "when": "view == resourceNinja.browseView && (viewItem == source || viewItem == remoteKindSource)",
+          "group": "navigation@1"
+        },
+        {
+          "command": "resourceNinja.registerLocalResource",
+          "when": "view == resourceNinja.installedView && viewItem == localSkill",
+          "group": "inline"
+        },
+        {
+          "command": "resourceNinja.unregisterLocalResource",
+          "when": "view == resourceNinja.installedView && viewItem == localSkill",
+          "group": "navigation"
+        },
+        {
+          "command": "resourceNinja.installBundle",
+          "when": "view == resourceNinja.browseView && viewItem == bundle",
+          "group": "inline"
+        },
+        {
+          "command": "resourceNinja.installPluginResources",
+          "when": "view == resourceNinja.browseView && viewItem == plugin",
+          "group": "inline"
+        },
+        {
+          "command": "resourceNinja.deletePluginResources",
+          "when": "(view == resourceNinja.installedView && viewItem == workspacePlugin) || (view == resourceNinja.userResourcesView && viewItem == plugin)",
+          "group": "inline"
+        },
+        {
+          "command": "resourceNinja.copyUrl",
+          "when": "view == resourceNinja.browseView && (viewItem == skill || viewItem == source || viewItem == remoteKindSource)",
+          "group": "navigation@1"
+        },
+        {
+          "command": "resourceNinja.copyPath",
+          "when": "view == resourceNinja.installedView && (viewItem == installedSkill || viewItem == installedResource || viewItem == localSkill || viewItem == localResource || viewItem == builtInResource)",
+          "group": "navigation@1"
+        },
+        {
+          "command": "resourceNinja.openInTerminal",
+          "when": "view == resourceNinja.installedView && (viewItem == installedSkill || viewItem == installedResource || viewItem == localSkill || viewItem == localResource || viewItem == builtInResource)",
+          "group": "navigation@2"
+        },
+        {
+          "command": "resourceNinja.openUserResource",
+          "when": "view == resourceNinja.userResourcesView && (viewItem == userResource || viewItem == builtInUserResource)",
+          "group": "inline@1"
+        },
+        {
+          "command": "resourceNinja.revealUserResource",
+          "when": "view == resourceNinja.userResourcesView && (viewItem == userResource || viewItem == builtInUserResource)",
+          "group": "inline@2"
+        },
+        {
+          "command": "resourceNinja.deleteUserResource",
+          "when": "view == resourceNinja.userResourcesView && viewItem == userResource",
+          "group": "inline@3"
+        },
+        {
+          "command": "resourceNinja.copyUserResourcePath",
+          "when": "view == resourceNinja.userResourcesView && (viewItem == userResource || viewItem == builtInUserResource)",
+          "group": "navigation@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Agent Resources Ninja",
+      "properties": {
+        "resourceNinja.autoUpdateInstruction": {
+          "type": "boolean",
+          "default": true,
+          "order": 13,
+          "markdownDescription": "%config.autoUpdateInstruction.markdownDescription%"
+        },
+        "resourceNinja.autoUpdateResourcesOnUpgrade": {
+          "type": "string",
+          "default": "prompt",
+          "order": 17,
+          "enum": [
+            "always",
+            "prompt",
+            "never"
+          ],
+          "enumDescriptions": [
+            "%config.autoUpdateResourcesOnUpgrade.always%",
+            "%config.autoUpdateResourcesOnUpgrade.prompt%",
+            "%config.autoUpdateResourcesOnUpgrade.never%"
+          ],
+          "markdownDescription": "%config.autoUpdateResourcesOnUpgrade.markdownDescription%"
+        },
+        "resourceNinja.instructionFile": {
+          "type": "string",
+          "default": "AGENTS.md",
+          "order": 14,
+          "enum": [
+            "none",
+            "AGENTS.md",
+            "~/.copilot/copilot-instructions.md",
+            ".github/copilot-instructions.md",
+            ".github/instructions/SkillList.instructions.md",
+            "CLAUDE.md",
+            ".claude/CLAUDE.md",
+            ".claude/CLAUDE.local.md",
+            ".cursor/rules/skills.mdc",
+            ".windsurfrules",
+            ".clinerules",
+            "custom"
+          ],
+          "enumDescriptions": [
+            "%config.instructionFile.none%",
+            "%config.instructionFile.agents%",
+            "%config.instructionFile.copilotCliLocal%",
+            "%config.instructionFile.copilot%",
+            "%config.instructionFile.instructions%",
+            "%config.instructionFile.claude%",
+            "%config.instructionFile.claudeFolder%",
+            "%config.instructionFile.claudeLocal%",
+            "%config.instructionFile.cursor%",
+            "%config.instructionFile.windsurf%",
+            "%config.instructionFile.cline%",
+            "%config.instructionFile.custom%"
+          ],
+          "markdownDescription": "%config.instructionFile.markdownDescription%"
+        },
+        "resourceNinja.customInstructionPath": {
+          "type": "string",
+          "default": "",
+          "order": 15,
+          "markdownDescription": "%config.customInstructionPath.markdownDescription%"
+        },
+        "resourceNinja.includeLocalResources": {
+          "type": "boolean",
+          "default": true,
+          "order": 16,
+          "markdownDescription": "%config.includeLocalResources.markdownDescription%"
+        },
+        "resourceNinja.resourcesDirectory": {
+          "type": "string",
+          "default": ".github/skills",
+          "order": 2,
+          "markdownDescription": "%config.resourcesDirectory.markdownDescription%"
+        },
+        "resourceNinja.workspaceAgentsDirectory": {
+          "type": "string",
+          "default": ".github/agents",
+          "order": 3,
+          "markdownDescription": "%config.workspaceAgentsDirectory.markdownDescription%"
+        },
+        "resourceNinja.workspaceInstructionsDirectory": {
+          "type": "string",
+          "default": ".github/instructions",
+          "order": 4,
+          "markdownDescription": "%config.workspaceInstructionsDirectory.markdownDescription%"
+        },
+        "resourceNinja.workspacePromptsDirectory": {
+          "type": "string",
+          "default": ".github/prompts",
+          "order": 5,
+          "markdownDescription": "%config.workspacePromptsDirectory.markdownDescription%"
+        },
+        "resourceNinja.workspaceHooksDirectory": {
+          "type": "string",
+          "default": ".github/hooks",
+          "order": 6,
+          "markdownDescription": "%config.workspaceHooksDirectory.markdownDescription%"
+        },
+        "resourceNinja.workspaceMcpDirectory": {
+          "type": "string",
+          "default": ".github/mcp",
+          "order": 7,
+          "markdownDescription": "%config.workspaceMcpDirectory.markdownDescription%"
+        },
+        "resourceNinja.userAgentsDirectory": {
+          "type": "string",
+          "default": "",
+          "order": 8,
+          "markdownDescription": "%config.userAgentsDirectory.markdownDescription%"
+        },
+        "resourceNinja.userInstructionsDirectory": {
+          "type": "string",
+          "default": "",
+          "order": 9,
+          "markdownDescription": "%config.userInstructionsDirectory.markdownDescription%"
+        },
+        "resourceNinja.userPromptsDirectory": {
+          "type": "string",
+          "default": "",
+          "order": 10,
+          "markdownDescription": "%config.userPromptsDirectory.markdownDescription%"
+        },
+        "resourceNinja.globalResourceHomePreset": {
+          "type": "string",
+          "default": "copilot",
+          "order": 11,
+          "enum": [
+            "copilot",
+            "claude",
+            "agents",
+            "custom"
+          ],
+          "enumDescriptions": [
+            "%config.globalResourceHomePreset.copilot%",
+            "%config.globalResourceHomePreset.claude%",
+            "%config.globalResourceHomePreset.agents%",
+            "%config.globalResourceHomePreset.custom%"
+          ],
+          "markdownDescription": "%config.globalResourceHomePreset.markdownDescription%"
+        },
+        "resourceNinja.globalHomeDirectory": {
+          "type": "string",
+          "default": "",
+          "order": 12,
+          "markdownDescription": "%config.globalHomeDirectory.markdownDescription%"
+        },
+        "resourceNinja.githubToken": {
+          "type": "string",
+          "default": "",
+          "editPresentation": "password",
+          "order": 25,
+          "markdownDescription": "%config.githubToken.markdownDescription%"
+        },
+        "resourceNinja.language": {
+          "type": "string",
+          "default": "auto",
+          "order": 24,
+          "enum": [
+            "auto",
+            "en",
+            "ja"
+          ],
+          "enumDescriptions": [
+            "%config.language.auto%",
+            "%config.language.en%",
+            "%config.language.ja%"
+          ],
+          "description": "%config.language.description%"
+        },
+        "resourceNinja.outputFormat": {
+          "type": "string",
+          "default": "full",
+          "order": 21,
+          "enum": [
+            "full",
+            "compact",
+            "legacy"
+          ],
+          "enumDescriptions": [
+            "%config.outputFormat.full%",
+            "%config.outputFormat.compact%",
+            "%config.outputFormat.legacy%"
+          ],
+          "markdownDescription": "%config.outputFormat.markdownDescription%"
+        },
+        "resourceNinja.singleClickInstall": {
+          "type": "boolean",
+          "default": false,
+          "order": 1,
+          "markdownDescription": "%config.singleClickInstall.markdownDescription%"
+        },
+        "resourceNinja.defaultInstallTarget": {
+          "type": "string",
+          "default": "workspace",
+          "order": 0,
+          "enum": [
+            "workspace",
+            "ask",
+            "userData",
+            "globalHome"
+          ],
+          "enumDescriptions": [
+            "%config.defaultInstallTarget.workspace%",
+            "%config.defaultInstallTarget.ask%",
+            "%config.defaultInstallTarget.userData%",
+            "%config.defaultInstallTarget.globalHome%"
+          ],
+          "markdownDescription": "%config.defaultInstallTarget.markdownDescription%"
+        },
+        "resourceNinja.showBuiltInResources": {
+          "type": "boolean",
+          "default": false,
+          "order": 22,
+          "markdownDescription": "%config.showBuiltInResources.markdownDescription%"
+        },
+        "resourceNinja.remoteResourceViewMode": {
+          "type": "string",
+          "default": "repositoryFirst",
+          "order": 23,
+          "enum": [
+            "repositoryFirst",
+            "resourceTypeFirst"
+          ],
+          "enumDescriptions": [
+            "%config.remoteResourceViewMode.repositoryFirst%",
+            "%config.remoteResourceViewMode.resourceTypeFirst%"
+          ],
+          "markdownDescription": "%config.remoteResourceViewMode.markdownDescription%"
+        },
+        "resourceNinja.versionInfo": {
+          "type": "null",
+          "order": 100,
+          "markdownDescription": "%config.versionInfo.markdownDescription%"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && npm run lint && node esbuild.js",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "npm run check-types && npm run lint && node esbuild.js --production",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src",
+    "test:resources": "node scripts/test-resource-kinds.js && node scripts/test-resource-targets.js && node scripts/test-user-data-paths.js && node scripts/test-global-home-routing.js && node scripts/test-hook-config.js && node scripts/test-mcp-config-merge.js && node scripts/test-skill-search.js && node scripts/test-azure-plugin-source.js && node scripts/test-azure-skills-source.js && node scripts/test-plugin-bundles.js && node scripts/test-ux-scope-actions.js && node scripts/test-create-resource-templates.js && node scripts/test-create-resource-flow.js && node scripts/test-create-resource-validation.js && node scripts/test-instruction-target-ux.js && node scripts/test-localization-ux.js && node scripts/test-readme-release-ux.js && node scripts/test-view-welcome-ux.js && node scripts/test-activation-ux.js && node scripts/test-release-hygiene.js && node scripts/test-manifest-consistency.js && node scripts/test-logger.js",
+    "test": "vscode-test"
+  },
+  "overrides": {
+    "brace-expansion": "^5.0.5",
+    "diff": "^9.0.0",
+    "flatted": "^3.4.2",
+    "minimatch": "^10.2.5",
+    "serialize-javascript": "^7.0.5",
+    "picomatch": "^4.0.4"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "20.x",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^8.18.0",
+    "@typescript-eslint/parser": "^8.18.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.4.1",
+    "esbuild": "^0.25.12",
+    "eslint": "^9.17.0",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "vscode-nls": "^5.2.0"
+  }
+}

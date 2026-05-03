@@ -1,0 +1,34 @@
+node_modules/
+dist/
+*.vsix
+.vscode-test/
+.hiker/
+*.log
+*-exit.txt
+*-output.txt
+audit-output.json
+output_blog_tips/
+output_retro/
+compile-output.txt
+AGENTS.md.backup
+AGENTS.md
+*.bak-*
+.vscode/mcp.json.bak-*
+scripts/debug-*.js
+.github/*
+!.github/workflows/
+!.github/workflows/**
+
+# .vscode/ のうち個人設定は除外（launch.json, tasks.json は開発用に同期）
+.vscode/settings.json
+
+# Review workflow generated files
+.github/review-learnings.md
+DASHBOARD.md
+NEXT_WORK.md
+PRODUCT_DIRECTION.md
+MIGRATION_NOTES.md
+
+# Copilot agent artifacts (keep local in public repos)
+/research/
+/output_sessions/
