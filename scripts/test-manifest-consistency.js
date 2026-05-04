@@ -1552,13 +1552,20 @@ test("workspace resource menus distinguish skill-only actions from generic resou
       .join("\n");
 
   assert.match(treeProviderSource, /"installedResource"/);
+  assert.match(treeProviderSource, /"installedRemoteSkill"/);
+  assert.match(treeProviderSource, /"installedRemoteResource"/);
   assert.match(treeProviderSource, /"localResource"/);
   assert.match(treeProviderSource, /resourceNinja\.hasInstalledSkills/);
   assert.match(extensionSource, /getResourceKind\(skill\) !== "skill"/);
   assert.match(extensionSource, /path\.dirname\(skill\.fullPath\)/);
 
+  assert.strictEqual(
+    titleWhenFor("resourceNinja.reinstallAll"),
+    "",
+    "Bulk reinstall should not occupy the Workspace Resources title toolbar",
+  );
+
   for (const command of [
-    "resourceNinja.reinstallAll",
     "resourceNinja.uninstallAll",
     "resourceNinja.uninstallMultiple",
     "resourceNinja.reinstallMultiple",
@@ -1570,20 +1577,23 @@ test("workspace resource menus distinguish skill-only actions from generic resou
     );
   }
 
-  assert.strictEqual(nls["command.reinstall"], "Reinstall Installed Skill");
+  assert.strictEqual(nls["command.reinstall"], "Reinstall Resource");
   assert.strictEqual(
     nls["command.uninstallMultiple"],
     "Uninstall Selected Skills",
   );
   assert.strictEqual(nls["command.editWhenToUse"], "Edit Skill When To Use");
-  assert.match(nlsJa["command.reinstall"], /skill/);
+  assert.match(nlsJa["command.reinstall"], /リソース/);
   assert.match(nlsJa["command.uninstallMultiple"], /skill/);
 
   assert.match(whenFor("resourceNinja.uninstall"), /installedResource/);
+  assert.match(whenFor("resourceNinja.uninstall"), /installedRemoteResource/);
+  assert.match(whenFor("resourceNinja.reinstall"), /installedRemoteSkill/);
+  assert.match(whenFor("resourceNinja.reinstall"), /installedRemoteResource/);
   assert.doesNotMatch(
     whenFor("resourceNinja.reinstall"),
-    /installedResource/,
-    "Reinstall remains skill-only until non-skill source metadata is tracked",
+    /viewItem == installedSkill|viewItem == installedResource/,
+    "Reinstall should only appear for remote-installed resources with source metadata",
   );
   assert.doesNotMatch(
     whenFor("resourceNinja.editWhenToUse"),
@@ -1595,10 +1605,7 @@ test("workspace resource menus distinguish skill-only actions from generic resou
     /When To Use editing is only available for skill entries/,
   );
   assert.match(extensionSource, /Edit When To Use for/);
-  assert.match(
-    extensionSource,
-    /Reinstall is only available for installed skill entries/,
-  );
+  assert.match(extensionSource, /remote install metadata is missing/);
   assert.doesNotMatch(
     extensionSource,
     /Description editing is only available for skill resources/,
@@ -1615,11 +1622,10 @@ test("workspace resource menus distinguish skill-only actions from generic resou
     "resourceNinja.copyPath",
     "resourceNinja.openInTerminal",
   ]) {
-    assert.match(
-      whenFor(command),
-      /installedResource[\s\S]*localResource/,
-      `${command} should be available for non-skill workspace resources`,
-    );
+    const when = whenFor(command);
+    assert.match(when, /installedRemoteResource/);
+    assert.match(when, /installedResource/);
+    assert.match(when, /localResource/);
   }
 
   assert.doesNotMatch(

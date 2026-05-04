@@ -2,7 +2,7 @@
   "name": "agent-resources-ninja",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "publisher": "yamapan",
   "license": "CC-BY-NC-SA-4.0",
   "icon": "resources/icon.png",
@@ -863,11 +863,6 @@
           "group": "navigation@3"
         },
         {
-          "command": "resourceNinja.reinstallAll",
-          "when": "view == resourceNinja.installedView && resourceNinja.hasInstalledSkills",
-          "group": "navigation@4"
-        },
-        {
           "command": "resourceNinja.uninstallAll",
           "when": "view == resourceNinja.installedView && resourceNinja.hasInstalledSkills",
           "group": "actions@1"
@@ -1016,27 +1011,27 @@
         },
         {
           "command": "resourceNinja.uninstall",
-          "when": "view == resourceNinja.installedView && (viewItem == installedSkill || viewItem == installedResource)",
-          "group": "inline"
+          "when": "view == resourceNinja.installedView && (viewItem == installedSkill || viewItem == installedRemoteSkill || viewItem == installedResource || viewItem == installedRemoteResource)",
+          "group": "inline@2"
         },
         {
           "command": "resourceNinja.reinstall",
-          "when": "view == resourceNinja.installedView && viewItem == installedSkill",
-          "group": "inline"
+          "when": "view == resourceNinja.installedView && (viewItem == installedRemoteSkill || viewItem == installedRemoteResource)",
+          "group": "inline@1"
         },
         {
           "command": "resourceNinja.editWhenToUse",
-          "when": "view == resourceNinja.installedView && viewItem == installedSkill",
+          "when": "view == resourceNinja.installedView && (viewItem == installedSkill || viewItem == installedRemoteSkill)",
           "group": "navigation"
         },
         {
           "command": "resourceNinja.openResourceFolder",
-          "when": "view == resourceNinja.installedView && (viewItem == installedSkill || viewItem == installedResource || viewItem == localSkill || viewItem == localResource || viewItem == builtInResource)",
+          "when": "view == resourceNinja.installedView && (viewItem == installedSkill || viewItem == installedRemoteSkill || viewItem == installedResource || viewItem == installedRemoteResource || viewItem == localSkill || viewItem == localResource || viewItem == builtInResource)",
           "group": "inline"
         },
         {
           "command": "resourceNinja.openResourceFile",
-          "when": "view == resourceNinja.installedView && (viewItem == installedSkill || viewItem == installedResource || viewItem == localSkill || viewItem == localResource || viewItem == builtInResource)",
+          "when": "view == resourceNinja.installedView && (viewItem == installedSkill || viewItem == installedRemoteSkill || viewItem == installedResource || viewItem == installedRemoteResource || viewItem == localSkill || viewItem == localResource || viewItem == builtInResource)",
           "group": "inline"
         },
         {
@@ -1081,12 +1076,12 @@
         },
         {
           "command": "resourceNinja.copyPath",
-          "when": "view == resourceNinja.installedView && (viewItem == installedSkill || viewItem == installedResource || viewItem == localSkill || viewItem == localResource || viewItem == builtInResource)",
+          "when": "view == resourceNinja.installedView && (viewItem == installedSkill || viewItem == installedRemoteSkill || viewItem == installedResource || viewItem == installedRemoteResource || viewItem == localSkill || viewItem == localResource || viewItem == builtInResource)",
           "group": "navigation@1"
         },
         {
           "command": "resourceNinja.openInTerminal",
-          "when": "view == resourceNinja.installedView && (viewItem == installedSkill || viewItem == installedResource || viewItem == localSkill || viewItem == localResource || viewItem == builtInResource)",
+          "when": "view == resourceNinja.installedView && (viewItem == installedSkill || viewItem == installedRemoteSkill || viewItem == installedResource || viewItem == installedRemoteResource || viewItem == localSkill || viewItem == localResource || viewItem == builtInResource)",
           "group": "navigation@2"
         },
         {

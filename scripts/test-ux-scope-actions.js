@@ -137,6 +137,19 @@ test("workspace bulk skill commands are labeled as workspace scoped", () => {
   );
 });
 
+test("workspace reinstall is a per-resource inline action", () => {
+  const titleCommands = titleMenuCommandsFor("resourceNinja.installedView");
+  assert.ok(!titleCommands.includes("resourceNinja.reinstallAll"));
+  assert.ok(
+    itemMenuHas(
+      "resourceNinja.reinstall",
+      "view == resourceNinja.installedView && (viewItem == installedRemoteSkill || viewItem == installedRemoteResource)",
+    ),
+  );
+  assert.strictEqual(nls["command.reinstall"], "Reinstall Resource");
+  assert.strictEqual(nlsJa["command.reinstall"], "リソースを再インストール");
+});
+
 test("bundle-facing language is install set language", () => {
   assert.strictEqual(nls["command.installBundle"], "Install Set");
   assert.strictEqual(

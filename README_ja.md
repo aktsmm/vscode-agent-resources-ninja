@@ -192,7 +192,8 @@ Azure は Microsoft 公式 source が 2 系統あります。`microsoft/GitHub-C
 - 作成時に Workspace、User Profile、Global Resource Home、カスタムフォルダーを保存先に選択
 - 新しくインストールしたリソース（一時的なバッジ）
 - ツールバー: Instruction / 新規作成 / 更新 / 設定
-- skill 専用メニュー: ワークスペース skill の一括再インストール / 一括削除 / 複数選択
+- リモートからインストールしたリソースは、各行の inline action からリソース単位で再インストール可能
+- skill 専用の一括コマンドは、メンテナンス用に Command Palette または overflow action から利用可能
 - リソースフォルダを開く（右クリックメニュー）
 
 3. **User / Global Resource Home** - このPC上のユーザー領域と共有リソースルートを確認

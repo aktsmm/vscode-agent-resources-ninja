@@ -2014,7 +2014,7 @@ export function activate(context: vscode.ExtensionContext) {
     },
   );
 
-  // Command: Reinstall single skill
+  // Command: Reinstall single remote-installed resource
   const reinstallCmd = vscode.commands.registerCommand(
     "resourceNinja.reinstall",
     async (item?: SkillTreeItem) => {
@@ -2024,42 +2024,68 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      // ツリーアイテムからスキル情報を取得
-      const skill = item?.skill;
+      const skill = item?.skill as (Skill & Partial<LocalSkill>) | undefined;
       if (!skill?.name) {
         vscode.window.showErrorMessage(messages.invalidSkillInfo());
         return;
       }
-      if (getResourceKind(skill) !== "skill") {
+
+      const resourceKind = getResourceKind(skill);
+      let source = skill.source;
+      let remotePath = skill.remotePath;
+      let resourceName = skill.name;
+      let relativePath = skill.relativePath || skill.path;
+
+      if (resourceKind === "skill") {
+        const installedMeta = await getInstalledSkillsWithMeta(wsFolder.uri);
+        const meta = installedMeta.find(
+          (m) =>
+            m.name === skill.name ||
+            (!!skill.relativePath && m.relativePath === skill.relativePath),
+        );
+        if (!meta) {
+          vscode.window.showErrorMessage(
+            isJapanese()
+              ? `${skill.name} のメタデータが見つかりません`
+              : `Metadata not found for ${skill.name}`,
+          );
+          return;
+        }
+        source = meta.source;
+        remotePath = meta.remotePath;
+        resourceName = meta.name;
+        relativePath = meta.skillFilePath || meta.relativePath || relativePath;
+      }
+
+      if (!source || source === "local" || !remotePath) {
         vscode.window.showWarningMessage(
           isJapanese()
-            ? "再インストールはインストール済み skill entry のみ対応しています"
-            : "Reinstall is only available for installed skill entries",
+            ? `${skill.name} はリモートインストール元のメタデータがないため再インストールできません`
+            : `${skill.name} cannot be reinstalled because remote install metadata is missing`,
         );
         return;
       }
 
-      // メタデータからソース情報を取得
-      const installedMeta = await getInstalledSkillsWithMeta(wsFolder.uri);
-      const meta = installedMeta.find((m) => m.name === skill.name);
-      if (!meta) {
-        vscode.window.showErrorMessage(
-          isJapanese()
-            ? `${skill.name} のメタデータが見つかりません`
-            : `Metadata not found for ${skill.name}`,
-        );
-        return;
-      }
-
-      // インデックスからスキル情報を取得
       let index = await loadSkillIndex(context);
-      // source が "unknown" の場合は name だけで検索
       let fullSkill = index.skills.find(
-        (s: Skill) => s.name === meta.name && s.source === meta.source,
+        (s: Skill) =>
+          getResourceKind(s) === resourceKind &&
+          s.source === source &&
+          s.path === remotePath,
       );
-      if (!fullSkill && meta.source === "unknown") {
-        // source が unknown の場合は name だけで検索（最初に見つかったもの）
-        fullSkill = index.skills.find((s: Skill) => s.name === meta.name);
+      if (!fullSkill && source === "unknown") {
+        fullSkill = index.skills.find(
+          (s: Skill) =>
+            getResourceKind(s) === resourceKind && s.name === resourceName,
+        );
+      }
+      if (!fullSkill) {
+        fullSkill = index.skills.find(
+          (s: Skill) =>
+            getResourceKind(s) === resourceKind &&
+            s.name === resourceName &&
+            s.source === source,
+        );
       }
 
       // インデックスに見つからない場合は自動で更新を試みる
@@ -2085,12 +2111,17 @@ export function activate(context: vscode.ExtensionContext) {
             },
           );
 
-          // 再検索
           fullSkill = index.skills.find(
-            (s: Skill) => s.name === meta.name && s.source === meta.source,
+            (s: Skill) =>
+              getResourceKind(s) === resourceKind &&
+              s.source === source &&
+              s.path === remotePath,
           );
-          if (!fullSkill && meta.source === "unknown") {
-            fullSkill = index.skills.find((s: Skill) => s.name === meta.name);
+          if (!fullSkill && source === "unknown") {
+            fullSkill = index.skills.find(
+              (s: Skill) =>
+                getResourceKind(s) === resourceKind && s.name === resourceName,
+            );
           }
         }
 
@@ -2113,18 +2144,37 @@ export function activate(context: vscode.ExtensionContext) {
               : `Reinstalling ${skill.name}...`,
           },
           async () => {
-            await uninstallSkill(skill.name, wsFolder.uri);
+            let uninstallResult:
+              | Awaited<ReturnType<typeof uninstallSkillByPath>>
+              | Awaited<ReturnType<typeof uninstallSkill>>
+              | undefined;
+            if (relativePath) {
+              uninstallResult = await uninstallSkillByPath(
+                relativePath,
+                wsFolder.uri,
+              );
+            } else {
+              uninstallResult = await uninstallSkill(skill.name, wsFolder.uri);
+            }
             await installSkill(fullSkill, wsFolder.uri, context);
 
             const config = vscode.workspace.getConfiguration("resourceNinja");
-            if (config.get<boolean>("autoUpdateInstruction")) {
+            if (
+              resourceKind === "skill" &&
+              config.get<boolean>("autoUpdateInstruction")
+            ) {
               await updateInstructionFile(wsFolder.uri, context);
+            }
+            const hookConfigSummary = formatHookConfigUpdateSummary(
+              uninstallResult?.hookConfigUpdate,
+            );
+            if (hookConfigSummary) {
+              vscode.window.showInformationMessage(hookConfigSummary);
             }
           },
         );
 
-        // 🆕 バッジを一時表示
-        markRecentlyInstalled(skill);
+        markRecentlyInstalled(fullSkill);
 
         // ステータスバーに表示
         statusBarItem.text = `$(sync) ${skill.name} ${

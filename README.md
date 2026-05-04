@@ -196,7 +196,8 @@ Generic MCP config file names such as `mcp.json` and `.mcp.json` are installed w
 - Choose Workspace, User Profile, Global Resource Home, or a custom folder when creating resources
 - Newly installed resources (temporary badge)
 - Toolbar: Instruction File / Create / Refresh / Settings
-- Skill-only menu: Reinstall All Workspace Skills / Uninstall All Workspace Skills / Multiple selection
+- Remote-installed resource rows expose per-resource reinstall from the inline action buttons
+- Skill-only bulk commands remain available from Command Palette or overflow actions for maintenance workflows
 - Open resource folder (right-click menu)
 
 3. **User / Global Resource Home** - Browser for this machine

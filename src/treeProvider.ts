@@ -295,12 +295,17 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
     const kind = skill.kind || "skill";
     const sourceLabel =
       skill.source && skill.source !== "unknown" ? skill.source : undefined;
+    const isRemoteInstalled = !!sourceLabel && !!skill.remotePath;
     const contextValue = skill.isBuiltIn
       ? "builtInResource"
       : skill.isInstalled
-        ? kind === "skill"
-          ? "installedSkill"
-          : "installedResource"
+        ? isRemoteInstalled
+          ? kind === "skill"
+            ? "installedRemoteSkill"
+            : "installedRemoteResource"
+          : kind === "skill"
+            ? "installedSkill"
+            : "installedResource"
         : kind === "skill"
           ? "localSkill"
           : "localResource";

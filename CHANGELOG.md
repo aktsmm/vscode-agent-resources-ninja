@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-05-05
+
+### Changed
+
+- **Per-resource reinstall actions** - Workspace Resources now shows reinstall as an inline action only on remote-installed resources with source metadata, instead of placing the bulk reinstall command in the view title toolbar / Workspace Resources では一括再インストールをビュータイトルから外し、source metadata を持つ remote-installed resource の行にだけリソース単位の再インストール action を表示するようにしました
+- **Workspace resource action scope** - Reinstall now supports remote-installed skills, agents, instructions, prompts, hooks, and MCP config resources while local/manual resources without remote metadata do not show the action / 再インストールは remote-installed の skills、agents、instructions、prompts、hooks、MCP config resources に対応し、remote metadata のない local/manual resource には表示しないようにしました
+
+### Tests
+
+- **Workspace Resources UX Coverage** - Added menu and manifest regression coverage that keeps reinstall scoped to remote-installed resource rows and keeps local/manual resources free of misleading reinstall actions / reinstall を remote-installed resource 行に限定し、local/manual resource に誤解を招く再インストール action を出さない UI 回帰テストを追加
+
 ## [0.2.3] - 2026-05-05
 
 ### Changed
@@ -159,7 +170,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The original Agent Skills Ninja release history is intentionally not carried into this changelog. Migration context is tracked in [MIGRATION_NOTES.md](MIGRATION_NOTES.md). / 旧 Agent Skills Ninja のリリース履歴はこの CHANGELOG には引き継ぎません。移行経緯は [MIGRATION_NOTES.md](MIGRATION_NOTES.md) に記録します。
 
-[Unreleased]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.0...v0.2.1
