@@ -164,6 +164,13 @@ test("README MCP config safety copy explains explicit merge choice", () => {
   assert.match(readmeJa, /上書きは必ず確認/);
 });
 
+test("README explains nested SKILL contents are not standalone remote resources", () => {
+  assert.match(readme, /nested under a directory-based `SKILL\.md` root/);
+  assert.match(readme, /do not appear as separate Remote Resources/);
+  assert.match(readmeJa, /ディレクトリ型の `SKILL\.md` root 配下/);
+  assert.match(readmeJa, /Remote Resources に別リソースとして表示しません/);
+});
+
 test("README marketplace identity matches package metadata", () => {
   const displayName = nls.displayName;
   assert.match(

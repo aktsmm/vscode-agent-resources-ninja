@@ -227,6 +227,62 @@ function getResourceInstallPath(filePath, kind) {
   return normalizedPath;
 }
 
+function normalizeResourcePath(resourcePath) {
+  return resourcePath.replace(/\\/g, "/").replace(/^\/+/, "").toLowerCase();
+}
+
+function getSkillRootDirectoryFromPath(resourcePath) {
+  const normalizedPath = normalizeResourcePath(resourcePath);
+  if (normalizedPath !== "skill.md" && !normalizedPath.endsWith("/skill.md")) {
+    return undefined;
+  }
+  const slashIndex = normalizedPath.lastIndexOf("/");
+  return slashIndex === -1 ? "" : normalizedPath.slice(0, slashIndex);
+}
+
+function getSkillRootDirectoriesFromPaths(resourcePaths) {
+  const rootDirectories = new Set();
+  for (const resourcePath of resourcePaths) {
+    const rootDirectory = getSkillRootDirectoryFromPath(resourcePath);
+    if (rootDirectory !== undefined) {
+      rootDirectories.add(rootDirectory);
+    }
+  }
+  return rootDirectories;
+}
+
+function isNestedResourcePathUnderSkillRoot(
+  resourcePath,
+  kind,
+  skillRootDirectories,
+) {
+  if (kind === "skill") {
+    return false;
+  }
+  const normalizedPath = normalizeResourcePath(resourcePath);
+  for (const rootDirectory of skillRootDirectories) {
+    if (rootDirectory && normalizedPath.startsWith(`${rootDirectory}/`)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function getIndexedResourcePathsFromTree(paths) {
+  const skillRootDirectories = getSkillRootDirectoriesFromPaths(paths);
+  return paths.filter((resourcePath) => {
+    const kind = detectResourceKindFromPath(resourcePath);
+    return (
+      !!kind &&
+      !isNestedResourcePathUnderSkillRoot(
+        resourcePath,
+        kind,
+        skillRootDirectories,
+      )
+    );
+  });
+}
+
 function getFallbackResourceName(filePath, kind) {
   const pathParts = filePath.replace(/\\/g, "/").split("/");
   if (kind === "skill" || kind === "hook") {
@@ -337,6 +393,34 @@ test("does not count nested files inside skill folders as standalone resources",
   assert.strictEqual(
     detectResourceKindFromPath(".github/skills/code-tour/hooks/pre/README.md"),
     undefined,
+  );
+});
+
+test("does not index non-skill resources nested under detected skill roots", () => {
+  assert.deepStrictEqual(
+    getIndexedResourcePathsFromTree([
+      "book-writing-workspace/SKILL.md",
+      "book-writing-workspace/templates/outline.prompt.md",
+      "book-writing-workspace/templates/review.instructions.md",
+      "prompts/standalone.prompt.md",
+      "agents/standalone.agent.md",
+    ]),
+    [
+      "book-writing-workspace/SKILL.md",
+      "prompts/standalone.prompt.md",
+      "agents/standalone.agent.md",
+    ],
+  );
+});
+
+test("keeps standalone resources visible when SKILL.md is at repository root", () => {
+  assert.deepStrictEqual(
+    getIndexedResourcePathsFromTree([
+      "SKILL.md",
+      "helper.prompt.md",
+      "setup.agent.md",
+    ]),
+    ["SKILL.md", "helper.prompt.md", "setup.agent.md"],
   );
 });
 

@@ -17,6 +17,8 @@ import {
   getFallbackResourceName,
   getPluginIdFromPath,
   getResourceInstallPath,
+  getSkillRootDirectoriesFromPaths,
+  isNestedResourcePathUnderSkillRoot,
 } from "./resourceKinds";
 import { messages } from "./i18n";
 import { getGitHubToken } from "./githubAuth";
@@ -532,12 +534,20 @@ async function processTreeResponse(
   _token?: string,
   sourceOptions?: Pick<Source, "includePaths" | "excludePaths">,
 ): Promise<{ skills: Skill[]; source: Source; bundles?: Bundle[] }> {
-  const resourceFiles = data.tree.filter(
+  const allowedBlobFiles = data.tree.filter(
     (item) =>
-      item.type === "blob" &&
-      isResourcePathAllowed(item.path, sourceOptions) &&
-      !!detectResourceKindFromPath(item.path),
+      item.type === "blob" && isResourcePathAllowed(item.path, sourceOptions),
   );
+  const skillRootDirectories = getSkillRootDirectoriesFromPaths(
+    allowedBlobFiles.map((item) => item.path),
+  );
+  const resourceFiles = allowedBlobFiles.filter((item) => {
+    const kind = detectResourceKindFromPath(item.path);
+    return (
+      !!kind &&
+      !isNestedResourcePathUnderSkillRoot(item.path, kind, skillRootDirectories)
+    );
+  });
   const canUseLegacyFallbackScanner =
     resourceFiles.length === 0 &&
     !sourceOptions?.includePaths?.length &&

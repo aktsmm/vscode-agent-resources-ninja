@@ -52,6 +52,51 @@ export function detectResourceKindFromPath(
   return undefined;
 }
 
+function normalizeResourcePath(resourcePath: string): string {
+  return resourcePath.replace(/\\/g, "/").replace(/^\/+/, "").toLowerCase();
+}
+
+function getSkillRootDirectoryFromPath(
+  resourcePath: string,
+): string | undefined {
+  const normalizedPath = normalizeResourcePath(resourcePath);
+  if (normalizedPath !== "skill.md" && !normalizedPath.endsWith("/skill.md")) {
+    return undefined;
+  }
+  const slashIndex = normalizedPath.lastIndexOf("/");
+  return slashIndex === -1 ? "" : normalizedPath.slice(0, slashIndex);
+}
+
+export function getSkillRootDirectoriesFromPaths(
+  resourcePaths: string[],
+): Set<string> {
+  const rootDirectories = new Set<string>();
+  for (const resourcePath of resourcePaths) {
+    const rootDirectory = getSkillRootDirectoryFromPath(resourcePath);
+    if (rootDirectory !== undefined) {
+      rootDirectories.add(rootDirectory);
+    }
+  }
+  return rootDirectories;
+}
+
+export function isNestedResourcePathUnderSkillRoot(
+  resourcePath: string,
+  kind: ResourceKind,
+  skillRootDirectories: Set<string>,
+): boolean {
+  if (kind === "skill") {
+    return false;
+  }
+  const normalizedPath = normalizeResourcePath(resourcePath);
+  for (const rootDirectory of skillRootDirectories) {
+    if (rootDirectory && normalizedPath.startsWith(`${rootDirectory}/`)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function getPluginIdFromPath(resourcePath?: string): string | undefined {
   const normalizedPath = (resourcePath || "").replace(/\\/g, "/");
   const match = normalizedPath.match(/^plugins\/([^/]+)\//i);

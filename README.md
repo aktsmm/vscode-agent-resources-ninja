@@ -179,6 +179,7 @@ Generic MCP config file names such as `mcp.json` and `.mcp.json` are installed w
 > Use `Update Index` to refresh the latest resources and metadata from these sources.
 > Official product and plugin repositories are path-filtered so bundled presets include distribution-ready resource roots, not samples, manifests, or test fixtures.
 > For `github/awesome-copilot`, resources published from `plugins/` are indexed from distribution-ready top-level resource paths when available, avoiding duplicate raw plugin paths.
+> Files nested under a directory-based `SKILL.md` root are treated as internal skill contents, so helper prompts or instructions in a skill's `templates` folder do not appear as separate Remote Resources.
 
 ## 🥷 Usage
 

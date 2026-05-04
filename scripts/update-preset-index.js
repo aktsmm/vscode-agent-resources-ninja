@@ -308,6 +308,50 @@ function detectResourceKindFromPath(resourcePath) {
   return undefined;
 }
 
+function normalizeResourcePath(resourcePath) {
+  return String(resourcePath)
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .toLowerCase();
+}
+
+function getSkillRootDirectoryFromPath(resourcePath) {
+  const normalizedPath = normalizeResourcePath(resourcePath);
+  if (normalizedPath !== "skill.md" && !normalizedPath.endsWith("/skill.md")) {
+    return undefined;
+  }
+  const slashIndex = normalizedPath.lastIndexOf("/");
+  return slashIndex === -1 ? "" : normalizedPath.slice(0, slashIndex);
+}
+
+function getSkillRootDirectoriesFromPaths(resourcePaths) {
+  const rootDirectories = new Set();
+  for (const resourcePath of resourcePaths) {
+    const rootDirectory = getSkillRootDirectoryFromPath(resourcePath);
+    if (rootDirectory !== undefined) {
+      rootDirectories.add(rootDirectory);
+    }
+  }
+  return rootDirectories;
+}
+
+function isNestedResourcePathUnderSkillRoot(
+  resourcePath,
+  kind,
+  skillRootDirectories,
+) {
+  if (kind === "skill") {
+    return false;
+  }
+  const normalizedPath = normalizeResourcePath(resourcePath);
+  for (const rootDirectory of skillRootDirectories) {
+    if (rootDirectory && normalizedPath.startsWith(`${rootDirectory}/`)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function getResourceInstallPath(filePath, kind) {
   const normalizedPath = filePath.replace(/\\/g, "/");
   if (kind === "skill") {
@@ -432,10 +476,20 @@ function isResourcePathAllowed(filePath, source) {
  * ツリーを処理してリソースを抽出
  */
 async function processTree(data, owner, repoName, branch, source) {
-  const resourceFiles = data.tree.filter((item) => {
+  const allowedBlobFiles = data.tree.filter((item) => {
     if (item.type !== "blob") return false;
     if (!isResourcePathAllowed(item.path, source)) return false;
-    return !!detectResourceKindFromPath(item.path);
+    return true;
+  });
+  const skillRootDirectories = getSkillRootDirectoriesFromPaths(
+    allowedBlobFiles.map((item) => item.path),
+  );
+  const resourceFiles = allowedBlobFiles.filter((item) => {
+    const kind = detectResourceKindFromPath(item.path);
+    return (
+      !!kind &&
+      !isNestedResourcePathUnderSkillRoot(item.path, kind, skillRootDirectories)
+    );
   });
 
   const kindCounts = resourceFiles.reduce((counts, item) => {

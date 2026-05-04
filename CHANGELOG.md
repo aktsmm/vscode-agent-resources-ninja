@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-05-05
+
+### Changed
+
+- **Nested Skill Contents** - Remote index updates now treat files under a detected `SKILL.md` root as internal skill contents, preventing helper prompts and instructions in folders such as `templates` from appearing as separate Remote Resources / Remote index 更新で検出済み `SKILL.md` root 配下のファイルを skill 内部構成として扱い、`templates` などの補助 prompt / instruction が Remote Resources に別リソースとして出ないようにしました
+
+### Tests
+
+- **Nested Resource Regression Coverage** - Added regression coverage that keeps standalone prompts and agents visible while pruning non-skill resources nested under a skill root / standalone prompt / agent は維持しつつ、skill root 配下の non-skill resource を除外する回帰テストを追加
+
 ## [0.2.2] - 2026-05-04
 
 ### Fixed
@@ -149,7 +159,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The original Agent Skills Ninja release history is intentionally not carried into this changelog. Migration context is tracked in [MIGRATION_NOTES.md](MIGRATION_NOTES.md). / 旧 Agent Skills Ninja のリリース履歴はこの CHANGELOG には引き継ぎません。移行経緯は [MIGRATION_NOTES.md](MIGRATION_NOTES.md) に記録します。
 
-[Unreleased]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.1.0...v0.2.0

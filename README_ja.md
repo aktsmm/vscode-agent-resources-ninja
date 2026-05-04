@@ -175,6 +175,7 @@ Azure は Microsoft 公式 source が 2 系統あります。`microsoft/GitHub-C
 > `Update Index` コマンドで、これらのソースから最新のリソースとメタデータを再取得できます
 > 公式プロダクト/プラグインリポジトリは path filter で配布向けの場所だけを対象にし、サンプル、manifest、テスト用 skill は同梱プリセットに含めません。
 > `github/awesome-copilot` では、`plugins/` から公開されたリソースも、利用可能な場合は重複する raw plugin path ではなく配布向け top-level resource path から収録します。
+> ディレクトリ型の `SKILL.md` root 配下のファイルは skill 内部の構成要素として扱い、`templates` 配下の補助 prompt / instruction などは Remote Resources に別リソースとして表示しません。
 
 ## 🥷 Usage
 
