@@ -105,7 +105,24 @@ async function main() {
               updateHookConfigForInstall: async () => undefined,
               updateHookConfigForUninstall: async () => undefined,
             },
+            "./mcpConfigManager": {
+              updateMcpConfigForInstall: async () => undefined,
+            },
             "./customizationPaths": {
+              DEFAULT_GLOBAL_HOME_DIRECTORY: "~/.copilot",
+              getConfiguredGlobalHomeDirectory: () => "~/.copilot",
+              getConfiguredSkillsDirectory: () => ".github/skills",
+              getConfiguredUserAgentsDirectory: () => "",
+              getConfiguredUserInstructionsDirectory: () => "",
+              getConfiguredUserPromptsDirectory: () => "",
+              getConfiguredWorkspaceAgentsDirectory: () => ".github/agents",
+              getConfiguredWorkspaceHooksDirectory: () => ".github/hooks",
+              getConfiguredWorkspaceInstructionsDirectory: () =>
+                ".github/instructions",
+              getConfiguredWorkspaceMcpDirectory: () => ".github/mcp",
+              getConfiguredWorkspacePromptsDirectory: () => ".github/prompts",
+              getRelativeSkillsPathForWorkspace: () => ".github/skills",
+              resolveConfiguredUri: () => ({ fsPath: "/tmp/resource" }),
               resolveSkillsDirectoryUri: () => ({
                 fsPath: "/tmp/.github/skills",
               }),

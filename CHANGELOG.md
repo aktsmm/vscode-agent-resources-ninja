@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.0] - 2026-04-30
+## [0.2.1] - 2026-05-04
+
+### Fixed
+
+- **Language switch refresh** - User / Global Resource Home now refreshes when the UI language setting changes, matching Workspace Resources and Remote Resources / UI 言語設定変更時に User / Global Resource Home も Workspace Resources / Remote Resources と同じく再描画するように修正
+- **Report Bug locale handling** - Report Bug now uses the shared runtime language helper so `auto` follows the active VS Code locale / Report Bug が共通の runtime 言語判定を使い、`auto` が VS Code の有効 locale に追随するように修正
+- **Installer auth fallback test** - Updated the auth fallback regression test stubs for current MCP and customization path dependencies / auth fallback 回帰テストの stub を現在の MCP / customization path 依存に追随
+
+### Changed
+
+- **README release positioning** - README and README_ja now lead with the three resource-management views, explicit install target safety, and read-only built-in resources instead of generated Agent Skills index output formats / README / README_ja の冒頭を生成 Agent Skills index の出力形式ではなく、3 つの resource view、明示的な install target、安全な組み込みリソース説明へ整理
+- **Release hygiene guardrails** - Release hygiene tests now ensure VSIX packaging keeps `dist/extension.js` while excluding sourcemaps and development artifacts / release hygiene テストで `dist/extension.js` を残しつつ sourcemap と開発用 artifact を VSIX から除外することを検証
+
+## [0.2.0] - 2026-05-03
 
 ### Added
 
@@ -120,6 +133,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The original Agent Skills Ninja release history is intentionally not carried into this changelog. Migration context is tracked in [MIGRATION_NOTES.md](MIGRATION_NOTES.md). / 旧 Agent Skills Ninja のリリース履歴はこの CHANGELOG には引き継ぎません。移行経緯は [MIGRATION_NOTES.md](MIGRATION_NOTES.md) に記録します。
 
-[Unreleased]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/aktsmm/vscode-agent-resources-ninja/releases/tag/v0.1.0

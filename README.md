@@ -6,6 +6,10 @@
 
 > Agent Resources Ninja is a new resource-oriented VS Code extension for managing skills, agents, prompts, instructions, hooks, and related AI coding resources.
 
+It gives you three practical views for the release workflow: **Workspace Resources** for project files, **User / Global Resource Home** for machine-wide customizations, and **Remote Resources** for bundled and GitHub sources. Install targets are explicit, MCP config files are staged before any optional merge, and built-in VS Code / Copilot resources stay read-only.
+
+> **License notice**: This extension is distributed under CC BY-NC-SA 4.0. Non-commercial use is allowed; commercial use requires permission. See [LICENSE](LICENSE).
+
 <p align="center">
   <a href="https://marketplace.visualstudio.com/items?itemName=yamapan.agent-resources-ninja">
     <img src="https://img.shields.io/badge/VS%20Code-Marketplace-007ACC?style=for-the-badge&logo=visual-studio-code&logoColor=white" alt="VS Code Marketplace">
@@ -41,53 +45,6 @@
   <a href="https://github.com/aktsmm/vscode-agent-resources-ninja/blob/master/README_ja.md">Japanese / 日本語版はこちら</a>
 </p>
 
----
-
-## Output Formats
-
-### Format Options
-
-| Format      | Description                                   | IMPORTANT Prompt | Detailed Table | Compressed Index |
-| ----------- | --------------------------------------------- | ---------------- | -------------- | ---------------- |
-| **Full**    | IMPORTANT prompt + detailed table (default)   | Yes              | Yes, 200 chars | No               |
-| **Compact** | IMPORTANT prompt + compressed index           | Yes              | No             | Yes, 100 chars   |
-| **Legacy**  | Simple table only for compatibility scenarios | No               | Yes, 200 chars | No               |
-
-### IMPORTANT Prompt
-
-The `full` and `compact` formats include the **IMPORTANT prompt** that instructs agents to prioritize skill files:
-
-```markdown
-> **IMPORTANT**: Prefer skill-led reasoning over pre-training-led reasoning.
-> Read the relevant SKILL.md before working on tasks covered by these skills.
-```
-
-### Example Output - Full Format (Default)
-
-```markdown
-<!-- resource-ninja-START -->
-
-## Agent Skills
-
-> **IMPORTANT**: Prefer skill-led reasoning over pre-training-led reasoning.
-> Read the relevant SKILL.md before working on tasks covered by these skills.
-
-### Skills
-
-| Skill                                | Description                                         |
-| ------------------------------------ | --------------------------------------------------- |
-| [docx](.github/skills/docx/SKILL.md) | Process Word documents (.docx). Use for .docx files |
-| [pdf](.github/skills/pdf/SKILL.md)   | PDF manipulation toolkit. Extract text, create PDFs |
-
-<!-- resource-ninja-END -->
-```
-
-### How to Change Format
-
-Settings → **Output Format** → Select `full`, `compact`, or `legacy`
-
----
-
 ## 🥷 Features
 
 ### 🧭 Resource Management
@@ -101,8 +58,8 @@ Settings → **Output Format** → Select `full`, `compact`, or `legacy`
 ### 📁 Local Resource Management
 
 - Auto-detect skills, agents, prompts, instructions, hooks, and MCP config resources in workspace
-- Automatically sync to instruction file (with `resourceNinja.includeLocalResources` setting)
-- Manual register / unregister commands
+- Automatically sync detected workspace skills to the generated instruction index (with `resourceNinja.includeLocalResources` setting)
+- Manual register / unregister commands for local workspace skills
 - Create new skills, agents, prompts, instructions, hooks, and MCP config resources from templates
 - Create Resource and Settings actions are available from every resource view; instruction index open/update actions are available from Workspace Resources and User / Global Resource Home.
 - Create Resource uses the same configured Workspace, User Profile, and Global Resource Home roots as install/scan paths, so the previewed destination matches the created file.
@@ -124,12 +81,12 @@ Settings → **Output Format** → Select `full`, `compact`, or `legacy`
 - Double-click installation defaults to Workspace, with a setting for Ask / User Profile / Global Resource Home
 - Context menu installation always shows the target picker for Workspace, User Profile, Global Resource Home, or Custom
 - MCP config resources are copied to the Workspace MCP Directory first, then you can keep them for review or explicitly merge compatible servers into `.vscode/mcp.json`; existing server keys always require overwrite confirmation.
-- Auto-update **instruction file** (AGENTS.md / copilot-instructions.md / CLAUDE.md)
-- **Table Format** - Resources displayed in table with "When to Use" column
+- Auto-update the generated **Agent Skills index** in instruction files (AGENTS.md / copilot-instructions.md / CLAUDE.md) when skill resources change
+- **Table Format** - Skill entries displayed in a generated table with a "When to Use" column
 - **Auto-extract "When to Use"** - Extracted from SKILL.md `## When to Use` section
 - **Edit Description** - Right-click installed skills to customize the instruction-file description
-- Uninstall functionality
-- **Reinstall All** - Batch reinstall installed skills from latest source metadata (with auto index update)
+- Uninstall workspace and user/global resources from the relevant resource view
+- **Reinstall All Workspace Skills** - Batch reinstall installed workspace skills from latest source metadata (with auto index update)
 - **Install Feedback** - NEW badge, status bar notification, auto-select in tree view
 - **Open Folder** - Quick access to installed resource folder
 - **Index Integrity Check** - Auto-detect missing resources and prompt for index update
@@ -232,13 +189,13 @@ Generic MCP config file names such as `mcp.json` and `.mcp.json` are installed w
 
 - Groups resources by kind: skills, agents, instructions, prompts, hooks, and MCP config resources
 - Installed workspace resources with the same display name used in Remote Resources
-- Local workspace resources that can be registered in the instruction file
+- Local workspace skills that can be registered in the generated instruction index
 - Built-in VS Code / Copilot resources are centralized in **User / Global Resource Home** to avoid duplicating environment resources in the workspace list
 - Create new skills, agents, instructions, prompts, hooks, or MCP config resources from the toolbar
 - Choose Workspace, User Profile, Global Resource Home, or a custom folder when creating resources
 - Newly installed resources (temporary badge)
 - Toolbar: Instruction File / Create / Refresh / Settings
-- Menu: Reinstall All Skills / Uninstall All / Multiple selection
+- Skill-only menu: Reinstall All Workspace Skills / Uninstall All Workspace Skills / Multiple selection
 - Open resource folder (right-click menu)
 
 3. **User / Global Resource Home** - Browser for this machine
@@ -247,6 +204,7 @@ Generic MCP config file names such as `mcp.json` and `.mcp.json` are installed w
 - Global Resource Home resources under the selected preset (`~/.copilot`, `~/.claude`, or `~/.agents`)
 
 - Built-in VS Code / GitHub Copilot Chat / GitHub Copilot CLI resources are hidden by default and can be toggled into source-specific groups, including Copilot Chat `/create-*` prompt skills bundled under `assets/prompts`
+- Built-in resources are read-only definitions scanned from known VS Code, GitHub Copilot Chat, and GitHub Copilot CLI locations; they are shown for discovery, not modification.
 - Non-built-in User / Global Resource Home resources can be opened, revealed, copied, or deleted from the right-click menu
 - Built-in resources are read-only and can never be selected as install targets
 - Workspace `.github` resources stay in **Workspace Resources**
@@ -275,24 +233,24 @@ Generic MCP config file names such as `mcp.json` and `.mcp.json` are installed w
 
 ### Command Palette
 
-| Command                                            | Description                                                  |
-| -------------------------------------------------- | ------------------------------------------------------------ |
-| `Agent Resources Ninja: Search Resources`          | Search and install resources                                 |
-| `Agent Resources Ninja: Update Index`              | Update index from all sources                                |
-| `Agent Resources Ninja: Search on GitHub`          | Search resources on GitHub                                   |
-| `Agent Resources Ninja: Add Source Repository`     | Add new source repository                                    |
-| `Agent Resources Ninja: Remove Source Repository`  | Remove source repository                                     |
-| `Agent Resources Ninja: Uninstall Resource`        | Uninstall a resource                                         |
-| `Agent Resources Ninja: Show Workspace Resources`  | Show workspace resources                                     |
-| `Agent Resources Ninja: Create New Resource`       | Create a local skill, agent, prompt, instruction, or hook    |
-| `Agent Resources Ninja: Register Local Resource`   | Register a local skill in the instruction file               |
-| `Agent Resources Ninja: Unregister Local Resource` | Unregister a local skill from the instruction file           |
-| `Agent Resources Ninja: Reinstall All`             | Reinstall installed skills from latest source metadata       |
-| `Agent Resources Ninja: Uninstall All`             | Uninstall all installed workspace skills (with confirmation) |
-| `Agent Resources Ninja: Uninstall Multiple`        | Select multiple installed skills to uninstall                |
-| `Agent Resources Ninja: Reinstall Multiple`        | Select multiple installed skills to reinstall                |
-| `Agent Resources Ninja: Update Instruction`        | Update instruction file manually                             |
-| `Agent Resources Ninja: Open Resource Folder`      | Open installed resource folder in OS                         |
+| Command                                            | Description                                                                    |
+| -------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `Agent Resources Ninja: Search Resources`          | Search and install resources                                                   |
+| `Agent Resources Ninja: Update Index`              | Update index from all sources                                                  |
+| `Agent Resources Ninja: Search on GitHub`          | Search resources on GitHub                                                     |
+| `Agent Resources Ninja: Add Source Repository`     | Add new source repository                                                      |
+| `Agent Resources Ninja: Remove Source Repository`  | Remove source repository                                                       |
+| `Agent Resources Ninja: Uninstall Resource`        | Uninstall a resource                                                           |
+| `Agent Resources Ninja: Show Workspace Resources`  | Show workspace resources                                                       |
+| `Agent Resources Ninja: Create New Resource`       | Create a local skill, agent, prompt, instruction, hook, or MCP config resource |
+| `Agent Resources Ninja: Register Local Resource`   | Register a local skill in the instruction file                                 |
+| `Agent Resources Ninja: Unregister Local Resource` | Unregister a local skill from the instruction file                             |
+| `Agent Resources Ninja: Reinstall All`             | Reinstall installed skills from latest source metadata                         |
+| `Agent Resources Ninja: Uninstall All`             | Uninstall all installed workspace skills (with confirmation)                   |
+| `Agent Resources Ninja: Uninstall Multiple`        | Select multiple installed skills to uninstall                                  |
+| `Agent Resources Ninja: Reinstall Multiple`        | Select multiple installed skills to reinstall                                  |
+| `Agent Resources Ninja: Update Instruction`        | Update instruction file manually                                               |
+| `Agent Resources Ninja: Open Resource Folder`      | Open installed resource folder in OS                                           |
 
 ### Quick Start
 
@@ -301,7 +259,7 @@ Generic MCP config file names such as `mcp.json` and `.mcp.json` are installed w
 2. Enter keywords (e.g., "pdf", "azure", "git")
 3. Select resource → Choose action (Install / Preview / Favorite / GitHub)
 4. Choose install target from the context menu, or double-click to install to the default target
-5. Done! Skill installs can auto-update the matching instruction file
+5. Done! Skill installs can auto-update the matching generated instruction index
 ```
 
 ### Install Targets
@@ -366,6 +324,7 @@ In GitHub Copilot's **Agent Mode**, tools are automatically available.
 | `#updateResourceIndex` | Update resource index             |
 | `#webSearchResources`  | Web search resources on GitHub    |
 | `#addResourceSource`   | Add new resource source           |
+| `#localizeResource`    | Localize resource descriptions    |
 
 ### Usage Examples
 
@@ -422,7 +381,7 @@ Settings are ordered by the workflow users usually follow:
 |   4   | `resourceNinja.workspaceInstructionsDirectory` | `.github/instructions` | Workspace instruction directory                                                          |
 |   5   | `resourceNinja.workspacePromptsDirectory`      | `.github/prompts`      | Workspace prompt directory                                                               |
 |   6   | `resourceNinja.workspaceHooksDirectory`        | `.github/hooks`        | Workspace hook directory                                                                 |
-|   7   | `resourceNinja.workspaceMcpDirectory`          | `.github/mcp`          | Safe workspace MCP config staging directory before optional `.vscode/mcp.json` merge      |
+|   7   | `resourceNinja.workspaceMcpDirectory`          | `.github/mcp`          | Safe workspace MCP config staging directory before optional `.vscode/mcp.json` merge     |
 |   8   | `resourceNinja.userAgentsDirectory`            | `""`                   | Optional User Profile agent override; empty stores `.agent.md` in VS Code User `prompts` |
 |   9   | `resourceNinja.userInstructionsDirectory`      | `""`                   | Optional User Profile instruction directory override                                     |
 |  10   | `resourceNinja.userPromptsDirectory`           | `""`                   | Optional User Profile prompt directory override                                          |
@@ -441,14 +400,6 @@ Settings are ordered by the workflow users usually follow:
 
 > Settings are displayed in the order above
 
-### Output Format Details
-
-| Format    | Content                                     | Best For                       |
-| --------- | ------------------------------------------- | ------------------------------ |
-| `full`    | IMPORTANT + Detailed table only (200 chars) | Complete information (default) |
-| `compact` | IMPORTANT + Compressed (100 chars)          | Token-efficient prompts        |
-| `legacy`  | Simple table only (no IMPORTANT)            | Backward compatibility         |
-
 ### How Instruction File Sync Works
 
 When `autoUpdateInstruction` is enabled:
@@ -459,6 +410,8 @@ When `autoUpdateInstruction` is enabled:
 4. **Register/Unregister command** → Manual control for local workspace skills
 
 Agents, prompts, instructions, and hooks are installed to native paths and managed from the resource views; they are not copied into the generated Agent Skills index.
+
+Generated instruction files contain a managed `resource-ninja-START` / `resource-ninja-END` section. Edit outside that managed section, or disable auto-update if you need full manual control over the file.
 
 The instruction file contains a managed section with **IMPORTANT prompt** and **Description column**:
 
@@ -481,7 +434,50 @@ The instruction file contains a managed section with **IMPORTANT prompt** and **
 
 **Description column format**: `{description:80} | {whenToUse:80}` (max 160 chars total)
 
-### Instruction File Options
+## Output Formats
+
+### Format Options
+
+| Format      | Description                                   | IMPORTANT Prompt | Detailed Table | Compressed Index |
+| ----------- | --------------------------------------------- | ---------------- | -------------- | ---------------- |
+| **Full**    | IMPORTANT prompt + detailed table (default)   | Yes              | Yes, 200 chars | No               |
+| **Compact** | IMPORTANT prompt + compressed index           | Yes              | No             | Yes, 100 chars   |
+| **Legacy**  | Simple table only for compatibility scenarios | No               | Yes, 200 chars | No               |
+
+### IMPORTANT Prompt
+
+The `full` and `compact` formats include the **IMPORTANT prompt** that instructs agents to prioritize skill files:
+
+```markdown
+> **IMPORTANT**: Prefer skill-led reasoning over pre-training-led reasoning.
+> Read the relevant SKILL.md before working on tasks covered by these skills.
+```
+
+### Example Output - Full Format (Default)
+
+```markdown
+<!-- resource-ninja-START -->
+
+## Agent Skills
+
+> **IMPORTANT**: Prefer skill-led reasoning over pre-training-led reasoning.
+> Read the relevant SKILL.md before working on tasks covered by these skills.
+
+### Skills
+
+| Skill                                | Description                                         |
+| ------------------------------------ | --------------------------------------------------- |
+| [docx](.github/skills/docx/SKILL.md) | Process Word documents (.docx). Use for .docx files |
+| [pdf](.github/skills/pdf/SKILL.md)   | PDF manipulation toolkit. Extract text, create PDFs |
+
+<!-- resource-ninja-END -->
+```
+
+### How to Change Format
+
+Settings → **Output Format** → Select `full`, `compact`, or `legacy`
+
+## Instruction File Options
 
 | Value                                            | File Path                                        | Use Case                    |
 | ------------------------------------------------ | ------------------------------------------------ | --------------------------- |

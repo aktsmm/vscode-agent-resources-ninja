@@ -20,7 +20,7 @@ const nlsJa = JSON.parse(
 const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
 const readmeJa = fs.readFileSync(path.join(repoRoot, "README_ja.md"), "utf8");
 const releaseNotes = fs.readFileSync(
-  path.join(repoRoot, "release-notes-v0.2.0.md"),
+  path.join(repoRoot, `release-notes-v${packageJson.version}.md`),
   "utf8",
 );
 
@@ -52,17 +52,31 @@ function getLanguageModelToolReferences() {
 
 function assertIncludesAllLmTools(text, docName) {
   for (const toolName of getLanguageModelToolReferences()) {
-    assert.match(text, new RegExp(`#${toolName}(?=\\W|$)`), `${docName} should document #${toolName}`);
+    assert.match(
+      text,
+      new RegExp(`#${toolName}(?=\\W|$)`),
+      `${docName} should document #${toolName}`,
+    );
   }
 }
 
 function assertMentionsMcpResourceKind(text, docName) {
-  assert.match(text, /MCP config/, `${docName} should mention MCP config resources`);
-  assert.match(text, /skills?[、,].*agents?[、,].*instructions?[、,].*prompts?[、,].*hooks?[、,].*MCP config/s, `${docName} should list MCP config with the other resource kinds`);
+  assert.match(
+    text,
+    /MCP config/,
+    `${docName} should mention MCP config resources`,
+  );
+  assert.match(
+    text,
+    /skills?[、,].*agents?[、,].*instructions?[、,].*prompts?[、,].*hooks?[、,].*MCP config/s,
+    `${docName} should list MCP config with the other resource kinds`,
+  );
 }
 
 function getSourceTableRows(text) {
-  const section = text.split(/## .*Included Resource Sources|## .*収録リソースソース/)[1];
+  const section = text.split(
+    /## .*Included Resource Sources|## .*収録リソースソース/,
+  )[1];
   assert.ok(section, "README should include the source section");
   const table = section.split(/\n\nAzure |\n\nAzure は/)[0];
   return table
@@ -100,14 +114,23 @@ test("feature overview includes MCP config resources", () => {
 
 test("workspace usage includes MCP config grouping and creation", () => {
   assert.match(readme, /Groups resources by kind:.*MCP config resources/);
-  assert.match(readme, /Create new skills.*MCP config resources from the toolbar/);
+  assert.match(
+    readme,
+    /Create new skills.*MCP config resources from the toolbar/,
+  );
   assert.match(readmeJa, /リソース種別ごとに分類/);
   assert.match(readmeJa, /MCP config リソースを新規作成/);
 });
 
 test("remote layout docs include MCP config resources", () => {
-  assert.match(readme, /Repository-first groups by source.*MCP config resources/);
-  assert.match(readme, /Resource-type-first groups by skills.*MCP config resources/);
+  assert.match(
+    readme,
+    /Repository-first groups by source.*MCP config resources/,
+  );
+  assert.match(
+    readme,
+    /Resource-type-first groups by skills.*MCP config resources/,
+  );
   assert.match(readmeJa, /リポジトリ起点ではソース.*MCP config リソース/);
   assert.match(readmeJa, /リソース種別起点では skills.*MCP config リソース/);
 });
@@ -131,7 +154,10 @@ test("README token guidance follows least privilege", () => {
 
 test("README MCP config safety copy explains explicit merge choice", () => {
   assert.match(readme, /copied to the Workspace MCP Directory first/);
-  assert.match(readme, /explicitly merge compatible servers into `\.vscode\/mcp\.json`/);
+  assert.match(
+    readme,
+    /explicitly merge compatible servers into `\.vscode\/mcp\.json`/,
+  );
   assert.match(readme, /overwrite confirmation/);
   assert.match(readmeJa, /いったん Workspace MCP Directory へコピー/);
   assert.match(readmeJa, /`\.vscode\/mcp\.json` へ明示的にマージ/);
@@ -140,17 +166,32 @@ test("README MCP config safety copy explains explicit merge choice", () => {
 
 test("README marketplace identity matches package metadata", () => {
   const displayName = nls.displayName;
-  assert.match(readme, new RegExp(displayName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(readmeJa, new RegExp(displayName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(readme, new RegExp(`ext install ${packageJson.publisher}\\.${packageJson.name}`));
-  assert.match(readmeJa, new RegExp(`ext install ${packageJson.publisher}\\.${packageJson.name}`));
+  assert.match(
+    readme,
+    new RegExp(displayName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+  );
+  assert.match(
+    readmeJa,
+    new RegExp(displayName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+  );
+  assert.match(
+    readme,
+    new RegExp(`ext install ${packageJson.publisher}\\.${packageJson.name}`),
+  );
+  assert.match(
+    readmeJa,
+    new RegExp(`ext install ${packageJson.publisher}\\.${packageJson.name}`),
+  );
 });
 
 test("README docs avoid legacy release-facing claims", () => {
   const docs = allDocsText();
   assert.doesNotMatch(docs, /8 Tools|8 ツール/);
   assert.doesNotMatch(docs, /Skill preview in Webview|スキルプレビュー/);
-  assert.doesNotMatch(docs, /GitHub Token is \*\*required\*\*|GitHub Token が\*\*必須\*\*/);
+  assert.doesNotMatch(
+    docs,
+    /GitHub Token is \*\*required\*\*|GitHub Token が\*\*必須\*\*/,
+  );
 });
 
 test("README output format table uses professional release copy", () => {
@@ -170,21 +211,43 @@ test("README source tables include every bundled source", () => {
 });
 
 test("README source table row count matches index metadata", () => {
-  assert.strictEqual(getSourceTableRows(readme).length, skillIndex.sources.length);
-  assert.strictEqual(getSourceTableRows(readmeJa).length, skillIndex.sources.length);
+  assert.strictEqual(
+    getSourceTableRows(readme).length,
+    skillIndex.sources.length,
+  );
+  assert.strictEqual(
+    getSourceTableRows(readmeJa).length,
+    skillIndex.sources.length,
+  );
 });
 
 test("README source tables keep qdhenry row inside the table", () => {
-  assert.ok(getSourceTableRows(readme).some((line) => line.includes("qdhenry/Claude-Command-Suite")));
-  assert.ok(getSourceTableRows(readmeJa).some((line) => line.includes("qdhenry/Claude-Command-Suite")));
-  const afterMcpSafety = readme.split("MCP files are still copied for review and are not auto-activated.")[1] || "";
-  const afterMcpSafetyJa = readmeJa.split("MCP ファイルは引き続き確認用にコピーし、自動有効化しません。")[1] || "";
+  assert.ok(
+    getSourceTableRows(readme).some((line) =>
+      line.includes("qdhenry/Claude-Command-Suite"),
+    ),
+  );
+  assert.ok(
+    getSourceTableRows(readmeJa).some((line) =>
+      line.includes("qdhenry/Claude-Command-Suite"),
+    ),
+  );
+  const afterMcpSafety =
+    readme.split(
+      "MCP files are still copied for review and are not auto-activated.",
+    )[1] || "";
+  const afterMcpSafetyJa =
+    readmeJa.split(
+      "MCP ファイルは引き続き確認用にコピーし、自動有効化しません。",
+    )[1] || "";
   assert.doesNotMatch(afterMcpSafety, /\| \[qdhenry\/Claude-Command-Suite\]/);
   assert.doesNotMatch(afterMcpSafetyJa, /\| \[qdhenry\/Claude-Command-Suite\]/);
 });
 
 test("README source tables use only known source type labels", () => {
-  for (const row of getSourceTableRows(readme).concat(getSourceTableRows(readmeJa))) {
+  for (const row of getSourceTableRows(readme).concat(
+    getSourceTableRows(readmeJa),
+  )) {
     const columns = row.split("|").map((column) => column.trim());
     assert.match(columns[2], /^(Official|Curated|Community)$/);
   }
@@ -192,8 +255,14 @@ test("README source tables use only known source type labels", () => {
 
 test("release-facing source count matches bundled index", () => {
   const sourceCount = String(skillIndex.sources.length);
-  assert.match(nls["config.versionInfo.markdownDescription"], new RegExp(`Sources \\| ${sourceCount}`));
-  assert.match(nlsJa["config.versionInfo.markdownDescription"], new RegExp(`Sources \\| ${sourceCount}`));
+  assert.match(
+    nls["config.versionInfo.markdownDescription"],
+    new RegExp(`Sources \\| ${sourceCount}`),
+  );
+  assert.match(
+    nlsJa["config.versionInfo.markdownDescription"],
+    new RegExp(`Sources \\| ${sourceCount}`),
+  );
 });
 
 console.log("RESULT=PASS");

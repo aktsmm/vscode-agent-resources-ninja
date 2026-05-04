@@ -654,6 +654,7 @@ export function activate(context: vscode.ExtensionContext) {
       // バンドル版の description_ja を反映させるため
       skillIndex = await loadSkillIndex(context);
       workspaceProvider.refresh();
+      userResourcesProvider.refresh();
       browseProvider.refresh();
     }
 
@@ -1480,9 +1481,7 @@ export function activate(context: vscode.ExtensionContext) {
     return choice === overwrite ? serverKeys : [];
   }
 
-  async function pickMcpInstallMode(
-    mcpResourceCount: number,
-  ): Promise<
+  async function pickMcpInstallMode(mcpResourceCount: number): Promise<
     | {
         mcpInstallMode: McpInstallMode;
         confirmMcpServerOverwrite?: (
@@ -1586,15 +1585,10 @@ export function activate(context: vscode.ExtensionContext) {
           title: messages.installing(skill.name),
         },
         async () => {
-          installResult = await installSkill(
-            skill,
-            wsFolder.uri,
-            context,
-            {
-              ...installTarget,
-              ...mcpInstallOptions,
-            },
-          );
+          installResult = await installSkill(skill, wsFolder.uri, context, {
+            ...installTarget,
+            ...mcpInstallOptions,
+          });
 
           const config = vscode.workspace.getConfiguration("resourceNinja");
           if (
@@ -2402,11 +2396,16 @@ export function activate(context: vscode.ExtensionContext) {
             });
 
             try {
-              const installResult = await installSkill(skill, wsFolder.uri, context, {
-                ...installTarget,
-                ...mcpInstallOptions,
-                suppressRecoveryPrompt: true,
-              });
+              const installResult = await installSkill(
+                skill,
+                wsFolder.uri,
+                context,
+                {
+                  ...installTarget,
+                  ...mcpInstallOptions,
+                  suppressRecoveryPrompt: true,
+                },
+              );
               const mcpConfigSummary = formatMcpConfigUpdateSummary(
                 installResult.mcpConfigUpdate,
               );
@@ -4223,12 +4222,10 @@ ${fileUri.fsPath}`,
         vscode.extensions.getExtension("yamapan.agent-resources-ninja")
           ?.packageJSON?.version || "unknown";
 
-      const config = vscode.workspace.getConfiguration("resourceNinja");
-      const language = config.get<string>("language", "en");
-      const isJapanese = language === "ja";
+      const isJa = isJapanese();
 
-      const issueTitle = isJapanese ? "[バグ報告] " : "[Bug] ";
-      const issueBody = isJapanese
+      const issueTitle = isJa ? "[バグ報告] " : "[Bug] ";
+      const issueBody = isJa
         ? `**問題の説明**\n` +
           `<!-- 発生したバグについて説明してください -->\n\n` +
           `**再現手順**\n` +

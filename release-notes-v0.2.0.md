@@ -98,5 +98,4 @@
 
 ## Notes
 
-- Marketplace publishing is not performed by this prep step.
 - Non-skill reinstall remains intentionally hidden until source metadata is stored for agents, prompts, instructions, hooks, and MCP config resources.

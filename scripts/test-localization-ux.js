@@ -14,7 +14,14 @@ const nls = JSON.parse(
 const nlsJa = JSON.parse(
   fs.readFileSync(path.join(repoRoot, "package.nls.ja.json"), "utf8"),
 );
-const i18nSource = fs.readFileSync(path.join(repoRoot, "src", "i18n.ts"), "utf8");
+const i18nSource = fs.readFileSync(
+  path.join(repoRoot, "src", "i18n.ts"),
+  "utf8",
+);
+const extensionSource = fs.readFileSync(
+  path.join(repoRoot, "src", "extension.ts"),
+  "utf8",
+);
 const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
 const readmeJa = fs.readFileSync(path.join(repoRoot, "README_ja.md"), "utf8");
 
@@ -29,7 +36,10 @@ function test(name, fn) {
 }
 
 function extractObjectKeys(source, objectName) {
-  return Array.from(extractObjectBody(source, objectName).matchAll(/^\s{2}([A-Za-z0-9_]+):/gm), (entry) => entry[1]).sort();
+  return Array.from(
+    extractObjectBody(source, objectName).matchAll(/^\s{2}([A-Za-z0-9_]+):/gm),
+    (entry) => entry[1],
+  ).sort();
 }
 
 function extractObjectBody(source, objectName) {
@@ -38,8 +48,13 @@ function extractObjectBody(source, objectName) {
   const bodyStart = source.indexOf("{", objectStart) + 1;
   const asConstEnd = source.indexOf("\n} as const;", bodyStart);
   const plainEnd = source.indexOf("\n};", bodyStart);
-  const bodyEndCandidates = [asConstEnd, plainEnd].filter((index) => index !== -1);
-  assert.ok(bodyEndCandidates.length > 0, `Missing end for object ${objectName}`);
+  const bodyEndCandidates = [asConstEnd, plainEnd].filter(
+    (index) => index !== -1,
+  );
+  assert.ok(
+    bodyEndCandidates.length > 0,
+    `Missing end for object ${objectName}`,
+  );
   const bodyEnd = Math.min(...bodyEndCandidates);
   return source.slice(bodyStart, bodyEnd);
 }
@@ -60,7 +75,10 @@ function placeholderCount(value) {
 }
 
 function packagePlaceholderKeys() {
-  return Array.from(JSON.stringify(packageJson).matchAll(/%([^%]+)%/g), (match) => match[1]).sort();
+  return Array.from(
+    JSON.stringify(packageJson).matchAll(/%([^%]+)%/g),
+    (match) => match[1],
+  ).sort();
 }
 
 function maskUrlEscapes(value) {
@@ -76,17 +94,31 @@ test("package NLS English and Japanese keys match exactly", () => {
 
 test("package JSON localization placeholders resolve in both locales", () => {
   for (const key of packagePlaceholderKeys()) {
-    assert.ok(Object.hasOwn(nls, key), `Missing English package NLS key: ${key}`);
-    assert.ok(Object.hasOwn(nlsJa, key), `Missing Japanese package NLS key: ${key}`);
+    assert.ok(
+      Object.hasOwn(nls, key),
+      `Missing English package NLS key: ${key}`,
+    );
+    assert.ok(
+      Object.hasOwn(nlsJa, key),
+      `Missing Japanese package NLS key: ${key}`,
+    );
   }
 });
 
 test("package NLS values do not contain unresolved localization placeholders", () => {
   for (const [key, value] of Object.entries(nls)) {
-    assert.doesNotMatch(maskUrlEscapes(value), /%[A-Za-z0-9_.-]+%/, `Unresolved placeholder in package.nls.json ${key}`);
+    assert.doesNotMatch(
+      maskUrlEscapes(value),
+      /%[A-Za-z0-9_.-]+%/,
+      `Unresolved placeholder in package.nls.json ${key}`,
+    );
   }
   for (const [key, value] of Object.entries(nlsJa)) {
-    assert.doesNotMatch(maskUrlEscapes(value), /%[A-Za-z0-9_.-]+%/, `Unresolved placeholder in package.nls.ja.json ${key}`);
+    assert.doesNotMatch(
+      maskUrlEscapes(value),
+      /%[A-Za-z0-9_.-]+%/,
+      `Unresolved placeholder in package.nls.ja.json ${key}`,
+    );
   }
 });
 
@@ -109,6 +141,17 @@ test("runtime i18n placeholders match between English and Japanese", () => {
   }
 });
 
+test("runtime language changes refresh every resource view", () => {
+  const languageBlockMatch = extensionSource.match(
+    /if \(e\.affectsConfiguration\("resourceNinja\.language"\)\) \{[\s\S]*?\n    \}/,
+  );
+  assert.ok(languageBlockMatch, "Missing resourceNinja.language watcher");
+  const languageBlock = languageBlockMatch[0];
+  assert.match(languageBlock, /workspaceProvider\.refresh\(\)/);
+  assert.match(languageBlock, /userResourcesProvider\.refresh\(\)/);
+  assert.match(languageBlock, /browseProvider\.refresh\(\)/);
+});
+
 test("command palette labels signal follow-up and destructive actions", () => {
   assert.match(nls["command.resetSettings"], /\.\.\.$/);
   assert.match(nlsJa["command.resetSettings"], /\.\.\.$/);
@@ -127,13 +170,18 @@ test("command palette labels signal follow-up and destructive actions", () => {
     "resourceNinja.uninstallMultiple",
     "resourceNinja.removeSource",
   ]) {
-    assert.ok(hiddenFromPalette.has(commandId), `${commandId} should not be a top-level palette action`);
+    assert.ok(
+      hiddenFromPalette.has(commandId),
+      `${commandId} should not be a top-level palette action`,
+    );
   }
 });
 
 test("GitHub token setting uses password presentation", () => {
   assert.strictEqual(
-    packageJson.contributes.configuration.properties["resourceNinja.githubToken"].editPresentation,
+    packageJson.contributes.configuration.properties[
+      "resourceNinja.githubToken"
+    ].editPresentation,
     "password",
   );
 });
@@ -163,31 +211,78 @@ test("GitHub token guidance follows least privilege", () => {
 });
 
 test("preview terminology is resource-oriented in both locales", () => {
-  assert.match(extractObjectEntry(i18nSource, "enMessages", "previewTitle"), /Resource Preview/);
-  assert.match(extractObjectEntry(i18nSource, "jaMessages", "previewTitle"), /リソース プレビュー/);
-  assert.doesNotMatch(extractObjectEntry(i18nSource, "enMessages", "previewTitle"), /Skill Preview/);
+  assert.match(
+    extractObjectEntry(i18nSource, "enMessages", "previewTitle"),
+    /Resource Preview/,
+  );
+  assert.match(
+    extractObjectEntry(i18nSource, "jaMessages", "previewTitle"),
+    /リソース プレビュー/,
+  );
+  assert.doesNotMatch(
+    extractObjectEntry(i18nSource, "enMessages", "previewTitle"),
+    /Skill Preview/,
+  );
 });
 
 test("Global Resource Home terminology is user-facing", () => {
-  assert.match(extractObjectEntry(i18nSource, "enMessages", "installTargetCopilotHomeLabel"), /Global Resource Home/);
-  assert.match(extractObjectEntry(i18nSource, "jaMessages", "installTargetCopilotHomeLabel"), /Global Resource Home/);
+  assert.match(
+    extractObjectEntry(
+      i18nSource,
+      "enMessages",
+      "installTargetCopilotHomeLabel",
+    ),
+    /Global Resource Home/,
+  );
+  assert.match(
+    extractObjectEntry(
+      i18nSource,
+      "jaMessages",
+      "installTargetCopilotHomeLabel",
+    ),
+    /Global Resource Home/,
+  );
   for (const value of packageTextValues) {
     assert.doesNotMatch(value, /Copilot Home/);
   }
 });
 
 test("settings descriptions explain MCP config safety", () => {
-  assert.match(nls["config.workspaceMcpDirectory.markdownDescription"], /explicitly merge compatible servers into `\.vscode\/mcp\.json`/);
-  assert.match(nlsJa["config.workspaceMcpDirectory.markdownDescription"], /`\.vscode\/mcp\.json` へ明示的にマージ/);
-  assert.match(nls["config.defaultInstallTarget.markdownDescription"], /keep them for review or explicitly merge compatible servers/);
-  assert.match(nlsJa["config.defaultInstallTarget.markdownDescription"], /レビュー用に保持するか、互換 server を `\.vscode\/mcp\.json` へ明示的にマージ/);
+  assert.match(
+    nls["config.workspaceMcpDirectory.markdownDescription"],
+    /explicitly merge compatible servers into `\.vscode\/mcp\.json`/,
+  );
+  assert.match(
+    nlsJa["config.workspaceMcpDirectory.markdownDescription"],
+    /`\.vscode\/mcp\.json` へ明示的にマージ/,
+  );
+  assert.match(
+    nls["config.defaultInstallTarget.markdownDescription"],
+    /keep them for review or explicitly merge compatible servers/,
+  );
+  assert.match(
+    nlsJa["config.defaultInstallTarget.markdownDescription"],
+    /レビュー用に保持するか、互換 server を `\.vscode\/mcp\.json` へ明示的にマージ/,
+  );
 });
 
 test("settings descriptions distinguish skill index from native resource paths", () => {
-  assert.match(nls["config.instructionFile.markdownDescription"], /Agent Skills index/);
-  assert.match(nls["config.instructionFile.markdownDescription"], /native paths/);
-  assert.match(nlsJa["config.instructionFile.markdownDescription"], /Agent Skills index/);
-  assert.match(nlsJa["config.instructionFile.markdownDescription"], /ネイティブな保存先/);
+  assert.match(
+    nls["config.instructionFile.markdownDescription"],
+    /Agent Skills index/,
+  );
+  assert.match(
+    nls["config.instructionFile.markdownDescription"],
+    /native paths/,
+  );
+  assert.match(
+    nlsJa["config.instructionFile.markdownDescription"],
+    /Agent Skills index/,
+  );
+  assert.match(
+    nlsJa["config.instructionFile.markdownDescription"],
+    /ネイティブな保存先/,
+  );
 });
 
 test("settings output format copy stays professional", () => {
@@ -220,8 +315,14 @@ test("instruction file enum descriptions match exact targets", () => {
     if (value === "none" || value === "custom") {
       continue;
     }
-    assert.match(nls[key], new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-    assert.match(nlsJa[key], new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(
+      nls[key],
+      new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    );
+    assert.match(
+      nlsJa[key],
+      new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    );
   }
   assert.match(nls["config.instructionFile.agents"], /Copilot CLI/);
   assert.match(nlsJa["config.instructionFile.agents"], /Copilot CLI/);
@@ -241,8 +342,14 @@ test("docs and package metadata avoid legacy Skill Ninja branding", () => {
 
 test("release-facing version info matches package version", () => {
   const version = packageJson.version;
-  assert.match(nls["config.versionInfo.markdownDescription"], new RegExp(`Extension \\| \\*\\*${version.replace(/\./g, "\\.")}\\*\\*`));
-  assert.match(nlsJa["config.versionInfo.markdownDescription"], new RegExp(`Extension \\| \\*\\*${version.replace(/\./g, "\\.")}\\*\\*`));
+  assert.match(
+    nls["config.versionInfo.markdownDescription"],
+    new RegExp(`Extension \\| \\*\\*${version.replace(/\./g, "\\.")}\\*\\*`),
+  );
+  assert.match(
+    nlsJa["config.versionInfo.markdownDescription"],
+    new RegExp(`Extension \\| \\*\\*${version.replace(/\./g, "\\.")}\\*\\*`),
+  );
 });
 
 console.log("RESULT=PASS");

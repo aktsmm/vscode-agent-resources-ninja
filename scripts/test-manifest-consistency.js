@@ -253,7 +253,10 @@ test("bundle install uses selectable resource checklist", () => {
   assert.doesNotMatch(extensionSource, /Select Bundle Resources/);
   assert.match(extensionSource, /getResourceKindIcon\(kind\)/);
   assert.match(extensionSource, /selectedKindSummary/);
-  assert.match(extensionSource, /MCP config files will use the selected activation mode/);
+  assert.match(
+    extensionSource,
+    /MCP config files will use the selected activation mode/,
+  );
   assert.match(extensionSource, /MCP config の有効化方法/);
   assert.match(
     extensionSource,
@@ -391,7 +394,7 @@ test("bundled Microsoft Azure Skills plugin source is complete", () => {
 
 test("new product metadata is internally consistent", () => {
   assert.strictEqual(packageJson.name, "agent-resources-ninja");
-  assert.strictEqual(packageJson.version, "0.2.0");
+  assert.match(packageJson.version, /^\d+\.\d+\.\d+$/);
   assert.strictEqual(
     packageJson.repository?.url,
     "https://github.com/aktsmm/vscode-agent-resources-ninja",
@@ -627,19 +630,24 @@ test("settings and support toolbar groups stay consistent", () => {
     "resourceNinja.userResourcesView",
     "resourceNinja.browseView",
   ]) {
-    const viewMenus = titleMenus.filter((item) => item.when === `view == ${viewId}`);
+    const viewMenus = titleMenus.filter(
+      (item) => item.when === `view == ${viewId}`,
+    );
     assert.strictEqual(
-      viewMenus.find((item) => item.command === "resourceNinja.openSettings")?.group,
+      viewMenus.find((item) => item.command === "resourceNinja.openSettings")
+        ?.group,
       "z_settings@1",
       `${viewId} should keep Open Settings first in the settings group`,
     );
     assert.strictEqual(
-      viewMenus.find((item) => item.command === "resourceNinja.resetSettings")?.group,
+      viewMenus.find((item) => item.command === "resourceNinja.resetSettings")
+        ?.group,
       "z_settings@2",
       `${viewId} should keep Reset Settings second in the settings group`,
     );
     assert.strictEqual(
-      viewMenus.find((item) => item.command === "resourceNinja.reportBug")?.group,
+      viewMenus.find((item) => item.command === "resourceNinja.reportBug")
+        ?.group,
       "z_support@1",
       `${viewId} should keep Report a Bug in the support group`,
     );
