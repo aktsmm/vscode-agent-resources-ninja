@@ -12799,7 +12799,7 @@
       "source": "github-awesome-copilot",
       "path": ".vscode/mcp.json",
       "categories": ["mcp"],
-      "description": "{",
+      "description": "MCP configuration for mcp",
       "description_ja": ""
     },
     {

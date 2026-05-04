@@ -6,6 +6,8 @@ import {
   loadSkillIndex,
   getSkillGitHubUrl,
   getSourceBranch,
+  getResourceContentPath,
+  isResourceFilePath,
   Skill,
   Source,
   getResourceKind,
@@ -231,12 +233,8 @@ async function fetchSkillContent(
         const ownerRepo = match[1];
         // HEAD リクエストまたは API でデフォルトブランチを動的取得
         const branch = await getSourceBranch(sourceInfo, token, skill.path);
-        // パスが .md で終わる場合はそのまま使用、そうでなければ /SKILL.md を追加
-        if (skill.path.endsWith(".md")) {
-          rawUrl = `https://raw.githubusercontent.com/${ownerRepo}/${branch}/${skill.path}`;
-        } else {
-          rawUrl = `https://raw.githubusercontent.com/${ownerRepo}/${branch}/${skill.path}/SKILL.md`;
-        }
+        const contentPath = getResourceContentPath(skill);
+        rawUrl = `https://raw.githubusercontent.com/${ownerRepo}/${branch}/${contentPath}`;
       } else {
         throw new Error(`Invalid source URL: ${sourceInfo.url}`);
       }
@@ -251,7 +249,7 @@ async function fetchSkillContent(
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to fetch: ${response.status}`);
+    throw new Error(`Failed to fetch ${rawUrl}: ${response.status}`);
   }
 
   return await response.text();
@@ -339,7 +337,12 @@ function getWebviewContent(
   nonce: string,
   isInIndex: boolean = true,
 ): string {
-  const htmlContent = markdownToHtml(content);
+  const previewContent =
+    getResourceKind(skill) === "mcp" ||
+    skill.path.toLowerCase().endsWith(".json")
+      ? `\`\`\`json\n${content}\n\`\`\``
+      : content;
+  const htmlContent = markdownToHtml(previewContent);
   const htmlLang = isJapanese() ? "ja" : "en";
   const safeSkillName = escapeHtml(skill.name);
   const safeSource = escapeHtml(skill.source);
@@ -730,16 +733,16 @@ export async function showSkillPreview(
             // フォールバック: skill.url または source/path から直接構築
             if (!url) {
               if (skill.url) {
-                // blob URL を tree URL に変換
-                url = skill.url.replace("/blob/", "/tree/");
+                url = skill.url;
               } else if (skill.source && skill.path) {
                 // source が owner/repo 形式か source ID 形式かを判定
                 // ソース情報からブランチを取得（なければ main にフォールバック）
                 const sourceInfo = sources.find((s) => s.id === skill.source);
                 const branch = sourceInfo?.branch || "main";
+                const route = isResourceFilePath(skill.path) ? "blob" : "tree";
                 if (skill.source.includes("/")) {
                   // owner/repo 形式（検索結果から）
-                  url = `https://github.com/${skill.source}/tree/${branch}/${skill.path}`;
+                  url = `https://github.com/${skill.source}/${route}/${branch}/${skill.path}`;
                 } else {
                   // source ID 形式（インデックスから）→ ソース情報からURLを取得
                   if (sourceInfo) {
@@ -747,7 +750,7 @@ export async function showSkillPreview(
                       /github\.com\/([^/]+\/[^/]+)/,
                     );
                     if (match) {
-                      url = `https://github.com/${match[1]}/tree/${branch}/${skill.path}`;
+                      url = `https://github.com/${match[1]}/${route}/${branch}/${skill.path}`;
                     }
                   }
                 }

@@ -1928,10 +1928,25 @@ test("ignore files exclude local release and agent artifacts", () => {
   }
 });
 
-test("version info reflects bundled resource index metadata", () => {
+test("version info reflects extension release and bundled resource index metadata", () => {
+  const changelog = fs.readFileSync(
+    path.join(repoRoot, "CHANGELOG.md"),
+    "utf8",
+  );
+  const releaseDateMatch = changelog.match(
+    new RegExp(
+      `## \\[${packageJson.version.replace(/\./g, "\\.")}\\] - (\\d{4}-\\d{2}-\\d{2})`,
+    ),
+  );
+  assert.ok(
+    releaseDateMatch,
+    `CHANGELOG should include release date for ${packageJson.version}`,
+  );
+  const extensionReleaseDate = releaseDateMatch[1];
   const expectedRows = [
+    `Extension | **${packageJson.version}**`,
     `Resource Index | **v${bundledIndex.version}**`,
-    `Last Updated | ${bundledIndex.lastUpdated}`,
+    `Last Updated | ${extensionReleaseDate}`,
     `Resources | ${bundledIndex.skills.length}`,
     `Sources | ${bundledIndex.sources.length}`,
   ];

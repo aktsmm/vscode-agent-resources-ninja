@@ -250,7 +250,15 @@ test("Global Resource Home terminology is user-facing", () => {
 test("settings descriptions explain MCP config safety", () => {
   assert.match(
     nls["config.workspaceMcpDirectory.markdownDescription"],
+    /Staging and review directory/,
+  );
+  assert.match(
+    nls["config.workspaceMcpDirectory.markdownDescription"],
     /explicitly merge compatible servers into `\.vscode\/mcp\.json`/,
+  );
+  assert.match(
+    nlsJa["config.workspaceMcpDirectory.markdownDescription"],
+    /staging \/ review 用ディレクトリ/,
   );
   assert.match(
     nlsJa["config.workspaceMcpDirectory.markdownDescription"],

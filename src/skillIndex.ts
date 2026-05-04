@@ -618,12 +618,29 @@ export async function getSourceBranch(
     return source.branch;
   }
   // HEAD リクエストまたは API で動的取得
-  // パスが .md で終わる場合はそのまま使用、そうでなければ /SKILL.md を追加
+  // 実ファイルならそのまま使用し、directory 型の skill だけ /SKILL.md を追加
   let testPath: string | undefined;
   if (skillPath) {
-    testPath = skillPath.endsWith(".md") ? skillPath : `${skillPath}/SKILL.md`;
+    testPath = getResourceContentPath({ path: skillPath });
   }
   return await getDefaultBranch(source.url, token, testPath);
+}
+
+export function isResourceFilePath(resourcePath: string): boolean {
+  const fileName = resourcePath.replace(/\\/g, "/").split("/").pop() || "";
+  return /\.(?:agent\.md|instructions\.md|prompt\.md|md|mdx|json|ya?ml|toml|txt)$/i.test(
+    fileName,
+  );
+}
+
+export function getResourceContentPath(
+  resource: Pick<Skill, "path">,
+  defaultFileName: string = "SKILL.md",
+): string {
+  if (isResourceFilePath(resource.path)) {
+    return resource.path;
+  }
+  return `${resource.path.replace(/\/+$/, "")}/${defaultFileName}`;
 }
 
 /**
@@ -641,7 +658,7 @@ export async function getSkillGitHubUrlAsync(
 
   const branch = await getSourceBranch(source, token);
   const baseUrl = source.url.replace(/\/$/, "");
-  const route = skill.path.endsWith(".md") ? "blob" : "tree";
+  const route = isResourceFilePath(skill.path) ? "blob" : "tree";
   return `${baseUrl}/${route}/${branch}/${skill.path}`;
 }
 
@@ -661,7 +678,7 @@ export function getSkillGitHubUrl(
   const cachedBranch = branchCache.get(source.url);
   const branch = cachedBranch || source.branch || "main";
   const baseUrl = source.url.replace(/\/$/, "");
-  const route = skill.path.endsWith(".md") ? "blob" : "tree";
+  const route = isResourceFilePath(skill.path) ? "blob" : "tree";
   return `${baseUrl}/${route}/${branch}/${skill.path}`;
 }
 
@@ -686,11 +703,8 @@ export async function getSkillRawUrlAsync(
 
   const [, owner, repo] = match;
   const branch = await getSourceBranch(source, token);
-  // パスが .md で終わる場合はそのまま使用
-  if (skill.path.endsWith(".md")) {
-    return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${skill.path}`;
-  }
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${skill.path}/${fileName}`;
+  const contentPath = getResourceContentPath(skill, fileName);
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${contentPath}`;
 }
 
 /**
@@ -716,9 +730,6 @@ export function getSkillRawUrl(
   const [, owner, repo] = match;
   const cachedBranch = branchCache.get(source.url);
   const branch = cachedBranch || source.branch || "main";
-  // パスが .md で終わる場合はそのまま使用
-  if (skill.path.endsWith(".md")) {
-    return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${skill.path}`;
-  }
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${skill.path}/${fileName}`;
+  const contentPath = getResourceContentPath(skill, fileName);
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${contentPath}`;
 }

@@ -6,7 +6,7 @@
 
 > Agent Resources Ninja is a new resource-oriented VS Code extension for managing skills, agents, prompts, instructions, hooks, and related AI coding resources.
 
-It gives you three practical views for the release workflow: **Workspace Resources** for project files, **User / Global Resource Home** for machine-wide customizations, and **Remote Resources** for bundled and GitHub sources. Install targets are explicit, MCP config files are staged before any optional merge, and built-in VS Code / Copilot resources stay read-only.
+It gives you three practical views for everyday resource management: **Workspace Resources** for project files, **User / Global Resource Home** for machine-wide customizations, and **Remote Resources** for bundled and GitHub sources. Install targets are explicit, MCP config files are staged before any optional merge, and built-in VS Code / Copilot resources stay read-only.
 
 > **License notice**: This extension is distributed under CC BY-NC-SA 4.0. Non-commercial use is allowed; commercial use requires permission. See [LICENSE](LICENSE).
 

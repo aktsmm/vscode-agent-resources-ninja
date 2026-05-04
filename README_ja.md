@@ -6,7 +6,7 @@
 
 > Agent Resources Ninja は、スキル、エージェント、プロンプト、インストラクション、フックなどの AI コーディング用リソースを管理する新しい VS Code 拡張機能です。
 
-初回リリースでは、**Workspace Resources** でプロジェクト内リソースを、**User / Global Resource Home** でユーザー領域と共有ルートを、**Remote Resources** で同梱・GitHub ソースを扱います。インストール先は明示選択でき、MCP config は任意マージ前に安全な場所へコピーされ、VS Code / Copilot の組み込みリソースは読み取り専用として扱います。
+**Workspace Resources** でプロジェクト内リソースを、**User / Global Resource Home** でユーザー領域と共有ルートを、**Remote Resources** で同梱・GitHub ソースを扱えます。インストール先は明示選択でき、MCP config は任意マージ前に staging / review 用ディレクトリへコピーされ、VS Code / Copilot の組み込みリソースは読み取り専用として扱います。
 
 > **ライセンス注意**: 本拡張機能は CC BY-NC-SA 4.0 で配布されています。非商用利用は可能ですが、商用利用には許諾が必要です。詳細は [LICENSE](LICENSE) を確認してください。
 

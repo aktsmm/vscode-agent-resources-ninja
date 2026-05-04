@@ -2,7 +2,7 @@
   "name": "agent-resources-ninja",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "publisher": "yamapan",
   "license": "CC-BY-NC-SA-4.0",
   "icon": "resources/icon.png",
@@ -1360,7 +1360,7 @@
     "package": "npm run check-types && npm run lint && node esbuild.js --production",
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
-    "test:resources": "node scripts/test-resource-kinds.js && node scripts/test-resource-targets.js && node scripts/test-user-data-paths.js && node scripts/test-global-home-routing.js && node scripts/test-hook-config.js && node scripts/test-mcp-config-merge.js && node scripts/test-skill-search.js && node scripts/test-azure-plugin-source.js && node scripts/test-azure-skills-source.js && node scripts/test-plugin-bundles.js && node scripts/test-ux-scope-actions.js && node scripts/test-create-resource-templates.js && node scripts/test-create-resource-flow.js && node scripts/test-create-resource-validation.js && node scripts/test-instruction-target-ux.js && node scripts/test-localization-ux.js && node scripts/test-readme-release-ux.js && node scripts/test-view-welcome-ux.js && node scripts/test-activation-ux.js && node scripts/test-release-hygiene.js && node scripts/test-manifest-consistency.js && node scripts/test-logger.js",
+    "test:resources": "node scripts/test-resource-kinds.js && node scripts/test-resource-targets.js && node scripts/test-resource-preview-urls.js && node scripts/test-user-data-paths.js && node scripts/test-global-home-routing.js && node scripts/test-hook-config.js && node scripts/test-mcp-config-merge.js && node scripts/test-skill-search.js && node scripts/test-azure-plugin-source.js && node scripts/test-azure-skills-source.js && node scripts/test-plugin-bundles.js && node scripts/test-ux-scope-actions.js && node scripts/test-create-resource-templates.js && node scripts/test-create-resource-flow.js && node scripts/test-create-resource-validation.js && node scripts/test-instruction-target-ux.js && node scripts/test-localization-ux.js && node scripts/test-readme-release-ux.js && node scripts/test-view-welcome-ux.js && node scripts/test-activation-ux.js && node scripts/test-release-hygiene.js && node scripts/test-manifest-consistency.js && node scripts/test-logger.js",
     "test": "vscode-test"
   },
   "overrides": {

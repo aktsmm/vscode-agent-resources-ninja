@@ -9,9 +9,11 @@ import {
   ResourceKind,
   loadSkillIndex,
   getSkillGitHubUrl,
+  getResourceContentPath,
   getResourceKind,
   getResourceKindIcon,
   getResourceKindLabel,
+  isResourceFilePath,
 } from "./skillIndex";
 import { searchSkills, SkillQuickPickItem } from "./skillSearch";
 import {
@@ -3071,7 +3073,7 @@ export function activate(context: vscode.ExtensionContext) {
                 const item = e.item;
                 const branch = item.result.defaultBranch || "main";
                 const resourcePath = item.result.path
-                  ? `${item.result.path.endsWith(".md") ? "/blob" : "/tree"}/${branch}/${item.result.path}`
+                  ? `${isResourceFilePath(item.result.path) ? "/blob" : "/tree"}/${branch}/${item.result.path}`
                   : "";
                 const url = `${item.result.repoUrl}${resourcePath}`;
 
@@ -3138,11 +3140,9 @@ export function activate(context: vscode.ExtensionContext) {
 
             if (action.value === "preview") {
               // プレビュー表示
-              // パスが .md で終わる場合はそのまま使用
-              const pathEndsWithMd = selected.result.path.endsWith(".md");
-              const urlPath = pathEndsWithMd
-                ? selected.result.path
-                : `${selected.result.path}/SKILL.md`;
+              const urlPath = getResourceContentPath({
+                path: selected.result.path,
+              });
               const branch = selected.result.defaultBranch || "main";
               const skill: Skill = {
                 kind: selected.result.kind,
@@ -3170,7 +3170,7 @@ export function activate(context: vscode.ExtensionContext) {
             } else if (action.value === "open") {
               const branch = selected.result.defaultBranch || "main";
               const skillPath = selected.result.path
-                ? `${selected.result.path.endsWith(".md") ? "/blob" : "/tree"}/${branch}/${selected.result.path}`
+                ? `${isResourceFilePath(selected.result.path) ? "/blob" : "/tree"}/${branch}/${selected.result.path}`
                 : "";
               const url = `${selected.result.repoUrl}${skillPath}`;
               await vscode.env.openExternal(vscode.Uri.parse(url));
@@ -3179,7 +3179,7 @@ export function activate(context: vscode.ExtensionContext) {
             } else if (action.value === "copy-url") {
               const branch = selected.result.defaultBranch || "main";
               const skillPath = selected.result.path
-                ? `${selected.result.path.endsWith(".md") ? "/blob" : "/tree"}/${branch}/${selected.result.path}`
+                ? `${isResourceFilePath(selected.result.path) ? "/blob" : "/tree"}/${branch}/${selected.result.path}`
                 : "";
               const url = `${selected.result.repoUrl}${skillPath}`;
               await vscode.env.clipboard.writeText(url);
@@ -4176,7 +4176,8 @@ ${fileUri.fsPath}`,
       );
       if (source) {
         const branch = source.branch || "main";
-        const url = `${source.url}/tree/${branch}/${item.skill.path}`;
+        const route = isResourceFilePath(item.skill.path) ? "blob" : "tree";
+        const url = `${source.url}/${route}/${branch}/${item.skill.path}`;
         await vscode.env.clipboard.writeText(url);
         vscode.window.showInformationMessage(
           messages.copiedToClipboardWithValue(url),

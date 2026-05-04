@@ -35,6 +35,21 @@ function getLocalDateString(): string {
   return `${year}-${month}-${day}`;
 }
 
+function normalizeResourceDescription(
+  description: string,
+  kind: ResourceKind,
+  name: string,
+): string {
+  const trimmed = description.trim();
+  if (trimmed && trimmed !== "{" && trimmed !== "}") {
+    return trimmed;
+  }
+  if (kind === "mcp") {
+    return `MCP configuration for ${name}`;
+  }
+  return "";
+}
+
 async function fetchWithTimeout(
   url: string,
   options?: RequestInit,
@@ -598,7 +613,11 @@ async function processTreeResponse(
             skillInfo.categories.length > 0
               ? skillInfo.categories
               : getDefaultResourceCategories(kind),
-          description: skillInfo.description || "",
+          description: normalizeResourceDescription(
+            skillInfo.description || "",
+            kind,
+            skillInfo.name,
+          ),
         };
         if (kind === "skill" && skillInfo.standalone !== undefined) {
           skill.standalone = skillInfo.standalone;

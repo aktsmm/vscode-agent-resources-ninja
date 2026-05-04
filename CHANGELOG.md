@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-05-04
+
+### Fixed
+
+- **Resource Preview URLs** - Fixed MCP, agent, prompt, instruction, and hook preview/open/copy URLs so single-file resources use their actual raw/blob file paths instead of appending `SKILL.md` / MCP、agent、prompt、instruction、hook の preview/open/copy URL を修正し、単一ファイルリソースでは `SKILL.md` を付けず実ファイルの raw/blob path を使うようにしました
+- **MCP preview metadata** - Fixed bundled MCP config descriptions so JSON content does not appear as `{` in Remote Resources / Remote Resources で bundled MCP config の説明が `{` と表示されないように修正
+
+### Changed
+
+- **MCP Settings Clarity** - Clarified Workspace MCP Directory as a staging/review directory before optional `.vscode/mcp.json` merge / Workspace MCP Directory が任意の `.vscode/mcp.json` merge 前の staging / review 用ディレクトリであることを明確化
+- **README Release Readiness** - Refined README / README_ja first-screen copy for current resource-management behavior and MCP review flow / README / README_ja の冒頭説明を現在の resource management と MCP review flow に合わせて整理
+
+### Tests
+
+- **Preview URL Regression Coverage** - Added resource preview URL regression tests for MCP, agent, prompt, hook, and directory skill resources, and wired them into `npm run test:resources` / MCP、agent、prompt、hook、directory skill の preview URL 回帰テストを追加し、`npm run test:resources` に組み込み
+
 ## [0.2.1] - 2026-05-04
 
 ### Fixed
@@ -133,7 +149,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The original Agent Skills Ninja release history is intentionally not carried into this changelog. Migration context is tracked in [MIGRATION_NOTES.md](MIGRATION_NOTES.md). / 旧 Agent Skills Ninja のリリース履歴はこの CHANGELOG には引き継ぎません。移行経緯は [MIGRATION_NOTES.md](MIGRATION_NOTES.md) に記録します。
 
-[Unreleased]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/aktsmm/vscode-agent-resources-ninja/releases/tag/v0.1.0
