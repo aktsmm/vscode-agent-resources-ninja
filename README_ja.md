@@ -46,14 +46,14 @@
 ### 🧭 リソース管理
 
 - Activity Bar から **Workspace Resources**、**User / Global Resource Home**、**Remote Resources** を参照
-- skills、agents、prompts、instructions、hooks、MCP config リソースなど複数のリソース種別を管理
+- skills、agents、prompts、instructions、hooks、MCP config、plugin manifest、Cursor rule など複数のリソース種別を管理
 - リモートリソースを source 別または Resource Type 別に参照
 - VS Code User Data と選択中の Global Resource Home 配下の user/global リソースを確認
 - インストール先を Workspace、User Profile、Global Resource Home、Custom から明示選択
 
 ### 📁 ローカルリソース管理
 
-- ワークスペース内の skills、agents、prompts、instructions、hooks、MCP config リソースを自動検出
+- ワークスペース内の skills、agents、prompts、instructions、hooks、MCP config、plugin manifest、Cursor rule リソースを自動検出
 - 検出した workspace skills を生成される instruction index へ自動同期（`resourceNinja.includeLocalResources` 設定で制御）
 - ローカル workspace skills の手動登録/解除コマンド
 - テンプレートから skills、agents、prompts、instructions、hooks、MCP config リソースを新規作成
@@ -63,7 +63,7 @@
 ### 🔍 リソース検索・発見
 
 - リソースをキーワード検索（ローカル＆GitHub）
-- QuickPick 検索結果を resource kind（skills、agents、instructions、prompts、hooks、MCP config）で絞り込み
+- QuickPick 検索結果を resource kind（skills、agents、instructions、prompts、hooks、MCP config、plugins、Cursor rules）で絞り込み
 - **インストールセット** は curated な選択式インストール単位です。**プラグイン内リソース** は plugin path 配下のリソースを由来別に見るためのグループで、チェックリストでまとめて、または単体でインストールできます。
 - **複数キーワード検索** - 名前・パス・説明の関連度でスコアリング
 - **並列フェッチ** - 50 件同時取得で高速化
@@ -77,6 +77,7 @@
 - ダブルクリックインストールは既定で Workspace に保存し、設定で Ask / User Profile / Global Resource Home に変更可能
 - コンテキストメニューからのインストールでは Workspace、User Profile、Global Resource Home、Custom を毎回選択可能
 - MCP config リソースはいったん Workspace MCP Directory へコピーし、レビュー用に保持するか、互換 server を `.vscode/mcp.json` へ明示的にマージするかを選べます。既存 server key の上書きは必ず確認します。
+- Plugin manifest リソースは `.github/plugins/<plugin>` または Global Resource Home の `plugins/<plugin>` へ managed copy としてインストールします。plugin に含まれる hooks、実行可能ファイル、MCP config は確認用にコピーされ、自動実行や自動有効化はしません。
 - skill リソース変更時に instruction file 内の **Agent Skills index** を自動更新（AGENTS.md / copilot-instructions.md / CLAUDE.md）
 - **テーブル形式** - 「When to Use」列付きの表形式で skill entry を生成
 - **「When to Use」自動抽出** - SKILL.md の `## When to Use` セクションから自動取得
@@ -139,13 +140,14 @@ ext install yamapan.agent-resources-ninja
 
 ## 📚 Included Resource Sources
 
-プリセットインデックスには、公式・キュレーション・コミュニティの各ソースから skills、agents、prompts、instructions、hooks、MCP config リソースが初期状態で含まれます。
+プリセットインデックスには、公式・キュレーション・コミュニティの各ソースから skills、agents、prompts、instructions、hooks、MCP config、plugin manifest、Cursor rule リソースが初期状態で含まれます。
 
 | Source                                                                                                                        | Type      | 説明                                                                      |
 | ----------------------------------------------------------------------------------------------------------------------------- | --------- | ------------------------------------------------------------------------- |
 | [anthropics/skills](https://github.com/anthropics/skills)                                                                     | Official  | Anthropic 公式 Claude Skills                                              |
 | [openai/skills](https://github.com/openai/skills)                                                                             | Official  | OpenAI 公式 Codex Skills (1.7k+)                                          |
 | [github/awesome-copilot](https://github.com/github/awesome-copilot)                                                           | Official  | plugin から公開された skills / agents を含む GitHub 公式 Copilot リソース |
+| [cursor/plugins](https://github.com/cursor/plugins)                                                                            | Official  | Cursor 公式 plugin manifest、skills、agents、rules                        |
 | [MicrosoftDocs/Agent-Skills](https://github.com/MicrosoftDocs/Agent-Skills)                                                   | Official  | Microsoft 公式 Azure Agent Skills                                         |
 | [microsoft/GitHub-Copilot-for-Azure](https://github.com/microsoft/GitHub-Copilot-for-Azure)                                   | Official  | GitHub Copilot for Azure 公式プラグイン skills                            |
 | [microsoft/azure-skills](https://github.com/microsoft/azure-skills)                                                           | Official  | Azure skills と MCP config を含む Microsoft Azure Skills Plugin リソース  |
@@ -158,7 +160,7 @@ ext install yamapan.agent-resources-ninja
 | [aaif-goose/goose](https://github.com/aaif-goose/goose)                                                                       | Official  | AAIF の Goose リポジトリ skills                                           |
 | [ComposioHQ/awesome-claude-skills](https://github.com/ComposioHQ/awesome-claude-skills)                                       | Curated   | Claude Skills キュレーションリスト                                        |
 | [Code-and-Sorts/awesome-copilot-agents](https://github.com/Code-and-Sorts/awesome-copilot-agents)                             | Curated   | Copilot agents、instructions、prompts、skills                             |
-| [obra/superpowers](https://github.com/obra/superpowers)                                                                       | Community | 高品質スキル・エージェント集                                              |
+| [obra/superpowers](https://github.com/obra/superpowers)                                                                       | Community | Superpowers plugin manifest と plugin 由来 skills                         |
 | [glittercowboy/taches-cc-resources](https://github.com/glittercowboy/taches-cc-resources)                                     | Community | Claude Code resources と skills                                           |
 | [muratcankoylan/Agent-Skills-for-Context-Engineering](https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering) | Community | Context Engineering スキル (5k+)                                          |
 | [danielmiessler/Personal_AI_Infrastructure](https://github.com/danielmiessler/Personal_AI_Infrastructure)                     | Community | PAI Packs - スキル・フィーチャー集                                        |
@@ -168,12 +170,14 @@ ext install yamapan.agent-resources-ninja
 
 Azure は Microsoft 公式 source が 2 系統あります。`microsoft/GitHub-Copilot-for-Azure` は Copilot for Azure リポジトリ内の plugin-embedded skills を index し、`microsoft/azure-skills` は top-level の Azure Skills Plugin 配布物と Azure MCP config を index します。Azure Skills bundle は選択式で、skills をまとめて入れられます。MCP config は確認用にコピーするか、`.vscode/mcp.json` へ明示的にマージするかを選べます。
 
+Cursor 公式 plugins と Superpowers は、plugin manifest リソースとしても、plugin 内の skills、agents、rules、hooks、MCP config などの個別リソースとしても index します。plugin リソースのインストールは確認用の managed copy を作成するだけで、plugin hooks の実行や MCP config のマージは別途明示操作がない限り行いません。
+
 複数 source が同じ resource name を提供する場合、検索結果には読みやすい source 名を表示し、重複候補には source/path の詳細を追加します。関連度が同じ場合は、embedded plugin path より distribution-ready な top-level path を先に表示します。
 
 `mcp.json` や `.mcp.json` のような汎用 MCP config ファイル名は、別 source の MCP config を上書きしないよう `microsoft-azure-skills-mcp.json` のように source prefix 付きでインストールします。MCP ファイルはいったんコピーされ、`.vscode/mcp.json` へのマージは backup と上書き確認つきの明示選択です。
 
 > `Update Index` コマンドで、これらのソースから最新のリソースとメタデータを再取得できます
-> 公式プロダクト/プラグインリポジトリは path filter で配布向けの場所だけを対象にし、サンプル、manifest、テスト用 skill は同梱プリセットに含めません。
+> 公式プロダクト/プラグインリポジトリは path filter で配布向けの場所と選択した plugin manifest だけを対象にし、サンプルやテスト用 skill は同梱プリセットに含めません。
 > `github/awesome-copilot` では、`plugins/` から公開されたリソースも、利用可能な場合は重複する raw plugin path ではなく配布向け top-level resource path から収録します。
 > ディレクトリ型の `SKILL.md` root 配下のファイルは skill 内部の構成要素として扱い、`templates` 配下の補助 prompt / instruction などは Remote Resources に別リソースとして表示しません。
 
@@ -210,8 +214,8 @@ Azure は Microsoft 公式 source が 2 系統あります。`microsoft/GitHub-C
    - **お気に入り** セクションが最上部に表示
 
 - ツールバーからリポジトリ起点とリソース種別起点のレイアウトを切り替え
-- リポジトリ起点ではソース、skills、agents、instructions、prompts、hooks、MCP config リソースの順に分類
-- リソース種別起点では skills、agents、instructions、prompts、hooks、MCP config リソース、ソースの順に分類
+- リポジトリ起点ではソース、skills、agents、instructions、prompts、hooks、MCP config リソース、plugins、Cursor rules の順に分類
+- リソース種別起点では skills、agents、instructions、prompts、hooks、MCP config リソース、plugins、Cursor rules、ソースの順に分類
 - リポジトリセクションは Official → Curated → Community の順に表示
 - インストール済みは緑アイコンで表示
 - リストからダブルクリックでインストール。シングルクリック設定時は既定インストール先を使用

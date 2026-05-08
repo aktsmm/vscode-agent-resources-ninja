@@ -81,6 +81,14 @@ const sources = [
     branch: "main",
     description: "GitHub Awesome Copilot",
   },
+  {
+    id: "cursor-official-plugins",
+    name: "Cursor Plugins",
+    url: "https://github.com/cursor/plugins",
+    type: "official",
+    branch: "main",
+    description: "Cursor Plugins",
+  },
 ];
 
 const bundledIndex = JSON.parse(
@@ -192,6 +200,76 @@ test("directory skills still preview SKILL.md and open as tree", () => {
   assert.strictEqual(
     getSkillGitHubUrl(skill, sources),
     "https://github.com/github/awesome-copilot/tree/main/skills/example",
+  );
+});
+
+test("plugin manifests preview the manifest and open the plugin root", () => {
+  const plugin = resource({
+    kind: "plugin",
+    name: "create-plugin",
+    path: "create-plugin",
+  });
+  plugin.source = "cursor-official-plugins";
+  plugin.pluginRoot = "create-plugin";
+  plugin.pluginManifestPath = "create-plugin/.cursor-plugin/plugin.json";
+
+  assert.strictEqual(
+    getResourceContentPath(plugin),
+    "create-plugin/.cursor-plugin/plugin.json",
+  );
+  assert.strictEqual(
+    getSkillRawUrl(plugin, sources),
+    "https://raw.githubusercontent.com/cursor/plugins/main/create-plugin/.cursor-plugin/plugin.json",
+  );
+  assert.strictEqual(
+    getSkillGitHubUrl(plugin, sources),
+    "https://github.com/cursor/plugins/tree/main/create-plugin",
+  );
+});
+
+test("root marketplace plugin previews manifest without SKILL.md fallback", () => {
+  const marketplace = resource({
+    kind: "plugin",
+    name: "cursor-plugins",
+    path: ".",
+  });
+  marketplace.source = "cursor-official-plugins";
+  marketplace.pluginRoot = ".";
+  marketplace.pluginManifestPath = ".cursor-plugin/marketplace.json";
+
+  assert.strictEqual(
+    getResourceContentPath(marketplace),
+    ".cursor-plugin/marketplace.json",
+  );
+  assert.strictEqual(
+    getSkillRawUrl(marketplace, sources),
+    "https://raw.githubusercontent.com/cursor/plugins/main/.cursor-plugin/marketplace.json",
+  );
+  assert.strictEqual(
+    getSkillGitHubUrl(marketplace, sources),
+    "https://github.com/cursor/plugins/tree/main",
+  );
+});
+
+test("Cursor rules preview raw mdc files directly", () => {
+  const cursorRule = resource({
+    kind: "cursor-rule",
+    name: "plugin-quality-gates",
+    path: "create-plugin/rules/plugin-quality-gates.mdc",
+  });
+  cursorRule.source = "cursor-official-plugins";
+
+  assert.strictEqual(
+    getResourceContentPath(cursorRule),
+    "create-plugin/rules/plugin-quality-gates.mdc",
+  );
+  assert.strictEqual(
+    getSkillRawUrl(cursorRule, sources),
+    "https://raw.githubusercontent.com/cursor/plugins/main/create-plugin/rules/plugin-quality-gates.mdc",
+  );
+  assert.strictEqual(
+    getSkillGitHubUrl(cursorRule, sources),
+    "https://github.com/cursor/plugins/blob/main/create-plugin/rules/plugin-quality-gates.mdc",
   );
 });
 

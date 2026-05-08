@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-05-09
+
+### Added
+
+- **Cursor Official Plugins Source** - Added `cursor/plugins` as an official preset source, indexing plugin manifests plus plugin-contained skills, agents, and Cursor rules / `cursor/plugins` を公式プリセット source として追加し、plugin manifest と plugin 内の skills、agents、Cursor rules を index するようにしました
+- **Plugin Manifest Resource Support** - Plugin manifests are now first-class resources that can be installed as managed copies while keeping hooks, executables, and MCP config inactive until explicit user action / Plugin manifest を first-class resource として扱い、managed copy としてインストールできます。hooks、実行ファイル、MCP config は明示操作まで自動有効化しません
+- **Cursor Rule Support** - Added Cursor rule resource detection, search, filtering, preview URLs, install targets, icons, and User / Global Resource Home scanning for `.mdc` files / `.mdc` の Cursor rule resource 検出、検索、絞り込み、preview URL、インストール先、アイコン、User / Global Resource Home スキャンに対応しました
+
+### Fixed
+
+- **Plugin Preview URLs** - Fixed plugin preview and GitHub open URLs so plugin manifests preview the manifest file and open the plugin root instead of falling back to a non-existent `SKILL.md` / plugin preview と GitHub open URL を修正し、存在しない `SKILL.md` へ落ちず manifest file を preview し plugin root を開くようにしました
+- **Cursor Rule Preview URLs** - Fixed `.mdc` Cursor rules so preview/raw URLs use the actual rule file path instead of appending `SKILL.md` / `.mdc` Cursor rule の preview/raw URL が `SKILL.md` を付加せず実ファイル path を使うように修正しました
+- **Plugin Metadata Persistence** - Merged index persistence now detects plugin manifest metadata and plugin install-set safety metadata changes / merged index の永続化判定で plugin manifest metadata と plugin install-set safety metadata の変更を検出するようにしました
+
+### Changed
+
+- **Release Readiness Docs** - README and README_ja now describe plugin manifests, Cursor rules, Cursor official plugins, and managed-copy safety boundaries / README と README_ja に plugin manifest、Cursor rules、Cursor 公式 plugins、managed-copy safety boundary を反映しました
+- **Release Regression Coverage** - Added Cursor plugin source, plugin manifest parser, full plugin model, preview URL, target path, and release consistency regression coverage / Cursor plugin source、plugin manifest parser、full plugin model、preview URL、target path、release consistency の回帰テストを追加しました
+
 ## [0.2.4] - 2026-05-05
 
 ### Changed

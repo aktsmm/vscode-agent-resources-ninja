@@ -9,22 +9,29 @@ const bundledIndex = require(
 
 function detectResourceKindFromPath(resourcePath) {
   const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
-  if (/^plugins\/[^/]+\/agents\/[^/]+\.md$/.test(lowerPath)) {
+  if (isPluginManifestPath(lowerPath)) {
+    return "plugin";
+  }
+  const pluginPrefix = "(?:\\.github/)?plugins/[^/]+/";
+  if (new RegExp(`^(?:${pluginPrefix})?rules/[^/]+\\.mdc$`).test(lowerPath)) {
+    return "cursor-rule";
+  }
+  if (new RegExp(`^${pluginPrefix}agents/[^/]+\\.md$`).test(lowerPath)) {
     return "agent";
   }
-  if (/^plugins\/[^/]+\/instructions\/[^/]+\.md$/.test(lowerPath)) {
+  if (new RegExp(`^${pluginPrefix}instructions/[^/]+\\.md$`).test(lowerPath)) {
     return "instruction";
   }
-  if (/^plugins\/[^/]+\/prompts\/[^/]+\.md$/.test(lowerPath)) {
+  if (new RegExp(`^${pluginPrefix}prompts/[^/]+\\.md$`).test(lowerPath)) {
     return "prompt";
   }
-  if (/^plugins\/[^/]+\/hooks\/[^/]+\/readme\.md$/.test(lowerPath)) {
+  if (new RegExp(`^${pluginPrefix}hooks/[^/]+/readme\\.md$`).test(lowerPath)) {
     return "hook";
   }
   if (
-    /^plugins\/[^/]+\/(?:mcp\.json|\.vscode\/mcp\.json|mcp\/[^/]+\.json)$/.test(
-      lowerPath,
-    )
+    new RegExp(
+      `^${pluginPrefix}(?:mcp\\.json|\\.vscode/mcp\\.json|mcp/[^/]+\\.json)$`,
+    ).test(lowerPath)
   ) {
     return "mcp";
   }
@@ -55,6 +62,43 @@ function detectResourceKindFromPath(resourcePath) {
     return "mcp";
   }
   return undefined;
+}
+
+function isPluginManifestPath(lowerPath) {
+  return (
+    lowerPath === "plugin.json" ||
+    lowerPath === "gemini-extension.json" ||
+    lowerPath === "apm.yml" ||
+    lowerPath === "apm.yaml" ||
+    /(^|\/)\.(?:claude-plugin|codex-plugin|cursor-plugin|plugin)\/(?:plugin|marketplace)\.json$/.test(
+      lowerPath,
+    )
+  );
+}
+
+function getPluginRootFromManifestPath(resourcePath) {
+  const normalizedPath = String(resourcePath)
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "");
+  const lowerPath = normalizedPath.toLowerCase();
+  if (!isPluginManifestPath(lowerPath)) {
+    return undefined;
+  }
+  if (
+    lowerPath === "plugin.json" ||
+    lowerPath === "gemini-extension.json" ||
+    lowerPath === "apm.yml" ||
+    lowerPath === "apm.yaml"
+  ) {
+    return ".";
+  }
+  const markerMatch = normalizedPath.match(
+    /^(.*?)(?:^|\/)\.(?:claude-plugin|codex-plugin|cursor-plugin|plugin)\/(?:plugin|marketplace)\.json$/i,
+  );
+  if (!markerMatch) {
+    return ".";
+  }
+  return markerMatch[1].replace(/\/+$/, "") || ".";
 }
 
 function isBuiltInResourcePath(resourcePath) {
@@ -120,6 +164,9 @@ function getResourceMetadataPath(resourcePath, kind) {
   }
   if (kind === "hook") {
     return `${normalizedPath.replace(/\/README\.md$/i, "")}/.resource-ninja.json`;
+  }
+  if (kind === "plugin") {
+    return `${normalizedPath.replace(/\/+$/g, "")}/.resource-ninja.json`;
   }
   return `${normalizedPath}.resource-ninja.json`;
 }
@@ -224,6 +271,9 @@ function getResourceInstallPath(filePath, kind) {
   if (kind === "skill") {
     return normalizedPath.replace(/\/SKILL\.md$/i, "");
   }
+  if (kind === "plugin") {
+    return getPluginRootFromManifestPath(normalizedPath) || normalizedPath;
+  }
   return normalizedPath;
 }
 
@@ -288,9 +338,19 @@ function getFallbackResourceName(filePath, kind) {
   if (kind === "skill" || kind === "hook") {
     return pathParts[pathParts.length - 2] || "Unknown";
   }
+  if (kind === "plugin") {
+    const pluginRoot = getPluginRootFromManifestPath(filePath);
+    if (pluginRoot && pluginRoot !== ".") {
+      const rootParts = pluginRoot.split("/");
+      return rootParts[rootParts.length - 1] || "plugin";
+    }
+    return "plugin";
+  }
 
   const fileName = pathParts[pathParts.length - 1] || "Unknown";
-  return fileName.replace(/\.(agent|instructions|prompt)\.md$/i, "");
+  return fileName
+    .replace(/\.(agent|instructions|prompt)\.md$/i, "")
+    .replace(/\.mdc$/i, "");
 }
 
 function test(name, fn) {
@@ -349,6 +409,70 @@ test("detects raw plugin resources", () => {
   assert.strictEqual(
     detectResourceKindFromPath("plugins/example/.vscode/mcp.json"),
     "mcp",
+  );
+});
+
+test("detects plugin manifests and Cursor rules", () => {
+  assert.strictEqual(
+    detectResourceKindFromPath(".claude-plugin/plugin.json"),
+    "plugin",
+  );
+  assert.strictEqual(
+    detectResourceKindFromPath(".codex-plugin/plugin.json"),
+    "plugin",
+  );
+  assert.strictEqual(
+    detectResourceKindFromPath(".cursor-plugin/marketplace.json"),
+    "plugin",
+  );
+  assert.strictEqual(
+    detectResourceKindFromPath(
+      "plugins/feature-dev/.claude-plugin/plugin.json",
+    ),
+    "plugin",
+  );
+  assert.strictEqual(
+    detectResourceKindFromPath("gemini-extension.json"),
+    "plugin",
+  );
+  assert.strictEqual(detectResourceKindFromPath("apm.yml"), "plugin");
+  assert.strictEqual(
+    getResourceInstallPath(
+      "plugins/feature-dev/.claude-plugin/plugin.json",
+      "plugin",
+    ),
+    "plugins/feature-dev",
+  );
+  assert.strictEqual(
+    getResourceInstallPath(".claude-plugin/plugin.json", "plugin"),
+    ".",
+  );
+  assert.strictEqual(
+    detectResourceKindFromPath("rules/typescript-exhaustive-switch.mdc"),
+    "cursor-rule",
+  );
+  assert.strictEqual(
+    detectResourceKindFromPath("plugins/team-kit/rules/no-inline-imports.mdc"),
+    "cursor-rule",
+  );
+  assert.strictEqual(
+    detectResourceKindFromPath(".github/plugins/team-kit/agents/ci-watcher.md"),
+    "agent",
+  );
+  assert.strictEqual(
+    detectResourceKindFromPath(".github/plugins/team-kit/rules/no-inline-imports.mdc"),
+    "cursor-rule",
+  );
+  assert.strictEqual(
+    detectResourceKindFromPath(".github/plugins/team-kit/mcp.json"),
+    "mcp",
+  );
+  assert.strictEqual(
+    getFallbackResourceName(
+      "rules/typescript-exhaustive-switch.mdc",
+      "cursor-rule",
+    ),
+    "typescript-exhaustive-switch",
   );
 });
 
@@ -661,6 +785,10 @@ test("resource metadata sidecars sit next to installed resources", () => {
   assert.strictEqual(
     getResourceMetadataPath(".github/skills/code-tour/SKILL.md", "skill"),
     ".github/skills/code-tour/.skill-meta.json",
+  );
+  assert.strictEqual(
+    getResourceMetadataPath(".github/plugins/superpowers", "plugin"),
+    ".github/plugins/superpowers/.resource-ninja.json",
   );
 });
 

@@ -36,6 +36,8 @@ const RESOURCE_KIND_ORDER: ResourceKind[] = [
   "prompt",
   "hook",
   "mcp",
+  "plugin",
+  "cursor-rule",
 ];
 
 type RemoteResourceViewMode = "repositoryFirst" | "resourceTypeFirst";

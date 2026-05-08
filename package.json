@@ -2,7 +2,7 @@
   "name": "agent-resources-ninja",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "publisher": "yamapan",
   "license": "CC-BY-NC-SA-4.0",
   "icon": "resources/icon.png",
@@ -92,7 +92,7 @@
         "toolReferenceName": "searchResources",
         "displayName": "Search Agent Resources",
         "icon": "$(search)",
-        "modelDescription": "Search for agent resources such as skills, agents, prompts, instructions, and hooks / エージェントリソースを検索 / NINJA. For GitHub Copilot, Claude Code, or other AI coding assistants. Find resources by name, description, kind, or category.",
+        "modelDescription": "Search for agent resources such as skills, agents, prompts, instructions, hooks, MCP configs, plugin manifests, and Cursor rules / エージェントリソースを検索 / NINJA. For GitHub Copilot, Claude Code, or other AI coding assistants. Find resources by name, description, kind, or category.",
         "canBeReferencedInPrompt": true,
         "inputSchema": {
           "type": "object",
@@ -110,6 +110,8 @@
                 "prompt",
                 "hook",
                 "mcp",
+                "plugin",
+                "cursor-rule",
                 "all"
               ],
               "description": "Optional resource kind filter. Use 'all' or omit to search all resource kinds."
@@ -134,7 +136,7 @@
         "toolReferenceName": "installResource",
         "displayName": "Install Agent Resource",
         "icon": "$(cloud-download)",
-        "modelDescription": "Install an agent resource / エージェントリソースをインストール / NINJA. Supports skills, agents, prompts, instructions, hooks, and MCP config resources with explicit target selection.",
+        "modelDescription": "Install an agent resource / エージェントリソースをインストール / NINJA. Supports skills, agents, prompts, instructions, hooks, MCP config resources, plugin manifests, and Cursor rules with explicit target selection.",
         "canBeReferencedInPrompt": true,
         "inputSchema": {
           "type": "object",
@@ -151,7 +153,9 @@
                 "instruction",
                 "prompt",
                 "hook",
-                "mcp"
+                "mcp",
+                "plugin",
+                "cursor-rule"
               ],
               "description": "Optional resource kind filter used to disambiguate resources with similar names."
             }
@@ -235,7 +239,9 @@
                 "instruction",
                 "prompt",
                 "hook",
-                "mcp"
+                "mcp",
+                "plugin",
+                "cursor-rule"
               ],
               "description": "Optional installed resource kind filter used to disambiguate resources with similar names."
             }
@@ -1355,7 +1361,7 @@
     "package": "npm run check-types && npm run lint && node esbuild.js --production",
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
-    "test:resources": "node scripts/test-resource-kinds.js && node scripts/test-resource-targets.js && node scripts/test-resource-preview-urls.js && node scripts/test-user-data-paths.js && node scripts/test-global-home-routing.js && node scripts/test-hook-config.js && node scripts/test-mcp-config-merge.js && node scripts/test-skill-search.js && node scripts/test-azure-plugin-source.js && node scripts/test-azure-skills-source.js && node scripts/test-plugin-bundles.js && node scripts/test-ux-scope-actions.js && node scripts/test-create-resource-templates.js && node scripts/test-create-resource-flow.js && node scripts/test-create-resource-validation.js && node scripts/test-instruction-target-ux.js && node scripts/test-localization-ux.js && node scripts/test-readme-release-ux.js && node scripts/test-view-welcome-ux.js && node scripts/test-activation-ux.js && node scripts/test-release-hygiene.js && node scripts/test-manifest-consistency.js && node scripts/test-logger.js",
+    "test:resources": "node scripts/test-resource-kinds.js && node scripts/test-resource-targets.js && node scripts/test-resource-preview-urls.js && node scripts/test-user-data-paths.js && node scripts/test-global-home-routing.js && node scripts/test-hook-config.js && node scripts/test-mcp-config-merge.js && node scripts/test-skill-search.js && node scripts/test-azure-plugin-source.js && node scripts/test-azure-skills-source.js && node scripts/test-cursor-plugin-source.js && node scripts/test-plugin-manifests.js && node scripts/test-full-plugin-index.js && node scripts/test-plugin-bundles.js && node scripts/test-ux-scope-actions.js && node scripts/test-create-resource-templates.js && node scripts/test-create-resource-flow.js && node scripts/test-create-resource-validation.js && node scripts/test-instruction-target-ux.js && node scripts/test-localization-ux.js && node scripts/test-readme-release-ux.js && node scripts/test-view-welcome-ux.js && node scripts/test-activation-ux.js && node scripts/test-release-hygiene.js && node scripts/test-manifest-consistency.js && node scripts/test-logger.js",
     "test": "vscode-test"
   },
   "overrides": {

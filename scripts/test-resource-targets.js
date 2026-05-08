@@ -27,6 +27,10 @@ function getInstallFileName(skill, fileName) {
   return `${sanitizeResourceName(skill.source)}-${normalizedFileName}`;
 }
 
+function getPluginInstallRootName(skill) {
+  return sanitizeResourceName(skill.name || skill.pluginRoot || "plugin");
+}
+
 function targetPath(
   workspaceRoot,
   skill,
@@ -45,6 +49,23 @@ function targetPath(
       : path.posix.basename(path.posix.dirname(normalizedRemotePath)) ||
           skill.name,
   );
+
+  if (skill.kind === "plugin") {
+    const pluginFolderName = getPluginInstallRootName(skill);
+    if (targetScope === "custom") return path.posix.join(customRoot, pluginFolderName);
+    if (targetScope === "globalHome" || targetScope === "userData") {
+      return path.posix.join(globalHomeRoot(config), "plugins", pluginFolderName);
+    }
+    return path.posix.join(workspaceRoot, ".github/plugins", pluginFolderName);
+  }
+
+  if (skill.kind === "cursor-rule") {
+    if (targetScope === "custom") return path.posix.join(customRoot, fileName);
+    if (targetScope === "globalHome" || targetScope === "userData") {
+      return path.posix.join(globalHomeRoot(config), "rules", fileName);
+    }
+    return path.posix.join(workspaceRoot, ".cursor/rules", fileName);
+  }
 
   if (targetScope === "custom") {
     if (skill.kind === "skill") {
@@ -234,6 +255,23 @@ test("workspace targets are resource-kind aware", () => {
     }),
     "/repo/.github/mcp/mcp.json",
   );
+  assert.strictEqual(
+    targetPath("/repo", {
+      kind: "plugin",
+      name: "Create Plugin",
+      path: "create-plugin",
+      pluginRoot: "create-plugin",
+    }),
+    "/repo/.github/plugins/create-plugin",
+  );
+  assert.strictEqual(
+    targetPath("/repo", {
+      kind: "cursor-rule",
+      name: "Plugin Quality Gates",
+      path: "create-plugin/rules/plugin-quality-gates.mdc",
+    }),
+    "/repo/.cursor/rules/plugin-quality-gates.mdc",
+  );
 });
 
 test("global and user targets preserve native conventions", () => {
@@ -260,6 +298,30 @@ test("global and user targets preserve native conventions", () => {
       "userData",
     ),
     "<VSCodeUser>/prompts/planner.agent.md",
+  );
+  assert.strictEqual(
+    targetPath(
+      "/repo",
+      {
+        kind: "plugin",
+        name: "Cursor Team Kit",
+        path: "cursor-team-kit",
+      },
+      "globalHome",
+    ),
+    "~/.copilot/plugins/cursor-team-kit",
+  );
+  assert.strictEqual(
+    targetPath(
+      "/repo",
+      {
+        kind: "cursor-rule",
+        name: "Exhaustive Switch",
+        path: "cursor-team-kit/rules/typescript-exhaustive-switch.mdc",
+      },
+      "userData",
+    ),
+    "~/.copilot/rules/typescript-exhaustive-switch.mdc",
   );
   assert.strictEqual(
     targetPath(

@@ -40,6 +40,11 @@ function testSearchLogic(query) {
     `filename:README.md path:hooks ${baseQuery}`,
     `filename:mcp.json ${baseQuery}`,
     `extension:json path:mcp ${baseQuery}`,
+    `filename:plugin.json ${baseQuery}`,
+    `filename:marketplace.json ${baseQuery}`,
+    `filename:gemini-extension.json ${baseQuery}`,
+    `filename:apm.yml ${baseQuery}`,
+    `extension:mdc path:rules ${baseQuery}`,
   ];
 
   // 検索クエリを生成する関数

@@ -260,22 +260,29 @@ async function scanRepositoryForSkills(source) {
  */
 function detectResourceKindFromPath(resourcePath) {
   const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
-  if (/^plugins\/[^/]+\/agents\/[^/]+\.md$/.test(lowerPath)) {
+  if (isPluginManifestPath(lowerPath)) {
+    return "plugin";
+  }
+  const pluginPrefix = "(?:\\.github/)?plugins/[^/]+/";
+  if (new RegExp(`^(?:${pluginPrefix})?rules/[^/]+\\.mdc$`).test(lowerPath)) {
+    return "cursor-rule";
+  }
+  if (new RegExp(`^${pluginPrefix}agents/[^/]+\\.md$`).test(lowerPath)) {
     return "agent";
   }
-  if (/^plugins\/[^/]+\/instructions\/[^/]+\.md$/.test(lowerPath)) {
+  if (new RegExp(`^${pluginPrefix}instructions/[^/]+\\.md$`).test(lowerPath)) {
     return "instruction";
   }
-  if (/^plugins\/[^/]+\/prompts\/[^/]+\.md$/.test(lowerPath)) {
+  if (new RegExp(`^${pluginPrefix}prompts/[^/]+\\.md$`).test(lowerPath)) {
     return "prompt";
   }
-  if (/^plugins\/[^/]+\/hooks\/[^/]+\/readme\.md$/.test(lowerPath)) {
+  if (new RegExp(`^${pluginPrefix}hooks/[^/]+/readme\\.md$`).test(lowerPath)) {
     return "hook";
   }
   if (
-    /^plugins\/[^/]+\/(?:mcp\.json|\.vscode\/mcp\.json|mcp\/[^/]+\.json)$/.test(
-      lowerPath,
-    )
+    new RegExp(
+      `^${pluginPrefix}(?:mcp\\.json|\\.vscode/mcp\\.json|mcp/[^/]+\\.json)$`,
+    ).test(lowerPath)
   ) {
     return "mcp";
   }
@@ -306,6 +313,43 @@ function detectResourceKindFromPath(resourcePath) {
     return "mcp";
   }
   return undefined;
+}
+
+function isPluginManifestPath(lowerPath) {
+  return (
+    lowerPath === "plugin.json" ||
+    lowerPath === "gemini-extension.json" ||
+    lowerPath === "apm.yml" ||
+    lowerPath === "apm.yaml" ||
+    /(^|\/)\.(?:claude-plugin|codex-plugin|cursor-plugin|plugin)\/(?:plugin|marketplace)\.json$/.test(
+      lowerPath,
+    )
+  );
+}
+
+function getPluginRootFromManifestPath(resourcePath) {
+  const normalizedPath = String(resourcePath)
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "");
+  const lowerPath = normalizedPath.toLowerCase();
+  if (!isPluginManifestPath(lowerPath)) {
+    return undefined;
+  }
+  if (
+    lowerPath === "plugin.json" ||
+    lowerPath === "gemini-extension.json" ||
+    lowerPath === "apm.yml" ||
+    lowerPath === "apm.yaml"
+  ) {
+    return ".";
+  }
+  const markerMatch = normalizedPath.match(
+    /^(.*?)(?:^|\/)\.(?:claude-plugin|codex-plugin|cursor-plugin|plugin)\/(?:plugin|marketplace)\.json$/i,
+  );
+  if (!markerMatch) {
+    return ".";
+  }
+  return markerMatch[1].replace(/\/+$/, "") || ".";
 }
 
 function normalizeResourcePath(resourcePath) {
@@ -357,6 +401,9 @@ function getResourceInstallPath(filePath, kind) {
   if (kind === "skill") {
     return normalizedPath.replace(/\/SKILL\.md$/i, "");
   }
+  if (kind === "plugin") {
+    return getPluginRootFromManifestPath(normalizedPath) || normalizedPath;
+  }
   return normalizedPath;
 }
 
@@ -365,10 +412,19 @@ function getFallbackResourceName(filePath, kind) {
   if (kind === "skill" || kind === "hook") {
     return pathParts[pathParts.length - 2] || "Unknown";
   }
+  if (kind === "plugin") {
+    const pluginRoot = getPluginRootFromManifestPath(filePath);
+    if (pluginRoot && pluginRoot !== ".") {
+      const rootParts = pluginRoot.split("/");
+      return rootParts[rootParts.length - 1] || "plugin";
+    }
+    return "plugin";
+  }
 
   const fileName = pathParts[pathParts.length - 1] || "Unknown";
   const fallbackName = fileName
     .replace(/\.(agent|instructions|prompt)\.md$/i, "")
+    .replace(/\.mdc$/i, "")
     .replace(/\.mcp\.json$/i, "")
     .replace(/\.json$/i, "");
   return fallbackName || fileName.replace(/^\./, "").replace(/\.json$/i, "");
@@ -386,6 +442,10 @@ function getDefaultResourceCategories(kind) {
       return ["hooks"];
     case "mcp":
       return ["mcp"];
+    case "plugin":
+      return ["plugins"];
+    case "cursor-rule":
+      return ["cursor-rules"];
     case "skill":
     default:
       return [];
@@ -396,6 +456,85 @@ function getResourceKind(resource) {
   return resource.kind || "skill";
 }
 
+function getPluginManifestKind(filePath) {
+  const lowerPath = filePath.toLowerCase().replace(/\\/g, "/");
+  if (lowerPath.endsWith(".claude-plugin/plugin.json")) return "claude-plugin";
+  if (lowerPath.endsWith(".codex-plugin/plugin.json")) return "codex-plugin";
+  if (lowerPath.endsWith(".cursor-plugin/plugin.json")) return "cursor-plugin";
+  if (lowerPath.endsWith(".plugin/plugin.json")) return "plugin";
+  if (lowerPath.endsWith("marketplace.json")) return "marketplace";
+  if (lowerPath.endsWith("gemini-extension.json")) return "gemini-extension";
+  if (lowerPath.endsWith("apm.yml") || lowerPath.endsWith("apm.yaml")) {
+    return "apm";
+  }
+  if (lowerPath.endsWith("plugin.json")) return "plugin";
+  return undefined;
+}
+
+function stringifyManifestValue(value) {
+  if (typeof value === "string") return value.trim() || undefined;
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (value && typeof value === "object") {
+    const parts = [value.name, value.url, value.email]
+      .map((part) => (typeof part === "string" ? part.trim() : ""))
+      .filter(Boolean);
+    return parts.length
+      ? parts.join(" <") + (parts.length > 1 ? ">" : "")
+      : undefined;
+  }
+  return undefined;
+}
+
+function parseSimpleYamlObject(content) {
+  const values = {};
+  for (const line of content.replace(/\r\n/g, "\n").split("\n")) {
+    const match = line.match(/^([A-Za-z0-9_-]+):\s*(.+)$/);
+    if (!match) continue;
+    values[match[1]] = unquoteYamlValue(stripYamlInlineComment(match[2]));
+  }
+  return values;
+}
+
+function parsePluginManifestMetadata(content, filePath) {
+  const manifestKind = getPluginManifestKind(filePath);
+  const pluginRoot = getPluginRootFromManifestPath(filePath) || ".";
+  let manifest = {};
+  try {
+    manifest = JSON.parse(content);
+  } catch {
+    manifest = parseSimpleYamlObject(content);
+  }
+
+  const interfaceMetadata =
+    manifest.interface && typeof manifest.interface === "object"
+      ? manifest.interface
+      : {};
+  const name =
+    stringifyManifestValue(manifest.name) ||
+    stringifyManifestValue(interfaceMetadata.displayName) ||
+    getFallbackResourceName(filePath, "plugin");
+  const description =
+    stringifyManifestValue(manifest.description) ||
+    stringifyManifestValue(interfaceMetadata.shortDescription) ||
+    stringifyManifestValue(interfaceMetadata.longDescription) ||
+    `Plugin manifest for ${name}`;
+
+  return {
+    name,
+    description,
+    description_ja: "",
+    categories: ["plugins"],
+    license: stringifyManifestValue(manifest.license),
+    author: stringifyManifestValue(manifest.author),
+    version: stringifyManifestValue(manifest.version),
+    pluginRoot,
+    pluginManifestPath: filePath.replace(/\\/g, "/"),
+    pluginManifestKind: manifestKind,
+  };
+}
+
 function createResourceKey(resource) {
   return `${resource.source}:${getResourceKind(resource)}:${String(
     resource.path || resource.name,
@@ -403,6 +542,16 @@ function createResourceKey(resource) {
 }
 
 function createResourceDisplayKey(resource) {
+  if (getResourceKind(resource) === "plugin") {
+    return [
+      resource.source,
+      "plugin",
+      resource.pluginRoot || resource.path,
+      String(resource.name || "")
+        .trim()
+        .toLowerCase(),
+    ].join(":");
+  }
   const pluginId = getPluginIdFromPath(resource.path);
   const description = String(resource.description || "")
     .trim()
@@ -424,13 +573,26 @@ function createResourceDisplayKey(resource) {
 }
 
 function getPluginIdFromPath(resourcePath) {
-  const match = String(resourcePath || "")
-    .replace(/\\/g, "/")
-    .match(/^plugins\/([^/]+)\//i);
-  return match?.[1];
+  const normalizedPath = String(resourcePath || "").replace(/\\/g, "/");
+  const match = normalizedPath.match(/^plugins\/([^/]+)\//i);
+  if (match?.[1]) {
+    return match[1];
+  }
+  return normalizedPath.match(/^\.github\/plugins\/([^/]+)\//i)?.[1];
 }
 
 function shouldPreferResource(candidate, existing) {
+  if (
+    getResourceKind(candidate) === "plugin" &&
+    getResourceKind(existing) === "plugin"
+  ) {
+    const candidateWeight =
+      candidate.pluginManifestKind === "marketplace" ? 1 : 0;
+    const existingWeight =
+      existing.pluginManifestKind === "marketplace" ? 1 : 0;
+    if (candidateWeight !== existingWeight)
+      return candidateWeight < existingWeight;
+  }
   const candidatePath = String(candidate.path || "");
   const existingPath = String(existing.path || "");
   const candidateIsPluginPath = candidatePath.startsWith("plugins/");
@@ -472,6 +634,55 @@ function isResourcePathAllowed(filePath, source) {
   );
 }
 
+function getPluginRootsFromPaths(paths) {
+  return Array.from(
+    new Set(
+      paths
+        .map((filePath) => getPluginRootFromManifestPath(filePath))
+        .filter(Boolean),
+    ),
+  ).sort((a, b) => b.length - a.length);
+}
+
+function getRelativePathFromPluginRoot(filePath, pluginRoot) {
+  const normalizedPath = String(filePath).replace(/\\/g, "/").replace(/^\/+/, "");
+  if (pluginRoot === ".") {
+    return normalizedPath;
+  }
+  const normalizedRoot = String(pluginRoot).replace(/\\/g, "/").replace(/\/+$/, "");
+  return normalizedPath.startsWith(`${normalizedRoot}/`)
+    ? normalizedPath.slice(normalizedRoot.length + 1)
+    : undefined;
+}
+
+function detectPluginChildResourceKind(relativePath) {
+  const lowerPath = relativePath.toLowerCase();
+  if (/^agents\/[^/]+\.md$/.test(lowerPath)) return "agent";
+  if (/^instructions\/[^/]+\.md$/.test(lowerPath)) return "instruction";
+  if (/^prompts\/[^/]+\.md$/.test(lowerPath)) return "prompt";
+  if (/^rules\/[^/]+\.mdc$/.test(lowerPath)) return "cursor-rule";
+  if (/^hooks\/[^/]+\/readme\.md$/.test(lowerPath)) return "hook";
+  if (/^(?:mcp\.json|\.vscode\/mcp\.json|mcp\/[^/]+\.json)$/.test(lowerPath)) {
+    return "mcp";
+  }
+  if (/^skills\/[^/]+\/skill\.md$/.test(lowerPath)) return "skill";
+  return undefined;
+}
+
+function detectResourceKindWithPluginRoots(filePath, pluginRoots) {
+  const kind = detectResourceKindFromPath(filePath);
+  if (kind) return kind;
+
+  for (const pluginRoot of pluginRoots) {
+    const relativePath = getRelativePathFromPluginRoot(filePath, pluginRoot);
+    if (!relativePath) continue;
+    const childKind = detectPluginChildResourceKind(relativePath);
+    if (childKind) return childKind;
+  }
+
+  return undefined;
+}
+
 /**
  * ツリーを処理してリソースを抽出
  */
@@ -484,8 +695,11 @@ async function processTree(data, owner, repoName, branch, source) {
   const skillRootDirectories = getSkillRootDirectoriesFromPaths(
     allowedBlobFiles.map((item) => item.path),
   );
+  const pluginRoots = getPluginRootsFromPaths(
+    allowedBlobFiles.map((item) => item.path),
+  );
   const resourceFiles = allowedBlobFiles.filter((item) => {
-    const kind = detectResourceKindFromPath(item.path);
+    const kind = detectResourceKindWithPluginRoots(item.path, pluginRoots);
     return (
       !!kind &&
       !isNestedResourcePathUnderSkillRoot(item.path, kind, skillRootDirectories)
@@ -493,7 +707,7 @@ async function processTree(data, owner, repoName, branch, source) {
   });
 
   const kindCounts = resourceFiles.reduce((counts, item) => {
-    const kind = detectResourceKindFromPath(item.path) || "skill";
+    const kind = detectResourceKindWithPluginRoots(item.path, pluginRoots) || "skill";
     counts[kind] = (counts[kind] || 0) + 1;
     return counts;
   }, {});
@@ -515,7 +729,7 @@ async function processTree(data, owner, repoName, branch, source) {
     const results = await Promise.all(
       chunk.map(async (file) => {
         try {
-          const kind = detectResourceKindFromPath(file.path);
+          const kind = detectResourceKindWithPluginRoots(file.path, pluginRoots);
           if (!kind) return null;
 
           const rawUrl = `https://raw.githubusercontent.com/${owner}/${repoName}/${branch}/${file.path}`;
@@ -549,6 +763,13 @@ async function processTree(data, owner, repoName, branch, source) {
             license: skillInfo.license,
             author: skillInfo.author,
             version: skillInfo.version,
+            ...(kind === "plugin"
+              ? {
+                  pluginRoot: skillInfo.pluginRoot,
+                  pluginManifestPath: skillInfo.pluginManifestPath,
+                  pluginManifestKind: skillInfo.pluginManifestKind,
+                }
+              : {}),
           };
         } catch (error) {
           return null;
@@ -567,6 +788,9 @@ async function processTree(data, owner, repoName, branch, source) {
  */
 function parseSkillFrontmatter(content, filePath, kind = "skill") {
   const normalizedContent = content.replace(/\r\n/g, "\n");
+  if (kind === "plugin") {
+    return parsePluginManifestMetadata(normalizedContent, filePath);
+  }
   // frontmatter を抽出
   const frontmatterMatch = normalizedContent.match(/^---\n([\s\S]*?)\n---/);
 
@@ -772,6 +996,15 @@ async function main() {
           }
           if (!skill.version && existing.version) {
             skill.version = existing.version;
+          }
+          if (!skill.pluginRoot && existing.pluginRoot) {
+            skill.pluginRoot = existing.pluginRoot;
+          }
+          if (!skill.pluginManifestPath && existing.pluginManifestPath) {
+            skill.pluginManifestPath = existing.pluginManifestPath;
+          }
+          if (!skill.pluginManifestKind && existing.pluginManifestKind) {
+            skill.pluginManifestKind = existing.pluginManifestKind;
           }
         }
       }

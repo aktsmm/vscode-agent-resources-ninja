@@ -39,6 +39,7 @@ import {
 } from "./customizationPaths";
 import {
   detectResourceKindFromPath,
+  getPluginRootFromManifestPath,
   getResourceMetadataPath,
 } from "./resourceKinds";
 import { getVsCodeUserDataPath } from "./userDataPaths";
@@ -124,6 +125,9 @@ interface ResourceInstallMeta {
   categories?: string[];
   remotePath: string;
   installedAt: string;
+  pluginRoot?: string;
+  pluginManifestPath?: string;
+  pluginManifestKind?: string;
 }
 
 function getResourceMetadataUri(
@@ -153,6 +157,9 @@ async function writeResourceInstallMetadata(
     categories: skill.categories,
     remotePath: skill.path,
     installedAt: new Date().toISOString(),
+    pluginRoot: skill.pluginRoot,
+    pluginManifestPath: skill.pluginManifestPath,
+    pluginManifestKind: skill.pluginManifestKind,
   };
   await vscode.workspace.fs.writeFile(
     getResourceMetadataUri(resourceUri, kind),
@@ -184,6 +191,10 @@ function getInstallFileName(skill: Skill, fileName: string): string {
   return `${sanitizeSkillName(skill.source)}-${normalizedFileName}`;
 }
 
+function getPluginInstallRootName(skill: Skill): string {
+  return sanitizeSkillName(skill.name || skill.pluginRoot || "plugin");
+}
+
 export function getResourceTargetUri(
   workspaceUri: vscode.Uri,
   config: vscode.WorkspaceConfiguration,
@@ -203,6 +214,42 @@ export function getResourceTargetUri(
       : path.posix.basename(path.posix.dirname(normalizedRemotePath)) ||
           skill.name,
   );
+
+  if (kind === "plugin") {
+    const pluginFolderName = getPluginInstallRootName(skill);
+    if (targetScope === "custom" && options.customTargetUri) {
+      return vscode.Uri.joinPath(options.customTargetUri, pluginFolderName);
+    }
+    if (targetScope === "globalHome" || targetScope === "userData") {
+      const root = resolveConfiguredUri(
+        workspaceUri,
+        getConfiguredGlobalHomeDirectory(config),
+        DEFAULT_GLOBAL_HOME_DIRECTORY,
+      );
+      return vscode.Uri.joinPath(root, "plugins", pluginFolderName);
+    }
+    return vscode.Uri.joinPath(
+      workspaceUri,
+      ".github",
+      "plugins",
+      pluginFolderName,
+    );
+  }
+
+  if (kind === "cursor-rule") {
+    if (targetScope === "custom" && options.customTargetUri) {
+      return vscode.Uri.joinPath(options.customTargetUri, fileName);
+    }
+    if (targetScope === "globalHome" || targetScope === "userData") {
+      const root = resolveConfiguredUri(
+        workspaceUri,
+        getConfiguredGlobalHomeDirectory(config),
+        DEFAULT_GLOBAL_HOME_DIRECTORY,
+      );
+      return vscode.Uri.joinPath(root, "rules", fileName);
+    }
+    return vscode.Uri.joinPath(workspaceUri, ".cursor", "rules", fileName);
+  }
 
   if (targetScope === "custom" && options.customTargetUri) {
     if (kind === "skill") {
@@ -389,12 +436,13 @@ async function listGitHubDirectoryInternal(
   visitedPaths: Set<string> = new Set(),
 ): Promise<GitHubDirectoryEntry[]> {
   const normalizedPath = path.replace(/^\/+|\/+$/g, "");
-  if (visitedPaths.has(normalizedPath)) {
-    throw new Error(`Symlink loop detected: ${normalizedPath}`);
+  const apiPath = normalizedPath === "." ? "" : normalizedPath;
+  if (visitedPaths.has(apiPath)) {
+    throw new Error(`Symlink loop detected: ${apiPath}`);
   }
-  visitedPaths.add(normalizedPath);
+  visitedPaths.add(apiPath);
 
-  const encodedPath = normalizedPath
+  const encodedPath = apiPath
     .split("/")
     .map((segment) => encodeURIComponent(segment))
     .join("/");
@@ -420,10 +468,7 @@ async function listGitHubDirectoryInternal(
   }
 
   if (data.type === "symlink" && data.target) {
-    const resolvedTarget = resolveSymlinkTargetPath(
-      normalizedPath,
-      data.target,
-    );
+    const resolvedTarget = resolveSymlinkTargetPath(apiPath, data.target);
     return listGitHubDirectory(
       owner,
       repo,
@@ -434,7 +479,7 @@ async function listGitHubDirectoryInternal(
     );
   }
 
-  throw new Error(`Path is not a directory: ${normalizedPath}`);
+  throw new Error(`Path is not a directory: ${apiPath}`);
 }
 
 export async function listGitHubDirectory(
@@ -625,14 +670,48 @@ export async function installSkill(
     } else {
       const [, owner, repo] = match;
       // ブランチを取得（HEAD確認 or API でデフォルトブランチを取得）
-      const branch = await getSourceBranch(source, token, skill.path);
-      const remotePath = skill.path;
+      const branch = await getSourceBranch(
+        source,
+        token,
+        resourceKind === "plugin"
+          ? skill.pluginManifestPath || skill.path
+          : skill.path,
+      );
+      const remotePath =
+        resourceKind === "plugin"
+          ? skill.pluginRoot ||
+            getPluginRootFromManifestPath(
+              skill.pluginManifestPath || skill.path,
+            ) ||
+            skill.path
+          : skill.path;
 
       logger.info(`[Resource Ninja] Installing ${resourceKind}: ${skill.name}`);
       logger.info(
         `[Resource Ninja] Owner: ${owner}, Repo: ${repo}, Branch: ${branch}`,
       );
       logger.info(`[Resource Ninja] Remote path: ${remotePath}`);
+
+      if (resourceKind === "plugin") {
+        await vscode.workspace.fs.createDirectory(skillPath);
+        const result = await downloadDirectory(
+          owner,
+          repo,
+          remotePath,
+          skillPath,
+          branch,
+          token,
+        );
+        await writeResourceInstallMetadata(skillPath, skill);
+        if (result.errors.length > 0 && !options.suppressRecoveryPrompt) {
+          vscode.window.showWarningMessage(
+            isJapanese()
+              ? `プラグイン "${skill.name}" の一部のファイルがダウンロードできませんでした。コピーされた内容を確認してください。`
+              : `Some files for plugin "${skill.name}" could not be downloaded. Review the copied contents before activation.`,
+          );
+        }
+        return {};
+      }
 
       if (resourceKind !== "skill") {
         if (resourceKind === "hook") {

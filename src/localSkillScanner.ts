@@ -324,6 +324,14 @@ export async function scanLocalSkills(
         "**/.mcp.json",
         "**/mcp/*.json",
         "**/.github/mcp/*.json",
+        "**/plugin.json",
+        "**/.claude-plugin/*.json",
+        "**/.codex-plugin/*.json",
+        "**/.cursor-plugin/*.json",
+        "**/.plugin/*.json",
+        "**/gemini-extension.json",
+        "**/apm.{yml,yaml}",
+        "**/rules/*.mdc",
       ]
     : ["**/SKILL.md"];
   const foundFiles = await Promise.all(

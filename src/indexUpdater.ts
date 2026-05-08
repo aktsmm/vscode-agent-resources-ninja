@@ -16,6 +16,7 @@ import {
   getDefaultResourceCategories,
   getFallbackResourceName,
   getPluginIdFromPath,
+  getPluginRootFromManifestPath,
   getResourceInstallPath,
   getSkillRootDirectoriesFromPaths,
   isNestedResourcePathUnderSkillRoot,
@@ -49,7 +50,128 @@ function normalizeResourceDescription(
   if (kind === "mcp") {
     return `MCP configuration for ${name}`;
   }
+  if (kind === "plugin") {
+    return `Plugin manifest for ${name}`;
+  }
+  if (kind === "cursor-rule") {
+    return `Cursor rule for ${name}`;
+  }
   return "";
+}
+
+function getPluginManifestKind(filePath: string): string | undefined {
+  const lowerPath = filePath.toLowerCase().replace(/\\/g, "/");
+  if (lowerPath.endsWith(".claude-plugin/plugin.json")) {
+    return "claude-plugin";
+  }
+  if (lowerPath.endsWith(".codex-plugin/plugin.json")) {
+    return "codex-plugin";
+  }
+  if (lowerPath.endsWith(".cursor-plugin/plugin.json")) {
+    return "cursor-plugin";
+  }
+  if (lowerPath.endsWith(".plugin/plugin.json")) {
+    return "plugin";
+  }
+  if (lowerPath.endsWith("marketplace.json")) {
+    return "marketplace";
+  }
+  if (lowerPath.endsWith("gemini-extension.json")) {
+    return "gemini-extension";
+  }
+  if (lowerPath.endsWith("apm.yml") || lowerPath.endsWith("apm.yaml")) {
+    return "apm";
+  }
+  if (lowerPath.endsWith("plugin.json")) {
+    return "plugin";
+  }
+  return undefined;
+}
+
+function stringifyManifestValue(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    return value.trim() || undefined;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (value && typeof value === "object") {
+    const namedValue = value as {
+      name?: unknown;
+      url?: unknown;
+      email?: unknown;
+    };
+    const parts = [namedValue.name, namedValue.url, namedValue.email]
+      .map((part) => (typeof part === "string" ? part.trim() : ""))
+      .filter(Boolean);
+    return parts.length
+      ? parts.join(" <") + (parts.length > 1 ? ">" : "")
+      : undefined;
+  }
+  return undefined;
+}
+
+function parseSimpleYamlObject(content: string): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const line of content.replace(/\r\n/g, "\n").split("\n")) {
+    const match = line.match(/^([A-Za-z0-9_-]+):\s*(.+)$/);
+    if (!match) {
+      continue;
+    }
+    values[match[1]] = unquoteYamlValue(stripYamlInlineComment(match[2]));
+  }
+  return values;
+}
+
+function parsePluginManifestMetadata(
+  content: string,
+  filePath: string,
+): {
+  name: string;
+  description: string;
+  categories: string[];
+  license?: string;
+  author?: string;
+  version?: string;
+  pluginRoot?: string;
+  pluginManifestPath?: string;
+  pluginManifestKind?: string;
+} | null {
+  const manifestKind = getPluginManifestKind(filePath);
+  const pluginRoot = getPluginRootFromManifestPath(filePath) || ".";
+  let manifest: Record<string, unknown> = {};
+
+  try {
+    manifest = JSON.parse(content) as Record<string, unknown>;
+  } catch {
+    manifest = parseSimpleYamlObject(content);
+  }
+
+  const interfaceMetadata =
+    manifest.interface && typeof manifest.interface === "object"
+      ? (manifest.interface as Record<string, unknown>)
+      : {};
+  const name =
+    stringifyManifestValue(manifest.name) ||
+    stringifyManifestValue(interfaceMetadata.displayName) ||
+    getFallbackResourceName(filePath, "plugin");
+  const description =
+    stringifyManifestValue(manifest.description) ||
+    stringifyManifestValue(interfaceMetadata.shortDescription) ||
+    stringifyManifestValue(interfaceMetadata.longDescription) ||
+    `Plugin manifest for ${name}`;
+
+  return {
+    name,
+    description,
+    categories: ["plugins"],
+    license: stringifyManifestValue(manifest.license),
+    author: stringifyManifestValue(manifest.author),
+    version: stringifyManifestValue(manifest.version),
+    pluginRoot,
+    pluginManifestPath: filePath.replace(/\\/g, "/"),
+    pluginManifestKind: manifestKind,
+  };
 }
 
 async function fetchWithTimeout(
@@ -97,6 +219,14 @@ async function mapWithConcurrency<T, R>(
 }
 
 function createResourceDisplayKey(resource: Skill): string {
+  if (getResourceKind(resource) === "plugin") {
+    return [
+      resource.source,
+      "plugin",
+      resource.pluginRoot || resource.path,
+      resource.name.trim().toLowerCase(),
+    ].join(":");
+  }
   const pluginId = getPluginIdFromPath(resource.path);
   const description = String(resource.description || "")
     .trim()
@@ -115,6 +245,18 @@ function createResourceDisplayKey(resource: Skill): string {
 }
 
 function shouldPreferResource(candidate: Skill, existing: Skill): boolean {
+  if (
+    getResourceKind(candidate) === "plugin" &&
+    getResourceKind(existing) === "plugin"
+  ) {
+    const candidateWeight =
+      candidate.pluginManifestKind === "marketplace" ? 1 : 0;
+    const existingWeight =
+      existing.pluginManifestKind === "marketplace" ? 1 : 0;
+    if (candidateWeight !== existingWeight) {
+      return candidateWeight < existingWeight;
+    }
+  }
   const candidateIsPluginPath = candidate.path.startsWith("plugins/");
   const existingIsPluginPath = existing.path.startsWith("plugins/");
 
@@ -522,6 +664,81 @@ function isResourcePathAllowed(
   );
 }
 
+function getPluginRootsFromPaths(paths: string[]): string[] {
+  return Array.from(
+    new Set(
+      paths
+        .map((filePath) => getPluginRootFromManifestPath(filePath))
+        .filter((root): root is string => !!root),
+    ),
+  ).sort((a, b) => b.length - a.length);
+}
+
+function getRelativePathFromPluginRoot(
+  filePath: string,
+  pluginRoot: string,
+): string | undefined {
+  const normalizedPath = filePath.replace(/\\/g, "/").replace(/^\/+/, "");
+  if (pluginRoot === ".") {
+    return normalizedPath;
+  }
+  const normalizedRoot = pluginRoot.replace(/\\/g, "/").replace(/\/+$/, "");
+  return normalizedPath.startsWith(`${normalizedRoot}/`)
+    ? normalizedPath.slice(normalizedRoot.length + 1)
+    : undefined;
+}
+
+function detectPluginChildResourceKind(
+  relativePath: string,
+): ResourceKind | undefined {
+  const lowerPath = relativePath.toLowerCase();
+  if (/^agents\/[^/]+\.md$/.test(lowerPath)) {
+    return "agent";
+  }
+  if (/^instructions\/[^/]+\.md$/.test(lowerPath)) {
+    return "instruction";
+  }
+  if (/^prompts\/[^/]+\.md$/.test(lowerPath)) {
+    return "prompt";
+  }
+  if (/^rules\/[^/]+\.mdc$/.test(lowerPath)) {
+    return "cursor-rule";
+  }
+  if (/^hooks\/[^/]+\/readme\.md$/.test(lowerPath)) {
+    return "hook";
+  }
+  if (/^(?:mcp\.json|\.vscode\/mcp\.json|mcp\/[^/]+\.json)$/.test(lowerPath)) {
+    return "mcp";
+  }
+  if (/^skills\/[^/]+\/skill\.md$/.test(lowerPath)) {
+    return "skill";
+  }
+  return undefined;
+}
+
+function detectResourceKindWithPluginRoots(
+  filePath: string,
+  pluginRoots: string[],
+): ResourceKind | undefined {
+  const kind = detectResourceKindFromPath(filePath);
+  if (kind) {
+    return kind;
+  }
+
+  for (const pluginRoot of pluginRoots) {
+    const relativePath = getRelativePathFromPluginRoot(filePath, pluginRoot);
+    if (!relativePath) {
+      continue;
+    }
+    const childKind = detectPluginChildResourceKind(relativePath);
+    if (childKind) {
+      return childKind;
+    }
+  }
+
+  return undefined;
+}
+
 /**
  * ツリーレスポンスを処理してスキルを抽出
  */
@@ -541,8 +758,11 @@ async function processTreeResponse(
   const skillRootDirectories = getSkillRootDirectoriesFromPaths(
     allowedBlobFiles.map((item) => item.path),
   );
+  const pluginRoots = getPluginRootsFromPaths(
+    allowedBlobFiles.map((item) => item.path),
+  );
   const resourceFiles = allowedBlobFiles.filter((item) => {
-    const kind = detectResourceKindFromPath(item.path);
+    const kind = detectResourceKindWithPluginRoots(item.path, pluginRoots);
     return (
       !!kind &&
       !isNestedResourcePathUnderSkillRoot(item.path, kind, skillRootDirectories)
@@ -597,7 +817,7 @@ async function processTreeResponse(
     FETCH_CONCURRENCY,
     async (file): Promise<Skill | undefined> => {
       try {
-        const kind = detectResourceKindFromPath(file.path);
+        const kind = detectResourceKindWithPluginRoots(file.path, pluginRoots);
         if (!kind) {
           return undefined;
         }
@@ -666,6 +886,11 @@ async function processTreeResponse(
         }
         if (skillInfo.version) {
           skill.version = skillInfo.version;
+        }
+        if (kind === "plugin") {
+          skill.pluginRoot = skillInfo.pluginRoot;
+          skill.pluginManifestPath = skillInfo.pluginManifestPath;
+          skill.pluginManifestKind = skillInfo.pluginManifestKind;
         }
         return skill;
       } catch {
@@ -1088,6 +1313,7 @@ function parseSkillFrontmatter(
 ): {
   name: string;
   description: string;
+  description_ja?: string;
   categories: string[];
   standalone?: boolean;
   requires?: string[];
@@ -1095,8 +1321,14 @@ function parseSkillFrontmatter(
   license?: string;
   author?: string;
   version?: string;
+  pluginRoot?: string;
+  pluginManifestPath?: string;
+  pluginManifestKind?: string;
 } | null {
   const normalizedContent = content.replace(/\r\n/g, "\n");
+  if (kind === "plugin") {
+    return parsePluginManifestMetadata(normalizedContent, filePath);
+  }
   // frontmatter を抽出
   const frontmatterMatch = normalizedContent.match(/^---\n([\s\S]*?)\n---/);
 
@@ -1639,6 +1871,11 @@ export async function searchGitHub(
     `filename:README.md path:hooks ${baseQuery}`,
     `filename:mcp.json ${baseQuery}`,
     `extension:json path:mcp ${baseQuery}`,
+    `filename:plugin.json ${baseQuery}`,
+    `filename:marketplace.json ${baseQuery}`,
+    `filename:gemini-extension.json ${baseQuery}`,
+    `filename:apm.yml ${baseQuery}`,
+    `extension:mdc path:rules ${baseQuery}`,
   ];
 
   // 検索クエリを生成する関数

@@ -8,21 +8,31 @@ const index = require("../resources/skill-index.json");
 
 const SOURCE_ID = "microsoft-copilot-for-azure-plugin";
 const SOURCE_REPO = "microsoft/GitHub-Copilot-for-Azure";
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+
+function createHeaders(userAgent) {
+  const headers = { "User-Agent": userAgent };
+  if (GITHUB_TOKEN) {
+    headers.Authorization = `token ${GITHUB_TOKEN}`;
+  }
+  return headers;
+}
 
 async function fetchJson(url) {
   const response = await fetch(url, {
-    headers: { "User-Agent": "ResourceNinja-AzurePluginTest" },
+    headers: createHeaders("ResourceNinja-AzurePluginTest"),
   });
+  const text = await response.text();
   assert.ok(
     response.ok,
-    `Expected ${url} to be reachable, got ${response.status}`,
+    `Expected ${url} to be reachable, got ${response.status}: ${text}`,
   );
-  return response.json();
+  return JSON.parse(text);
 }
 
 async function fetchText(url) {
   const response = await fetch(url, {
-    headers: { "User-Agent": "ResourceNinja-AzurePluginTest" },
+    headers: createHeaders("ResourceNinja-AzurePluginTest"),
   });
   assert.ok(
     response.ok,
@@ -55,14 +65,23 @@ async function main() {
   assert.ok(azureRbac, "Expected azure-rbac to be indexed");
   assert.strictEqual(azureRbac.path, "plugin/skills/azure-rbac");
 
-  const repo = await fetchJson(`https://api.github.com/repos/${SOURCE_REPO}`);
-  const branch = repo.default_branch || "main";
-  const tree = await fetchJson(
-    `https://api.github.com/repos/${SOURCE_REPO}/git/trees/${branch}?recursive=1`,
-  );
-  const azureRbacFiles = tree.tree
-    .map((entry) => entry.path)
-    .filter((entryPath) => entryPath.startsWith(`${azureRbac.path}/`));
+  let branch = "main";
+  let azureRbacFiles = [`${azureRbac.path}/SKILL.md`];
+  try {
+    const repo = await fetchJson(`https://api.github.com/repos/${SOURCE_REPO}`);
+    branch = repo.default_branch || "main";
+    const tree = await fetchJson(
+      `https://api.github.com/repos/${SOURCE_REPO}/git/trees/${branch}?recursive=1`,
+    );
+    azureRbacFiles = tree.tree
+      .map((entry) => entry.path)
+      .filter((entryPath) => entryPath.startsWith(`${azureRbac.path}/`));
+  } catch (error) {
+    console.warn(
+      "WARN GitHub API tree unavailable; verifying indexed Azure plugin content through raw URLs only",
+    );
+    console.warn(error instanceof Error ? error.message : String(error));
+  }
   assert.ok(
     azureRbacFiles.includes(`${azureRbac.path}/SKILL.md`),
     "The indexed Azure plugin install path should contain SKILL.md upstream",

@@ -1694,6 +1694,8 @@ export function activate(context: vscode.ExtensionContext) {
         "prompt",
         "hook",
         "mcp",
+        "plugin",
+        "cursor-rule",
       ];
       let kindFilter: ResourceKind | undefined;
 

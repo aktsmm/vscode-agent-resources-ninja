@@ -50,14 +50,14 @@ It gives you three practical views for everyday resource management: **Workspace
 ### 🧭 Resource Management
 
 - Browse **Workspace Resources**, **User / Global Resource Home**, and **Remote Resources** from the Activity Bar
-- Manage multiple resource kinds: skills, agents, prompts, instructions, hooks, and MCP config resources
+- Manage multiple resource kinds: skills, agents, prompts, instructions, hooks, MCP config resources, plugin manifests, and Cursor rules
 - Browse remote resources by source or by Resource Type
 - Inspect user/global resources from VS Code User Data and the selected Global Resource Home
 - Choose explicit install targets: Workspace, User Profile, Global Resource Home, or Custom
 
 ### 📁 Local Resource Management
 
-- Auto-detect skills, agents, prompts, instructions, hooks, and MCP config resources in workspace
+- Auto-detect skills, agents, prompts, instructions, hooks, MCP config resources, plugin manifests, and Cursor rules in workspace
 - Automatically sync detected workspace skills to the generated instruction index (with `resourceNinja.includeLocalResources` setting)
 - Manual register / unregister commands for local workspace skills
 - Create new skills, agents, prompts, instructions, hooks, and MCP config resources from templates
@@ -67,7 +67,7 @@ It gives you three practical views for everyday resource management: **Workspace
 ### 🔍 Resource Search & Discovery
 
 - Search resources by keyword (local & GitHub)
-- Filter QuickPick search results by resource kind: skills, agents, instructions, prompts, hooks, or MCP config resources
+- Filter QuickPick search results by resource kind: skills, agents, instructions, prompts, hooks, MCP config resources, plugins, or Cursor rules
 - **Install Sets** are curated, selectable install groups. **Plugin Contents** are browse groups for resources found under plugin paths; install the whole indexed plugin group with a checklist, or install individual resources.
 - **Multi-keyword Search** - Scored by name, path, description relevance
 - **Parallel Fetch** - Fast results with 50 concurrent requests
@@ -81,6 +81,7 @@ It gives you three practical views for everyday resource management: **Workspace
 - Double-click installation defaults to Workspace, with a setting for Ask / User Profile / Global Resource Home
 - Context menu installation always shows the target picker for Workspace, User Profile, Global Resource Home, or Custom
 - MCP config resources are copied to the Workspace MCP Directory first, then you can keep them for review or explicitly merge compatible servers into `.vscode/mcp.json`; existing server keys always require overwrite confirmation.
+- Plugin manifest resources install as managed copies under `.github/plugins/<plugin>` or Global Resource Home `plugins/<plugin>`. Hooks, executable assets, and MCP config included in a plugin are copied for review and are not run or activated automatically.
 - Auto-update the generated **Agent Skills index** in instruction files (AGENTS.md / copilot-instructions.md / CLAUDE.md) when skill resources change
 - **Table Format** - Skill entries displayed in a generated table with a "When to Use" column
 - **Auto-extract "When to Use"** - Extracted from SKILL.md `## When to Use` section
@@ -143,13 +144,14 @@ Or search for **"Agent Resources Ninja"** in VS Code Extensions (`Ctrl+Shift+X`)
 
 ## 📚 Included Resource Sources
 
-Preset index includes skills, agents, prompts, instructions, hooks, and MCP config resources from official, curated, and community sources out of the box.
+Preset index includes skills, agents, prompts, instructions, hooks, MCP config resources, plugin manifests, and Cursor rules from official, curated, and community sources out of the box.
 
 | Source                                                                                                                        | Type      | Description                                                                     |
 | ----------------------------------------------------------------------------------------------------------------------------- | --------- | ------------------------------------------------------------------------------- |
 | [anthropics/skills](https://github.com/anthropics/skills)                                                                     | Official  | Anthropic official Claude Skills                                                |
 | [openai/skills](https://github.com/openai/skills)                                                                             | Official  | OpenAI official Codex Skills (1.7k+)                                            |
 | [github/awesome-copilot](https://github.com/github/awesome-copilot)                                                           | Official  | GitHub official Copilot resources, including plugin-published skills and agents |
+| [cursor/plugins](https://github.com/cursor/plugins)                                                                            | Official  | Cursor official plugin manifests, skills, agents, and rules                    |
 | [MicrosoftDocs/Agent-Skills](https://github.com/MicrosoftDocs/Agent-Skills)                                                   | Official  | Microsoft official Azure agent skills                                           |
 | [microsoft/GitHub-Copilot-for-Azure](https://github.com/microsoft/GitHub-Copilot-for-Azure)                                   | Official  | GitHub Copilot for Azure plugin skills                                          |
 | [microsoft/azure-skills](https://github.com/microsoft/azure-skills)                                                           | Official  | Microsoft Azure Skills plugin resources, including Azure skills and MCP config  |
@@ -162,7 +164,7 @@ Preset index includes skills, agents, prompts, instructions, hooks, and MCP conf
 | [aaif-goose/goose](https://github.com/aaif-goose/goose)                                                                       | Official  | Goose repository skills from AAIF                                               |
 | [ComposioHQ/awesome-claude-skills](https://github.com/ComposioHQ/awesome-claude-skills)                                       | Curated   | Curated Claude Skills list                                                      |
 | [Code-and-Sorts/awesome-copilot-agents](https://github.com/Code-and-Sorts/awesome-copilot-agents)                             | Curated   | Copilot agents, instructions, prompts, and skills                               |
-| [obra/superpowers](https://github.com/obra/superpowers)                                                                       | Community | High-quality skills & agents                                                    |
+| [obra/superpowers](https://github.com/obra/superpowers)                                                                       | Community | Superpowers plugin manifests and plugin-derived skills                          |
 | [glittercowboy/taches-cc-resources](https://github.com/glittercowboy/taches-cc-resources)                                     | Community | Claude Code resources and skills                                                |
 | [muratcankoylan/Agent-Skills-for-Context-Engineering](https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering) | Community | Context Engineering skills (5k+)                                                |
 | [danielmiessler/Personal_AI_Infrastructure](https://github.com/danielmiessler/Personal_AI_Infrastructure)                     | Community | PAI Packs - Skills & Features                                                   |
@@ -172,12 +174,14 @@ Preset index includes skills, agents, prompts, instructions, hooks, and MCP conf
 
 Azure appears through two official Microsoft sources. `microsoft/GitHub-Copilot-for-Azure` indexes plugin-embedded skills from the Copilot for Azure repository, while `microsoft/azure-skills` indexes the top-level Azure Skills Plugin distribution and its Azure MCP config. The Azure Skills bundle is selectable: skills can be installed together, and the MCP config can be copied for review or explicitly merged into `.vscode/mcp.json`.
 
+Cursor official plugins and Superpowers are indexed both as plugin manifest resources and as individual plugin-contained resources such as skills, agents, rules, hooks, and MCP config when present. Installing a plugin resource creates a managed copy for review; it does not run plugin hooks or merge MCP configuration without a separate explicit action.
+
 When two sources provide the same resource name, search results show the friendly source name and add source/path details for duplicates. Distribution-ready top-level paths are listed ahead of embedded plugin paths when relevance is otherwise tied.
 
 Generic MCP config file names such as `mcp.json` and `.mcp.json` are installed with a source prefix, for example `microsoft-azure-skills-mcp.json`, to avoid overwriting MCP configs from another source. MCP files are copied first, and merging into `.vscode/mcp.json` is an explicit install-time choice with backup and overwrite confirmation.
 
 > Use `Update Index` to refresh the latest resources and metadata from these sources.
-> Official product and plugin repositories are path-filtered so bundled presets include distribution-ready resource roots, not samples, manifests, or test fixtures.
+> Official product and plugin repositories are path-filtered so bundled presets include distribution-ready resource roots and selected plugin manifests, not samples or test fixtures.
 > For `github/awesome-copilot`, resources published from `plugins/` are indexed from distribution-ready top-level resource paths when available, avoiding duplicate raw plugin paths.
 > Files nested under a directory-based `SKILL.md` root are treated as internal skill contents, so helper prompts or instructions in a skill's `templates` folder do not appear as separate Remote Resources.
 
@@ -215,8 +219,8 @@ Generic MCP config file names such as `mcp.json` and `.mcp.json` are installed w
    - **Favorites** section at top
 
 - Toggle between repository-first and resource-type-first layouts from the toolbar
-- Repository-first groups by source, then skills, agents, instructions, prompts, hooks, and MCP config resources
-- Resource-type-first groups by skills, agents, instructions, prompts, hooks, and MCP config resources, then source
+- Repository-first groups by source, then skills, agents, instructions, prompts, hooks, MCP config resources, plugins, and Cursor rules
+- Resource-type-first groups by skills, agents, instructions, prompts, hooks, MCP config resources, plugins, and Cursor rules, then source
 - Repository sections are ordered Official → Curated → Community
 - Shows installed status with green icons
 - Double-click install from list; optional single-click install uses the configured default target

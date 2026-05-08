@@ -261,7 +261,10 @@ async function collectMarkdownFiles(
       } else if (
         type === vscode.FileType.File &&
         (name.toLowerCase().endsWith(".md") ||
-          name.toLowerCase().endsWith(".json"))
+          name.toLowerCase().endsWith(".json") ||
+          name.toLowerCase().endsWith(".mdc") ||
+          name.toLowerCase().endsWith(".yml") ||
+          name.toLowerCase().endsWith(".yaml"))
       ) {
         files.push(child);
         if (files.length >= maxFiles) {

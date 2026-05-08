@@ -115,7 +115,9 @@ function normalizeKindFilter(kind?: string): ResourceKind | undefined {
     normalized === "instruction" ||
     normalized === "prompt" ||
     normalized === "hook" ||
-    normalized === "mcp"
+    normalized === "mcp" ||
+    normalized === "plugin" ||
+    normalized === "cursor-rule"
   ) {
     return normalized;
   }

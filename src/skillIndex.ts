@@ -14,7 +14,9 @@ export type ResourceKind =
   | "instruction"
   | "prompt"
   | "hook"
-  | "mcp";
+  | "mcp"
+  | "plugin"
+  | "cursor-rule";
 
 export function getResourceKind(resource: Pick<Skill, "kind">): ResourceKind {
   return resource.kind || "skill";
@@ -35,6 +37,10 @@ export function getResourceKindLabel(
       return isJa ? "フック" : "Hook";
     case "mcp":
       return "MCP";
+    case "plugin":
+      return isJa ? "プラグイン" : "Plugin";
+    case "cursor-rule":
+      return isJa ? "Cursor ルール" : "Cursor Rule";
     case "skill":
     default:
       return isJa ? "スキル" : "Skill";
@@ -53,6 +59,10 @@ export function getResourceKindIcon(kind: ResourceKind): string {
       return "plug";
     case "mcp":
       return "server-process";
+    case "plugin":
+      return "extensions";
+    case "cursor-rule":
+      return "settings";
     case "skill":
     default:
       return "package";
@@ -82,6 +92,9 @@ export interface Skill {
   license?: string; // ライセンス（例: MIT, Apache-2.0）
   author?: string; // 作成者
   version?: string; // バージョン
+  pluginRoot?: string; // Plugin 全体のリモートルート（manifest 由来 resource 用）
+  pluginManifestPath?: string; // Plugin manifest のリモートパス
+  pluginManifestKind?: string; // claude-plugin / cursor-plugin / gemini-extension など
 }
 
 /**
@@ -149,6 +162,9 @@ export interface Bundle {
   skills: string[]; // 含まれるスキル名のリスト
   installOrder?: string[]; // インストール順序（依存解決済み）
   coreSkill?: string; // コアスキル（最初にインストール必須）
+  pluginId?: string; // Plugin-scoped install set の識別子
+  mode?: string; // skill-only / plugin-managed-copy などの安全境界ラベル
+  safetyBoundary?: string; // Hooks/executables/MCP などの扱い説明
 }
 
 // インデックス全体の型定義
@@ -360,6 +376,11 @@ function mergeSkillIndexes(
         license: bundledSkill.license || localSkill.license,
         author: bundledSkill.author || localSkill.author,
         version: bundledSkill.version || localSkill.version,
+        pluginRoot: bundledSkill.pluginRoot || localSkill.pluginRoot,
+        pluginManifestPath:
+          bundledSkill.pluginManifestPath || localSkill.pluginManifestPath,
+        pluginManifestKind:
+          bundledSkill.pluginManifestKind || localSkill.pluginManifestKind,
       };
     }
     return localSkill;
@@ -469,6 +490,9 @@ function shouldPersistMergedIndex(
       localBundle.description !== mergedBundle.description ||
       localBundle.description_ja !== mergedBundle.description_ja ||
       localBundle.coreSkill !== mergedBundle.coreSkill ||
+      localBundle.pluginId !== mergedBundle.pluginId ||
+      localBundle.mode !== mergedBundle.mode ||
+      localBundle.safetyBoundary !== mergedBundle.safetyBoundary ||
       !areStringArraysEqual(localBundle.skills, mergedBundle.skills) ||
       !areStringArraysEqual(localBundle.installOrder, mergedBundle.installOrder)
     ) {
@@ -500,6 +524,9 @@ function shouldPersistMergedIndex(
       localSkill.license !== mergedSkill.license ||
       localSkill.author !== mergedSkill.author ||
       localSkill.version !== mergedSkill.version ||
+      localSkill.pluginRoot !== mergedSkill.pluginRoot ||
+      localSkill.pluginManifestPath !== mergedSkill.pluginManifestPath ||
+      localSkill.pluginManifestKind !== mergedSkill.pluginManifestKind ||
       !areStringArraysEqual(localSkill.categories, mergedSkill.categories) ||
       !areStringArraysEqual(localSkill.requires, mergedSkill.requires)
     ) {
@@ -628,15 +655,18 @@ export async function getSourceBranch(
 
 export function isResourceFilePath(resourcePath: string): boolean {
   const fileName = resourcePath.replace(/\\/g, "/").split("/").pop() || "";
-  return /\.(?:agent\.md|instructions\.md|prompt\.md|md|mdx|json|ya?ml|toml|txt)$/i.test(
+  return /\.(?:agent\.md|instructions\.md|prompt\.md|md|mdx|mdc|json|ya?ml|toml|txt)$/i.test(
     fileName,
   );
 }
 
 export function getResourceContentPath(
-  resource: Pick<Skill, "path">,
+  resource: Pick<Skill, "path" | "kind" | "pluginManifestPath">,
   defaultFileName: string = "SKILL.md",
 ): string {
+  if (getResourceKind(resource) === "plugin" && resource.pluginManifestPath) {
+    return resource.pluginManifestPath;
+  }
   if (isResourceFilePath(resource.path)) {
     return resource.path;
   }
@@ -658,6 +688,12 @@ export async function getSkillGitHubUrlAsync(
 
   const branch = await getSourceBranch(source, token);
   const baseUrl = source.url.replace(/\/$/, "");
+  if (getResourceKind(skill) === "plugin") {
+    const pluginPath = skill.pluginRoot || skill.path;
+    return pluginPath === "."
+      ? `${baseUrl}/tree/${branch}`
+      : `${baseUrl}/tree/${branch}/${pluginPath}`;
+  }
   const route = isResourceFilePath(skill.path) ? "blob" : "tree";
   return `${baseUrl}/${route}/${branch}/${skill.path}`;
 }
@@ -678,6 +714,12 @@ export function getSkillGitHubUrl(
   const cachedBranch = branchCache.get(source.url);
   const branch = cachedBranch || source.branch || "main";
   const baseUrl = source.url.replace(/\/$/, "");
+  if (getResourceKind(skill) === "plugin") {
+    const pluginPath = skill.pluginRoot || skill.path;
+    return pluginPath === "."
+      ? `${baseUrl}/tree/${branch}`
+      : `${baseUrl}/tree/${branch}/${pluginPath}`;
+  }
   const route = isResourceFilePath(skill.path) ? "blob" : "tree";
   return `${baseUrl}/${route}/${branch}/${skill.path}`;
 }

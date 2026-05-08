@@ -31,6 +31,8 @@ const KIND_ORDER: ResourceKind[] = [
   "prompt",
   "hook",
   "mcp",
+  "plugin",
+  "cursor-rule",
 ];
 
 function getScopeIcon(scope: UserResourceScope): string {

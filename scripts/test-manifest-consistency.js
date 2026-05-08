@@ -220,6 +220,8 @@ test("language model resource actions are kind-aware and ambiguity-safe", () => 
     "prompt",
     "hook",
     "mcp",
+    "plugin",
+    "cursor-rule",
     "all",
   ]);
   assert.deepStrictEqual(installTool?.inputSchema?.properties?.kind?.enum, [
@@ -229,6 +231,8 @@ test("language model resource actions are kind-aware and ambiguity-safe", () => 
     "prompt",
     "hook",
     "mcp",
+    "plugin",
+    "cursor-rule",
   ]);
   assert.deepStrictEqual(uninstallTool?.inputSchema?.properties?.kind?.enum, [
     "skill",
@@ -237,6 +241,8 @@ test("language model resource actions are kind-aware and ambiguity-safe", () => 
     "prompt",
     "hook",
     "mcp",
+    "plugin",
+    "cursor-rule",
   ]);
 
   assert.match(mcpToolsSource, /normalizeKindFilter/);
@@ -733,9 +739,14 @@ test("github token setting is password-style and excluded from standard reset", 
 
 test("plugin resources remain browsable from raw plugin paths", () => {
   assert.match(presetIndexUpdaterSource, /plugin:\$\{pluginId\}/);
-  assert.match(presetIndexUpdaterSource, /plugins\\\/\[\^\/\]\+\\\/agents/);
+  assert.match(presetIndexUpdaterSource, /pluginPrefix/);
+  assert.match(presetIndexUpdaterSource, /detectPluginChildResourceKind[\s\S]*agents/);
+  assert.match(presetIndexUpdaterSource, /detectResourceKindWithPluginRoots/);
   assert.match(resourceKindsSource, /getPluginIdFromPath/);
-  assert.match(resourceKindsSource, /plugins\\\/\[\^\/\]\+\\\/agents/);
+  assert.match(resourceKindsSource, /pluginPrefix/);
+  assert.match(resourceKindsSource, /agents/);
+  assert.match(skillIndexSource, /localSkill\.pluginRoot !== mergedSkill\.pluginRoot/);
+  assert.match(skillIndexSource, /localBundle\.safetyBoundary !== mergedBundle\.safetyBoundary/);
 });
 
 test("install target picker uses localized resource-aware labels", () => {

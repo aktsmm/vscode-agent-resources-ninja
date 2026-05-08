@@ -4,22 +4,29 @@ export function detectResourceKindFromPath(
   resourcePath: string,
 ): ResourceKind | undefined {
   const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
-  if (/^plugins\/[^/]+\/agents\/[^/]+\.md$/.test(lowerPath)) {
+  if (isPluginManifestPath(lowerPath)) {
+    return "plugin";
+  }
+  const pluginPrefix = "(?:\\.github/)?plugins/[^/]+/";
+  if (new RegExp(`^(?:${pluginPrefix})?rules/[^/]+\\.mdc$`).test(lowerPath)) {
+    return "cursor-rule";
+  }
+  if (new RegExp(`^${pluginPrefix}agents/[^/]+\\.md$`).test(lowerPath)) {
     return "agent";
   }
-  if (/^plugins\/[^/]+\/instructions\/[^/]+\.md$/.test(lowerPath)) {
+  if (new RegExp(`^${pluginPrefix}instructions/[^/]+\\.md$`).test(lowerPath)) {
     return "instruction";
   }
-  if (/^plugins\/[^/]+\/prompts\/[^/]+\.md$/.test(lowerPath)) {
+  if (new RegExp(`^${pluginPrefix}prompts/[^/]+\\.md$`).test(lowerPath)) {
     return "prompt";
   }
-  if (/^plugins\/[^/]+\/hooks\/[^/]+\/readme\.md$/.test(lowerPath)) {
+  if (new RegExp(`^${pluginPrefix}hooks/[^/]+/readme\\.md$`).test(lowerPath)) {
     return "hook";
   }
   if (
-    /^plugins\/[^/]+\/(?:mcp\.json|\.vscode\/mcp\.json|mcp\/[^/]+\.json)$/.test(
-      lowerPath,
-    )
+    new RegExp(
+      `^${pluginPrefix}(?:mcp\\.json|\\.vscode/mcp\\.json|mcp/[^/]+\\.json)$`,
+    ).test(lowerPath)
   ) {
     return "mcp";
   }
@@ -50,6 +57,46 @@ export function detectResourceKindFromPath(
     return "mcp";
   }
   return undefined;
+}
+
+function isPluginManifestPath(lowerPath: string): boolean {
+  return (
+    lowerPath === "plugin.json" ||
+    lowerPath === "gemini-extension.json" ||
+    lowerPath === "apm.yml" ||
+    lowerPath === "apm.yaml" ||
+    /(^|\/)\.(?:claude-plugin|codex-plugin|cursor-plugin|plugin)\/(?:plugin|marketplace)\.json$/.test(
+      lowerPath,
+    )
+  );
+}
+
+export function getPluginRootFromManifestPath(
+  resourcePath: string,
+): string | undefined {
+  const normalizedPath = resourcePath.replace(/\\/g, "/").replace(/^\/+/, "");
+  const lowerPath = normalizedPath.toLowerCase();
+  if (!isPluginManifestPath(lowerPath)) {
+    return undefined;
+  }
+
+  if (
+    lowerPath === "plugin.json" ||
+    lowerPath === "gemini-extension.json" ||
+    lowerPath === "apm.yml" ||
+    lowerPath === "apm.yaml"
+  ) {
+    return ".";
+  }
+
+  const markerMatch = normalizedPath.match(
+    /^(.*?)(?:^|\/)\.(?:claude-plugin|codex-plugin|cursor-plugin|plugin)\/(?:plugin|marketplace)\.json$/i,
+  );
+  if (!markerMatch) {
+    return ".";
+  }
+  const root = markerMatch[1].replace(/\/+$/, "");
+  return root || ".";
 }
 
 function normalizeResourcePath(resourcePath: string): string {
@@ -100,7 +147,13 @@ export function isNestedResourcePathUnderSkillRoot(
 export function getPluginIdFromPath(resourcePath?: string): string | undefined {
   const normalizedPath = (resourcePath || "").replace(/\\/g, "/");
   const match = normalizedPath.match(/^plugins\/([^/]+)\//i);
-  return match?.[1];
+  if (match?.[1]) {
+    return match[1];
+  }
+  const githubPluginMatch = normalizedPath.match(
+    /^\.github\/plugins\/([^/]+)\//i,
+  );
+  return githubPluginMatch?.[1];
 }
 
 export function isBuiltInResourcePath(resourcePath: string): boolean {
@@ -245,6 +298,9 @@ export function getResourceMetadataPath(
   if (kind === "hook") {
     return `${normalizedPath.replace(/\/README\.md$/i, "")}/.resource-ninja.json`;
   }
+  if (kind === "plugin") {
+    return `${normalizedPath.replace(/\/+$/g, "")}/.resource-ninja.json`;
+  }
   return `${normalizedPath}.resource-ninja.json`;
 }
 
@@ -286,6 +342,9 @@ export function getResourceInstallPath(
   if (kind === "skill") {
     return normalizedPath.replace(/\/SKILL\.md$/i, "");
   }
+  if (kind === "plugin") {
+    return getPluginRootFromManifestPath(normalizedPath) || normalizedPath;
+  }
   return normalizedPath;
 }
 
@@ -297,10 +356,19 @@ export function getFallbackResourceName(
   if (kind === "skill" || kind === "hook") {
     return pathParts[pathParts.length - 2] || "Unknown";
   }
+  if (kind === "plugin") {
+    const pluginRoot = getPluginRootFromManifestPath(filePath);
+    if (pluginRoot && pluginRoot !== ".") {
+      const rootParts = pluginRoot.split("/");
+      return rootParts[rootParts.length - 1] || "plugin";
+    }
+    return "plugin";
+  }
 
   const fileName = pathParts[pathParts.length - 1] || "Unknown";
   return fileName
     .replace(/\.(agent|instructions|prompt)\.md$/i, "")
+    .replace(/\.mdc$/i, "")
     .replace(/\.mcp\.json$/i, "")
     .replace(/\.json$/i, "");
 }
@@ -317,6 +385,10 @@ export function getDefaultResourceCategories(kind: ResourceKind): string[] {
       return ["hooks"];
     case "mcp":
       return ["mcp"];
+    case "plugin":
+      return ["plugins"];
+    case "cursor-rule":
+      return ["cursor-rules"];
     case "skill":
     default:
       return [];
