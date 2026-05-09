@@ -93,6 +93,7 @@ It gives you three practical views for everyday resource management: **Workspace
 - **Edit Description** - Right-click installed skills to customize the instruction-file description
 - Uninstall workspace and user/global resources from the relevant resource view
 - **Reinstall All Workspace Skills** - Batch reinstall installed workspace skills from latest source metadata (with auto index update)
+- **Reinstall Resource Groups** - Right-click a Workspace Resources kind group, such as Skills or Agents, to reinstall all installed resources in that group that were downloaded from remote sources
 - **Install Feedback** - NEW badge, status bar notification, auto-select in tree view
 - **Open Folder** - Quick access to installed resource folder
 - **Index Integrity Check** - Auto-detect missing resources and prompt for index update

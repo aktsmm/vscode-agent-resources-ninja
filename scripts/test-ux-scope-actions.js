@@ -150,6 +150,25 @@ test("workspace reinstall is a per-resource inline action", () => {
   assert.strictEqual(nlsJa["command.reinstall"], "リソースを再インストール");
 });
 
+test("workspace resource kind groups expose bulk reinstall action", () => {
+  assert.ok(
+    itemMenuHas(
+      "resourceNinja.reinstallResourceGroup",
+      "view == resourceNinja.installedView && viewItem == workspaceResourceType",
+    ),
+  );
+  assert.strictEqual(
+    nls["command.reinstallResourceGroup"],
+    "Reinstall Resource Group",
+  );
+  assert.strictEqual(
+    nlsJa["command.reinstallResourceGroup"],
+    "リソースグループを再インストール",
+  );
+  assert.match(extensionSource, /resourceNinja\.reinstallResourceGroup/);
+  assert.match(extensionSource, /workspaceResourceType/);
+});
+
 test("bundle-facing language is install set language", () => {
   assert.strictEqual(nls["command.installBundle"], "Install Set");
   assert.strictEqual(

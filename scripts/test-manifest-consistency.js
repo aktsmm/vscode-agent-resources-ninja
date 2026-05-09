@@ -1375,6 +1375,7 @@ test("command palette hides context-only and compatibility commands", () => {
     "resourceNinja.install",
     "resourceNinja.uninstall",
     "resourceNinja.reinstall",
+    "resourceNinja.reinstallResourceGroup",
     "resourceNinja.reinstallAll",
     "resourceNinja.uninstallAll",
     "resourceNinja.uninstallMultiple",
@@ -1612,6 +1613,12 @@ test("workspace resource menus distinguish skill-only actions from generic resou
   assert.match(whenFor("resourceNinja.uninstall"), /installedRemoteResource/);
   assert.match(whenFor("resourceNinja.reinstall"), /installedRemoteSkill/);
   assert.match(whenFor("resourceNinja.reinstall"), /installedRemoteResource/);
+  assert.match(
+    whenFor("resourceNinja.reinstallResourceGroup"),
+    /workspaceResourceType/,
+  );
+  assert.match(extensionSource, /reinstallResourceGroupCmd/);
+  assert.match(extensionSource, /children\.filter/);
   assert.doesNotMatch(
     whenFor("resourceNinja.reinstall"),
     /viewItem == installedSkill|viewItem == installedResource/,

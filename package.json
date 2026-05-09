@@ -2,7 +2,7 @@
   "name": "agent-resources-ninja",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "publisher": "yamapan",
   "license": "CC-BY-NC-SA-4.0",
   "icon": "resources/icon.png",
@@ -457,6 +457,12 @@
         "icon": "$(sync)"
       },
       {
+        "command": "resourceNinja.reinstallResourceGroup",
+        "title": "%command.reinstallResourceGroup%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(sync)"
+      },
+      {
         "command": "resourceNinja.uninstallAll",
         "title": "%command.uninstallAll%",
         "category": "Agent Resources Ninja",
@@ -733,6 +739,10 @@
         },
         {
           "command": "resourceNinja.reinstall",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.reinstallResourceGroup",
           "when": "false"
         },
         {
@@ -1023,6 +1033,11 @@
         {
           "command": "resourceNinja.reinstall",
           "when": "view == resourceNinja.installedView && (viewItem == installedRemoteSkill || viewItem == installedRemoteResource)",
+          "group": "inline@1"
+        },
+        {
+          "command": "resourceNinja.reinstallResourceGroup",
+          "when": "view == resourceNinja.installedView && viewItem == workspaceResourceType",
           "group": "inline@1"
         },
         {

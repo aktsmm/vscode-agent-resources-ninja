@@ -2290,6 +2290,81 @@ export function activate(context: vscode.ExtensionContext) {
     },
   );
 
+  // Command: Reinstall remote-installed resources in a workspace resource-kind group
+  const reinstallResourceGroupCmd = vscode.commands.registerCommand(
+    "resourceNinja.reinstallResourceGroup",
+    async (item?: SkillTreeItem) => {
+      if (!item || item.contextValue !== "workspaceResourceType") {
+        return;
+      }
+
+      const children = await workspaceProvider.getChildren(item);
+      const remoteInstalledItems = children.filter(
+        (child) =>
+          child.contextValue === "installedRemoteSkill" ||
+          child.contextValue === "installedRemoteResource",
+      );
+
+      if (remoteInstalledItems.length === 0) {
+        vscode.window.showInformationMessage(
+          isJapanese()
+            ? "このグループにリモート由来の再インストール可能なリソースはありません"
+            : "This group has no remote-installed resources to reinstall",
+        );
+        return;
+      }
+
+      const kindLabel = item.resourceKind
+        ? getResourceKindLabel(item.resourceKind, isJapanese())
+        : isJapanese()
+          ? "リソース"
+          : "Resources";
+      const confirmLabel = isJapanese() ? "再インストール" : "Reinstall";
+      const confirm = await vscode.window.showWarningMessage(
+        isJapanese()
+          ? `${kindLabel} グループの ${remoteInstalledItems.length} 個のリモートリソースを再インストールしますか？`
+          : `Reinstall ${remoteInstalledItems.length} remote-installed resource(s) in ${kindLabel}?`,
+        { modal: true },
+        confirmLabel,
+      );
+      if (confirm !== confirmLabel) {
+        return;
+      }
+
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: isJapanese()
+            ? `${kindLabel} グループを再インストール中...`
+            : `Reinstalling ${kindLabel} group...`,
+          cancellable: false,
+        },
+        async (progress) => {
+          let completed = 0;
+          for (const child of remoteInstalledItems) {
+            progress.report({
+              message: `${child.skill?.name || child.label} (${completed + 1}/${remoteInstalledItems.length})`,
+              increment: 100 / remoteInstalledItems.length,
+            });
+            await vscode.commands.executeCommand(
+              "resourceNinja.reinstall",
+              child,
+            );
+            completed++;
+          }
+        },
+      );
+
+      workspaceProvider.refresh();
+      browseProvider.refresh();
+      vscode.window.showInformationMessage(
+        isJapanese()
+          ? `${kindLabel} グループの ${remoteInstalledItems.length} 個のリソースを再インストールしました`
+          : `Reinstalled ${remoteInstalledItems.length} resource(s) in ${kindLabel}`,
+      );
+    },
+  );
+
   // Command: Uninstall all skills (with warning)
   const uninstallAllCmd = vscode.commands.registerCommand(
     "resourceNinja.uninstallAll",
@@ -4412,6 +4487,7 @@ ${fileUri.fsPath}`,
     uninstallCmd,
     reinstallAllCmd,
     reinstallCmd,
+    reinstallResourceGroupCmd,
     uninstallAllCmd,
     installBundleCmd,
     installPluginResourcesCmd,

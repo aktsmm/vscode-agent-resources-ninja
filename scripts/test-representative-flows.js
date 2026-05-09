@@ -358,4 +358,24 @@ test("reinstall command reuses install pipeline (per-resource action)", () => {
   );
 });
 
+test("resource group reinstall delegates to per-resource reinstall", () => {
+  assert.match(extensionSource, /resourceNinja\.reinstallResourceGroup/);
+  assert.match(extensionSource, /workspaceResourceType/);
+  assert.match(extensionSource, /installedRemoteSkill/);
+  assert.match(extensionSource, /installedRemoteResource/);
+  assert.match(
+    extensionSource,
+    /executeCommand\([\s\S]*"resourceNinja\.reinstall"[\s\S]*child[\s\S]*\)/,
+  );
+});
+
+test("resource group reinstall explains empty remote-installed groups", () => {
+  assert.match(extensionSource, /remoteInstalledItems\.length === 0/);
+  assert.match(
+    extensionSource,
+    /This group has no remote-installed resources to reinstall/,
+  );
+  assert.match(extensionSource, /showInformationMessage/);
+});
+
 console.log("RESULT=PASS");
