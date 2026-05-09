@@ -2,9 +2,12 @@ import * as path from "path";
 import * as vscode from "vscode";
 import {
   getFallbackRecommendedHookConfig,
+  getHookConfigCommandPaths,
+  getHookConfigEventCounts,
   HookConfigMutationResult,
   JsonObject,
   mergeHookConfig,
+  normalizeRecommendedHookConfig,
   removeHookConfig,
 } from "./hookConfig";
 
@@ -24,6 +27,16 @@ export interface HookConfigUpdateResult {
 
 export interface HookConfigUpdateOptions {
   dryRun?: boolean;
+}
+
+export interface HookConfigDiagnostics {
+  status: "configured" | "notConfigured" | "needsReview";
+  configUri: vscode.Uri;
+  source: "hooks.json" | "readme" | "known" | "none";
+  eventCounts: Record<string, number>;
+  missingByEvent: Record<string, number>;
+  warnings: string[];
+  reason?: string;
 }
 
 async function fileExists(uri: vscode.Uri): Promise<boolean> {
@@ -52,6 +65,18 @@ function toWorkspaceRelativePath(
     return getUriBasename(childUri);
   }
   return relative.replace(/\\/g, "/");
+}
+
+function hasPathSegment(value: string): boolean {
+  return value.includes("/") || value.includes("\\");
+}
+
+function isUrl(value: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:/i.test(value);
+}
+
+function toDiagnosticWarning(message: string): string {
+  return message.replace(/\s+/g, " ").trim();
 }
 
 function createEmptyMutationResult(
@@ -148,6 +173,25 @@ async function loadRecommendedHookConfig(
   }
 
   return getFallbackRecommendedHookConfig(hookId, readmeText);
+}
+
+async function collectMissingCommandPathWarnings(
+  configRootUri: vscode.Uri,
+  normalizedConfig: JsonObject,
+): Promise<string[]> {
+  const warnings: string[] = [];
+  for (const commandPath of getHookConfigCommandPaths(normalizedConfig)) {
+    if (!hasPathSegment(commandPath) || isUrl(commandPath)) {
+      continue;
+    }
+    const commandUri = vscode.Uri.file(
+      path.resolve(configRootUri.fsPath, commandPath),
+    );
+    if (!(await fileExists(commandUri))) {
+      warnings.push(toDiagnosticWarning(`Missing script: ${commandPath}`));
+    }
+  }
+  return warnings;
 }
 
 function toUpdateResult(
@@ -288,4 +332,108 @@ export async function updateHookConfigForUninstall(
   options: HookConfigUpdateOptions = {},
 ): Promise<HookConfigUpdateResult> {
   return updateHookConfig("uninstall", configRootUri, hookReadmeUri, options);
+}
+
+export async function getHookConfigDiagnostics(
+  configRootUri: vscode.Uri,
+  hookReadmeUri: vscode.Uri,
+): Promise<HookConfigDiagnostics> {
+  const hookDirectoryUri = getParentDirectoryUri(hookReadmeUri);
+  const hookId = getUriBasename(hookDirectoryUri);
+  const configUri = vscode.Uri.joinPath(configRootUri, "hooks.json");
+  const recommended = await loadRecommendedHookConfig(hookDirectoryUri, hookId);
+
+  if (!recommended.config) {
+    return {
+      status: "needsReview",
+      configUri,
+      source: recommended.source,
+      eventCounts: {},
+      missingByEvent: {},
+      warnings: [],
+      reason: recommended.reason,
+    };
+  }
+
+  const installedHookDirectory = toWorkspaceRelativePath(
+    configRootUri,
+    hookDirectoryUri,
+  );
+  let normalizedConfig: JsonObject;
+  try {
+    normalizedConfig = normalizeRecommendedHookConfig(
+      recommended.config,
+      hookId,
+      installedHookDirectory,
+    );
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      status: "needsReview",
+      configUri,
+      source: recommended.source,
+      eventCounts: {},
+      missingByEvent: {},
+      warnings: [],
+      reason,
+    };
+  }
+
+  const eventCounts = getHookConfigEventCounts(normalizedConfig);
+  const warnings = await collectMissingCommandPathWarnings(
+    configRootUri,
+    normalizedConfig,
+  );
+
+  if (!(await fileExists(configUri))) {
+    return {
+      status: "notConfigured",
+      configUri,
+      source: recommended.source,
+      eventCounts,
+      missingByEvent: eventCounts,
+      warnings,
+      reason: "root hooks.json is missing",
+    };
+  }
+
+  let existingConfig: JsonObject;
+  try {
+    existingConfig = await readJsonFile(configUri);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      status: "needsReview",
+      configUri,
+      source: recommended.source,
+      eventCounts,
+      missingByEvent: eventCounts,
+      warnings,
+      reason: `root hooks.json is invalid: ${reason}`,
+    };
+  }
+
+  const mutation = mergeHookConfig(
+    existingConfig,
+    recommended.config,
+    hookId,
+    installedHookDirectory,
+  );
+  const missingByEvent = mutation.addedByEvent;
+  const hasMissingEntries = Object.keys(missingByEvent).length > 0;
+  if (mutation.reorderedEvents.length > 0) {
+    warnings.push(
+      toDiagnosticWarning(
+        `Hook order differs for: ${mutation.reorderedEvents.join(", ")}`,
+      ),
+    );
+  }
+  return {
+    status: hasMissingEntries ? "notConfigured" : "configured",
+    configUri,
+    source: recommended.source,
+    eventCounts,
+    missingByEvent,
+    warnings,
+  };
 }

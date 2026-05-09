@@ -7,7 +7,10 @@ const ts = require("typescript");
 const vm = require("vm");
 
 const repoRoot = path.resolve(__dirname, "..");
-const source = fs.readFileSync(path.join(repoRoot, "src", "mcpConfig.ts"), "utf8");
+const source = fs.readFileSync(
+  path.join(repoRoot, "src", "mcpConfig.ts"),
+  "utf8",
+);
 const output = ts.transpileModule(source, {
   compilerOptions: {
     module: ts.ModuleKind.CommonJS,
@@ -27,7 +30,11 @@ vm.runInNewContext(output, {
   Error,
 });
 
-const { getMcpConfigConflictServerKeys, mergeMcpConfig } = moduleObject.exports;
+const {
+  getMcpConfigConflictServerKeys,
+  getMcpConfigServerKeys,
+  mergeMcpConfig,
+} = moduleObject.exports;
 
 function assertJsonEqual(actual, expected) {
   assert.strictEqual(JSON.stringify(actual), JSON.stringify(expected));
@@ -46,7 +53,10 @@ function test(name, fn) {
 test("merge converts mcpServers resources into VS Code servers", () => {
   const result = mergeMcpConfig(undefined, {
     mcpServers: {
-      github: { command: "npx", args: ["-y", "@modelcontextprotocol/server-github"] },
+      github: {
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-github"],
+      },
     },
   });
 
@@ -54,6 +64,16 @@ test("merge converts mcpServers resources into VS Code servers", () => {
   assertJsonEqual(result.addedServers, ["github"]);
   assertJsonEqual(Object.keys(result.config.servers), ["github"]);
   assert.ok(!Object.hasOwn(result.config, "mcpServers"));
+});
+
+test("server key extraction supports servers and mcpServers", () => {
+  assertJsonEqual(
+    getMcpConfigServerKeys({
+      servers: { github: { command: "npx" } },
+      mcpServers: { azure: { command: "az" } },
+    }),
+    ["github", "azure"],
+  );
 });
 
 test("merge keeps existing server unless overwrite is confirmed", () => {
@@ -67,8 +87,12 @@ test("merge keeps existing server unless overwrite is confirmed", () => {
 });
 
 test("merge overwrites existing server only for confirmed keys", () => {
-  const existing = { servers: { github: { command: "old" }, azure: { command: "az" } } };
-  const recommended = { servers: { github: { command: "new" }, azure: { command: "new-az" } } };
+  const existing = {
+    servers: { github: { command: "old" }, azure: { command: "az" } },
+  };
+  const recommended = {
+    servers: { github: { command: "new" }, azure: { command: "new-az" } },
+  };
   const result = mergeMcpConfig(existing, recommended, ["github"]);
 
   assert.strictEqual(result.changed, true);

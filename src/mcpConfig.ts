@@ -4,6 +4,7 @@ export interface McpConfigChangeSummary {
   changed: boolean;
   addedServers: string[];
   overwrittenServers: string[];
+  removedServers: string[];
   skippedServers: string[];
   addedInputs: string[];
   skippedInputs: string[];
@@ -26,6 +27,7 @@ function createEmptySummary(): McpConfigChangeSummary {
     changed: false,
     addedServers: [],
     overwrittenServers: [],
+    removedServers: [],
     skippedServers: [],
     addedInputs: [],
     skippedInputs: [],
@@ -84,6 +86,12 @@ function getRecommendedServers(
     );
   }
   return servers;
+}
+
+export function getMcpConfigServerKeys(
+  recommendedConfig: JsonObject,
+): string[] {
+  return Object.keys(getRecommendedServers(recommendedConfig));
 }
 
 function getRecommendedInputs(recommendedConfig: JsonObject): JsonObject[] {
@@ -169,6 +177,34 @@ export function mergeMcpConfig(
     if (summary.addedInputs.length > 0) {
       config.inputs = inputs;
     }
+  }
+
+  return { config, ...summary };
+}
+
+export function removeMcpConfigServers(
+  existingConfig: unknown,
+  recommendedConfig: JsonObject,
+  serverKeysToRemove: Iterable<string>,
+): McpConfigMutationResult {
+  const config = prepareExistingConfig(existingConfig);
+  const servers = config.servers as Record<string, unknown>;
+  const recommendedServers = getRecommendedServers(recommendedConfig);
+  const removableKeys = new Set(serverKeysToRemove);
+  const summary = createEmptySummary();
+
+  for (const serverKey of Object.keys(recommendedServers)) {
+    if (!removableKeys.has(serverKey)) {
+      summary.skippedServers.push(serverKey);
+      continue;
+    }
+    if (!Object.hasOwn(servers, serverKey)) {
+      summary.skippedServers.push(serverKey);
+      continue;
+    }
+    delete servers[serverKey];
+    summary.removedServers.push(serverKey);
+    summary.changed = true;
   }
 
   return { config, ...summary };

@@ -31,7 +31,11 @@ import {
   formatHookConfigUpdateSummary,
   updateHookConfigForUninstall,
 } from "./hookConfigManager";
-import { formatMcpConfigUpdateSummary } from "./mcpConfigManager";
+import {
+  formatMcpConfigUpdateSummary,
+  getMcpConfigLifecycleStatus,
+  updateMcpConfigForUninstall,
+} from "./mcpConfigManager";
 import {
   updateInstructionFile,
   updateInstructionFileAtUri,
@@ -65,6 +69,7 @@ import { createChatParticipant } from "./chatParticipant";
 import { registerMcpTools } from "./mcpTools";
 import { logger, registerLogger } from "./logger";
 import {
+  detectResourceKindFromPath,
   getPluginIdFromPath,
   getResourceIdentityKeys,
   getResourceMetadataPath,
@@ -520,7 +525,7 @@ export function activate(context: vscode.ExtensionContext) {
     workspaceFolder?.uri,
     recentlyInstalled,
   );
-  const browseProvider = new BrowseSkillsProvider(context);
+  const browseProvider = new BrowseSkillsProvider(context, recentlyInstalled);
   const userResourcesProvider = new UserResourcesProvider(
     workspaceFolder?.uri,
     recentlyInstalled,
@@ -547,6 +552,7 @@ export function activate(context: vscode.ExtensionContext) {
       }
       if (changed) {
         workspaceProvider.refresh();
+        browseProvider.refresh();
         userResourcesProvider.refresh();
       }
     }, 15000);
@@ -556,6 +562,7 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     workspaceProvider.refresh();
+    browseProvider.refresh();
     userResourcesProvider.refresh();
   }
 
@@ -1542,6 +1549,48 @@ export function activate(context: vscode.ExtensionContext) {
       : { mcpInstallMode: "copyOnly" };
   }
 
+  async function maybeRemoveMergedMcpConfig(
+    workspaceUri: vscode.Uri,
+    mcpConfigUri: vscode.Uri,
+  ): Promise<
+    Awaited<ReturnType<typeof updateMcpConfigForUninstall>> | undefined
+  > {
+    const status = await getMcpConfigLifecycleStatus(
+      workspaceUri,
+      mcpConfigUri,
+    );
+    const mergedServerKeys = status.serverKeys.filter(
+      (serverKey) => !status.missingServerKeys.includes(serverKey),
+    );
+    if (mergedServerKeys.length === 0) {
+      return undefined;
+    }
+
+    const removeLabel = isJapanese()
+      ? ".vscode/mcp.json から削除"
+      : "Remove from .vscode/mcp.json";
+    const keepLabel = isJapanese()
+      ? "MCP config ファイルのみ削除"
+      : "Delete staged file only";
+    const choice = await vscode.window.showWarningMessage(
+      isJapanese()
+        ? `この MCP config は .vscode/mcp.json にマージ済みです。server (${mergedServerKeys.join(", ")}) も削除しますか？`
+        : `This MCP config is merged into .vscode/mcp.json. Remove server(s) (${mergedServerKeys.join(", ")}) as well?`,
+      { modal: true },
+      removeLabel,
+      keepLabel,
+    );
+    if (choice !== removeLabel) {
+      return undefined;
+    }
+
+    return updateMcpConfigForUninstall(
+      workspaceUri,
+      mcpConfigUri,
+      mergedServerKeys,
+    );
+  }
+
   async function installResource(
     skillOrItem: any,
     mode: "ask" | "default",
@@ -1572,8 +1621,13 @@ export function activate(context: vscode.ExtensionContext) {
       return false;
     }
 
+    const resourceKind = getResourceKind(skill);
     const mcpInstallOptions =
-      getResourceKind(skill) === "mcp" ? await pickMcpInstallMode(1) : {};
+      resourceKind === "mcp"
+        ? mode === "default"
+          ? { mcpInstallMode: "copyOnly" as const }
+          : await pickMcpInstallMode(1)
+        : {};
     if (!mcpInstallOptions) {
       return false;
     }
@@ -1615,13 +1669,21 @@ export function activate(context: vscode.ExtensionContext) {
         installResult?.hookConfigUpdate,
       );
       if (hookConfigSummary) {
+        logger.info(`[Resource Ninja] Hook config: ${hookConfigSummary}`);
         vscode.window.showInformationMessage(hookConfigSummary);
       }
       const mcpConfigSummary = formatMcpConfigUpdateSummary(
         installResult?.mcpConfigUpdate,
       );
       if (mcpConfigSummary) {
+        logger.info(`[Resource Ninja] MCP config: ${mcpConfigSummary}`);
         vscode.window.showInformationMessage(mcpConfigSummary);
+      } else if (resourceKind === "mcp") {
+        const message = isJapanese()
+          ? "MCP config を確認用にコピーしました。.vscode/mcp.json へのマージは明示操作が必要です。"
+          : "Copied MCP config for review. Merge into .vscode/mcp.json remains an explicit choice.";
+        logger.info(`[Resource Ninja] ${message}`);
+        vscode.window.showInformationMessage(message);
       }
       workspaceProvider.refresh();
       browseProvider.refresh();
@@ -1843,6 +1905,27 @@ export function activate(context: vscode.ExtensionContext) {
             | Awaited<ReturnType<typeof uninstallSkillByPath>>
             | Awaited<ReturnType<typeof uninstallSkill>>
             | undefined;
+          let mcpUninstallSummary: string | undefined;
+          if (relativePath) {
+            const normalizedRelativePath = relativePath.replace(/\\/g, "/");
+            const detectedKind = detectResourceKindFromPath(
+              normalizedRelativePath,
+            );
+            if (detectedKind === "mcp") {
+              const mcpConfigUri = path.isAbsolute(relativePath)
+                ? vscode.Uri.file(path.normalize(relativePath))
+                : vscode.Uri.joinPath(
+                    wsFolder.uri,
+                    ...normalizedRelativePath.split("/").filter(Boolean),
+                  );
+              const mcpUninstallResult = await maybeRemoveMergedMcpConfig(
+                wsFolder.uri,
+                mcpConfigUri,
+              );
+              mcpUninstallSummary =
+                formatMcpConfigUpdateSummary(mcpUninstallResult);
+            }
+          }
           // relativePath がある場合はそれを使って削除（より確実）
           if (relativePath) {
             uninstallResult = await uninstallSkillByPath(
@@ -1865,7 +1948,12 @@ export function activate(context: vscode.ExtensionContext) {
             uninstallResult?.hookConfigUpdate,
           );
           if (hookConfigSummary) {
+            logger.info(`[Resource Ninja] Hook config: ${hookConfigSummary}`);
             vscode.window.showInformationMessage(hookConfigSummary);
+          }
+          if (mcpUninstallSummary) {
+            logger.info(`[Resource Ninja] MCP config: ${mcpUninstallSummary}`);
+            vscode.window.showInformationMessage(mcpUninstallSummary);
           }
           workspaceProvider.refresh();
           browseProvider.refresh();

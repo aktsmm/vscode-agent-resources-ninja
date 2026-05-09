@@ -264,6 +264,32 @@ function getEntryCommand(entry: JsonObject): string | undefined {
   return undefined;
 }
 
+export function getHookConfigEventCounts(
+  config: JsonObject,
+): Record<string, number> {
+  const hooks = getRecommendedHooks(config);
+  return Object.fromEntries(
+    Object.entries(hooks).map(([eventName, entries]) => [
+      eventName,
+      entries.length,
+    ]),
+  );
+}
+
+export function getHookConfigCommandPaths(config: JsonObject): string[] {
+  const hooks = getRecommendedHooks(config);
+  const commands: string[] = [];
+  for (const entries of Object.values(hooks)) {
+    for (const entry of entries) {
+      const command = getEntryCommand(entry);
+      if (command) {
+        commands.push(command);
+      }
+    }
+  }
+  return commands;
+}
+
 function getHookEntryIdentity(eventName: string, entry: JsonObject): string {
   const type = typeof entry.type === "string" ? entry.type : "command";
   const matcher = typeof entry.matcher === "string" ? entry.matcher : "";

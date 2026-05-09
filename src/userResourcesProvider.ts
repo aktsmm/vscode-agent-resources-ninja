@@ -12,6 +12,15 @@ import {
 } from "./userResourceScanner";
 import { isJapanese } from "./i18n";
 import { getPluginIdFromPath, getResourceIdentityKeys } from "./resourceKinds";
+import {
+  formatMcpLifecycleLabel,
+  formatMcpLifecycleTooltipLines,
+  getMcpConfigLifecycleStatus,
+} from "./mcpConfigManager";
+import {
+  getHookConfigDiagnostics,
+  HookConfigDiagnostics,
+} from "./hookConfigManager";
 
 type UserResourceNodeType =
   | "scope"
@@ -45,6 +54,58 @@ function getScopeIcon(scope: UserResourceScope): string {
   }
 }
 
+function formatHookEventCounts(
+  eventCounts: Record<string, number>,
+): string | undefined {
+  const entries = Object.entries(eventCounts);
+  if (entries.length === 0) {
+    return undefined;
+  }
+  return entries
+    .map(([eventName, count]) => `${eventName}(${count})`)
+    .join(", ");
+}
+
+function formatHookDiagnosticsLabel(
+  diagnostics: HookConfigDiagnostics,
+  isJa: boolean,
+): string {
+  switch (diagnostics.status) {
+    case "configured":
+      return isJa ? "設定済み" : "Configured";
+    case "needsReview":
+      return isJa ? "確認が必要" : "Needs review";
+    case "notConfigured":
+    default:
+      return isJa ? "未設定" : "Not configured";
+  }
+}
+
+function formatHookDiagnosticsTooltipLines(
+  diagnostics: HookConfigDiagnostics,
+  isJa: boolean,
+): string[] {
+  const sourceLabel = isJa ? "設定ソース" : "Config source";
+  const rootLabel = isJa ? "Root hooks.json" : "Root hooks.json";
+  const eventsLabel = isJa ? "イベント" : "Events";
+  const missingLabel = isJa ? "未登録イベント" : "Missing events";
+  const warningsLabel = isJa ? "警告" : "Warnings";
+  const reasonLabel = isJa ? "理由" : "Reason";
+  const lines = [
+    `${sourceLabel}: ${diagnostics.source}`,
+    `${rootLabel}: ${diagnostics.configUri.fsPath}`,
+  ];
+  const events = formatHookEventCounts(diagnostics.eventCounts);
+  if (events) lines.push(`${eventsLabel}: ${events}`);
+  const missing = formatHookEventCounts(diagnostics.missingByEvent);
+  if (missing) lines.push(`${missingLabel}: ${missing}`);
+  if (diagnostics.reason) lines.push(`${reasonLabel}: ${diagnostics.reason}`);
+  if (diagnostics.warnings.length > 0) {
+    lines.push(`${warningsLabel}: ${diagnostics.warnings.join("; ")}`);
+  }
+  return lines;
+}
+
 export class UserResourcesProvider implements vscode.TreeDataProvider<UserResourceTreeItem> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<
     UserResourceTreeItem | undefined | null | void
@@ -76,6 +137,7 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
         this.workspaceUri,
         this.shouldShowBuiltInResources(),
       );
+      await this.enrichResourceStatuses();
       this.hasLoaded = true;
     }
 
@@ -341,6 +403,42 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
     return this.resources;
   }
 
+  private async enrichResourceStatuses(): Promise<void> {
+    for (const resource of this.resources) {
+      if (resource.isBuiltIn) {
+        continue;
+      }
+      if (resource.kind === "mcp") {
+        const status = await getMcpConfigLifecycleStatus(
+          this.workspaceUri,
+          vscode.Uri.file(resource.fullPath),
+        );
+        resource.lifecycleLabel = `${getResourceKindLabel(resource.kind, isJapanese())}: ${formatMcpLifecycleLabel(status, isJapanese())}`;
+        resource.lifecycleTooltipLines = formatMcpLifecycleTooltipLines(
+          status,
+          isJapanese(),
+        );
+      }
+      if (resource.kind === "hook") {
+        const diagnostics = await getHookConfigDiagnostics(
+          vscode.Uri.file(resource.rootFsPath),
+          vscode.Uri.file(resource.fullPath),
+        );
+        const events = formatHookEventCounts(diagnostics.eventCounts);
+        resource.lifecycleLabel = [
+          `${getResourceKindLabel(resource.kind, isJapanese())}: ${formatHookDiagnosticsLabel(diagnostics, isJapanese())}`,
+          events,
+        ]
+          .filter((part): part is string => !!part)
+          .join(" · ");
+        resource.lifecycleTooltipLines = formatHookDiagnosticsTooltipLines(
+          diagnostics,
+          isJapanese(),
+        );
+      }
+    }
+  }
+
   private createResourceItem(resource: UserResource): UserResourceTreeItem {
     const isRecent = getResourceIdentityKeys(resource).some((key) =>
       this.recentlyInstalled?.has(key),
@@ -351,7 +449,11 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
       : undefined;
     const description = resource.isBuiltIn
       ? `built-in · ${resource.tool}`
-      : [pluginLabel, resource.description || resource.relativePath]
+      : [
+          pluginLabel,
+          resource.lifecycleLabel,
+          resource.description || resource.relativePath,
+        ]
           .filter((part): part is string => !!part)
           .join(" · ");
     return new UserResourceTreeItem(
@@ -398,7 +500,10 @@ export class UserResourceTreeItem extends vscode.TreeItem {
       const pluginLine = pluginId
         ? `\n${isJapanese() ? "プラグイン" : "Plugin"}: ${pluginId}`
         : "";
-      this.tooltip = `${resource.name}\n${resource.description || "No description"}${pluginLine}\n${status}\n${resource.relativePath}\n${resource.fullPath}`;
+      const lifecycleLines = resource.lifecycleTooltipLines?.length
+        ? `\n${resource.lifecycleTooltipLines.join("\n")}`
+        : "";
+      this.tooltip = `${resource.name}\n${resource.description || "No description"}${pluginLine}${lifecycleLines}\n${status}\n${resource.relativePath}\n${resource.fullPath}`;
       this.command = {
         command: "resourceNinja.openUserResource",
         title: isJapanese() ? "リソースを開く" : "Open Resource",

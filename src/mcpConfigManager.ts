@@ -2,9 +2,11 @@ import * as path from "path";
 import * as vscode from "vscode";
 import {
   getMcpConfigConflictServerKeys,
+  getMcpConfigServerKeys,
   JsonObject,
   McpConfigMutationResult,
   mergeMcpConfig,
+  removeMcpConfigServers,
 } from "./mcpConfig";
 
 export interface McpConfigUpdateResult {
@@ -15,6 +17,7 @@ export interface McpConfigUpdateResult {
   reason?: string;
   addedServers: string[];
   overwrittenServers: string[];
+  removedServers: string[];
   skippedServers: string[];
   addedInputs: string[];
   skippedInputs: string[];
@@ -27,6 +30,15 @@ export interface McpConfigUpdateOptions {
     serverKeys: string[],
     configUri: vscode.Uri,
   ) => Promise<string[]>;
+}
+
+export interface McpConfigLifecycleStatus {
+  state: "staged" | "merged" | "stagedAndMerged" | "needsReview";
+  stagedPath: string;
+  targetPath?: string;
+  serverKeys: string[];
+  missingServerKeys: string[];
+  reason?: string;
 }
 
 async function fileExists(uri: vscode.Uri): Promise<boolean> {
@@ -96,6 +108,7 @@ function createEmptyResult(
     reason,
     addedServers: [],
     overwrittenServers: [],
+    removedServers: [],
     skippedServers: [],
     addedInputs: [],
     skippedInputs: [],
@@ -115,6 +128,7 @@ function toUpdateResult(
     backupUri,
     addedServers: mutation.addedServers,
     overwrittenServers: mutation.overwrittenServers,
+    removedServers: mutation.removedServers,
     skippedServers: mutation.skippedServers,
     addedInputs: mutation.addedInputs,
     skippedInputs: mutation.skippedInputs,
@@ -143,6 +157,9 @@ export function formatMcpConfigUpdateSummary(
     result.overwrittenServers.length
       ? `servers overwritten: ${result.overwrittenServers.join(", ")}`
       : "",
+    result.removedServers.length
+      ? `servers removed: ${result.removedServers.join(", ")}`
+      : "",
     result.skippedServers.length
       ? `servers skipped: ${result.skippedServers.join(", ")}`
       : "",
@@ -159,6 +176,135 @@ export function formatMcpConfigUpdateSummary(
   }
   const prefix = result.dryRun ? "mcp.json dry-run" : "mcp.json updated";
   return `${prefix}: ${parts.join("; ")}`;
+}
+
+export function formatMcpLifecycleLabel(
+  status: McpConfigLifecycleStatus,
+  isJa: boolean,
+): string {
+  switch (status.state) {
+    case "stagedAndMerged":
+      return isJa ? "確認用コピー + マージ済み" : "Staged + merged";
+    case "merged":
+      return isJa ? "マージ済み" : "Merged";
+    case "needsReview":
+      return isJa ? "確認が必要" : "Needs review";
+    case "staged":
+    default:
+      return isJa ? "確認用コピー" : "Staged for review";
+  }
+}
+
+export function formatMcpLifecycleTooltipLines(
+  status: McpConfigLifecycleStatus,
+  isJa: boolean,
+): string[] {
+  const stagedLabel = isJa ? "確認用コピー" : "Staged copy";
+  const targetLabel = isJa ? "マージ先" : "Merge target";
+  const serversLabel = isJa ? "MCP servers" : "MCP servers";
+  const missingLabel = isJa ? "未マージ server" : "Unmerged servers";
+  const reasonLabel = isJa ? "確認理由" : "Review reason";
+  const lines = [`${stagedLabel}: ${status.stagedPath}`];
+  if (status.targetPath) {
+    lines.push(`${targetLabel}: ${status.targetPath}`);
+  }
+  if (status.serverKeys.length > 0) {
+    lines.push(`${serversLabel}: ${status.serverKeys.join(", ")}`);
+  }
+  if (status.missingServerKeys.length > 0) {
+    lines.push(`${missingLabel}: ${status.missingServerKeys.join(", ")}`);
+  }
+  if (status.reason) {
+    lines.push(`${reasonLabel}: ${status.reason}`);
+  }
+  return lines;
+}
+
+export async function getMcpConfigLifecycleStatus(
+  workspaceUri: vscode.Uri | undefined,
+  installedMcpConfigUri: vscode.Uri,
+): Promise<McpConfigLifecycleStatus> {
+  let recommendedConfig: JsonObject;
+  try {
+    recommendedConfig = await readJsonFile(installedMcpConfigUri);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      state: "needsReview",
+      stagedPath: installedMcpConfigUri.fsPath,
+      serverKeys: [],
+      missingServerKeys: [],
+      reason: `installed MCP config is invalid: ${reason}`,
+    };
+  }
+
+  let serverKeys: string[];
+  try {
+    serverKeys = getMcpConfigServerKeys(recommendedConfig);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      state: "needsReview",
+      stagedPath: installedMcpConfigUri.fsPath,
+      serverKeys: [],
+      missingServerKeys: [],
+      reason,
+    };
+  }
+
+  if (!workspaceUri) {
+    return {
+      state: "staged",
+      stagedPath: installedMcpConfigUri.fsPath,
+      serverKeys,
+      missingServerKeys: serverKeys,
+    };
+  }
+
+  const targetUri = getWorkspaceMcpConfigUri(workspaceUri);
+  if (!(await fileExists(targetUri))) {
+    return {
+      state: "staged",
+      stagedPath: installedMcpConfigUri.fsPath,
+      targetPath: targetUri.fsPath,
+      serverKeys,
+      missingServerKeys: serverKeys,
+    };
+  }
+
+  let workspaceConfig: JsonObject;
+  try {
+    workspaceConfig = await readJsonFile(targetUri);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      state: "needsReview",
+      stagedPath: installedMcpConfigUri.fsPath,
+      targetPath: targetUri.fsPath,
+      serverKeys,
+      missingServerKeys: serverKeys,
+      reason: `.vscode/mcp.json is invalid: ${reason}`,
+    };
+  }
+
+  const workspaceServers = workspaceConfig.servers;
+  const installedServers =
+    typeof workspaceServers === "object" &&
+    workspaceServers !== null &&
+    !Array.isArray(workspaceServers)
+      ? new Set(Object.keys(workspaceServers))
+      : new Set<string>();
+  const missingServerKeys = serverKeys.filter(
+    (serverKey) => !installedServers.has(serverKey),
+  );
+  const merged = serverKeys.length > 0 && missingServerKeys.length === 0;
+  return {
+    state: merged ? "stagedAndMerged" : "staged",
+    stagedPath: installedMcpConfigUri.fsPath,
+    targetPath: targetUri.fsPath,
+    serverKeys,
+    missingServerKeys,
+  };
 }
 
 export async function updateMcpConfigForInstall(
@@ -208,6 +354,59 @@ export async function updateMcpConfigForInstall(
     if (await fileExists(configUri)) {
       backupUri = await createMcpJsonBackup(configUri);
     }
+    await vscode.workspace.fs.writeFile(
+      configUri,
+      Buffer.from(`${JSON.stringify(mutation.config, null, 2)}\n`, "utf-8"),
+    );
+  }
+
+  return toUpdateResult(configUri, mutation, options.dryRun, backupUri);
+}
+
+export async function updateMcpConfigForUninstall(
+  workspaceUri: vscode.Uri,
+  installedMcpConfigUri: vscode.Uri,
+  serverKeysToRemove: string[],
+  options: Pick<McpConfigUpdateOptions, "dryRun"> = {},
+): Promise<McpConfigUpdateResult> {
+  const configUri = getWorkspaceMcpConfigUri(workspaceUri);
+  if (serverKeysToRemove.length === 0) {
+    return createEmptyResult(
+      configUri,
+      "no MCP server keys were selected for removal",
+    );
+  }
+
+  let recommendedConfig: JsonObject;
+  try {
+    recommendedConfig = await readJsonFile(installedMcpConfigUri);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return createEmptyResult(
+      configUri,
+      `installed MCP config is invalid: ${reason}`,
+    );
+  }
+
+  const { config: existingConfig } =
+    await readWorkspaceMcpConfigOrBackup(configUri);
+  if (!existingConfig) {
+    return createEmptyResult(configUri, ".vscode/mcp.json does not exist");
+  }
+
+  const mutation = removeMcpConfigServers(
+    existingConfig,
+    recommendedConfig,
+    serverKeysToRemove,
+  );
+
+  if (!mutation.changed) {
+    return toUpdateResult(configUri, mutation, options.dryRun);
+  }
+
+  let backupUri: vscode.Uri | undefined;
+  if (!options.dryRun) {
+    backupUri = await createMcpJsonBackup(configUri);
     await vscode.workspace.fs.writeFile(
       configUri,
       Buffer.from(`${JSON.stringify(mutation.config, null, 2)}\n`, "utf-8"),

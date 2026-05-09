@@ -69,6 +69,9 @@ It gives you three practical views for everyday resource management: **Workspace
 - Search resources by keyword (local & GitHub)
 - Filter QuickPick search results by resource kind: skills, agents, instructions, prompts, hooks, MCP config resources, plugins, or Cursor rules
 - **Install Sets** are curated, selectable install groups. **Grouped by Plugin** shows plugin package manifests and their indexed child resources together; each child resource also remains visible under its own resource kind with plugin origin shown in the row details.
+- Remote rows show installed state in text and color for every resource kind, including agents, hooks, MCP config resources, plugins, and Cursor rules.
+- MCP config rows distinguish review copies from `.vscode/mcp.json` merges with staged / merged status in row details and tooltips.
+- Hook rows show static configuration diagnostics such as configured / not configured status, config source, events, and missing script warnings. Agent Resources Ninja does not run hooks.
 - **Multi-keyword Search** - Scored by name, path, description relevance
 - **Parallel Fetch** - Fast results with 50 concurrent requests
 - **Fallback Search** - Auto-retry with fewer keywords if no results
@@ -78,9 +81,11 @@ It gives you three practical views for everyday resource management: **Workspace
 
 ### 📦 Install & Manage
 
-- Double-click installation defaults to Workspace, with a setting for Ask / User Profile / Global Resource Home
-- Context menu installation always shows the target picker for Workspace, User Profile, Global Resource Home, or Custom
-- MCP config resources are copied to the Workspace MCP Directory first, then you can keep them for review or explicitly merge compatible servers into `.vscode/mcp.json`; existing server keys always require overwrite confirmation.
+- One-click default install applies to every resource kind: skills, agents, instructions, prompts, hooks, MCP config, plugin manifests, and Cursor rules. Click and double-click installs use **Default Install Target**; the context menu **Install Resource** still asks for a target and supports Custom.
+- Click and double-click installs of MCP config resources copy the file to the Workspace MCP Directory for review without modifying `.vscode/mcp.json`. To merge compatible servers into `.vscode/mcp.json`, use the context-menu **Install Resource** action and pick the merge option; existing server keys always require overwrite confirmation.
+- Uninstalling an MCP config that has been merged into `.vscode/mcp.json` shows an explicit modal to also remove the matching server entries with a backup before deletion.
+- Installed MCP config resources continue to show whether they are only staged for review or already represented in `.vscode/mcp.json`.
+- Installed hook resources show whether their recommended entries are present in root `hooks.json` and whether referenced scripts are missing; diagnostics are static checks only, not hook execution.
 - Plugin manifest resources install as managed copies under `.github/plugins/<plugin>` or Global Resource Home `plugins/<plugin>`. Hooks, executable assets, and MCP config included in a plugin are copied for review and are not run or activated automatically.
 - Auto-update the generated **Agent Skills index** in instruction files (AGENTS.md / copilot-instructions.md / CLAUDE.md) when skill resources change
 - **Table Format** - Skill entries displayed in a generated table with a "When to Use" column
@@ -222,7 +227,7 @@ Generic MCP config file names such as `mcp.json` and `.mcp.json` are installed w
 - Repository-first groups by source, then skills, agents, instructions, prompts, hooks, MCP config resources, plugins, and Cursor rules
 - Resource-type-first groups by skills, agents, instructions, prompts, hooks, MCP config resources, plugins, and Cursor rules, then source
 - Repository sections are ordered Official → Curated → Community
-- Shows installed status with green icons
+- Shows installed status with green icons and explicit `Installed` row details across all resource kinds
 - Double-click install from list; optional single-click install uses the configured default target
 
 ### Icon Legend

@@ -101,7 +101,7 @@ const {
     removeHookConfig,
     extractRecommendedHookConfigFromReadme,
   },
-  hookConfigManager: { updateHookConfigForInstall },
+  hookConfigManager: { getHookConfigDiagnostics, updateHookConfigForInstall },
 } = loadModules();
 
 test("first hook install creates hooks config from known fallback", () => {
@@ -310,6 +310,61 @@ test("invalid root hooks.json is backed up and not overwritten", async () => {
     await fs.promises.readFile(path.join(tempRoot, "hooks.json"), "utf8"),
     "{ bad json",
   );
+});
+
+test("hook diagnostics report missing root config and script warnings", async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ninja-hooks-diag-"));
+  const rootUri = vscode.Uri.file(tempRoot);
+  const hookDir = path.join(tempRoot, ".github", "hooks", "session-logger");
+  await fs.promises.mkdir(hookDir, { recursive: true });
+  await fs.promises.writeFile(
+    path.join(hookDir, "README.md"),
+    "# Session Logger\n",
+  );
+
+  const diagnostics = await getHookConfigDiagnostics(
+    rootUri,
+    vscode.Uri.file(path.join(hookDir, "README.md")),
+  );
+
+  assert.strictEqual(diagnostics.status, "notConfigured");
+  assert.strictEqual(diagnostics.source, "known");
+  assert.deepStrictEqual(diagnostics.eventCounts, {
+    sessionStart: 1,
+    userPromptSubmitted: 1,
+    sessionEnd: 1,
+  });
+  assert.ok(
+    diagnostics.warnings.some((warning) => /Missing script/.test(warning)),
+  );
+});
+
+test("hook diagnostics report configured root config", async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ninja-hooks-diag-"));
+  const rootUri = vscode.Uri.file(tempRoot);
+  const hookDir = path.join(tempRoot, ".github", "hooks", "secrets-scanner");
+  await fs.promises.mkdir(hookDir, { recursive: true });
+  await fs.promises.writeFile(
+    path.join(hookDir, "README.md"),
+    "# Secrets Scanner\n",
+  );
+  await fs.promises.writeFile(
+    path.join(hookDir, "scan-secrets.sh"),
+    "#!/usr/bin/env bash\n",
+  );
+  await updateHookConfigForInstall(
+    rootUri,
+    vscode.Uri.file(path.join(hookDir, "README.md")),
+  );
+
+  const diagnostics = await getHookConfigDiagnostics(
+    rootUri,
+    vscode.Uri.file(path.join(hookDir, "README.md")),
+  );
+
+  assert.strictEqual(diagnostics.status, "configured");
+  assert.deepStrictEqual(diagnostics.missingByEvent, {});
+  assert.deepStrictEqual(diagnostics.warnings, []);
 });
 
 process.on("beforeExit", () => {

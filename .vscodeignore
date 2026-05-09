@@ -37,3 +37,9 @@ output_blog_tips/**
 docs/screenshots/**
 scripts/**
 test/**
+
+# Temp / scratch files that may appear during local builds and reviews
+vsce-ls.txt
+*.tmp
+*.bak
+*.bak-*

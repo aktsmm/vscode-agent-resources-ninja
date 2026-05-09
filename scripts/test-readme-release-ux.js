@@ -153,15 +153,20 @@ test("README token guidance follows least privilege", () => {
 });
 
 test("README MCP config safety copy explains explicit merge choice", () => {
-  assert.match(readme, /copied to the Workspace MCP Directory first/);
+  assert.match(readme, /Workspace MCP Directory/);
+  assert.match(readme, /merge compatible servers into `\.vscode\/mcp\.json`/);
+  assert.match(readme, /overwrite confirmation/);
   assert.match(
     readme,
-    /explicitly merge compatible servers into `\.vscode\/mcp\.json`/,
+    /copy-only review file under the Workspace MCP Directory|copy the file to the Workspace MCP Directory for review/,
   );
-  assert.match(readme, /overwrite confirmation/);
-  assert.match(readmeJa, /いったん Workspace MCP Directory へコピー/);
-  assert.match(readmeJa, /`\.vscode\/mcp\.json` へ明示的にマージ/);
-  assert.match(readmeJa, /上書きは必ず確認/);
+  assert.match(readmeJa, /Workspace MCP Directory/);
+  assert.match(
+    readmeJa,
+    /`\.vscode\/mcp\.json` (?:へ明示的にマージ|にマージしたい)/,
+  );
+  assert.match(readmeJa, /上書きは必ず確認|上書き(?:は|を)?必ず確認/);
+  assert.match(readmeJa, /レビュー用にコピーするのみ|確認用にコピー/);
 });
 
 test("README explains nested SKILL contents are not standalone remote resources", () => {

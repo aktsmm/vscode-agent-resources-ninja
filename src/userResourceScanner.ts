@@ -43,7 +43,10 @@ export interface UserResource {
   scopeLabel: string;
   tool: string;
   rootLabel: string;
+  rootFsPath: string;
   isBuiltIn?: boolean;
+  lifecycleLabel?: string;
+  lifecycleTooltipLines?: string[];
 }
 
 interface ResourceInstallMeta {
@@ -358,6 +361,7 @@ async function parseResourceFile(
     scopeLabel: root.label,
     tool: isBuiltIn ? getBuiltInResourceSourceLabel(fileUri.fsPath) : root.tool,
     rootLabel: root.label,
+    rootFsPath: root.uri.fsPath,
     isBuiltIn,
   };
 }

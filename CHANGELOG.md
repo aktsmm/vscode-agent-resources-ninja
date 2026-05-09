@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-05-09
+
+### Added
+
+- ✨ **Universal One-Click Install** - Click and double-click installs in Remote Resources now apply to every resource kind, including agents, instructions, prompts, hooks, MCP config, plugin manifests, and Cursor rules. MCP config resources install as a copy-only review file under the Workspace MCP Directory; merging into `.vscode/mcp.json` remains an explicit context-menu action / Remote Resources のシングルクリック / ダブルクリックが skill 以外の agents、instructions、prompts、hooks、MCP config、plugin manifest、Cursor rules を含むすべての resource kind に適用されるようになりました。MCP config はワークスペース MCP ディレクトリへの review コピーで完了し、`.vscode/mcp.json` へのマージはコンテキストメニューでの明示操作のままです。
+- 🛡️ **MCP Merge-Aware Uninstall** - When uninstalling an MCP config that has been merged into `.vscode/mcp.json`, Resource Ninja now offers an explicit modal to also remove the matching server entries with backup before deletion / `.vscode/mcp.json` にマージ済みの MCP config をアンインストールするときに、マージ済み server を `.vscode/mcp.json` から削除するか確認する明示モーダルを追加し、削除前に backup を作成するようにしました。
+- 🪝 **Hook Static Diagnostics in Resource Rows** - Hook resource rows now show static diagnostics such as configured / not configured status, config source, registered events, and missing-script warnings without ever executing hooks / hook 行に静的診断を追加し、設定済み / 未設定、config source、登録イベント、missing script 警告を表示します。フックを実行することはありません。
+- 🧭 **MCP Lifecycle Status in Resource Rows** - Installed MCP config resources show whether they are staged for review, merged into `.vscode/mcp.json`, or need review, in both row description and tooltip / インストール済み MCP config 行に staged / merged / Needs review のライフサイクル状態を description と tooltip に表示するようにしました。
+- ✅ **Installed Badge for Every Resource Kind** - Remote Resources rows display Installed / Recently installed badges and check icons for agents, hooks, MCP, plugin, and Cursor rule resources, not only skills / Remote Resources 行に skill だけでなく agent、hook、MCP、plugin、Cursor rule のインストール状態を表示するようにしました。
+
+### Fixed
+
+- 🐛 **MCP Default Click Was Not Truly One-Click** - Default click and double-click installs no longer prompt for the MCP activation picker; the picker is reserved for the explicit Install Resource command, keeping click installs predictable / シングルクリック / ダブルクリックの default install が MCP の有効化方法ピッカーで止まっていた挙動を修正し、ピッカーは明示の Install Resource コマンドだけで表示するようにしました。
+
+### Changed
+
+- 📝 **Release Hygiene** - Updated `.gitignore` and `.vscodeignore` to keep transient `vsce ls` output, scratch backups, and tmp files out of both repository and Marketplace package / `.gitignore` と `.vscodeignore` を見直し、`vsce ls` の一時出力、スクラッチ backup、tmp ファイルが repo にも Marketplace package にも入らないようにしました。
+- 📚 **README and Settings Wording** - README and README_ja now describe one-click default install for every resource kind, MCP staged/merged status, and hook static diagnostics, with no implication that hooks are executed / README と README_ja を更新し、すべての resource kind の one-click default install、MCP の staged / merged 状態、hook の静的診断を説明し、hook を実行する誤解が出ないようにしました。
+
+### Tests
+
+- 🧪 **Representative Resource Flow Coverage** - Added `scripts/test-representative-flows.js` covering install path, idempotent reinstall, uninstall path, click-install command, MCP copy-only default click, hook static diagnostics surfacing, and merged MCP uninstall confirmation for every resource kind / 代表 resource kind ごとに install path、idempotent reinstall、uninstall path、click install command、MCP copy-only default、hook 診断、MCP merged uninstall 確認を回帰する `scripts/test-representative-flows.js` を追加しました。
+- 🧪 **Lifecycle Helper Coverage** - Extended `test-mcp-config-merge.js` and `test-hook-config.js` to cover the new merge-aware uninstall helper, lifecycle status helpers, and hook diagnostics output / `test-mcp-config-merge.js` と `test-hook-config.js` を拡張し、merge-aware uninstall helper、lifecycle 状態 helper、hook 診断出力までカバーしました。
+
 ## [0.2.6] - 2026-05-09
 
 ### Changed

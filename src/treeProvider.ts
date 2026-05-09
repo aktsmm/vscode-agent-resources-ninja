@@ -20,6 +20,15 @@ import { LocalSkill, scanLocalSkills } from "./localSkillScanner";
 import { isJapanese } from "./i18n";
 import { getSkillId } from "./skillPreview";
 import {
+  formatMcpLifecycleLabel,
+  formatMcpLifecycleTooltipLines,
+  getMcpConfigLifecycleStatus,
+} from "./mcpConfigManager";
+import {
+  getHookConfigDiagnostics,
+  HookConfigDiagnostics,
+} from "./hookConfigManager";
+import {
   getInstalledResourceKey,
   getPluginIdFromPath,
   getPluginPackageCandidates,
@@ -78,6 +87,66 @@ export interface WorkspaceSkill {
   license?: string; // ライセンス（例: MIT, Apache-2.0）
   author?: string; // 作成者
   version?: string; // バージョン
+  lifecycleLabel?: string;
+  lifecycleTooltipLines?: string[];
+}
+
+function formatHookEventCounts(
+  eventCounts: Record<string, number>,
+): string | undefined {
+  const entries = Object.entries(eventCounts);
+  if (entries.length === 0) {
+    return undefined;
+  }
+  return entries
+    .map(([eventName, count]) => `${eventName}(${count})`)
+    .join(", ");
+}
+
+function formatHookDiagnosticsLabel(
+  diagnostics: HookConfigDiagnostics,
+  isJa: boolean,
+): string {
+  switch (diagnostics.status) {
+    case "configured":
+      return isJa ? "設定済み" : "Configured";
+    case "needsReview":
+      return isJa ? "確認が必要" : "Needs review";
+    case "notConfigured":
+    default:
+      return isJa ? "未設定" : "Not configured";
+  }
+}
+
+function formatHookDiagnosticsTooltipLines(
+  diagnostics: HookConfigDiagnostics,
+  isJa: boolean,
+): string[] {
+  const sourceLabel = isJa ? "設定ソース" : "Config source";
+  const rootLabel = isJa ? "Root hooks.json" : "Root hooks.json";
+  const eventsLabel = isJa ? "イベント" : "Events";
+  const missingLabel = isJa ? "未登録イベント" : "Missing events";
+  const warningsLabel = isJa ? "警告" : "Warnings";
+  const reasonLabel = isJa ? "理由" : "Reason";
+  const lines = [
+    `${sourceLabel}: ${diagnostics.source}`,
+    `${rootLabel}: ${diagnostics.configUri.fsPath}`,
+  ];
+  const events = formatHookEventCounts(diagnostics.eventCounts);
+  if (events) {
+    lines.push(`${eventsLabel}: ${events}`);
+  }
+  const missing = formatHookEventCounts(diagnostics.missingByEvent);
+  if (missing) {
+    lines.push(`${missingLabel}: ${missing}`);
+  }
+  if (diagnostics.reason) {
+    lines.push(`${reasonLabel}: ${diagnostics.reason}`);
+  }
+  if (diagnostics.warnings.length > 0) {
+    lines.push(`${warningsLabel}: ${diagnostics.warnings.join("; ")}`);
+  }
+  return lines;
 }
 
 /**
@@ -329,11 +398,14 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
         : skill.isInstalled
           ? [
               sourceLabel ? `installed from ${sourceLabel}` : "installed",
+              skill.lifecycleLabel,
               workspacePluginLabel,
             ]
               .filter((part): part is string => !!part)
               .join(" · ")
-          : skill.relativePath,
+          : [skill.lifecycleLabel, skill.relativePath]
+              .filter((part): part is string => !!part)
+              .join(" · "),
       vscode.TreeItemCollapsibleState.None,
       contextValue,
       {
@@ -396,7 +468,10 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
     }
 
     const pluginInfo = workspacePluginLabel ? `\n${workspacePluginLabel}` : "";
-    item.tooltip = `${skill.name}\n${descText}${pluginInfo}\n${pathLabel}: ${skill.relativePath}\n${statusLabel}: ${statusText}${metaInfo}`;
+    const lifecycleInfo = skill.lifecycleTooltipLines?.length
+      ? `\n${skill.lifecycleTooltipLines.join("\n")}`
+      : "";
+    item.tooltip = `${skill.name}\n${descText}${pluginInfo}${lifecycleInfo}\n${pathLabel}: ${skill.relativePath}\n${statusLabel}: ${statusText}${metaInfo}`;
     item.command = {
       command: "vscode.open",
       title: isJapanese() ? "リソースを開く" : "Open Resource",
@@ -515,6 +590,45 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
       if (orderA !== orderB) return orderA - orderB;
       return a.name.localeCompare(b.name);
     });
+
+    await this.enrichWorkspaceResourceStatuses();
+  }
+
+  private async enrichWorkspaceResourceStatuses(): Promise<void> {
+    if (!this.workspaceUri) {
+      return;
+    }
+    for (const resource of this.workspaceSkills) {
+      const kind = resource.kind || "skill";
+      if (kind === "mcp") {
+        const status = await getMcpConfigLifecycleStatus(
+          this.workspaceUri,
+          vscode.Uri.file(resource.fullPath),
+        );
+        resource.lifecycleLabel = `${getResourceKindLabel(kind, isJapanese())}: ${formatMcpLifecycleLabel(status, isJapanese())}`;
+        resource.lifecycleTooltipLines = formatMcpLifecycleTooltipLines(
+          status,
+          isJapanese(),
+        );
+      }
+      if (kind === "hook") {
+        const diagnostics = await getHookConfigDiagnostics(
+          this.workspaceUri,
+          vscode.Uri.file(resource.fullPath),
+        );
+        const events = formatHookEventCounts(diagnostics.eventCounts);
+        resource.lifecycleLabel = [
+          `${getResourceKindLabel(kind, isJapanese())}: ${formatHookDiagnosticsLabel(diagnostics, isJapanese())}`,
+          events,
+        ]
+          .filter((part): part is string => !!part)
+          .join(" · ");
+        resource.lifecycleTooltipLines = formatHookDiagnosticsTooltipLines(
+          diagnostics,
+          isJapanese(),
+        );
+      }
+    }
   }
 
   /**
@@ -540,7 +654,10 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
   private skillIndex: SkillIndex | undefined;
   private installedSkillNames: Set<string> = new Set();
 
-  constructor(private context: vscode.ExtensionContext) {}
+  constructor(
+    private context: vscode.ExtensionContext,
+    private recentlyInstalled?: Set<string>,
+  ) {}
 
   refresh(): void {
     this.skillIndex = undefined;
@@ -1147,6 +1264,9 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
     );
     return resources.map((skill) => {
       const isInstalled = this.isSkillInstalled(skill);
+      const isRecent = getResourceIdentityKeys(skill).some((key) =>
+        this.recentlyInstalled?.has(key),
+      );
       const isCore = skill.name === coreSkill;
       const prefix = isCore ? "⭐ " : skill.standalone === false ? "🔗 " : "";
       const kind = getResourceKind(skill);
@@ -1157,6 +1277,12 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
           ? undefined
           : getPluginPackageLabel(pluginPackageId, pluginPackages);
       const descriptionParts = [
+        isRecent
+          ? isJa
+            ? "最近インストール"
+            : "Recently installed"
+          : undefined,
+        isInstalled ? (isJa ? "インストール済み" : "Installed") : undefined,
         pluginLabel
           ? `${isJa ? "プラグイン" : "Plugin"}: ${pluginLabel}`
           : undefined,
@@ -1164,7 +1290,9 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
         getLocalizedDescription(skill, isJa),
       ].filter((part): part is string => !!part);
       const item = new SkillTreeItem(
-        isInstalled ? `✓ ${prefix}${skill.name}` : `${prefix}${skill.name}`,
+        isInstalled
+          ? `${isRecent ? "🆕 " : ""}✓ ${prefix}${skill.name}`
+          : `${isRecent ? "🆕 " : ""}${prefix}${skill.name}`,
         descriptionParts.join(" · "),
         vscode.TreeItemCollapsibleState.None,
         "skill",
@@ -1179,6 +1307,15 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
           getResourceKindIcon(kind),
           new vscode.ThemeColor("charts.green"),
         );
+        item.tooltip = `${item.tooltip}\n${isJa ? "状態" : "Status"}: ${
+          isRecent
+            ? isJa
+              ? "最近インストール / インストール済み"
+              : "Recently installed / Installed"
+            : isJa
+              ? "インストール済み"
+              : "Installed"
+        }`;
       } else {
         item.iconPath = new vscode.ThemeIcon(getResourceKindIcon(kind));
         const singleClickInstall = vscode.workspace

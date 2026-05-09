@@ -205,6 +205,47 @@ test("plugin grouping labels distinguish remote contents from installed origins"
   assert.match(userResourcesProviderSource, /プラグイン別/);
 });
 
+test("resource rows expose installed mcp and hook lifecycle states", () => {
+  assert.match(treeProviderSource, /Recently installed/);
+  assert.match(treeProviderSource, /Installed/);
+  assert.match(treeProviderSource, /formatMcpLifecycleLabel/);
+  assert.match(treeProviderSource, /formatHookDiagnosticsLabel/);
+  assert.match(userResourcesProviderSource, /formatMcpLifecycleLabel/);
+  assert.match(userResourcesProviderSource, /formatHookDiagnosticsLabel/);
+  assert.match(extensionSource, /Copied MCP config for review/);
+  assert.match(extensionSource, /Hook config:/);
+});
+
+test("remote resource rows support click installs for every resource kind", () => {
+  assert.match(treeProviderSource, /getResourceKind\(skill\)/);
+  assert.match(treeProviderSource, /command: singleClickInstall/);
+  assert.match(treeProviderSource, /resourceNinja\.installDefault/);
+  assert.match(treeProviderSource, /resourceNinja\.onSkillClick/);
+  for (const kind of [
+    "skill",
+    "agent",
+    "instruction",
+    "prompt",
+    "hook",
+    "mcp",
+    "plugin",
+    "cursor-rule",
+  ]) {
+    assert.match(treeProviderSource, new RegExp(`"${kind}"`));
+  }
+});
+
+test("default click installs mcp configs as copy-only without activation picker", () => {
+  assert.match(
+    extensionSource,
+    /resourceKind === "mcp"[\s\S]*mode === "default"[\s\S]*mcpInstallMode: "copyOnly"/,
+  );
+  assert.match(
+    extensionSource,
+    /mode === "default"[\s\S]*: await pickMcpInstallMode\(1\)/,
+  );
+});
+
 test("instruction file creation dialog is localized", () => {
   assert.match(
     extensionSource,

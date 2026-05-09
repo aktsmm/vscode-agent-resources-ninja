@@ -14,6 +14,9 @@ compile-output.txt
 AGENTS.md.backup
 AGENTS.md
 *.bak-*
+*.bak
+*.tmp
+vsce-ls.txt
 .vscode/mcp.json.bak-*
 scripts/debug-*.js
 .github/*
