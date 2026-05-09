@@ -321,7 +321,7 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
       0,
     );
     const item = new UserResourceTreeItem(
-      isJapanese() ? "プラグイン由来" : "Plugin-derived",
+      isJapanese() ? "プラグイン別" : "Grouped by Plugin",
       `${pluginGroups.length} groups · ${resourceCount} resources`,
       vscode.TreeItemCollapsibleState.Collapsed,
       "pluginSection",
@@ -345,11 +345,18 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
     const isRecent = getResourceIdentityKeys(resource).some((key) =>
       this.recentlyInstalled?.has(key),
     );
+    const pluginId = getPluginIdFromPath(resource.remotePath);
+    const pluginLabel = pluginId
+      ? `${isJapanese() ? "プラグイン" : "Plugin"}: ${pluginId}`
+      : undefined;
+    const description = resource.isBuiltIn
+      ? `built-in · ${resource.tool}`
+      : [pluginLabel, resource.description || resource.relativePath]
+          .filter((part): part is string => !!part)
+          .join(" · ");
     return new UserResourceTreeItem(
       `${isRecent ? "🆕 " : ""}${resource.name}`,
-      resource.isBuiltIn
-        ? `built-in · ${resource.tool}`
-        : resource.description || resource.relativePath,
+      description,
       vscode.TreeItemCollapsibleState.None,
       "resource",
       resource,
@@ -387,7 +394,11 @@ export class UserResourceTreeItem extends vscode.TreeItem {
       const status = resource.isBuiltIn
         ? `Built-in · ${resource.tool}`
         : resource.scopeLabel;
-      this.tooltip = `${resource.name}\n${resource.description || "No description"}\n${status}\n${resource.relativePath}\n${resource.fullPath}`;
+      const pluginId = getPluginIdFromPath(resource.remotePath);
+      const pluginLine = pluginId
+        ? `\n${isJapanese() ? "プラグイン" : "Plugin"}: ${pluginId}`
+        : "";
+      this.tooltip = `${resource.name}\n${resource.description || "No description"}${pluginLine}\n${status}\n${resource.relativePath}\n${resource.fullPath}`;
       this.command = {
         command: "resourceNinja.openUserResource",
         title: isJapanese() ? "リソースを開く" : "Open Resource",

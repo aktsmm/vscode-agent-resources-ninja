@@ -101,6 +101,106 @@ function getPluginRootFromManifestPath(resourcePath) {
   return markerMatch[1].replace(/\/+$/, "") || ".";
 }
 
+function getPluginIdFromPath(resourcePath) {
+  const normalizedPath = String(resourcePath || "").replace(/\\/g, "/");
+  const match = normalizedPath.match(/^plugins\/([^/]+)\//i);
+  if (match?.[1]) return match[1];
+  return normalizedPath.match(/^\.github\/plugins\/([^/]+)\//i)?.[1];
+}
+
+function normalizePluginRoot(root) {
+  if (!root) return undefined;
+  const normalizedRoot = root.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  return normalizedRoot || ".";
+}
+
+function getPluginPackageKey(source, root) {
+  return `${source}:${root}`;
+}
+
+function getPluginFallbackRoot(resourcePath) {
+  const pluginId = getPluginIdFromPath(resourcePath);
+  return pluginId ? `plugins/${pluginId}` : undefined;
+}
+
+function getPluginPackageRoot(resource) {
+  if (resource.kind === "plugin") {
+    return normalizePluginRoot(
+      resource.pluginRoot ||
+        getPluginRootFromManifestPath(
+          resource.pluginManifestPath || resource.path,
+        ),
+    );
+  }
+  return getPluginFallbackRoot(resource.path);
+}
+
+function getPluginPackageCandidates(resources) {
+  const packages = new Map();
+  for (const resource of resources) {
+    if (
+      (resource.kind || detectResourceKindFromPath(resource.path)) !== "plugin"
+    ) {
+      continue;
+    }
+    if (resource.pluginManifestKind === "marketplace") {
+      continue;
+    }
+    const root = getPluginPackageRoot(resource);
+    if (!root) continue;
+    const id = getPluginPackageKey(resource.source, root);
+    const existing = packages.get(id);
+    if (existing) {
+      existing.manifestPaths.push(resource.pluginManifestPath || resource.path);
+      continue;
+    }
+    packages.set(id, {
+      id,
+      label: resource.name || (root === "." ? resource.source : root),
+      source: resource.source,
+      root,
+      manifestPaths: [resource.pluginManifestPath || resource.path],
+    });
+  }
+  for (const resource of resources) {
+    const fallbackRoot = getPluginFallbackRoot(resource.path);
+    if (!fallbackRoot) continue;
+    const id = getPluginPackageKey(resource.source, fallbackRoot);
+    if (packages.has(id)) continue;
+    packages.set(id, {
+      id,
+      label: fallbackRoot.split("/").pop(),
+      source: resource.source,
+      root: fallbackRoot,
+      manifestPaths: [],
+    });
+  }
+  return [...packages.values()];
+}
+
+function getPluginPackageId(resource, packages = []) {
+  const directRoot = getPluginPackageRoot(resource);
+  if (directRoot) {
+    const directId = getPluginPackageKey(resource.source, directRoot);
+    if (packages.length === 0 || packages.some((pkg) => pkg.id === directId)) {
+      return directId;
+    }
+  }
+  const normalizedPath = resource.path.replace(/\\/g, "/").replace(/^\/+/, "");
+  const sourcePackages = packages
+    .filter((pkg) => pkg.source === resource.source)
+    .sort((a, b) => b.root.length - a.root.length);
+  for (const pkg of sourcePackages) {
+    if (
+      pkg.root !== "." &&
+      (normalizedPath === pkg.root || normalizedPath.startsWith(`${pkg.root}/`))
+    ) {
+      return pkg.id;
+    }
+  }
+  return sourcePackages.find((pkg) => pkg.root === ".")?.id;
+}
+
 function isBuiltInResourcePath(resourcePath) {
   const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
   return (
@@ -460,7 +560,9 @@ test("detects plugin manifests and Cursor rules", () => {
     "agent",
   );
   assert.strictEqual(
-    detectResourceKindFromPath(".github/plugins/team-kit/rules/no-inline-imports.mdc"),
+    detectResourceKindFromPath(
+      ".github/plugins/team-kit/rules/no-inline-imports.mdc",
+    ),
     "cursor-rule",
   );
   assert.strictEqual(
@@ -473,6 +575,80 @@ test("detects plugin manifests and Cursor rules", () => {
       "cursor-rule",
     ),
     "typescript-exhaustive-switch",
+  );
+});
+
+test("groups plugin packages from manifests and child resources", () => {
+  const resources = [
+    {
+      kind: "plugin",
+      name: "superpowers",
+      source: "obra-superpowers",
+      path: ".",
+      pluginRoot: ".",
+      pluginManifestPath: ".codex-plugin/plugin.json",
+      pluginManifestKind: "codex-plugin",
+    },
+    {
+      kind: "skill",
+      name: "brainstorming",
+      source: "obra-superpowers",
+      path: "skills/brainstorming",
+    },
+    {
+      kind: "plugin",
+      name: "cursor-plugins",
+      source: "cursor-official-plugins",
+      path: ".",
+      pluginRoot: ".",
+      pluginManifestPath: ".cursor-plugin/marketplace.json",
+      pluginManifestKind: "marketplace",
+    },
+    {
+      kind: "plugin",
+      name: "create-plugin",
+      source: "cursor-official-plugins",
+      path: "create-plugin",
+      pluginRoot: "create-plugin",
+      pluginManifestPath: "create-plugin/.cursor-plugin/plugin.json",
+      pluginManifestKind: "cursor-plugin",
+    },
+    {
+      kind: "agent",
+      name: "plugin-architect",
+      source: "cursor-official-plugins",
+      path: "create-plugin/agents/plugin-architect.md",
+    },
+  ];
+  const packages = getPluginPackageCandidates(resources);
+
+  assert.ok(
+    packages.some(
+      (pkg) => pkg.id === "obra-superpowers:." && pkg.label === "superpowers",
+    ),
+    "Root plugin package should be created from non-marketplace manifest",
+  );
+  assert.ok(
+    packages.some(
+      (pkg) =>
+        pkg.id === "cursor-official-plugins:create-plugin" &&
+        pkg.label === "create-plugin",
+    ),
+    "Subdirectory plugin package should be created from pluginRoot",
+  );
+  assert.ok(
+    !packages.some((pkg) => pkg.id === "cursor-official-plugins:."),
+    "Marketplace root manifest should not swallow an entire source as one plugin",
+  );
+  assert.strictEqual(
+    getPluginPackageId(resources[1], packages),
+    "obra-superpowers:.",
+    "Root plugin skills should be marked as part of the source-level plugin",
+  );
+  assert.strictEqual(
+    getPluginPackageId(resources[4], packages),
+    "cursor-official-plugins:create-plugin",
+    "Plugin child agents should be marked as part of their plugin package",
   );
 });
 

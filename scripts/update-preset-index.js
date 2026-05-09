@@ -645,11 +645,15 @@ function getPluginRootsFromPaths(paths) {
 }
 
 function getRelativePathFromPluginRoot(filePath, pluginRoot) {
-  const normalizedPath = String(filePath).replace(/\\/g, "/").replace(/^\/+/, "");
+  const normalizedPath = String(filePath)
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "");
   if (pluginRoot === ".") {
     return normalizedPath;
   }
-  const normalizedRoot = String(pluginRoot).replace(/\\/g, "/").replace(/\/+$/, "");
+  const normalizedRoot = String(pluginRoot)
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "");
   return normalizedPath.startsWith(`${normalizedRoot}/`)
     ? normalizedPath.slice(normalizedRoot.length + 1)
     : undefined;
@@ -707,7 +711,8 @@ async function processTree(data, owner, repoName, branch, source) {
   });
 
   const kindCounts = resourceFiles.reduce((counts, item) => {
-    const kind = detectResourceKindWithPluginRoots(item.path, pluginRoots) || "skill";
+    const kind =
+      detectResourceKindWithPluginRoots(item.path, pluginRoots) || "skill";
     counts[kind] = (counts[kind] || 0) + 1;
     return counts;
   }, {});
@@ -729,7 +734,10 @@ async function processTree(data, owner, repoName, branch, source) {
     const results = await Promise.all(
       chunk.map(async (file) => {
         try {
-          const kind = detectResourceKindWithPluginRoots(file.path, pluginRoots);
+          const kind = detectResourceKindWithPluginRoots(
+            file.path,
+            pluginRoots,
+          );
           if (!kind) return null;
 
           const rawUrl = `https://raw.githubusercontent.com/${owner}/${repoName}/${branch}/${file.path}`;

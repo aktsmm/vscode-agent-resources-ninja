@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-05-09
+
+### Changed
+
+- **Plugin Grouping UX** - Renamed the plugin browse section to Grouped by Plugin and grouped plugin manifests with indexed child resources, including root-level plugin packages such as Superpowers / plugin browse section を Grouped by Plugin / プラグイン別へ整理し、Superpowers のような root-level plugin package も含めて manifest とインデックス済み子リソースをまとめて表示するようにしました
+- **Plugin Origin Visibility** - Resource-kind rows now show plugin origin in descriptions and tooltips, so plugin-contained skills, agents, and rules remain discoverable by kind while preserving package context / resource kind 別の行に plugin 由来を description と tooltip で表示し、plugin 内の skills、agents、rules を種別別に探しつつ package context も分かるようにしました
+- **Plugin Action Copy** - Polished plugin install wording from Plugin Contents to Plugin Resources where the action installs the selected plugin resource group / 選択した plugin resource group をインストールする action の文言を Plugin Contents から Plugin Resources へ整理しました
+- **README Plugin Guidance** - README and README_ja now explain plugin grouping, plugin origin, and resource-kind visibility more directly / README と README_ja で plugin grouping、plugin origin、resource kind 別表示の関係をより明確に説明しました
+
+### Tests
+
+- **Plugin Package Regression Coverage** - Added regression coverage for manifest-derived plugin packages, root-level plugin grouping, package-origin row details, and updated plugin grouping labels / manifest 由来 plugin package、root-level plugin grouping、package 由来の行表示、更新後の plugin grouping label に対する回帰テストを追加しました
+
 ## [0.2.5] - 2026-05-09
 
 ### Added

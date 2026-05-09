@@ -740,13 +740,22 @@ test("github token setting is password-style and excluded from standard reset", 
 test("plugin resources remain browsable from raw plugin paths", () => {
   assert.match(presetIndexUpdaterSource, /plugin:\$\{pluginId\}/);
   assert.match(presetIndexUpdaterSource, /pluginPrefix/);
-  assert.match(presetIndexUpdaterSource, /detectPluginChildResourceKind[\s\S]*agents/);
+  assert.match(
+    presetIndexUpdaterSource,
+    /detectPluginChildResourceKind[\s\S]*agents/,
+  );
   assert.match(presetIndexUpdaterSource, /detectResourceKindWithPluginRoots/);
   assert.match(resourceKindsSource, /getPluginIdFromPath/);
   assert.match(resourceKindsSource, /pluginPrefix/);
   assert.match(resourceKindsSource, /agents/);
-  assert.match(skillIndexSource, /localSkill\.pluginRoot !== mergedSkill\.pluginRoot/);
-  assert.match(skillIndexSource, /localBundle\.safetyBoundary !== mergedBundle\.safetyBoundary/);
+  assert.match(
+    skillIndexSource,
+    /localSkill\.pluginRoot !== mergedSkill\.pluginRoot/,
+  );
+  assert.match(
+    skillIndexSource,
+    /localBundle\.safetyBoundary !== mergedBundle\.safetyBoundary/,
+  );
 });
 
 test("install target picker uses localized resource-aware labels", () => {
@@ -1256,7 +1265,7 @@ test("open instruction file flow supports non-local target discovery", () => {
   );
 });
 
-test("plugin contents can be installed as a selectable set", () => {
+test("plugin grouped resources can be installed as a selectable set", () => {
   const commands = packageJson.contributes?.commands || [];
   const itemMenus = packageJson.contributes?.menus?.["view/item/context"] || [];
   assert.ok(
@@ -1271,7 +1280,7 @@ test("plugin contents can be installed as a selectable set", () => {
         item.command === "resourceNinja.installPluginResources" &&
         item.when === "view == resourceNinja.browseView && viewItem == plugin",
     ),
-    "Remote plugin groups should expose Install Plugin Contents",
+    "Remote plugin groups should expose Install Plugin Resources",
   );
   assert.match(extensionSource, /resourceNinja\.installPluginResources/);
   assert.match(extensionSource, /resourceNinja\.installBundle/);
@@ -1280,16 +1289,18 @@ test("plugin contents can be installed as a selectable set", () => {
     treeProviderSource,
     /plugin\.resources\.map\(\(resource\) => resource\.path\)/,
   );
-  assert.match(treeProviderSource, /Plugin Contents/);
-  assert.match(treeProviderSource, /Plugin-derived/);
+  assert.match(treeProviderSource, /Grouped by Plugin/);
+  assert.match(treeProviderSource, /getPluginPackageCandidates/);
+  assert.match(treeProviderSource, /getPluginPackageId/);
+  assert.match(treeProviderSource, /getPluginPackageLabel/);
   assert.strictEqual(nls["command.installBundle"], "Install Set");
   assert.strictEqual(
     nls["command.installPluginResources"],
-    "Install Plugin Contents",
+    "Install Plugin Resources",
   );
   assert.strictEqual(
     nlsJa["command.installPluginResources"],
-    "プラグイン内リソースをインストール",
+    "プラグインリソースをインストール",
   );
 });
 

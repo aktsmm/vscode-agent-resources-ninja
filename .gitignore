@@ -7,6 +7,7 @@ dist/
 *-exit.txt
 *-output.txt
 audit-output.json
+hooks.json
 output_blog_tips/
 output_retro/
 compile-output.txt

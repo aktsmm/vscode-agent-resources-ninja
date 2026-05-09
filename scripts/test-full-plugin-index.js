@@ -58,14 +58,22 @@ function detectResourceKindFromPath(resourcePath) {
 
 function getPluginRootsFromPaths(paths) {
   return Array.from(
-    new Set(paths.map((filePath) => getPluginRootFromManifestPath(filePath)).filter(Boolean)),
+    new Set(
+      paths
+        .map((filePath) => getPluginRootFromManifestPath(filePath))
+        .filter(Boolean),
+    ),
   ).sort((a, b) => b.length - a.length);
 }
 
 function getRelativePathFromPluginRoot(filePath, pluginRoot) {
-  const normalizedPath = String(filePath).replace(/\\/g, "/").replace(/^\/+/, "");
+  const normalizedPath = String(filePath)
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "");
   if (pluginRoot === ".") return normalizedPath;
-  const normalizedRoot = String(pluginRoot).replace(/\\/g, "/").replace(/\/+$/, "");
+  const normalizedRoot = String(pluginRoot)
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "");
   return normalizedPath.startsWith(`${normalizedRoot}/`)
     ? normalizedPath.slice(normalizedRoot.length + 1)
     : undefined;
@@ -89,7 +97,10 @@ function detectResourceKindWithPluginRoots(resourcePath, pluginRoots) {
   const kind = detectResourceKindFromPath(resourcePath);
   if (kind) return kind;
   for (const pluginRoot of pluginRoots) {
-    const relativePath = getRelativePathFromPluginRoot(resourcePath, pluginRoot);
+    const relativePath = getRelativePathFromPluginRoot(
+      resourcePath,
+      pluginRoot,
+    );
     if (!relativePath) continue;
     const childKind = detectPluginChildResourceKind(relativePath);
     if (childKind) return childKind;
@@ -233,9 +244,7 @@ assert.match(installSet.description, /not activated automatically/);
 assert.strictEqual(installSet.installOrder[0], "feature-dev");
 assert.ok(
   installSet.installOrder.indexOf("feature-dev/mcp.json") >
-    installSet.installOrder.indexOf(
-      "feature-dev/agents/code-reviewer.md",
-    ),
+    installSet.installOrder.indexOf("feature-dev/agents/code-reviewer.md"),
   "MCP resources should install after passive text resources",
 );
 

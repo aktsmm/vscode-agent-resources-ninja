@@ -68,7 +68,7 @@ It gives you three practical views for everyday resource management: **Workspace
 
 - Search resources by keyword (local & GitHub)
 - Filter QuickPick search results by resource kind: skills, agents, instructions, prompts, hooks, MCP config resources, plugins, or Cursor rules
-- **Install Sets** are curated, selectable install groups. **Plugin Contents** are browse groups for resources found under plugin paths; install the whole indexed plugin group with a checklist, or install individual resources.
+- **Install Sets** are curated, selectable install groups. **Grouped by Plugin** shows plugin package manifests and their indexed child resources together; each child resource also remains visible under its own resource kind with plugin origin shown in the row details.
 - **Multi-keyword Search** - Scored by name, path, description relevance
 - **Parallel Fetch** - Fast results with 50 concurrent requests
 - **Fallback Search** - Auto-retry with fewer keywords if no results
@@ -151,7 +151,7 @@ Preset index includes skills, agents, prompts, instructions, hooks, MCP config r
 | [anthropics/skills](https://github.com/anthropics/skills)                                                                     | Official  | Anthropic official Claude Skills                                                |
 | [openai/skills](https://github.com/openai/skills)                                                                             | Official  | OpenAI official Codex Skills (1.7k+)                                            |
 | [github/awesome-copilot](https://github.com/github/awesome-copilot)                                                           | Official  | GitHub official Copilot resources, including plugin-published skills and agents |
-| [cursor/plugins](https://github.com/cursor/plugins)                                                                            | Official  | Cursor official plugin manifests, skills, agents, and rules                    |
+| [cursor/plugins](https://github.com/cursor/plugins)                                                                           | Official  | Cursor official plugin manifests, skills, agents, and rules                     |
 | [MicrosoftDocs/Agent-Skills](https://github.com/MicrosoftDocs/Agent-Skills)                                                   | Official  | Microsoft official Azure agent skills                                           |
 | [microsoft/GitHub-Copilot-for-Azure](https://github.com/microsoft/GitHub-Copilot-for-Azure)                                   | Official  | GitHub Copilot for Azure plugin skills                                          |
 | [microsoft/azure-skills](https://github.com/microsoft/azure-skills)                                                           | Official  | Microsoft Azure Skills plugin resources, including Azure skills and MCP config  |

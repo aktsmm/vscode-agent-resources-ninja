@@ -162,14 +162,14 @@ test("bundle-facing language is install set language", () => {
   assert.doesNotMatch(extensionSource, /Bundle インストール対象/);
 });
 
-test("plugin contents install is a separate visible action", () => {
+test("plugin resources install is a separate visible action", () => {
   assert.strictEqual(
     nls["command.installPluginResources"],
-    "Install Plugin Contents",
+    "Install Plugin Resources",
   );
   assert.strictEqual(
     nlsJa["command.installPluginResources"],
-    "プラグイン内リソースをインストール",
+    "プラグインリソースをインストール",
   );
   assert.ok(
     itemMenuHas(
@@ -180,12 +180,14 @@ test("plugin contents install is a separate visible action", () => {
   assert.match(extensionSource, /resourceNinja\.installPluginResources/);
 });
 
-test("plugin contents install uses path-based virtual install sets", () => {
+test("plugin grouped resources install uses virtual install sets", () => {
   assert.match(treeProviderSource, /const virtualBundle/);
   assert.match(
     treeProviderSource,
     /plugin\.resources\.map\(\(resource\) => resource\.path\)/,
   );
+  assert.match(treeProviderSource, /getPluginPackageCandidates/);
+  assert.match(treeProviderSource, /getPluginPackageId/);
   assert.match(
     extensionSource,
     /s\.path === skillName && s\.source === bundle\.source/,
@@ -193,11 +195,14 @@ test("plugin contents install uses path-based virtual install sets", () => {
 });
 
 test("plugin grouping labels distinguish remote contents from installed origins", () => {
-  assert.match(treeProviderSource, /Plugin Contents/);
-  assert.match(treeProviderSource, /プラグイン内リソース/);
-  assert.match(treeProviderSource, /Plugin-derived/);
-  assert.match(userResourcesProviderSource, /Plugin-derived/);
-  assert.match(userResourcesProviderSource, /プラグイン由来/);
+  assert.match(treeProviderSource, /Grouped by Plugin/);
+  assert.match(treeProviderSource, /プラグイン別/);
+  assert.match(treeProviderSource, /"Plugin"\}: \$\{pluginLabel\}/);
+  assert.match(treeProviderSource, /Remote path/);
+  assert.match(treeProviderSource, /Grouped by Plugin/);
+  assert.match(userResourcesProviderSource, /"Plugin"\}: \$\{pluginId\}/);
+  assert.match(userResourcesProviderSource, /Grouped by Plugin/);
+  assert.match(userResourcesProviderSource, /プラグイン別/);
 });
 
 test("instruction file creation dialog is localized", () => {
@@ -248,11 +253,11 @@ test("install set success reports skipped resources", () => {
   assert.match(extensionSource, /スキップ/);
 });
 
-test("docs explain install sets and plugin contents", () => {
+test("docs explain install sets and plugin grouping", () => {
   assert.match(readme, /Install Sets/);
-  assert.match(readme, /Plugin Contents/);
+  assert.match(readme, /Grouped by Plugin/);
   assert.match(readmeJa, /インストールセット/);
-  assert.match(readmeJa, /プラグイン内リソース/);
+  assert.match(readmeJa, /プラグイン別/);
 });
 
 test("create resource workspace roots use configured resource directories", () => {

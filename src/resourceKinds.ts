@@ -1,5 +1,24 @@
 import { ResourceKind, Skill } from "./skillIndex";
 
+export interface PluginPackageInfo {
+  id: string;
+  label: string;
+  source: string;
+  root: string;
+  manifestPaths: string[];
+}
+
+type PluginPackageResource = Pick<
+  Skill,
+  | "kind"
+  | "name"
+  | "source"
+  | "path"
+  | "pluginRoot"
+  | "pluginManifestPath"
+  | "pluginManifestKind"
+>;
+
 export function detectResourceKindFromPath(
   resourcePath: string,
 ): ResourceKind | undefined {
@@ -154,6 +173,164 @@ export function getPluginIdFromPath(resourcePath?: string): string | undefined {
     /^\.github\/plugins\/([^/]+)\//i,
   );
   return githubPluginMatch?.[1];
+}
+
+function normalizePluginRoot(root: string | undefined): string | undefined {
+  if (!root) {
+    return undefined;
+  }
+  const normalizedRoot = root.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  return normalizedRoot || ".";
+}
+
+function getPluginPackageKey(source: string, root: string): string {
+  return `${source}:${root}`;
+}
+
+function getPluginFallbackRoot(resourcePath?: string): string | undefined {
+  const pluginId = getPluginIdFromPath(resourcePath);
+  return pluginId ? `plugins/${pluginId}` : undefined;
+}
+
+function getPluginPackageRoot(
+  resource: PluginPackageResource,
+): string | undefined {
+  if (resource.kind === "plugin") {
+    return normalizePluginRoot(
+      resource.pluginRoot ||
+        getPluginRootFromManifestPath(
+          resource.pluginManifestPath || resource.path,
+        ),
+    );
+  }
+  return getPluginFallbackRoot(resource.path);
+}
+
+function isPackageManifest(resource: PluginPackageResource): boolean {
+  return (
+    (resource.kind || detectResourceKindFromPath(resource.path)) === "plugin" &&
+    resource.pluginManifestKind !== "marketplace"
+  );
+}
+
+export function getPluginPackageCandidates(
+  resources: PluginPackageResource[],
+): PluginPackageInfo[] {
+  const packages = new Map<string, PluginPackageInfo>();
+
+  for (const resource of resources) {
+    if (!isPackageManifest(resource)) {
+      continue;
+    }
+    const root = getPluginPackageRoot(resource);
+    if (!root) {
+      continue;
+    }
+    const id = getPluginPackageKey(resource.source, root);
+    const manifestPath = resource.pluginManifestPath || resource.path;
+    const existing = packages.get(id);
+    if (existing) {
+      if (!existing.manifestPaths.includes(manifestPath)) {
+        existing.manifestPaths.push(manifestPath);
+      }
+      continue;
+    }
+    packages.set(id, {
+      id,
+      label: resource.name || (root === "." ? resource.source : root),
+      source: resource.source,
+      root,
+      manifestPaths: [manifestPath],
+    });
+  }
+
+  for (const resource of resources) {
+    const fallbackRoot = getPluginFallbackRoot(resource.path);
+    if (!fallbackRoot) {
+      continue;
+    }
+    const id = getPluginPackageKey(resource.source, fallbackRoot);
+    if (packages.has(id)) {
+      continue;
+    }
+    const pathPluginId = fallbackRoot.split("/").pop() || fallbackRoot;
+    packages.set(id, {
+      id,
+      label: pathPluginId,
+      source: resource.source,
+      root: fallbackRoot,
+      manifestPaths: [],
+    });
+  }
+
+  return [...packages.values()].sort((a, b) => {
+    const sourceCompare = a.source.localeCompare(b.source);
+    if (sourceCompare !== 0) {
+      return sourceCompare;
+    }
+    if (a.root === "." && b.root !== ".") {
+      return 1;
+    }
+    if (a.root !== "." && b.root === ".") {
+      return -1;
+    }
+    return a.label.localeCompare(b.label);
+  });
+}
+
+export function getPluginPackageId(
+  resource: PluginPackageResource,
+  packages: PluginPackageInfo[] = [],
+): string | undefined {
+  if (!resource.source) {
+    return undefined;
+  }
+
+  const directRoot = getPluginPackageRoot(resource);
+  if (directRoot) {
+    const directId = getPluginPackageKey(resource.source, directRoot);
+    if (packages.length === 0 || packages.some((pkg) => pkg.id === directId)) {
+      return directId;
+    }
+  }
+
+  const normalizedPath = resource.path.replace(/\\/g, "/").replace(/^\/+/, "");
+  const sourcePackages = packages
+    .filter((pkg) => pkg.source === resource.source)
+    .sort((a, b) => b.root.length - a.root.length);
+
+  for (const pkg of sourcePackages) {
+    if (pkg.root === ".") {
+      continue;
+    }
+    if (
+      normalizedPath === pkg.root ||
+      normalizedPath.startsWith(`${pkg.root}/`)
+    ) {
+      return pkg.id;
+    }
+  }
+
+  const rootPackage = sourcePackages.find((pkg) => pkg.root === ".");
+  if (rootPackage && resource.pluginManifestKind !== "marketplace") {
+    return rootPackage.id;
+  }
+
+  return undefined;
+}
+
+export function getPluginPackageLabel(
+  packageId: string | undefined,
+  packages: PluginPackageInfo[] = [],
+): string | undefined {
+  if (!packageId) {
+    return undefined;
+  }
+  const pluginPackage = packages.find((pkg) => pkg.id === packageId);
+  if (pluginPackage) {
+    return pluginPackage.label;
+  }
+  return packageId.split(":").pop()?.split("/").pop();
 }
 
 export function isBuiltInResourcePath(resourcePath: string): boolean {

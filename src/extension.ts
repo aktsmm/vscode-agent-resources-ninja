@@ -2559,8 +2559,8 @@ export function activate(context: vscode.ExtensionContext) {
       if (!item?.bundle) {
         vscode.window.showErrorMessage(
           isJapanese()
-            ? "プラグイン内リソース情報がありません"
-            : "No plugin resource group information",
+            ? "プラグインリソースのグループ情報がありません"
+            : "No grouped plugin resource information",
         );
         return;
       }

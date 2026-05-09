@@ -64,7 +64,7 @@
 
 - リソースをキーワード検索（ローカル＆GitHub）
 - QuickPick 検索結果を resource kind（skills、agents、instructions、prompts、hooks、MCP config、plugins、Cursor rules）で絞り込み
-- **インストールセット** は curated な選択式インストール単位です。**プラグイン内リソース** は plugin path 配下のリソースを由来別に見るためのグループで、チェックリストでまとめて、または単体でインストールできます。
+- **インストールセット** は curated な選択式インストール単位です。**プラグイン別** は plugin package の manifest とインデックス済み子リソースをまとめて表示します。子リソースは各 resource kind にも表示され、行の詳細で plugin 由来が分かります。
 - **複数キーワード検索** - 名前・パス・説明の関連度でスコアリング
 - **並列フェッチ** - 50 件同時取得で高速化
 - **フォールバック検索** - 結果 0 件時にキーワードを減らして自動リトライ
@@ -147,7 +147,7 @@ ext install yamapan.agent-resources-ninja
 | [anthropics/skills](https://github.com/anthropics/skills)                                                                     | Official  | Anthropic 公式 Claude Skills                                              |
 | [openai/skills](https://github.com/openai/skills)                                                                             | Official  | OpenAI 公式 Codex Skills (1.7k+)                                          |
 | [github/awesome-copilot](https://github.com/github/awesome-copilot)                                                           | Official  | plugin から公開された skills / agents を含む GitHub 公式 Copilot リソース |
-| [cursor/plugins](https://github.com/cursor/plugins)                                                                            | Official  | Cursor 公式 plugin manifest、skills、agents、rules                        |
+| [cursor/plugins](https://github.com/cursor/plugins)                                                                           | Official  | Cursor 公式 plugin manifest、skills、agents、rules                        |
 | [MicrosoftDocs/Agent-Skills](https://github.com/MicrosoftDocs/Agent-Skills)                                                   | Official  | Microsoft 公式 Azure Agent Skills                                         |
 | [microsoft/GitHub-Copilot-for-Azure](https://github.com/microsoft/GitHub-Copilot-for-Azure)                                   | Official  | GitHub Copilot for Azure 公式プラグイン skills                            |
 | [microsoft/azure-skills](https://github.com/microsoft/azure-skills)                                                           | Official  | Azure skills と MCP config を含む Microsoft Azure Skills Plugin リソース  |

@@ -99,6 +99,7 @@ test("gitignore covers local release and validation artifacts", () => {
     "*-exit.txt",
     "*-output.txt",
     "audit-output.json",
+    "hooks.json",
     "compile-output.txt",
     "AGENTS.md.backup",
     "AGENTS.md",
@@ -134,6 +135,7 @@ test("vscodeignore excludes development and validation artifacts", () => {
     "*-exit.txt",
     "*-output.txt",
     "audit-output.json",
+    "hooks.json",
     "AGENTS.md.backup",
     "release-notes-v*.md",
   ]) {
@@ -215,6 +217,7 @@ test("existing VSIX payload stays release-minimal", () => {
     "extension/MIGRATION_NOTES.md",
     "extension/package-lock.json",
     "extension/compile-output.txt",
+    "extension/hooks.json",
   ]);
   for (const entry of entries) {
     assert.ok(!forbiddenNames.has(entry), `Unexpected VSIX file: ${entry}`);

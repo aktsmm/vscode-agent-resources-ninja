@@ -52,9 +52,14 @@ function targetPath(
 
   if (skill.kind === "plugin") {
     const pluginFolderName = getPluginInstallRootName(skill);
-    if (targetScope === "custom") return path.posix.join(customRoot, pluginFolderName);
+    if (targetScope === "custom")
+      return path.posix.join(customRoot, pluginFolderName);
     if (targetScope === "globalHome" || targetScope === "userData") {
-      return path.posix.join(globalHomeRoot(config), "plugins", pluginFolderName);
+      return path.posix.join(
+        globalHomeRoot(config),
+        "plugins",
+        pluginFolderName,
+      );
     }
     return path.posix.join(workspaceRoot, ".github/plugins", pluginFolderName);
   }

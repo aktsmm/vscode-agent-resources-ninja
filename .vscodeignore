@@ -27,6 +27,7 @@ compile-output.txt
 *-exit.txt
 *-output.txt
 audit-output.json
+hooks.json
 *.log
 quality-*.log
 release-notes-v*.md

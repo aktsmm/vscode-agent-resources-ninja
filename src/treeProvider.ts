@@ -22,7 +22,11 @@ import { getSkillId } from "./skillPreview";
 import {
   getInstalledResourceKey,
   getPluginIdFromPath,
+  getPluginPackageCandidates,
+  getPluginPackageId,
+  getPluginPackageLabel,
   getResourceIdentityKeys,
+  PluginPackageInfo,
 } from "./resourceKinds";
 import {
   getConfiguredSkillsDirectory,
@@ -44,7 +48,9 @@ type RemoteResourceViewMode = "repositoryFirst" | "resourceTypeFirst";
 
 interface PluginGroup {
   id: string;
+  label: string;
   resources: Skill[];
+  packageInfo?: PluginPackageInfo;
 }
 
 interface WorkspacePluginGroup {
@@ -254,7 +260,7 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
       0,
     );
     const item = new SkillTreeItem(
-      isJapanese() ? "プラグイン由来" : "Plugin-derived",
+      isJapanese() ? "プラグイン別" : "Grouped by Plugin",
       `${pluginGroups.length} groups · ${resourceCount} resources`,
       vscode.TreeItemCollapsibleState.Collapsed,
       "workspacePluginSection",
@@ -297,6 +303,10 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
     const kind = skill.kind || "skill";
     const sourceLabel =
       skill.source && skill.source !== "unknown" ? skill.source : undefined;
+    const workspacePluginId = getPluginIdFromPath(skill.remotePath);
+    const workspacePluginLabel = workspacePluginId
+      ? `${isJapanese() ? "プラグイン" : "Plugin"}: ${workspacePluginId}`
+      : undefined;
     const isRemoteInstalled = !!sourceLabel && !!skill.remotePath;
     const contextValue = skill.isBuiltIn
       ? "builtInResource"
@@ -317,9 +327,12 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
       skill.isBuiltIn
         ? `built-in · ${sourceLabel || "Built-in"}`
         : skill.isInstalled
-          ? sourceLabel
-            ? `installed from ${sourceLabel}`
-            : "installed"
+          ? [
+              sourceLabel ? `installed from ${sourceLabel}` : "installed",
+              workspacePluginLabel,
+            ]
+              .filter((part): part is string => !!part)
+              .join(" · ")
           : skill.relativePath,
       vscode.TreeItemCollapsibleState.None,
       contextValue,
@@ -382,7 +395,8 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
       metaInfo += `\nVersion: ${skill.version}`;
     }
 
-    item.tooltip = `${skill.name}\n${descText}\n${pathLabel}: ${skill.relativePath}\n${statusLabel}: ${statusText}${metaInfo}`;
+    const pluginInfo = workspacePluginLabel ? `\n${workspacePluginLabel}` : "";
+    item.tooltip = `${skill.name}\n${descText}${pluginInfo}\n${pathLabel}: ${skill.relativePath}\n${statusLabel}: ${statusText}${metaInfo}`;
     item.command = {
       command: "vscode.open",
       title: isJapanese() ? "リソースを開く" : "Open Resource",
@@ -787,8 +801,8 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
         const virtualBundle: Bundle = {
           id: `plugin:${plugin.id}`,
           name: isJapanese()
-            ? `${plugin.id} のインデックス済みリソース`
-            : `${plugin.id} indexed resources`,
+            ? `${plugin.label} のインデックス済みリソース`
+            : `${plugin.label} indexed resources`,
           source: source?.id || plugin.resources[0]?.source || "",
           description:
             "Selectable install set generated from indexed resources in this plugin path. Only indexed resources are installed; executable plugin setup is not enabled automatically.",
@@ -798,7 +812,7 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
           installOrder,
         };
         const item = new SkillTreeItem(
-          plugin.id,
+          plugin.label,
           description,
           vscode.TreeItemCollapsibleState.Collapsed,
           "plugin",
@@ -876,41 +890,49 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
   }
 
   private getPluginGroups(): PluginGroup[] {
-    const groups = new Map<string, Skill[]>();
-    for (const resource of this.skillIndex?.skills || []) {
-      const pluginId = getPluginIdFromPath(resource.path);
-      if (!pluginId) {
+    const resources = this.skillIndex?.skills || [];
+    const packages = getPluginPackageCandidates(resources);
+    const groups = new Map<string, PluginGroup>();
+
+    for (const resource of resources) {
+      const pluginPackageId = getPluginPackageId(resource, packages);
+      if (!pluginPackageId) {
         continue;
       }
-      const resources = groups.get(pluginId) || [];
-      resources.push(resource);
-      groups.set(pluginId, resources);
+      const pluginPackage = packages.find((pkg) => pkg.id === pluginPackageId);
+      const group = groups.get(pluginPackageId) || {
+        id: pluginPackageId,
+        label:
+          getPluginPackageLabel(pluginPackageId, packages) || pluginPackageId,
+        resources: [],
+        packageInfo: pluginPackage,
+      };
+      group.resources.push(resource);
+      groups.set(pluginPackageId, group);
     }
 
-    return [...groups.entries()]
-      .map(([id, resources]) => ({ id, resources }))
-      .sort((a, b) => {
-        const sourceWeightDiff =
-          this.getPluginSortWeight(a) - this.getPluginSortWeight(b);
-        if (sourceWeightDiff !== 0) {
-          return sourceWeightDiff;
-        }
-        return a.id.localeCompare(b.id);
-      });
+    return [...groups.values()].sort((a, b) => {
+      const sourceWeightDiff =
+        this.getPluginSortWeight(a) - this.getPluginSortWeight(b);
+      if (sourceWeightDiff !== 0) {
+        return sourceWeightDiff;
+      }
+      return a.label.localeCompare(b.label);
+    });
   }
 
-  private getResourcesForPlugin(pluginId: string): Skill[] {
-    return (this.skillIndex?.skills || []).filter(
-      (resource) => getPluginIdFromPath(resource.path) === pluginId,
+  private getResourcesForPlugin(pluginPackageId: string): Skill[] {
+    const resources = this.skillIndex?.skills || [];
+    const packages = getPluginPackageCandidates(resources);
+    return resources.filter(
+      (resource) => getPluginPackageId(resource, packages) === pluginPackageId,
     );
   }
 
   private getSourceForPlugin(plugin: PluginGroup): Source | undefined {
-    const firstResource = plugin.resources[0];
-    return firstResource
-      ? this.skillIndex?.sources.find(
-          (source) => source.id === firstResource.source,
-        )
+    const sourceId = plugin.packageInfo?.source || plugin.resources[0]?.source;
+    return sourceId
+      ? this.skillIndex?.sources.find((source) => source.id === sourceId)
       : undefined;
   }
 
@@ -1072,7 +1094,7 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
       0,
     );
     const item = new SkillTreeItem(
-      isJapanese() ? "プラグイン内リソース" : "Plugin Contents",
+      isJapanese() ? "プラグイン別" : "Grouped by Plugin",
       `${pluginGroups.length} groups · ${resourceCount} resources`,
       vscode.TreeItemCollapsibleState.Collapsed,
       "pluginSection",
@@ -1120,15 +1142,30 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
     coreSkill?: string,
   ): SkillTreeItem[] {
     const isJa = isJapanese();
+    const pluginPackages = getPluginPackageCandidates(
+      this.skillIndex?.skills || resources,
+    );
     return resources.map((skill) => {
       const isInstalled = this.isSkillInstalled(skill);
       const isCore = skill.name === coreSkill;
       const prefix = isCore ? "⭐ " : skill.standalone === false ? "🔗 " : "";
       const kind = getResourceKind(skill);
       const kindLabel = getResourceKindLabel(kind, isJa);
+      const pluginPackageId = getPluginPackageId(skill, pluginPackages);
+      const pluginLabel =
+        kind === "plugin"
+          ? undefined
+          : getPluginPackageLabel(pluginPackageId, pluginPackages);
+      const descriptionParts = [
+        pluginLabel
+          ? `${isJa ? "プラグイン" : "Plugin"}: ${pluginLabel}`
+          : undefined,
+        kindLabel,
+        getLocalizedDescription(skill, isJa),
+      ].filter((part): part is string => !!part);
       const item = new SkillTreeItem(
         isInstalled ? `✓ ${prefix}${skill.name}` : `${prefix}${skill.name}`,
-        `${kindLabel} · ${getLocalizedDescription(skill, isJa)}`,
+        descriptionParts.join(" · "),
         vscode.TreeItemCollapsibleState.None,
         "skill",
         skill,
@@ -1159,6 +1196,12 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
       if (skill.requires?.length) {
         const requiresLabel = isJa ? "依存" : "Requires";
         item.tooltip = `${item.tooltip}\n\n${requiresLabel}: ${skill.requires.join(", ")}`;
+      }
+
+      if (pluginLabel) {
+        const pluginLabelName = isJa ? "プラグイン" : "Plugin";
+        const pathLabel = isJa ? "リモートパス" : "Remote path";
+        item.tooltip = `${item.tooltip}\n${pluginLabelName}: ${pluginLabel}\n${pathLabel}: ${skill.path}`;
       }
 
       return item;
