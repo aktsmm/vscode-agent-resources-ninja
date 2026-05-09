@@ -251,10 +251,19 @@ test("plugin grouping labels distinguish remote contents from installed origins"
 });
 
 test("installed plugin grouping falls back beyond remotePath", () => {
-  assert.match(treeProviderSource, /getPluginIdFromPath\(resource\.relativePath\)/);
+  assert.match(
+    treeProviderSource,
+    /getPluginIdFromPath\(resource\.relativePath\)/,
+  );
   assert.match(treeProviderSource, /getPluginIdFromPath\(resource\.fullPath\)/);
-  assert.match(userResourcesProviderSource, /getPluginIdFromPath\(resource\.relativePath\)/);
-  assert.match(userResourcesProviderSource, /getPluginIdFromPath\(resource\.fullPath\)/);
+  assert.match(
+    userResourcesProviderSource,
+    /getPluginIdFromPath\(resource\.relativePath\)/,
+  );
+  assert.match(
+    userResourcesProviderSource,
+    /getPluginIdFromPath\(resource\.fullPath\)/,
+  );
   assert.match(extensionSource, /getInstalledPluginId/);
 });
 
