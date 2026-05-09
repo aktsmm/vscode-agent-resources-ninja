@@ -35,9 +35,13 @@ export interface UserResource {
   kind: ResourceKind;
   name: string;
   description: string;
+  source?: string;
   categories: string[];
   relativePath: string;
   remotePath?: string;
+  pluginRoot?: string;
+  pluginManifestPath?: string;
+  pluginManifestKind?: string;
   fullPath: string;
   scope: UserResourceScope;
   scopeLabel: string;
@@ -56,6 +60,9 @@ interface ResourceInstallMeta {
   description_ja?: string;
   categories?: string[];
   remotePath?: string;
+  pluginRoot?: string;
+  pluginManifestPath?: string;
+  pluginManifestKind?: string;
 }
 
 function normalizeSeparators(value: string): string {
@@ -351,11 +358,15 @@ async function parseResourceFile(
     kind,
     name,
     description,
+    source: installMeta?.source,
     categories: installMeta?.categories?.length
       ? installMeta.categories
       : getDefaultResourceCategories(kind),
     relativePath: normalizedDetectionPath,
     remotePath: installMeta?.remotePath,
+    pluginRoot: installMeta?.pluginRoot,
+    pluginManifestPath: installMeta?.pluginManifestPath,
+    pluginManifestKind: installMeta?.pluginManifestKind,
     fullPath: fileUri.fsPath,
     scope: root.scope,
     scopeLabel: root.label,

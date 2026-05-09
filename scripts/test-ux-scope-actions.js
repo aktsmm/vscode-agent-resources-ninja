@@ -169,6 +169,32 @@ test("workspace resource kind groups expose bulk reinstall action", () => {
   assert.match(extensionSource, /workspaceResourceType/);
 });
 
+test("user global resources expose reinstall actions", () => {
+  assert.ok(
+    itemMenuHas(
+      "resourceNinja.reinstallUserResource",
+      "view == resourceNinja.userResourcesView && viewItem == userRemoteResource",
+    ),
+  );
+  assert.ok(
+    itemMenuHas(
+      "resourceNinja.reinstallUserResourceGroup",
+      "view == resourceNinja.userResourcesView && (viewItem == kind || viewItem == plugin)",
+    ),
+  );
+  assert.strictEqual(
+    nls["command.reinstallUserResource"],
+    "Reinstall User / Global Resource Home Resource",
+  );
+  assert.strictEqual(
+    nlsJa["command.reinstallUserResource"],
+    "ユーザー / Global Resource Home リソースを再インストール",
+  );
+  assert.match(userResourcesProviderSource, /userRemoteResource/);
+  assert.match(extensionSource, /resourceNinja\.reinstallUserResource/);
+  assert.match(extensionSource, /resourceNinja\.reinstallUserResourceGroup/);
+});
+
 test("bundle-facing language is install set language", () => {
   assert.strictEqual(nls["command.installBundle"], "Install Set");
   assert.strictEqual(
@@ -222,6 +248,14 @@ test("plugin grouping labels distinguish remote contents from installed origins"
   assert.match(userResourcesProviderSource, /"Plugin"\}: \$\{pluginId\}/);
   assert.match(userResourcesProviderSource, /Grouped by Plugin/);
   assert.match(userResourcesProviderSource, /プラグイン別/);
+});
+
+test("installed plugin grouping falls back beyond remotePath", () => {
+  assert.match(treeProviderSource, /getPluginIdFromPath\(resource\.relativePath\)/);
+  assert.match(treeProviderSource, /getPluginIdFromPath\(resource\.fullPath\)/);
+  assert.match(userResourcesProviderSource, /getPluginIdFromPath\(resource\.relativePath\)/);
+  assert.match(userResourcesProviderSource, /getPluginIdFromPath\(resource\.fullPath\)/);
+  assert.match(extensionSource, /getInstalledPluginId/);
 });
 
 test("resource rows expose installed mcp and hook lifecycle states", () => {

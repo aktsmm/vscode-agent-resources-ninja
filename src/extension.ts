@@ -74,7 +74,7 @@ import {
   getResourceIdentityKeys,
   getResourceMetadataPath,
 } from "./resourceKinds";
-import { scanUserResources } from "./userResourceScanner";
+import { scanUserResources, UserResource } from "./userResourceScanner";
 import {
   DEFAULT_GLOBAL_HOME_DIRECTORY,
   DEFAULT_WORKSPACE_AGENTS_DIRECTORY,
@@ -586,6 +586,27 @@ export function activate(context: vscode.ExtensionContext) {
     );
   }
 
+  function getInstalledPluginId(resource: {
+    remotePath?: string;
+    relativePath?: string;
+    fullPath?: string;
+  }): string | undefined {
+    return (
+      getPluginIdFromPath(resource.remotePath) ||
+      getPluginIdFromPath(resource.relativePath) ||
+      getPluginIdFromPath(resource.fullPath)
+    );
+  }
+
+  function isRemoteInstalledUserResource(resource: UserResource): boolean {
+    return (
+      !resource.isBuiltIn &&
+      !!resource.remotePath &&
+      !!resource.source &&
+      resource.source !== "local"
+    );
+  }
+
   // 後方互換のためのエイリアス
   const installedProvider = workspaceProvider;
 
@@ -985,6 +1006,265 @@ export function activate(context: vscode.ExtensionContext) {
     },
   );
 
+  const reinstallUserResourceCmd = vscode.commands.registerCommand(
+    "resourceNinja.reinstallUserResource",
+    async (item: UserResourceTreeItem, suppressSuccessMessage?: boolean) => {
+      const resource = item?.resource;
+      if (!resource || resource.isBuiltIn) {
+        return false;
+      }
+      if (!isRemoteInstalledUserResource(resource)) {
+        if (!suppressSuccessMessage) {
+          vscode.window.showWarningMessage(
+            isJapanese()
+              ? `${resource.name} はリモートインストール元のメタデータがないため再インストールできません`
+              : `${resource.name} cannot be reinstalled because remote install metadata is missing`,
+          );
+        }
+        return false;
+      }
+
+      const wsFolder = vscode.workspace.workspaceFolders?.[0];
+      if (!wsFolder) {
+        vscode.window.showErrorMessage(messages.noWorkspace());
+        return false;
+      }
+
+      const targetScope: InstallTargetScope =
+        resource.scope === "userData" ? "userData" : "globalHome";
+
+      let index = await loadSkillIndex(context);
+      let fullSkill = index.skills.find(
+        (s: Skill) =>
+          getResourceKind(s) === resource.kind &&
+          s.source === resource.source &&
+          s.path === resource.remotePath,
+      );
+      if (!fullSkill) {
+        fullSkill = index.skills.find(
+          (s: Skill) =>
+            getResourceKind(s) === resource.kind &&
+            s.path === resource.remotePath,
+        );
+      }
+      if (!fullSkill) {
+        const tryUpdate = await vscode.window.showWarningMessage(
+          isJapanese()
+            ? `${resource.name} がインデックスに見つかりません。インデックスを更新しますか？`
+            : `${resource.name} not found in index. Update index now?`,
+          isJapanese() ? "更新する" : "Update",
+          isJapanese() ? "キャンセル" : "Cancel",
+        );
+
+        if (tryUpdate === (isJapanese() ? "更新する" : "Update")) {
+          await vscode.window.withProgress(
+            {
+              location: vscode.ProgressLocation.Notification,
+              title: isJapanese()
+                ? "インデックスを更新中..."
+                : "Updating index...",
+            },
+            async (progress) => {
+              index = await updateIndexFromSources(context, index, progress);
+            },
+          );
+
+          fullSkill = index.skills.find(
+            (s: Skill) =>
+              getResourceKind(s) === resource.kind &&
+              s.source === resource.source &&
+              s.path === resource.remotePath,
+          );
+          if (!fullSkill) {
+            fullSkill = index.skills.find(
+              (s: Skill) =>
+                getResourceKind(s) === resource.kind &&
+                s.path === resource.remotePath,
+            );
+          }
+        }
+
+        if (!fullSkill) {
+          if (!suppressSuccessMessage) {
+            vscode.window.showErrorMessage(
+              isJapanese()
+                ? `${resource.name} がインデックスに見つかりません。ソースリポジトリを確認してください。`
+                : `${resource.name} not found in index. Please check source repositories.`,
+            );
+          }
+          return false;
+        }
+      }
+
+      try {
+        await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: isJapanese()
+              ? `${resource.name} を再インストール中...`
+              : `Reinstalling ${resource.name}...`,
+            cancellable: false,
+          },
+          async () => {
+            await deleteInstalledResourceByPath(
+              resource.kind,
+              resource.fullPath,
+            );
+            await installSkill(fullSkill, wsFolder.uri, context, {
+              targetScope,
+            });
+
+            const config = vscode.workspace.getConfiguration("resourceNinja");
+            if (
+              resource.kind === "skill" &&
+              config.get<boolean>("autoUpdateInstruction")
+            ) {
+              const targetUri = resolveGlobalInstructionFileUri(
+                wsFolder.uri,
+                config,
+              );
+              if (targetUri) {
+                await updateInstructionFileAtUri(
+                  wsFolder.uri,
+                  context,
+                  targetUri,
+                  getGlobalInstructionTargetLabel(wsFolder.uri, config),
+                );
+              }
+            }
+          },
+        );
+
+        markRecentlyInstalled(fullSkill);
+        userResourcesProvider.refresh();
+        browseProvider.refresh();
+        workspaceProvider.refresh();
+
+        if (!suppressSuccessMessage) {
+          vscode.window.showInformationMessage(
+            isJapanese()
+              ? `${resource.name} を再インストールしました`
+              : `Reinstalled ${resource.name}`,
+          );
+        }
+        return true;
+      } catch (error) {
+        if (!suppressSuccessMessage) {
+          vscode.window.showErrorMessage(
+            isJapanese()
+              ? `再インストール失敗: ${String(error)}`
+              : `Reinstall failed: ${String(error)}`,
+          );
+        }
+        return false;
+      }
+    },
+  );
+
+  const reinstallUserResourceGroupCmd = vscode.commands.registerCommand(
+    "resourceNinja.reinstallUserResourceGroup",
+    async (item?: UserResourceTreeItem) => {
+      if (!item) {
+        return;
+      }
+
+      const allResources = userResourcesProvider
+        .getResources()
+        .filter((resource) => !resource.isBuiltIn);
+
+      let targets: UserResource[] = [];
+      if (item.nodeType === "kind" && item.scope && item.kind) {
+        targets = allResources.filter(
+          (resource) =>
+            resource.scope === item.scope &&
+            resource.scopeLabel === item.scopeLabel &&
+            resource.kind === item.kind,
+        );
+      } else if (item.nodeType === "plugin" && item.scope && item.pluginId) {
+        targets = allResources.filter(
+          (resource) =>
+            resource.scope === item.scope &&
+            resource.scopeLabel === item.scopeLabel &&
+            getInstalledPluginId(resource) === item.pluginId,
+        );
+      } else {
+        return;
+      }
+
+      const remoteTargets = targets.filter(isRemoteInstalledUserResource);
+      if (remoteTargets.length === 0) {
+        vscode.window.showInformationMessage(
+          isJapanese()
+            ? "このグループにリモート由来の再インストール可能なリソースはありません"
+            : "This group has no remote-installed resources to reinstall",
+        );
+        return;
+      }
+
+      const groupLabel =
+        item.label?.toString() ||
+        (isJapanese() ? "リソースグループ" : "Resource group");
+      const confirmLabel = isJapanese() ? "再インストール" : "Reinstall";
+      const confirm = await vscode.window.showWarningMessage(
+        isJapanese()
+          ? `${groupLabel} の ${remoteTargets.length} 個のリモートリソースを再インストールしますか？`
+          : `Reinstall ${remoteTargets.length} remote-installed resource(s) in ${groupLabel}?`,
+        { modal: true },
+        confirmLabel,
+      );
+      if (confirm !== confirmLabel) {
+        return;
+      }
+
+      let success = 0;
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: isJapanese()
+            ? `${groupLabel} を再インストール中...`
+            : `Reinstalling ${groupLabel}...`,
+          cancellable: false,
+        },
+        async (progress) => {
+          let completed = 0;
+          for (const resource of remoteTargets) {
+            progress.report({
+              message: `${resource.name} (${completed + 1}/${remoteTargets.length})`,
+              increment: 100 / remoteTargets.length,
+            });
+            const ok = await vscode.commands.executeCommand<boolean>(
+              "resourceNinja.reinstallUserResource",
+              new UserResourceTreeItem(
+                resource.name,
+                resource.description || "",
+                vscode.TreeItemCollapsibleState.None,
+                "remoteResource",
+                resource,
+                resource.scope,
+                resource.kind,
+                resource.scopeLabel,
+              ),
+              true,
+            );
+            if (ok) {
+              success++;
+            }
+            completed++;
+          }
+        },
+      );
+
+      userResourcesProvider.refresh();
+      browseProvider.refresh();
+      workspaceProvider.refresh();
+      vscode.window.showInformationMessage(
+        isJapanese()
+          ? `${groupLabel} の ${success}/${remoteTargets.length} 個を再インストールしました`
+          : `Reinstalled ${success}/${remoteTargets.length} resources in ${groupLabel}`,
+      );
+    },
+  );
+
   // Command: Refresh Local
   const refreshLocalCmd = vscode.commands.registerCommand(
     "resourceNinja.refreshLocal",
@@ -1055,12 +1335,12 @@ export function activate(context: vscode.ExtensionContext) {
             .filter(
               (resource) =>
                 !resource.isBuiltIn &&
-                getPluginIdFromPath(resource.remotePath) === pluginId,
+                getInstalledPluginId(resource) === pluginId,
             )
         : [];
       const userResources = await scanUserResources(wsFolder?.uri, false);
       const userPluginResources = userResources.filter(
-        (resource) => getPluginIdFromPath(resource.remotePath) === pluginId,
+        (resource) => getInstalledPluginId(resource) === pluginId,
       );
       const resources = [
         ...workspaceResources.map((resource) => ({
@@ -4504,6 +4784,8 @@ ${fileUri.fsPath}`,
     openUserResourceCmd,
     revealUserResourceCmd,
     copyUserResourcePathCmd,
+    reinstallUserResourceCmd,
+    reinstallUserResourceGroupCmd,
     deleteUserResourceCmd,
     deletePluginResourcesCmd,
     openSkillFileCmd,

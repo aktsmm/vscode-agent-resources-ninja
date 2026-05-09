@@ -67,6 +67,14 @@ interface WorkspacePluginGroup {
   resources: WorkspaceSkill[];
 }
 
+function getWorkspacePluginId(resource: WorkspaceSkill): string | undefined {
+  return (
+    getPluginIdFromPath(resource.remotePath) ||
+    getPluginIdFromPath(resource.relativePath) ||
+    getPluginIdFromPath(resource.fullPath)
+  );
+}
+
 /**
  * ワークスペーススキル情報（統合型）
  */
@@ -300,7 +308,7 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
       if (resource.isBuiltIn) {
         continue;
       }
-      const pluginId = getPluginIdFromPath(resource.remotePath);
+      const pluginId = getWorkspacePluginId(resource);
       if (!pluginId) {
         continue;
       }
@@ -315,7 +323,7 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
 
   private getWorkspacePluginResources(pluginId: string): WorkspaceSkill[] {
     return this.workspaceSkills.filter(
-      (resource) => getPluginIdFromPath(resource.remotePath) === pluginId,
+      (resource) => getWorkspacePluginId(resource) === pluginId,
     );
   }
 
@@ -372,7 +380,7 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
     const kind = skill.kind || "skill";
     const sourceLabel =
       skill.source && skill.source !== "unknown" ? skill.source : undefined;
-    const workspacePluginId = getPluginIdFromPath(skill.remotePath);
+    const workspacePluginId = getWorkspacePluginId(skill);
     const workspacePluginLabel = workspacePluginId
       ? `${isJapanese() ? "プラグイン" : "Plugin"}: ${workspacePluginId}`
       : undefined;

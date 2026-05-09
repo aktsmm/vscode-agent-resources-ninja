@@ -19,8 +19,8 @@
 
 ## VSIX
 
-| Item | Value |
-| ---- | ----- |
-| File | `agent-resources-ninja-0.2.8.vsix` |
-| Size | 298.62 KB (305,788 bytes), 14 files |
+| Item   | Value                                                              |
+| ------ | ------------------------------------------------------------------ |
+| File   | `agent-resources-ninja-0.2.8.vsix`                                 |
+| Size   | 298.62 KB (305,788 bytes), 14 files                                |
 | SHA256 | `1F2B7AA684B2A703FFDAF2DED3B677C2C205FACF1C83A099B9C8F86132A3D89E` |

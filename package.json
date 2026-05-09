@@ -2,7 +2,7 @@
   "name": "agent-resources-ninja",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "publisher": "yamapan",
   "license": "CC-BY-NC-SA-4.0",
   "icon": "resources/icon.png",
@@ -649,6 +649,18 @@
         "icon": "$(trash)"
       },
       {
+        "command": "resourceNinja.reinstallUserResource",
+        "title": "%command.reinstallUserResource%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "resourceNinja.reinstallUserResourceGroup",
+        "title": "%command.reinstallUserResourceGroup%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(sync)"
+      },
+      {
         "command": "resourceNinja.updateInstruction",
         "title": "%command.updateInstruction%",
         "category": "Agent Resources Ninja",
@@ -835,6 +847,14 @@
         },
         {
           "command": "resourceNinja.deleteUserResource",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.reinstallUserResource",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.reinstallUserResourceGroup",
           "when": "false"
         },
         {
@@ -1107,22 +1127,32 @@
         },
         {
           "command": "resourceNinja.openUserResource",
-          "when": "view == resourceNinja.userResourcesView && (viewItem == userResource || viewItem == builtInUserResource)",
+          "when": "view == resourceNinja.userResourcesView && (viewItem == userResource || viewItem == userRemoteResource || viewItem == builtInUserResource)",
           "group": "inline@1"
         },
         {
-          "command": "resourceNinja.revealUserResource",
-          "when": "view == resourceNinja.userResourcesView && (viewItem == userResource || viewItem == builtInUserResource)",
+          "command": "resourceNinja.reinstallUserResource",
+          "when": "view == resourceNinja.userResourcesView && viewItem == userRemoteResource",
           "group": "inline@2"
         },
         {
-          "command": "resourceNinja.deleteUserResource",
-          "when": "view == resourceNinja.userResourcesView && viewItem == userResource",
+          "command": "resourceNinja.revealUserResource",
+          "when": "view == resourceNinja.userResourcesView && (viewItem == userResource || viewItem == userRemoteResource || viewItem == builtInUserResource)",
           "group": "inline@3"
         },
         {
+          "command": "resourceNinja.reinstallUserResourceGroup",
+          "when": "view == resourceNinja.userResourcesView && (viewItem == kind || viewItem == plugin)",
+          "group": "inline@4"
+        },
+        {
+          "command": "resourceNinja.deleteUserResource",
+          "when": "view == resourceNinja.userResourcesView && (viewItem == userResource || viewItem == userRemoteResource)",
+          "group": "inline@5"
+        },
+        {
           "command": "resourceNinja.copyUserResourcePath",
-          "when": "view == resourceNinja.userResourcesView && (viewItem == userResource || viewItem == builtInUserResource)",
+          "when": "view == resourceNinja.userResourcesView && (viewItem == userResource || viewItem == userRemoteResource || viewItem == builtInUserResource)",
           "group": "navigation@1"
         }
       ]

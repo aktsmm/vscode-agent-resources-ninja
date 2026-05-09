@@ -502,7 +502,7 @@ test("user global resources support deleting only non-built-in resources", () =>
       (item) =>
         item.command === "resourceNinja.deleteUserResource" &&
         item.when ===
-          "view == resourceNinja.userResourcesView && viewItem == userResource",
+          "view == resourceNinja.userResourcesView && (viewItem == userResource || viewItem == userRemoteResource)",
     ),
     "Delete command should appear only for non-built-in user resources",
   );
@@ -518,6 +518,30 @@ test("user global resources support deleting only non-built-in resources", () =>
   assert.match(extensionSource, /resourceNinja\.deleteUserResource/);
   assert.match(extensionSource, /resource\.isBuiltIn/);
   assert.match(extensionSource, /getResourceMetadataPath/);
+  assert.match(userResourcesProviderSource, /userRemoteResource/);
+  assert.match(extensionSource, /resourceNinja\.reinstallUserResource/);
+});
+
+test("user global resources expose per-resource and group reinstall actions", () => {
+  const itemMenus = packageJson.contributes?.menus?.["view/item/context"] || [];
+  assert.ok(
+    itemMenus.some(
+      (item) =>
+        item.command === "resourceNinja.reinstallUserResource" &&
+        item.when ===
+          "view == resourceNinja.userResourcesView && viewItem == userRemoteResource",
+    ),
+    "User / Global view should expose reinstall for remote-installed resources",
+  );
+  assert.ok(
+    itemMenus.some(
+      (item) =>
+        item.command === "resourceNinja.reinstallUserResourceGroup" &&
+        item.when ===
+          "view == resourceNinja.userResourcesView && (viewItem == kind || viewItem == plugin)",
+    ),
+    "User / Global view should expose group reinstall for kind and plugin groups",
+  );
 });
 
 test("built-in user resources remain openable and copyable", () => {
@@ -1398,6 +1422,8 @@ test("command palette hides context-only and compatibility commands", () => {
     "resourceNinja.revealUserResource",
     "resourceNinja.copyUserResourcePath",
     "resourceNinja.deleteUserResource",
+    "resourceNinja.reinstallUserResource",
+    "resourceNinja.reinstallUserResourceGroup",
     "resourceNinja.installBundle",
     "resourceNinja.installPluginResources",
     "resourceNinja.deletePluginResources",

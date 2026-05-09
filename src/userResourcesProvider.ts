@@ -30,6 +30,7 @@ type UserResourceNodeType =
   | "plugin"
   | "kind"
   | "builtInKind"
+  | "remoteResource"
   | "resource"
   | "placeholder";
 
@@ -248,7 +249,7 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
           (resource) =>
             resource.scope === element.scope &&
             resource.scopeLabel === element.scopeLabel &&
-            getPluginIdFromPath(resource.remotePath) === element.pluginId,
+            this.getPluginId(resource) === element.pluginId,
         )
         .map((resource) => this.createResourceItem(resource));
     }
@@ -324,6 +325,23 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
     return this.resources.filter((resource) => resource.isBuiltIn);
   }
 
+  private getPluginId(resource: UserResource): string | undefined {
+    return (
+      getPluginIdFromPath(resource.remotePath) ||
+      getPluginIdFromPath(resource.relativePath) ||
+      getPluginIdFromPath(resource.fullPath)
+    );
+  }
+
+  private isRemoteInstalled(resource: UserResource): boolean {
+    return (
+      !resource.isBuiltIn &&
+      !!resource.remotePath &&
+      !!resource.source &&
+      resource.source !== "local"
+    );
+  }
+
   private createKindItems(
     resources: UserResource[],
     nodeType: "kind" | "builtInKind",
@@ -356,7 +374,7 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
   ): Array<{ id: string; resources: UserResource[] }> {
     const groups = new Map<string, UserResource[]>();
     for (const resource of resources) {
-      const pluginId = getPluginIdFromPath(resource.remotePath);
+      const pluginId = this.getPluginId(resource);
       if (!pluginId) {
         continue;
       }
@@ -443,7 +461,7 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
     const isRecent = getResourceIdentityKeys(resource).some((key) =>
       this.recentlyInstalled?.has(key),
     );
-    const pluginId = getPluginIdFromPath(resource.remotePath);
+    const pluginId = this.getPluginId(resource);
     const pluginLabel = pluginId
       ? `${isJapanese() ? "プラグイン" : "Plugin"}: ${pluginId}`
       : undefined;
@@ -460,7 +478,7 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
       `${isRecent ? "🆕 " : ""}${resource.name}`,
       description,
       vscode.TreeItemCollapsibleState.None,
-      "resource",
+      this.isRemoteInstalled(resource) ? "remoteResource" : "resource",
       resource,
       resource.scope,
       resource.kind,
@@ -484,10 +502,12 @@ export class UserResourceTreeItem extends vscode.TreeItem {
     super(label, collapsibleState);
     this.description = description;
     this.contextValue =
-      nodeType === "resource"
+      nodeType === "resource" || nodeType === "remoteResource"
         ? resource?.isBuiltIn
           ? "builtInUserResource"
-          : "userResource"
+          : nodeType === "remoteResource"
+            ? "userRemoteResource"
+            : "userResource"
         : nodeType;
 
     if (resource) {
@@ -496,7 +516,10 @@ export class UserResourceTreeItem extends vscode.TreeItem {
       const status = resource.isBuiltIn
         ? `Built-in · ${resource.tool}`
         : resource.scopeLabel;
-      const pluginId = getPluginIdFromPath(resource.remotePath);
+      const pluginId =
+        getPluginIdFromPath(resource.remotePath) ||
+        getPluginIdFromPath(resource.relativePath) ||
+        getPluginIdFromPath(resource.fullPath);
       const pluginLine = pluginId
         ? `\n${isJapanese() ? "プラグイン" : "Plugin"}: ${pluginId}`
         : "";
