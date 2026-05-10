@@ -169,6 +169,19 @@ test("README MCP config safety copy explains explicit merge choice", () => {
   assert.match(readmeJa, /レビュー用にコピーするのみ|確認用にコピー/);
 });
 
+test("README documents Copilot CLI Global Resource Home resources", () => {
+  assert.match(readme, /copilot-instructions\.md/);
+  assert.match(readme, /skills\/\*\/SKILL\.md/);
+  assert.match(readme, /hooks\/\*\.json/);
+  assert.match(readme, /mcp-config\.json/);
+  assert.match(readme, /runtime logs, session state/);
+  assert.match(readmeJa, /copilot-instructions\.md/);
+  assert.match(readmeJa, /skills\/\*\/SKILL\.md/);
+  assert.match(readmeJa, /hooks\/\*\.json/);
+  assert.match(readmeJa, /mcp-config\.json/);
+  assert.match(readmeJa, /runtime logs、session state/);
+});
+
 test("README explains nested SKILL contents are not standalone remote resources", () => {
   assert.match(readme, /nested under a directory-based `SKILL\.md` root/);
   assert.match(readme, /do not appear as separate Remote Resources/);

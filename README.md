@@ -214,10 +214,11 @@ Generic MCP config file names such as `mcp.json` and `.mcp.json` are installed w
 3. **User / Global Resource Home** - Browser for this machine
 
 - VS Code User `prompts` (including `.agent.md`), `instructions`, and legacy `agents`
-- Global Resource Home resources under the selected preset (`~/.copilot`, `~/.claude`, or `~/.agents`)
+- Global Resource Home resources under the selected preset (`~/.copilot`, `~/.claude`, or `~/.agents`), including product-native instruction files such as `copilot-instructions.md`, skills under `skills/*/SKILL.md`, agents under `agents/`, Copilot hook config files under `hooks/*.json`, and Copilot CLI `mcp-config.json`
 
 - Built-in VS Code / GitHub Copilot Chat / GitHub Copilot CLI resources are hidden by default and can be toggled into source-specific groups, including Copilot Chat `/create-*` prompt skills bundled under `assets/prompts`
 - Built-in resources are read-only definitions scanned from known VS Code, GitHub Copilot Chat, and GitHub Copilot CLI locations; they are shown for discovery, not modification.
+- Copilot CLI runtime logs, session state, OAuth cache, and restart state under `~/.copilot` are skipped so user-authored resources remain visible even when the CLI home contains many session files.
 - Non-built-in User / Global Resource Home resources can be opened, revealed, copied, or deleted from the right-click menu
 - Built-in resources are read-only and can never be selected as install targets
 - Workspace `.github` resources stay in **Workspace Resources**

@@ -31,6 +31,12 @@ function getPluginInstallRootName(skill) {
   return sanitizeResourceName(skill.name || skill.pluginRoot || "plugin");
 }
 
+function isHookConfigFilePath(resourcePath) {
+  return /(^|\/)(?:\.github\/)?hooks\/[^/]+\.json$/i.test(
+    resourcePath.replace(/\\/g, "/"),
+  );
+}
+
 function targetPath(
   workspaceRoot,
   skill,
@@ -43,6 +49,8 @@ function targetPath(
     skill,
     path.posix.basename(normalizedRemotePath),
   );
+  const isHookConfigFile =
+    skill.kind === "hook" && isHookConfigFilePath(normalizedRemotePath);
   const resourceFolderName = sanitizeResourceName(
     skill.kind === "skill"
       ? skill.name
@@ -77,6 +85,9 @@ function targetPath(
       return path.posix.join(customRoot, sanitizeResourceName(skill.name));
     }
     if (skill.kind === "hook") {
+      if (isHookConfigFile) {
+        return path.posix.join(customRoot, fileName);
+      }
       return path.posix.join(customRoot, resourceFolderName, "README.md");
     }
     return path.posix.join(customRoot, fileName);
@@ -93,6 +104,7 @@ function targetPath(
     if (skill.kind === "prompt")
       return path.posix.join(root, "prompts", fileName);
     if (skill.kind === "mcp") return path.posix.join(root, "mcp", fileName);
+    if (isHookConfigFile) return path.posix.join(root, "hooks", fileName);
     return path.posix.join(root, "hooks", resourceFolderName, "README.md");
   }
 
@@ -104,13 +116,16 @@ function targetPath(
         "skills",
         sanitizeResourceName(skill.name),
       );
-    if (skill.kind === "hook")
+    if (skill.kind === "hook") {
+      if (isHookConfigFile)
+        return path.posix.join(globalRoot, "hooks", fileName);
       return path.posix.join(
         globalRoot,
         "hooks",
         resourceFolderName,
         "README.md",
       );
+    }
     if (skill.kind === "agent")
       return path.posix.join(
         config.userAgentsDirectory ||
@@ -162,6 +177,13 @@ function targetPath(
       config.workspaceMcpDirectory || ".github/mcp",
       fileName,
     );
+  if (isHookConfigFile) {
+    return path.posix.join(
+      workspaceRoot,
+      config.workspaceHooksDirectory || ".github/hooks",
+      fileName,
+    );
+  }
   return path.posix.join(
     workspaceRoot,
     config.workspaceHooksDirectory || ".github/hooks",
@@ -177,12 +199,17 @@ function uninstallTargetPath(workspaceRoot, configuredSkillsDir, relativePath) {
     normalizedPath.toLowerCase() === "skill.md" ||
     normalizedPath.toLowerCase().endsWith("/skill.md");
   const isHook = /^(.+\/)?hooks\/[^/]+\/readme\.md$/i.test(normalizedPath);
+  const isHookConfigFile = isHookConfigFilePath(normalizedPath);
 
   if (isAbsolute) {
     if (isSkill || isHook) {
       return path.posix.dirname(normalizedPath);
     }
     return normalizedPath;
+  }
+
+  if (isHookConfigFile) {
+    return path.posix.join(workspaceRoot, normalizedPath);
   }
 
   if (isSkill) {
@@ -254,6 +281,14 @@ test("workspace targets are resource-kind aware", () => {
   );
   assert.strictEqual(
     targetPath("/repo", {
+      kind: "hook",
+      name: "CLI Policy",
+      path: ".github/hooks/copilot-cli-policy.json",
+    }),
+    "/repo/.github/hooks/copilot-cli-policy.json",
+  );
+  assert.strictEqual(
+    targetPath("/repo", {
       kind: "mcp",
       name: "GitHub MCP",
       path: ".vscode/mcp.json",
@@ -287,6 +322,18 @@ test("global and user targets preserve native conventions", () => {
       "globalHome",
     ),
     "~/.copilot/agents/planner.agent.md",
+  );
+  assert.strictEqual(
+    targetPath(
+      "/repo",
+      {
+        kind: "hook",
+        name: "CLI Policy",
+        path: ".github/hooks/copilot-cli-policy.json",
+      },
+      "globalHome",
+    ),
+    "~/.copilot/hooks/copilot-cli-policy.json",
   );
   assert.strictEqual(
     targetPath(
@@ -357,6 +404,18 @@ test("global and user targets preserve native conventions", () => {
       "userData",
     ),
     "~/.copilot/hooks/pre-review/README.md",
+  );
+  assert.strictEqual(
+    targetPath(
+      "/repo",
+      {
+        kind: "hook",
+        name: "CLI Policy",
+        path: "hooks/copilot-cli-policy.json",
+      },
+      "userData",
+    ),
+    "~/.copilot/hooks/copilot-cli-policy.json",
   );
   assert.strictEqual(
     targetPath(
@@ -546,6 +605,14 @@ test("uninstall by path avoids duplicating configured skills directory", () => {
     uninstallTargetPath(
       "/repo",
       ".github/skills",
+      ".github/hooks/copilot-cli-policy.json",
+    ),
+    "/repo/.github/hooks/copilot-cli-policy.json",
+  );
+  assert.strictEqual(
+    uninstallTargetPath(
+      "/repo",
+      ".github/skills",
       "/external/agents/planner.agent.md",
     ),
     "/external/agents/planner.agent.md",
@@ -557,6 +624,14 @@ test("uninstall by path avoids duplicating configured skills directory", () => {
       "/external/hooks/pre-review/README.md",
     ),
     "/external/hooks/pre-review",
+  );
+  assert.strictEqual(
+    uninstallTargetPath(
+      "/repo",
+      ".github/skills",
+      "/external/hooks/copilot-cli-policy.json",
+    ),
+    "/external/hooks/copilot-cli-policy.json",
   );
 });
 

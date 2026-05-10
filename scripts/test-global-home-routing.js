@@ -19,6 +19,14 @@ const customizationPathsSource = fs.readFileSync(
   path.join(repoRoot, "src", "customizationPaths.ts"),
   "utf8",
 );
+const resourceKindsSource = fs.readFileSync(
+  path.join(repoRoot, "src", "resourceKinds.ts"),
+  "utf8",
+);
+const userResourceScannerSource = fs.readFileSync(
+  path.join(repoRoot, "src", "userResourceScanner.ts"),
+  "utf8",
+);
 
 function normalizeConfiguredPath(value) {
   return value.replace(/\\/g, "/");
@@ -284,18 +292,83 @@ test("implementation keeps known preset defaults centralized", () => {
 });
 
 test("global instruction file names follow product-native presets", () => {
-  assert.strictEqual(getGlobalInstructionFileNameForPreset("copilot"), "copilot-instructions.md");
-  assert.strictEqual(getGlobalInstructionFileNameForPreset("claude"), "CLAUDE.md");
-  assert.strictEqual(getGlobalInstructionFileNameForPreset("agents"), "AGENTS.md");
-  assert.strictEqual(getGlobalInstructionFileNameForPreset("custom"), "AGENTS.md");
+  assert.strictEqual(
+    getGlobalInstructionFileNameForPreset("copilot"),
+    "copilot-instructions.md",
+  );
+  assert.strictEqual(
+    getGlobalInstructionFileNameForPreset("claude"),
+    "CLAUDE.md",
+  );
+  assert.strictEqual(
+    getGlobalInstructionFileNameForPreset("agents"),
+    "AGENTS.md",
+  );
+  assert.strictEqual(
+    getGlobalInstructionFileNameForPreset("custom"),
+    "AGENTS.md",
+  );
 });
 
 test("implementation exposes global instruction resolver", () => {
-  assert.match(customizationPathsSource, /function getGlobalInstructionFileNameForPreset/);
-  assert.match(customizationPathsSource, /case "copilot"[\s\S]*"copilot-instructions\.md"/);
+  assert.match(
+    customizationPathsSource,
+    /function getGlobalInstructionFileNameForPreset/,
+  );
+  assert.match(
+    customizationPathsSource,
+    /case "copilot"[\s\S]*"copilot-instructions\.md"/,
+  );
   assert.match(customizationPathsSource, /case "claude"[\s\S]*"CLAUDE\.md"/);
   assert.match(customizationPathsSource, /resolveGlobalInstructionFileUri/);
-  assert.match(customizationPathsSource, /getConfiguredGlobalHomeDirectory\(config\)/);
+  assert.match(
+    customizationPathsSource,
+    /getConfiguredGlobalHomeDirectory\(config\)/,
+  );
+});
+
+test("resource detection includes product-native instruction files", () => {
+  assert.match(resourceKindsSource, /isNativeInstructionFilePath/);
+  assert.match(resourceKindsSource, /copilot-instructions\.md/);
+  assert.match(resourceKindsSource, /\.codex\/agents\.md/);
+  assert.match(resourceKindsSource, /\.gemini\/gemini\.md/);
+});
+
+test("resource detection includes Copilot CLI hook and MCP config files", () => {
+  assert.match(resourceKindsSource, /isHookConfigFilePath/);
+  assert.match(resourceKindsSource, /hooks\\\/\[\^\/\]\+\\\.json/);
+  assert.match(resourceKindsSource, /mcp-config\.json/);
+  assert.match(resourceKindsSource, /isResourceMetadataSidecarPath/);
+});
+
+test("global home scan prioritizes resource directories before runtime noise", () => {
+  assert.match(userResourceScannerSource, /RESOURCE_DIRECTORY_NAMES/);
+  assert.match(userResourceScannerSource, /"skills"/);
+  assert.match(userResourceScannerSource, /"instructions"/);
+  assert.match(userResourceScannerSource, /"hooks"/);
+  assert.match(
+    userResourceScannerSource,
+    /prioritizeResourceDirectories:[\s\S]*root\.scope === "globalHome"/,
+  );
+});
+
+test("global home scope labels expose selected product root", () => {
+  assert.match(userResourceScannerSource, /function getGlobalHomeToolLabel/);
+  assert.match(userResourceScannerSource, /GitHub Copilot CLI/);
+  assert.match(userResourceScannerSource, /Custom resource home/);
+});
+
+test("global home scan skips Copilot CLI runtime directories", () => {
+  assert.match(
+    userResourceScannerSource,
+    /GLOBAL_HOME_RUNTIME_DIRECTORY_NAMES/,
+  );
+  assert.match(userResourceScannerSource, /"logs"/);
+  assert.match(userResourceScannerSource, /"session-state"/);
+  assert.match(
+    userResourceScannerSource,
+    /skipRuntimeDirectories:[\s\S]*root\.scope === "globalHome"/,
+  );
 });
 
 console.log("Global home routing tests passed");

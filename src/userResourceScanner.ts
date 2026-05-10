@@ -3,6 +3,7 @@ import { ResourceKind } from "./skillIndex";
 import {
   DEFAULT_GLOBAL_HOME_DIRECTORY,
   getConfiguredGlobalHomeDirectory,
+  getConfiguredGlobalResourceHomePreset,
   getConfiguredUserAgentsDirectory,
   getConfiguredUserInstructionsDirectory,
   getConfiguredUserPromptsDirectory,
@@ -63,6 +64,57 @@ interface ResourceInstallMeta {
   pluginRoot?: string;
   pluginManifestPath?: string;
   pluginManifestKind?: string;
+}
+
+interface CollectResourceFilesOptions {
+  prioritizeResourceDirectories?: boolean;
+  skipRuntimeDirectories?: boolean;
+}
+
+const RESOURCE_DIRECTORY_NAMES = new Set([
+  ".claude-plugin",
+  ".codex",
+  ".codex-plugin",
+  ".cursor-plugin",
+  ".gemini",
+  ".github",
+  ".plugin",
+  ".vscode",
+  "agents",
+  "hooks",
+  "instructions",
+  "mcp",
+  "plugins",
+  "prompts",
+  "rules",
+  "skills",
+]);
+
+const GLOBAL_HOME_RUNTIME_DIRECTORY_NAMES = new Set([
+  "crash-context",
+  "ide",
+  "logs",
+  "mcp-oauth-config",
+  "restart",
+  "session-state",
+  "session-store",
+]);
+
+function getGlobalHomeToolLabel(config: vscode.WorkspaceConfiguration): string {
+  if (config.get<string>("globalHomeDirectory")?.trim()) {
+    return "Custom resource home";
+  }
+  switch (getConfiguredGlobalResourceHomePreset(config)) {
+    case "claude":
+      return "Claude-compatible";
+    case "agents":
+      return "Open agent resources";
+    case "custom":
+      return "Custom resource home";
+    case "copilot":
+    default:
+      return "GitHub Copilot CLI";
+  }
 }
 
 function normalizeSeparators(value: string): string {
@@ -132,7 +184,7 @@ function getKnownRoots(
   roots.push({
     scope: "globalHome",
     label: "Global Resource Home",
-    tool: "Shared resource root",
+    tool: getGlobalHomeToolLabel(config),
     uri: resolveConfiguredUri(
       workspaceUri,
       getConfiguredGlobalHomeDirectory(config),
@@ -237,9 +289,49 @@ async function pathExists(uri: vscode.Uri): Promise<boolean> {
   }
 }
 
+function hasFileType(
+  type: vscode.FileType,
+  expectedType: vscode.FileType,
+): boolean {
+  return (type & expectedType) !== 0;
+}
+
+function shouldSkipScanDirectory(
+  name: string,
+  includeBuiltInResources: boolean,
+  options: CollectResourceFilesOptions,
+): boolean {
+  const lowerName = name.toLowerCase();
+  return (
+    lowerName === "node_modules" ||
+    lowerName === ".git" ||
+    (!includeBuiltInResources && lowerName === "pkg") ||
+    (!!options.skipRuntimeDirectories &&
+      GLOBAL_HOME_RUNTIME_DIRECTORY_NAMES.has(lowerName))
+  );
+}
+
+function getScanPriority(
+  name: string,
+  type: vscode.FileType,
+  options: CollectResourceFilesOptions,
+): number {
+  if (hasFileType(type, vscode.FileType.File)) {
+    return 0;
+  }
+  if (
+    options.prioritizeResourceDirectories &&
+    RESOURCE_DIRECTORY_NAMES.has(name.toLowerCase())
+  ) {
+    return 1;
+  }
+  return 2;
+}
+
 async function collectMarkdownFiles(
   root: vscode.Uri,
   includeBuiltInResources: boolean,
+  options: CollectResourceFilesOptions = {},
 ): Promise<vscode.Uri[]> {
   const files: vscode.Uri[] = [];
   const maxFiles = 2000;
@@ -256,20 +348,27 @@ async function collectMarkdownFiles(
       return;
     }
 
-    for (const [name, type] of entries) {
-      if (
-        name === "node_modules" ||
-        name === ".git" ||
-        (!includeBuiltInResources && name === "pkg")
-      ) {
+    const sortedEntries = entries
+      .slice()
+      .sort(([nameA, typeA], [nameB, typeB]) => {
+        const priorityA = getScanPriority(nameA, typeA, options);
+        const priorityB = getScanPriority(nameB, typeB, options);
+        if (priorityA !== priorityB) {
+          return priorityA - priorityB;
+        }
+        return nameA.localeCompare(nameB);
+      });
+
+    for (const [name, type] of sortedEntries) {
+      if (shouldSkipScanDirectory(name, includeBuiltInResources, options)) {
         continue;
       }
 
       const child = vscode.Uri.joinPath(current, name);
-      if (type === vscode.FileType.Directory) {
+      if (hasFileType(type, vscode.FileType.Directory)) {
         await walk(child);
       } else if (
-        type === vscode.FileType.File &&
+        hasFileType(type, vscode.FileType.File) &&
         (name.toLowerCase().endsWith(".md") ||
           name.toLowerCase().endsWith(".json") ||
           name.toLowerCase().endsWith(".mdc") ||
@@ -390,7 +489,16 @@ export async function scanUserResources(
       continue;
     }
 
-    const files = await collectMarkdownFiles(root.uri, includeBuiltInResources);
+    const files = await collectMarkdownFiles(
+      root.uri,
+      includeBuiltInResources,
+      {
+        prioritizeResourceDirectories:
+          root.scope === "globalHome" && !root.builtInOnly,
+        skipRuntimeDirectories:
+          root.scope === "globalHome" && !root.builtInOnly,
+      },
+    );
     for (const file of files) {
       const key = file.fsPath.toLowerCase();
       if (seenPaths.has(key)) {

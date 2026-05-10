@@ -9,6 +9,9 @@ const bundledIndex = require(
 
 function detectResourceKindFromPath(resourcePath) {
   const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
+  if (isResourceMetadataSidecarPath(lowerPath)) {
+    return undefined;
+  }
   if (isPluginManifestPath(lowerPath)) {
     return "plugin";
   }
@@ -28,12 +31,18 @@ function detectResourceKindFromPath(resourcePath) {
   if (new RegExp(`^${pluginPrefix}hooks/[^/]+/readme\\.md$`).test(lowerPath)) {
     return "hook";
   }
+  if (isHookConfigFilePath(lowerPath)) {
+    return "hook";
+  }
   if (
     new RegExp(
       `^${pluginPrefix}(?:mcp\\.json|\\.vscode/mcp\\.json|mcp/[^/]+\\.json)$`,
     ).test(lowerPath)
   ) {
     return "mcp";
+  }
+  if (isNativeInstructionFilePath(lowerPath)) {
+    return "instruction";
   }
   if (lowerPath === "skill.md" || lowerPath.endsWith("/skill.md")) {
     return "skill";
@@ -53,8 +62,12 @@ function detectResourceKindFromPath(resourcePath) {
   if (/^(?:\.github\/)?hooks\/[^/]+\/readme\.md$/i.test(lowerPath)) {
     return "hook";
   }
+  if (isHookConfigFilePath(lowerPath)) {
+    return "hook";
+  }
   if (
     lowerPath === "mcp.json" ||
+    lowerPath === "mcp-config.json" ||
     lowerPath === ".mcp.json" ||
     lowerPath === ".vscode/mcp.json" ||
     /^(?:\.github\/)?mcp\/[^/]+\.json$/i.test(lowerPath)
@@ -62,6 +75,34 @@ function detectResourceKindFromPath(resourcePath) {
     return "mcp";
   }
   return undefined;
+}
+
+function isResourceMetadataSidecarPath(lowerPath) {
+  return (
+    lowerPath.endsWith("/.skill-meta.json") ||
+    lowerPath.endsWith("/.resource-ninja.json") ||
+    lowerPath.endsWith(".resource-ninja.json")
+  );
+}
+
+function isHookConfigFilePath(resourcePath) {
+  const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
+  if (!/(^|\/)(?:\.github\/)?hooks\/[^/]+\.json$/i.test(lowerPath)) {
+    return false;
+  }
+  return !isResourceMetadataSidecarPath(lowerPath);
+}
+
+function isNativeInstructionFilePath(lowerPath) {
+  return (
+    lowerPath === "copilot-instructions.md" ||
+    lowerPath === ".github/copilot-instructions.md" ||
+    lowerPath === "claude.md" ||
+    lowerPath === "agents.md" ||
+    lowerPath === ".codex/agents.md" ||
+    lowerPath === "gemini.md" ||
+    lowerPath === ".gemini/gemini.md"
+  );
 }
 
 function isPluginManifestPath(lowerPath) {
@@ -435,7 +476,10 @@ function getIndexedResourcePathsFromTree(paths) {
 
 function getFallbackResourceName(filePath, kind) {
   const pathParts = filePath.replace(/\\/g, "/").split("/");
-  if (kind === "skill" || kind === "hook") {
+  if (kind === "skill") {
+    return pathParts[pathParts.length - 2] || "Unknown";
+  }
+  if (kind === "hook" && !isHookConfigFilePath(filePath)) {
     return pathParts[pathParts.length - 2] || "Unknown";
   }
   if (kind === "plugin") {
@@ -450,7 +494,9 @@ function getFallbackResourceName(filePath, kind) {
   const fileName = pathParts[pathParts.length - 1] || "Unknown";
   return fileName
     .replace(/\.(agent|instructions|prompt)\.md$/i, "")
-    .replace(/\.mdc$/i, "");
+    .replace(/\.mdc$/i, "")
+    .replace(/\.mcp\.json$/i, "")
+    .replace(/\.json$/i, "");
 }
 
 function test(name, fn) {
@@ -475,6 +521,27 @@ test("detects skill folders", () => {
   assert.strictEqual(
     getFallbackResourceName("skills/code-tour/SKILL.md", "skill"),
     "code-tour",
+  );
+});
+
+test("detects product-native instruction files", () => {
+  assert.strictEqual(
+    detectResourceKindFromPath("copilot-instructions.md"),
+    "instruction",
+  );
+  assert.strictEqual(
+    detectResourceKindFromPath(".github/copilot-instructions.md"),
+    "instruction",
+  );
+  assert.strictEqual(detectResourceKindFromPath("CLAUDE.md"), "instruction");
+  assert.strictEqual(detectResourceKindFromPath("AGENTS.md"), "instruction");
+  assert.strictEqual(
+    detectResourceKindFromPath(".codex/AGENTS.md"),
+    "instruction",
+  );
+  assert.strictEqual(
+    detectResourceKindFromPath(".gemini/GEMINI.md"),
+    "instruction",
   );
 });
 
@@ -900,7 +967,7 @@ test("deduplicates built-in resources by kind and name", () => {
   );
 });
 
-test("detects hook entry readmes only", () => {
+test("detects hook entry readmes and Copilot CLI hook configs", () => {
   assert.strictEqual(
     detectResourceKindFromPath("hooks/pre-review/README.md"),
     "hook",
@@ -909,11 +976,30 @@ test("detects hook entry readmes only", () => {
     detectResourceKindFromPath(".github/hooks/pre-review/README.md"),
     "hook",
   );
+  assert.strictEqual(
+    detectResourceKindFromPath("hooks/copilot-cli-policy.json"),
+    "hook",
+  );
+  assert.strictEqual(
+    detectResourceKindFromPath(".github/hooks/copilot-cli-policy.json"),
+    "hook",
+  );
+  assert.strictEqual(
+    getFallbackResourceName("hooks/copilot-cli-policy.json", "hook"),
+    "copilot-cli-policy",
+  );
+  assert.strictEqual(
+    detectResourceKindFromPath(
+      "hooks/copilot-cli-policy.json.resource-ninja.json",
+    ),
+    undefined,
+  );
   assert.strictEqual(detectResourceKindFromPath("docs/README.md"), undefined);
 });
 
 test("detects MCP config resources without auto-activation paths", () => {
   assert.strictEqual(detectResourceKindFromPath("mcp.json"), "mcp");
+  assert.strictEqual(detectResourceKindFromPath("mcp-config.json"), "mcp");
   assert.strictEqual(detectResourceKindFromPath(".mcp.json"), "mcp");
   assert.strictEqual(detectResourceKindFromPath(".vscode/mcp.json"), "mcp");
   assert.strictEqual(

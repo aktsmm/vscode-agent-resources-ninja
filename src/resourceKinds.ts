@@ -23,6 +23,9 @@ export function detectResourceKindFromPath(
   resourcePath: string,
 ): ResourceKind | undefined {
   const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
+  if (isResourceMetadataSidecarPath(lowerPath)) {
+    return undefined;
+  }
   if (isPluginManifestPath(lowerPath)) {
     return "plugin";
   }
@@ -42,12 +45,18 @@ export function detectResourceKindFromPath(
   if (new RegExp(`^${pluginPrefix}hooks/[^/]+/readme\\.md$`).test(lowerPath)) {
     return "hook";
   }
+  if (isHookConfigFilePath(lowerPath)) {
+    return "hook";
+  }
   if (
     new RegExp(
       `^${pluginPrefix}(?:mcp\\.json|\\.vscode/mcp\\.json|mcp/[^/]+\\.json)$`,
     ).test(lowerPath)
   ) {
     return "mcp";
+  }
+  if (isNativeInstructionFilePath(lowerPath)) {
+    return "instruction";
   }
   if (lowerPath === "skill.md" || lowerPath.endsWith("/skill.md")) {
     return "skill";
@@ -67,8 +76,12 @@ export function detectResourceKindFromPath(
   if (/^(?:\.github\/)?hooks\/[^/]+\/readme\.md$/i.test(lowerPath)) {
     return "hook";
   }
+  if (isHookConfigFilePath(lowerPath)) {
+    return "hook";
+  }
   if (
     lowerPath === "mcp.json" ||
+    lowerPath === "mcp-config.json" ||
     lowerPath === ".mcp.json" ||
     lowerPath === ".vscode/mcp.json" ||
     /^(?:\.github\/)?mcp\/[^/]+\.json$/i.test(lowerPath)
@@ -76,6 +89,34 @@ export function detectResourceKindFromPath(
     return "mcp";
   }
   return undefined;
+}
+
+function isResourceMetadataSidecarPath(lowerPath: string): boolean {
+  return (
+    lowerPath.endsWith("/.skill-meta.json") ||
+    lowerPath.endsWith("/.resource-ninja.json") ||
+    lowerPath.endsWith(".resource-ninja.json")
+  );
+}
+
+export function isHookConfigFilePath(resourcePath: string): boolean {
+  const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
+  if (!/(^|\/)(?:\.github\/)?hooks\/[^/]+\.json$/i.test(lowerPath)) {
+    return false;
+  }
+  return !isResourceMetadataSidecarPath(lowerPath);
+}
+
+function isNativeInstructionFilePath(lowerPath: string): boolean {
+  return (
+    lowerPath === "copilot-instructions.md" ||
+    lowerPath === ".github/copilot-instructions.md" ||
+    lowerPath === "claude.md" ||
+    lowerPath === "agents.md" ||
+    lowerPath === ".codex/agents.md" ||
+    lowerPath === "gemini.md" ||
+    lowerPath === ".gemini/gemini.md"
+  );
 }
 
 function isPluginManifestPath(lowerPath: string): boolean {
@@ -530,7 +571,10 @@ export function getFallbackResourceName(
   kind: ResourceKind,
 ): string {
   const pathParts = filePath.replace(/\\/g, "/").split("/");
-  if (kind === "skill" || kind === "hook") {
+  if (kind === "skill") {
+    return pathParts[pathParts.length - 2] || "Unknown";
+  }
+  if (kind === "hook" && !isHookConfigFilePath(filePath)) {
     return pathParts[pathParts.length - 2] || "Unknown";
   }
   if (kind === "plugin") {

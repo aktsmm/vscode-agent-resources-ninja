@@ -17,12 +17,16 @@ function isPluginManifestPath(resourcePath) {
 
 function detectResourceKindFromPath(resourcePath) {
   const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
+  if (isResourceMetadataSidecarPath(lowerPath)) return undefined;
   if (isPluginManifestPath(lowerPath)) return "plugin";
   if (/^(?:plugins\/[^/]+\/)?rules\/[^/]+\.mdc$/.test(lowerPath)) {
     return "cursor-rule";
   }
   if (/^plugins\/[^/]+\/agents\/[^/]+\.md$/.test(lowerPath)) return "agent";
   if (/^plugins\/[^/]+\/hooks\/[^/]+\/readme\.md$/.test(lowerPath)) {
+    return "hook";
+  }
+  if (/^plugins\/[^/]+\/hooks\/[^/]+\.json$/.test(lowerPath)) {
     return "hook";
   }
   if (/^plugins\/[^/]+\/skills\/[^/]+\/skill\.md$/.test(lowerPath)) {
@@ -45,8 +49,12 @@ function detectResourceKindFromPath(resourcePath) {
   if (/^(?:\.github\/)?hooks\/[^/]+\/readme\.md$/i.test(lowerPath)) {
     return "hook";
   }
+  if (isHookConfigFilePath(lowerPath)) {
+    return "hook";
+  }
   if (
     lowerPath === "mcp.json" ||
+    lowerPath === "mcp-config.json" ||
     lowerPath === ".mcp.json" ||
     lowerPath === ".vscode/mcp.json" ||
     /^(?:\.github\/)?mcp\/[^/]+\.json$/i.test(lowerPath)
@@ -54,6 +62,22 @@ function detectResourceKindFromPath(resourcePath) {
     return "mcp";
   }
   return undefined;
+}
+
+function isResourceMetadataSidecarPath(lowerPath) {
+  return (
+    lowerPath.endsWith("/.skill-meta.json") ||
+    lowerPath.endsWith("/.resource-ninja.json") ||
+    lowerPath.endsWith(".resource-ninja.json")
+  );
+}
+
+function isHookConfigFilePath(resourcePath) {
+  const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
+  if (!/(^|\/)(?:\.github\/)?hooks\/[^/]+\.json$/i.test(lowerPath)) {
+    return false;
+  }
+  return !isResourceMetadataSidecarPath(lowerPath);
 }
 
 function getPluginRootsFromPaths(paths) {
@@ -86,6 +110,7 @@ function detectPluginChildResourceKind(relativePath) {
   if (/^prompts\/[^/]+\.md$/.test(lowerPath)) return "prompt";
   if (/^rules\/[^/]+\.mdc$/.test(lowerPath)) return "cursor-rule";
   if (/^hooks\/[^/]+\/readme\.md$/.test(lowerPath)) return "hook";
+  if (/^hooks\/[^/]+\.json$/.test(lowerPath)) return "hook";
   if (/^(?:mcp\.json|\.vscode\/mcp\.json|mcp\/[^/]+\.json)$/.test(lowerPath)) {
     return "mcp";
   }
@@ -139,7 +164,10 @@ function getResourceInstallPath(filePath, kind) {
 
 function getFallbackResourceName(filePath, kind) {
   const pathParts = filePath.replace(/\\/g, "/").split("/");
-  if (kind === "skill" || kind === "hook") {
+  if (kind === "skill") {
+    return pathParts[pathParts.length - 2] || "Unknown";
+  }
+  if (kind === "hook" && !isHookConfigFilePath(filePath)) {
     return pathParts[pathParts.length - 2] || "Unknown";
   }
   if (kind === "plugin") {

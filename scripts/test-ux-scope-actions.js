@@ -272,10 +272,32 @@ test("resource rows expose installed mcp and hook lifecycle states", () => {
   assert.match(treeProviderSource, /Installed/);
   assert.match(treeProviderSource, /formatMcpLifecycleLabel/);
   assert.match(treeProviderSource, /formatHookDiagnosticsLabel/);
+  assert.match(treeProviderSource, /isHookConfigFilePath/);
+  assert.match(treeProviderSource, /Detected as a Copilot hook JSON config/);
   assert.match(userResourcesProviderSource, /formatMcpLifecycleLabel/);
   assert.match(userResourcesProviderSource, /formatHookDiagnosticsLabel/);
+  assert.match(userResourcesProviderSource, /isHookConfigResource/);
+  assert.match(
+    userResourcesProviderSource,
+    /Detected as a Copilot hook JSON config/,
+  );
   assert.match(extensionSource, /Copied MCP config for review/);
   assert.match(extensionSource, /Hook config:/);
+});
+
+test("recently installed tree badges have textual status alternatives", () => {
+  assert.match(treeProviderSource, /const recentLabel = isRecent/);
+  assert.match(
+    treeProviderSource,
+    /recentLabel,[\s\S]*sourceLabel \? `installed from \$\{sourceLabel\}` : "installed"/,
+  );
+  assert.match(treeProviderSource, /const accessibleStatusText = isRecent/);
+  assert.match(userResourcesProviderSource, /const recentLabel = isRecent/);
+  assert.match(
+    userResourcesProviderSource,
+    /recentLabel,[\s\S]*pluginLabel,[\s\S]*resource\.lifecycleLabel/,
+  );
+  assert.match(userResourcesProviderSource, /Status[\s\S]*Recently installed/);
 });
 
 test("remote resource rows support click installs for every resource kind", () => {
@@ -336,14 +358,16 @@ test("plugin cleanup refreshes instruction index when skills were deleted", () =
   );
 });
 
-test("hook plugin cleanup removes the hook folder rather than only README", () => {
+test("hook plugin cleanup removes folders but keeps JSON configs file-scoped", () => {
+  assert.match(extensionSource, /const isDirectoryBackedHook/);
+  assert.match(extensionSource, /!isHookConfigFilePath\(fullPath\)/);
   assert.match(
     extensionSource,
-    /kind === "skill" \|\| kind === "hook" \? path\.dirname\(fullPath\) : fullPath/,
+    /kind === "skill" \|\| isDirectoryBackedHook \? path\.dirname\(fullPath\) : fullPath/,
   );
   assert.match(
     extensionSource,
-    /recursive: kind === "skill" \|\| kind === "hook"/,
+    /recursive: kind === "skill" \|\| isDirectoryBackedHook/,
   );
 });
 
@@ -497,16 +521,15 @@ test("user global resource empty state gives next action", () => {
 });
 
 test("global resource home tree description is not repetitive", () => {
-  assert.match(
-    userResourcesProviderSource,
-    /\$\{count\} resources · \$\{resource\.tool\}/,
-  );
+  assert.match(userResourcesProviderSource, /function formatScopeDescription/);
+  assert.match(userResourcesProviderSource, /formatRootPathForDisplay/);
+  assert.match(userResourcesProviderSource, /resource\.scope === "globalHome"/);
   assert.match(
     fs.readFileSync(
       path.join(repoRoot, "src", "userResourceScanner.ts"),
       "utf8",
     ),
-    /tool: "Shared resource root"/,
+    /GitHub Copilot CLI/,
   );
 });
 

@@ -1802,7 +1802,7 @@ test("built-in resource visibility is configurable", () => {
   assert.match(userResourceScannerSource, /getBuiltInResourceDedupeKey/);
   assert.match(userResourceScannerSource, /shouldReplaceBuiltInResourcePath/);
   assert.match(userResourceScannerSource, /includeBuiltInResources/);
-  assert.match(userResourceScannerSource, /name === "pkg"/);
+  assert.match(userResourceScannerSource, /lowerName === "pkg"/);
   assert.match(userResourceScannerSource, /github\.copilot-chat/);
   assert.match(userResourceScannerSource, /out[\s\S]*vs[\s\S]*sessions/);
   assert.match(

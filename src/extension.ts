@@ -73,6 +73,7 @@ import {
   getPluginIdFromPath,
   getResourceIdentityKeys,
   getResourceMetadataPath,
+  isHookConfigFilePath,
 } from "./resourceKinds";
 import { scanUserResources, UserResource } from "./userResourceScanner";
 import {
@@ -111,15 +112,16 @@ async function deleteInstalledResourceByPath(
   kind: ResourceKind,
   fullPath: string,
 ): Promise<void> {
+  const isDirectoryBackedHook = kind === "hook" && !isHookConfigFilePath(fullPath);
   const targetUri = vscode.Uri.file(
-    kind === "skill" || kind === "hook" ? path.dirname(fullPath) : fullPath,
+    kind === "skill" || isDirectoryBackedHook ? path.dirname(fullPath) : fullPath,
   );
   await vscode.workspace.fs.delete(targetUri, {
-    recursive: kind === "skill" || kind === "hook",
+    recursive: kind === "skill" || isDirectoryBackedHook,
     useTrash: true,
   });
 
-  if (kind !== "skill" && kind !== "hook") {
+  if (kind !== "skill" && !isDirectoryBackedHook) {
     try {
       await vscode.workspace.fs.delete(
         vscode.Uri.file(getResourceMetadataPath(fullPath, kind)),
@@ -948,14 +950,16 @@ export function activate(context: vscode.ExtensionContext) {
       }
 
       const resourceUri = vscode.Uri.file(resource.fullPath);
+      const isDirectoryBackedHook =
+        resource.kind === "hook" && !isHookConfigFilePath(resource.fullPath);
       const targetUri =
-        resource.kind === "skill" || resource.kind === "hook"
+        resource.kind === "skill" || isDirectoryBackedHook
           ? vscode.Uri.file(path.dirname(resource.fullPath))
           : resourceUri;
 
       try {
         let hookConfigSummary: string | undefined;
-        if (resource.kind === "hook") {
+        if (isDirectoryBackedHook) {
           const hookConfigUpdate = await updateHookConfigForUninstall(
             wsFolder.uri,
             resourceUri,
@@ -964,11 +968,11 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         await vscode.workspace.fs.delete(targetUri, {
-          recursive: resource.kind === "skill" || resource.kind === "hook",
+          recursive: resource.kind === "skill" || isDirectoryBackedHook,
           useTrash: true,
         });
 
-        if (resource.kind !== "skill" && resource.kind !== "hook") {
+        if (resource.kind !== "skill" && !isDirectoryBackedHook) {
           try {
             await vscode.workspace.fs.delete(
               vscode.Uri.file(

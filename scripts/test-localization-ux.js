@@ -291,6 +291,30 @@ test("settings descriptions distinguish skill index from native resource paths",
     nlsJa["config.instructionFile.markdownDescription"],
     /ネイティブな保存先/,
   );
+  assert.match(
+    nls["config.globalResourceHomePreset.markdownDescription"],
+    /hooks\/\*\.json/,
+  );
+  assert.match(
+    nls["config.globalHomeDirectory.markdownDescription"],
+    /mcp-config\.json/,
+  );
+  assert.match(
+    nls["config.showBuiltInResources.markdownDescription"],
+    /Your own files under the selected Global Resource Home are always shown/,
+  );
+  assert.match(
+    nlsJa["config.globalResourceHomePreset.markdownDescription"],
+    /hooks\/\*\.json/,
+  );
+  assert.match(
+    nlsJa["config.globalHomeDirectory.markdownDescription"],
+    /mcp-config\.json/,
+  );
+  assert.match(
+    nlsJa["config.showBuiltInResources.markdownDescription"],
+    /ユーザー自身のファイルは常に表示/,
+  );
 });
 
 test("settings output format copy stays professional", () => {

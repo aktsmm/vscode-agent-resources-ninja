@@ -260,6 +260,9 @@ async function scanRepositoryForSkills(source) {
  */
 function detectResourceKindFromPath(resourcePath) {
   const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
+  if (isResourceMetadataSidecarPath(lowerPath)) {
+    return undefined;
+  }
   if (isPluginManifestPath(lowerPath)) {
     return "plugin";
   }
@@ -277,6 +280,9 @@ function detectResourceKindFromPath(resourcePath) {
     return "prompt";
   }
   if (new RegExp(`^${pluginPrefix}hooks/[^/]+/readme\\.md$`).test(lowerPath)) {
+    return "hook";
+  }
+  if (isHookConfigFilePath(lowerPath)) {
     return "hook";
   }
   if (
@@ -304,8 +310,12 @@ function detectResourceKindFromPath(resourcePath) {
   if (/^(?:\.github\/)?hooks\/[^/]+\/readme\.md$/i.test(lowerPath)) {
     return "hook";
   }
+  if (isHookConfigFilePath(lowerPath)) {
+    return "hook";
+  }
   if (
     lowerPath === "mcp.json" ||
+    lowerPath === "mcp-config.json" ||
     lowerPath === ".mcp.json" ||
     lowerPath === ".vscode/mcp.json" ||
     /^(?:\.github\/)?mcp\/[^/]+\.json$/i.test(lowerPath)
@@ -313,6 +323,22 @@ function detectResourceKindFromPath(resourcePath) {
     return "mcp";
   }
   return undefined;
+}
+
+function isResourceMetadataSidecarPath(lowerPath) {
+  return (
+    lowerPath.endsWith("/.skill-meta.json") ||
+    lowerPath.endsWith("/.resource-ninja.json") ||
+    lowerPath.endsWith(".resource-ninja.json")
+  );
+}
+
+function isHookConfigFilePath(resourcePath) {
+  const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
+  if (!/(^|\/)(?:\.github\/)?hooks\/[^/]+\.json$/i.test(lowerPath)) {
+    return false;
+  }
+  return !isResourceMetadataSidecarPath(lowerPath);
 }
 
 function isPluginManifestPath(lowerPath) {
@@ -409,7 +435,10 @@ function getResourceInstallPath(filePath, kind) {
 
 function getFallbackResourceName(filePath, kind) {
   const pathParts = filePath.replace(/\\/g, "/").split("/");
-  if (kind === "skill" || kind === "hook") {
+  if (kind === "skill") {
+    return pathParts[pathParts.length - 2] || "Unknown";
+  }
+  if (kind === "hook" && !isHookConfigFilePath(filePath)) {
     return pathParts[pathParts.length - 2] || "Unknown";
   }
   if (kind === "plugin") {
@@ -666,6 +695,7 @@ function detectPluginChildResourceKind(relativePath) {
   if (/^prompts\/[^/]+\.md$/.test(lowerPath)) return "prompt";
   if (/^rules\/[^/]+\.mdc$/.test(lowerPath)) return "cursor-rule";
   if (/^hooks\/[^/]+\/readme\.md$/.test(lowerPath)) return "hook";
+  if (/^hooks\/[^/]+\.json$/.test(lowerPath)) return "hook";
   if (/^(?:mcp\.json|\.vscode\/mcp\.json|mcp\/[^/]+\.json)$/.test(lowerPath)) {
     return "mcp";
   }

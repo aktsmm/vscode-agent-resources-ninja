@@ -1,6 +1,8 @@
 // 検索ロジックのテストスクリプト
 // 実際のAPIは呼ばず、クエリ生成ロジックのみテスト
 
+const assert = require("assert");
+
 function testSearchLogic(query) {
   // クエリをキーワードに分割（3文字以上のみ、ノイズ削減）
   const rawKeywords = query
@@ -38,7 +40,9 @@ function testSearchLogic(query) {
     `extension:md path:instructions ${baseQuery}`,
     `extension:md path:prompts ${baseQuery}`,
     `filename:README.md path:hooks ${baseQuery}`,
+    `extension:json path:hooks ${baseQuery}`,
     `filename:mcp.json ${baseQuery}`,
+    `filename:mcp-config.json ${baseQuery}`,
     `extension:json path:mcp ${baseQuery}`,
     `filename:plugin.json ${baseQuery}`,
     `filename:marketplace.json ${baseQuery}`,
@@ -166,3 +170,13 @@ for (const testCase of testCases) {
   }
   console.log("");
 }
+
+const azureQueries = testSearchLogic("azure").parallelQueries.normal;
+assert.ok(
+  azureQueries.includes("extension:json path:hooks azure"),
+  "hook JSON configs must be searched",
+);
+assert.ok(
+  azureQueries.includes("filename:mcp-config.json azure"),
+  "Copilot CLI mcp-config.json must be searched",
+);

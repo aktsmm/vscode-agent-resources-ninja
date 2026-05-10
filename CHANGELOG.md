@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-05-11
+
+### Fixed
+
+- **Global Resource Home Copilot CLI Parity** - User / Global Resource Home now prioritizes product resource folders such as `skills/` and `instructions/` before Copilot CLI runtime logs/state, so `~/.copilot/skills/*/SKILL.md` remains visible even when the home contains many session files. Product-native instruction files such as `copilot-instructions.md`, Copilot hook config files such as `hooks/*.json`, and `mcp-config.json` are also recognized. Global Resource Home scope rows now show the selected product root and compact path / User / Global Resource Home で Copilot CLI の runtime log/state より `skills/` や `instructions/` などの product resource folder を先にスキャンし、`~/.copilot` に多数の session file があっても `~/.copilot/skills/*/SKILL.md` が表示されるようにしました。`copilot-instructions.md` などの product-native instruction file、`hooks/*.json` の Copilot hook config、`mcp-config.json` も認識します。Global Resource Home の scope row には選択中の product root と短いパスを表示します。
+
+### Tests
+
+- **Release Validation** - Revalidated resource regression, typecheck, lint, bundle build, VS Code extension test, search smoke, When to Use extraction, npm audit, and Copilot CLI Global Resource Home preflight / resource 回帰、型チェック、lint、bundle build、VS Code extension test、検索 smoke、When to Use 抽出、npm audit、Copilot CLI Global Resource Home preflight を再検証しました。
+
 ## [0.2.10] - 2026-05-10
 
 ### Fixed

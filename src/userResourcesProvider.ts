@@ -1,3 +1,4 @@
+import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
 import {
@@ -11,7 +12,11 @@ import {
   scanUserResources,
 } from "./userResourceScanner";
 import { isJapanese } from "./i18n";
-import { getPluginIdFromPath, getResourceIdentityKeys } from "./resourceKinds";
+import {
+  getPluginIdFromPath,
+  getResourceIdentityKeys,
+  isHookConfigFilePath,
+} from "./resourceKinds";
 import {
   formatMcpLifecycleLabel,
   formatMcpLifecycleTooltipLines,
@@ -53,6 +58,35 @@ function getScopeIcon(scope: UserResourceScope): string {
     default:
       return "home";
   }
+}
+
+function formatRootPathForDisplay(fsPath: string): string {
+  const normalizedPath = fsPath.replace(/\\/g, "/").replace(/\/+$/g, "");
+  const homePath = os.homedir().replace(/\\/g, "/").replace(/\/+$/g, "");
+  if (normalizedPath.toLowerCase() === homePath.toLowerCase()) {
+    return "~";
+  }
+  const homePrefix = `${homePath}/`.toLowerCase();
+  if (normalizedPath.toLowerCase().startsWith(homePrefix)) {
+    return `~/${normalizedPath.slice(homePath.length + 1)}`;
+  }
+  return normalizedPath;
+}
+
+function formatScopeDescription(resource: UserResource, count: number): string {
+  const details = [resource.tool];
+  if (resource.scope === "globalHome") {
+    details.push(formatRootPathForDisplay(resource.rootFsPath));
+  }
+  return `${count} resources · ${details.join(" · ")}`;
+}
+
+function isHookConfigResource(resource: UserResource): boolean {
+  return (
+    resource.kind === "hook" &&
+    (isHookConfigFilePath(resource.relativePath) ||
+      isHookConfigFilePath(resource.fullPath))
+  );
 }
 
 function formatHookEventCounts(
@@ -176,7 +210,7 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
         ).length;
         const item = new UserResourceTreeItem(
           resource.scopeLabel,
-          `${count} resources · ${resource.tool}`,
+          formatScopeDescription(resource, count),
           vscode.TreeItemCollapsibleState.Expanded,
           "scope",
           undefined,
@@ -185,6 +219,7 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
           resource.scopeLabel,
         );
         item.iconPath = new vscode.ThemeIcon(getScopeIcon(resource.scope));
+        item.tooltip = `${resource.scopeLabel}\n${formatScopeDescription(resource, count)}\n${resource.rootFsPath}`;
         return item;
       });
 
@@ -438,6 +473,15 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
         );
       }
       if (resource.kind === "hook") {
+        if (isHookConfigResource(resource)) {
+          resource.lifecycleLabel = `${getResourceKindLabel(resource.kind, isJapanese())}: ${isJapanese() ? "設定ファイル" : "Config file"}`;
+          resource.lifecycleTooltipLines = [
+            isJapanese()
+              ? "Copilot hook JSON config として検出"
+              : "Detected as a Copilot hook JSON config",
+          ];
+          continue;
+        }
         const diagnostics = await getHookConfigDiagnostics(
           vscode.Uri.file(resource.rootFsPath),
           vscode.Uri.file(resource.fullPath),
@@ -461,6 +505,11 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
     const isRecent = getResourceIdentityKeys(resource).some((key) =>
       this.recentlyInstalled?.has(key),
     );
+    const recentLabel = isRecent
+      ? isJapanese()
+        ? "最近インストール"
+        : "Recently installed"
+      : undefined;
     const pluginId = this.getPluginId(resource);
     const pluginLabel = pluginId
       ? `${isJapanese() ? "プラグイン" : "Plugin"}: ${pluginId}`
@@ -468,6 +517,7 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
     const description = resource.isBuiltIn
       ? `built-in · ${resource.tool}`
       : [
+          recentLabel,
           pluginLabel,
           resource.lifecycleLabel,
           resource.description || resource.relativePath,
@@ -483,6 +533,8 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
       resource.scope,
       resource.kind,
       resource.scopeLabel,
+      undefined,
+      isRecent,
     );
   }
 }
@@ -498,6 +550,7 @@ export class UserResourceTreeItem extends vscode.TreeItem {
     public readonly kind?: ResourceKind,
     public readonly scopeLabel?: string,
     public readonly pluginId?: string,
+    public readonly isRecent?: boolean,
   ) {
     super(label, collapsibleState);
     this.description = description;
@@ -526,7 +579,10 @@ export class UserResourceTreeItem extends vscode.TreeItem {
       const lifecycleLines = resource.lifecycleTooltipLines?.length
         ? `\n${resource.lifecycleTooltipLines.join("\n")}`
         : "";
-      this.tooltip = `${resource.name}\n${resource.description || "No description"}${pluginLine}${lifecycleLines}\n${status}\n${resource.relativePath}\n${resource.fullPath}`;
+      const recentLine = isRecent
+        ? `\n${isJapanese() ? "状態" : "Status"}: ${isJapanese() ? "最近インストール" : "Recently installed"}`
+        : "";
+      this.tooltip = `${resource.name}\n${resource.description || "No description"}${pluginLine}${lifecycleLines}${recentLine}\n${status}\n${resource.relativePath}\n${resource.fullPath}`;
       this.command = {
         command: "resourceNinja.openUserResource",
         title: isJapanese() ? "リソースを開く" : "Open Resource",

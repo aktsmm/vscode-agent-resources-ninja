@@ -132,6 +132,15 @@ function getConfiguredWorkspaceResourceRoots(
     {
       rootUri: resolveConfiguredUri(
         workspaceUri,
+        getConfiguredWorkspaceHooksDirectory(config),
+        DEFAULT_WORKSPACE_HOOKS_DIRECTORY,
+      ),
+      glob: "*.json",
+      detectionBase: "hooks",
+    },
+    {
+      rootUri: resolveConfiguredUri(
+        workspaceUri,
         getConfiguredWorkspaceMcpDirectory(config),
         DEFAULT_WORKSPACE_MCP_DIRECTORY,
       ),
@@ -169,7 +178,10 @@ function getWorkspaceFallbackPatterns(
         "**/*.instructions.md",
         "**/*.prompt.md",
         "**/hooks/**/README.md",
+        "**/.github/hooks/*.json",
+        "**/hooks/*.json",
         "**/mcp.json",
+        "**/mcp-config.json",
         "**/.mcp.json",
         "**/mcp/*.json",
         "**/.github/mcp/*.json",

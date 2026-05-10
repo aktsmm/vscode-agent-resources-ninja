@@ -35,6 +35,7 @@ import {
   getPluginPackageId,
   getPluginPackageLabel,
   getResourceIdentityKeys,
+  isHookConfigFilePath,
   PluginPackageInfo,
 } from "./resourceKinds";
 import {
@@ -378,6 +379,11 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
     }
 
     const kind = skill.kind || "skill";
+    const recentLabel = isRecent
+      ? isJapanese()
+        ? "最近インストール"
+        : "Recently installed"
+      : undefined;
     const sourceLabel =
       skill.source && skill.source !== "unknown" ? skill.source : undefined;
     const workspacePluginId = getWorkspacePluginId(skill);
@@ -405,6 +411,7 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
         ? `built-in · ${sourceLabel || "Built-in"}`
         : skill.isInstalled
           ? [
+              recentLabel,
               sourceLabel ? `installed from ${sourceLabel}` : "installed",
               skill.lifecycleLabel,
               workspacePluginLabel,
@@ -457,6 +464,9 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
           : isJapanese()
             ? "ローカル（未登録）"
             : "Local (Not registered)";
+    const accessibleStatusText = isRecent
+      ? `${recentLabel} / ${statusText}`
+      : statusText;
     const noDesc = isJapanese() ? "説明なし" : "No description";
     const pathLabel = isJapanese() ? "パス" : "Path";
     const statusLabel = isJapanese() ? "状態" : "Status";
@@ -479,7 +489,7 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
     const lifecycleInfo = skill.lifecycleTooltipLines?.length
       ? `\n${skill.lifecycleTooltipLines.join("\n")}`
       : "";
-    item.tooltip = `${skill.name}\n${descText}${pluginInfo}${lifecycleInfo}\n${pathLabel}: ${skill.relativePath}\n${statusLabel}: ${statusText}${metaInfo}`;
+    item.tooltip = `${skill.name}\n${descText}${pluginInfo}${lifecycleInfo}\n${pathLabel}: ${skill.relativePath}\n${statusLabel}: ${accessibleStatusText}${metaInfo}`;
     item.command = {
       command: "vscode.open",
       title: isJapanese() ? "リソースを開く" : "Open Resource",
@@ -620,6 +630,18 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
         );
       }
       if (kind === "hook") {
+        if (
+          isHookConfigFilePath(resource.relativePath) ||
+          isHookConfigFilePath(resource.fullPath)
+        ) {
+          resource.lifecycleLabel = `${getResourceKindLabel(kind, isJapanese())}: ${isJapanese() ? "設定ファイル" : "Config file"}`;
+          resource.lifecycleTooltipLines = [
+            isJapanese()
+              ? "Copilot hook JSON config として検出"
+              : "Detected as a Copilot hook JSON config",
+          ];
+          continue;
+        }
         const diagnostics = await getHookConfigDiagnostics(
           this.workspaceUri,
           vscode.Uri.file(resource.fullPath),

@@ -41,6 +41,7 @@ import {
   detectResourceKindFromPath,
   getPluginRootFromManifestPath,
   getResourceMetadataPath,
+  isHookConfigFilePath,
 } from "./resourceKinds";
 import { getVsCodeUserDataPath } from "./userDataPaths";
 import { logger } from "./logger";
@@ -208,6 +209,7 @@ export function getResourceTargetUri(
     skill,
     path.posix.basename(normalizedRemotePath),
   );
+  const isHookConfigFile = kind === "hook" && isHookConfigFilePath(normalizedRemotePath);
   const resourceFolderName = sanitizeSkillName(
     kind === "skill"
       ? skill.name
@@ -259,6 +261,9 @@ export function getResourceTargetUri(
       );
     }
     if (kind === "hook") {
+      if (isHookConfigFile) {
+        return vscode.Uri.joinPath(options.customTargetUri, fileName);
+      }
       return vscode.Uri.joinPath(
         options.customTargetUri,
         resourceFolderName,
@@ -288,6 +293,9 @@ export function getResourceTargetUri(
       case "prompt":
         return vscode.Uri.joinPath(root, "prompts", fileName);
       case "hook":
+        if (isHookConfigFile) {
+          return vscode.Uri.joinPath(root, "hooks", fileName);
+        }
         return vscode.Uri.joinPath(
           root,
           "hooks",
@@ -323,6 +331,9 @@ export function getResourceTargetUri(
       );
     }
     if (kind === "hook") {
+      if (isHookConfigFile) {
+        return vscode.Uri.joinPath(globalHomeRoot, "hooks", fileName);
+      }
       return vscode.Uri.joinPath(
         vscode.Uri.joinPath(globalHomeRoot, "hooks"),
         resourceFolderName,
@@ -399,6 +410,16 @@ export function getResourceTargetUri(
         fileName,
       );
     case "hook":
+      if (isHookConfigFile) {
+        return vscode.Uri.joinPath(
+          resolveConfiguredUri(
+            workspaceUri,
+            getConfiguredWorkspaceHooksDirectory(config),
+            ".github/hooks",
+          ),
+          fileName,
+        );
+      }
       return vscode.Uri.joinPath(
         resolveConfiguredUri(
           workspaceUri,
@@ -1144,12 +1165,13 @@ export async function uninstallSkillByPath(
   const normalizedPath = relativePath.replace(/\\/g, "/");
   const kind = detectResourceKindFromPath(normalizedPath) || "skill";
   const isAbsoluteResourcePath = path.isAbsolute(relativePath);
+  const isHookConfigFile = kind === "hook" && isHookConfigFilePath(normalizedPath);
 
   let skillPath: vscode.Uri;
   if (isAbsoluteResourcePath) {
     const absoluteUri = vscode.Uri.file(path.normalize(relativePath));
     skillPath =
-      kind === "skill" || kind === "hook"
+      kind === "skill" || (kind === "hook" && !isHookConfigFile)
         ? getParentDirectoryUri(absoluteUri)
         : absoluteUri;
   } else if (kind === "skill") {
@@ -1180,7 +1202,7 @@ export async function uninstallSkillByPath(
       workspaceUri,
       ...normalizedPath.split("/").filter(Boolean),
     );
-    skillPath = getParentDirectoryUri(hookFile);
+    skillPath = isHookConfigFile ? hookFile : getParentDirectoryUri(hookFile);
   } else {
     skillPath = vscode.Uri.joinPath(
       workspaceUri,
@@ -1190,7 +1212,7 @@ export async function uninstallSkillByPath(
 
   try {
     let hookConfigUpdate: HookConfigUpdateResult | undefined;
-    if (kind === "hook") {
+    if (kind === "hook" && !isHookConfigFile) {
       const hookReadmeUri = isAbsoluteResourcePath
         ? vscode.Uri.file(path.normalize(relativePath))
         : vscode.Uri.joinPath(
