@@ -20,6 +20,7 @@ import {
   DEFAULT_WORKSPACE_INSTRUCTIONS_DIRECTORY,
   DEFAULT_WORKSPACE_MCP_DIRECTORY,
   DEFAULT_WORKSPACE_PROMPTS_DIRECTORY,
+  DEFAULT_SKILLS_DIRECTORY,
   getConfiguredInstructionFilePath,
   getConfiguredIncludeLocalResources,
   getConfiguredSkillsDirectory,
@@ -57,6 +58,12 @@ interface ConfiguredResourceRoot {
   detectionBase: string;
 }
 
+type WorkspaceFallbackMode = "auto" | "always" | "none";
+
+interface ScanLocalSkillsOptions {
+  workspaceFallback?: WorkspaceFallbackMode;
+}
+
 function normalizeSeparators(value: string): string {
   return value.replace(/\\/g, "/");
 }
@@ -77,6 +84,15 @@ function getConfiguredWorkspaceResourceRoots(
   config: vscode.WorkspaceConfiguration,
 ): ConfiguredResourceRoot[] {
   return [
+    {
+      rootUri: resolveConfiguredUri(
+        workspaceUri,
+        getConfiguredSkillsDirectory(config),
+        DEFAULT_SKILLS_DIRECTORY,
+      ),
+      glob: "**/SKILL.md",
+      detectionBase: "skills",
+    },
     {
       rootUri: resolveConfiguredUri(
         workspaceUri,
@@ -138,6 +154,100 @@ async function readResourceInstallMetadata(
   } catch {
     return undefined;
   }
+}
+
+const WORKSPACE_SCAN_EXCLUDE_PATTERN =
+  "{**/node_modules/**,**/.vscode-test/**}";
+
+function getWorkspaceFallbackPatterns(
+  includeNonSkillResources: boolean,
+): string[] {
+  return includeNonSkillResources
+    ? [
+        "**/SKILL.md",
+        "**/*.agent.md",
+        "**/*.instructions.md",
+        "**/*.prompt.md",
+        "**/hooks/**/README.md",
+        "**/mcp.json",
+        "**/.mcp.json",
+        "**/mcp/*.json",
+        "**/.github/mcp/*.json",
+        "**/plugin.json",
+        "**/.claude-plugin/*.json",
+        "**/.codex-plugin/*.json",
+        "**/.cursor-plugin/*.json",
+        "**/.plugin/*.json",
+        "**/gemini-extension.json",
+        "**/apm.{yml,yaml}",
+        "**/rules/*.mdc",
+      ]
+    : ["**/SKILL.md"];
+}
+
+async function findWorkspaceFallbackCandidates(
+  workspaceUri: vscode.Uri,
+  includeNonSkillResources: boolean,
+): Promise<ScanCandidate[]> {
+  const foundFiles = await Promise.all(
+    getWorkspaceFallbackPatterns(includeNonSkillResources).map((glob) =>
+      vscode.workspace.findFiles(
+        new vscode.RelativePattern(workspaceUri, glob),
+        WORKSPACE_SCAN_EXCLUDE_PATTERN,
+        MAX_LOCAL_RESOURCE_FILES,
+      ),
+    ),
+  );
+
+  return foundFiles.flat().map((uri) => ({ uri }));
+}
+
+async function findConfiguredWorkspaceCandidates(
+  workspaceUri: vscode.Uri,
+  config: vscode.WorkspaceConfiguration,
+  includeNonSkillResources: boolean,
+): Promise<ScanCandidate[]> {
+  const roots = getConfiguredWorkspaceResourceRoots(
+    workspaceUri,
+    config,
+  ).filter(
+    (root) => includeNonSkillResources || root.detectionBase === "skills",
+  );
+
+  const configuredRootFiles = await Promise.all(
+    roots.map(async (root) => {
+      const files = await vscode.workspace.findFiles(
+        new vscode.RelativePattern(root.rootUri, root.glob),
+        WORKSPACE_SCAN_EXCLUDE_PATTERN,
+        MAX_LOCAL_RESOURCE_FILES,
+      );
+      return files.map((uri): ScanCandidate => {
+        const relativeToRoot = normalizeSeparators(
+          path.relative(root.rootUri.fsPath, uri.fsPath),
+        );
+        return {
+          uri,
+          detectionPath: `${root.detectionBase}/${relativeToRoot}`,
+          displayPath: getWorkspaceRelativeOrAbsolutePath(workspaceUri, uri),
+        };
+      });
+    }),
+  );
+
+  return configuredRootFiles.flat();
+}
+
+function shouldUseWorkspaceFallback(
+  mode: WorkspaceFallbackMode,
+  configuredSkills: LocalSkill[],
+): boolean {
+  if (mode === "always") {
+    return true;
+  }
+  if (mode === "none") {
+    return false;
+  }
+  return configuredSkills.length === 0;
 }
 
 /**
@@ -302,6 +412,7 @@ export async function scanLocalSkills(
   includeInstalled: boolean = false,
   includeNonSkillResources: boolean = false,
   includeBuiltInResources: boolean = false,
+  options: ScanLocalSkillsOptions = {},
 ): Promise<LocalSkill[]> {
   const skills: LocalSkill[] = [];
 
@@ -311,64 +422,12 @@ export async function scanLocalSkills(
     getConfiguredSkillsDirectory(config),
   );
 
-  const excludePattern = "{**/node_modules/**,**/.vscode-test/**}";
-
-  const patterns = includeNonSkillResources
-    ? [
-        "**/SKILL.md",
-        "**/*.agent.md",
-        "**/*.instructions.md",
-        "**/*.prompt.md",
-        "**/hooks/**/README.md",
-        "**/mcp.json",
-        "**/.mcp.json",
-        "**/mcp/*.json",
-        "**/.github/mcp/*.json",
-        "**/plugin.json",
-        "**/.claude-plugin/*.json",
-        "**/.codex-plugin/*.json",
-        "**/.cursor-plugin/*.json",
-        "**/.plugin/*.json",
-        "**/gemini-extension.json",
-        "**/apm.{yml,yaml}",
-        "**/rules/*.mdc",
-      ]
-    : ["**/SKILL.md"];
-  const foundFiles = await Promise.all(
-    patterns.map((glob) =>
-      vscode.workspace.findFiles(
-        new vscode.RelativePattern(workspaceUri, glob),
-        excludePattern,
-        MAX_LOCAL_RESOURCE_FILES,
-      ),
-    ),
+  const workspaceFallback = options.workspaceFallback || "auto";
+  const configuredCandidates = await findConfiguredWorkspaceCandidates(
+    workspaceUri,
+    config,
+    includeNonSkillResources,
   );
-  const configuredRootFiles = includeNonSkillResources
-    ? await Promise.all(
-        getConfiguredWorkspaceResourceRoots(workspaceUri, config).map(
-          async (root) => {
-            const files = await vscode.workspace.findFiles(
-              new vscode.RelativePattern(root.rootUri, root.glob),
-              excludePattern,
-              MAX_LOCAL_RESOURCE_FILES,
-            );
-            return files.map((uri): ScanCandidate => {
-              const relativeToRoot = normalizeSeparators(
-                path.relative(root.rootUri.fsPath, uri.fsPath),
-              );
-              return {
-                uri,
-                detectionPath: `${root.detectionBase}/${relativeToRoot}`,
-                displayPath: getWorkspaceRelativeOrAbsolutePath(
-                  workspaceUri,
-                  uri,
-                ),
-              };
-            });
-          },
-        ),
-      )
-    : [];
   const builtInNodeModuleFiles = includeBuiltInResources
     ? await vscode.workspace.findFiles(
         new vscode.RelativePattern(
@@ -379,61 +438,77 @@ export async function scanLocalSkills(
         MAX_LOCAL_RESOURCE_FILES,
       )
     : [];
-  const files: ScanCandidate[] = [
-    ...foundFiles.flat().map((uri) => ({ uri })),
-    ...configuredRootFiles.flat(),
-    ...builtInNodeModuleFiles.map((uri) => ({ uri })),
-  ];
   const seenPaths = new Set<string>();
 
-  for (const candidate of files) {
-    const file = candidate.uri;
-    try {
-      if (seenPaths.has(file.fsPath)) {
-        continue;
-      }
-      seenPaths.add(file.fsPath);
+  const parseCandidates = async (
+    candidates: ScanCandidate[],
+  ): Promise<LocalSkill[]> => {
+    const parsedSkills: LocalSkill[] = [];
+    for (const candidate of candidates) {
+      const file = candidate.uri;
+      try {
+        if (seenPaths.has(file.fsPath)) {
+          continue;
+        }
+        seenPaths.add(file.fsPath);
 
-      const relativePath =
-        candidate.displayPath ||
-        getWorkspaceRelativeOrAbsolutePath(workspaceUri, file);
-      const isBuiltInResource =
-        isBuiltInResourcePath(relativePath) ||
-        isBuiltInResourcePath(file.fsPath);
-      if (isBuiltInResource && !includeBuiltInResources) {
-        continue;
-      }
+        const relativePath =
+          candidate.displayPath ||
+          getWorkspaceRelativeOrAbsolutePath(workspaceUri, file);
+        const isBuiltInResource =
+          isBuiltInResourcePath(relativePath) ||
+          isBuiltInResourcePath(file.fsPath);
+        if (isBuiltInResource && !includeBuiltInResources) {
+          continue;
+        }
 
-      const kind = detectResourceKindFromPath(
-        candidate.detectionPath || relativePath,
-      );
-      if (!kind) {
-        continue;
-      }
+        const kind = detectResourceKindFromPath(
+          candidate.detectionPath || relativePath,
+        );
+        if (!kind) {
+          continue;
+        }
 
-      // インストール済みスキル（.github/skills 配下）を除外するか
-      if (
-        kind === "skill" &&
-        !includeInstalled &&
-        skillsDir &&
-        relativePath.startsWith(skillsDir)
-      ) {
-        continue;
-      }
+        // インストール済みスキル（.github/skills 配下）を除外するか
+        if (
+          kind === "skill" &&
+          !includeInstalled &&
+          skillsDir &&
+          relativePath.startsWith(skillsDir)
+        ) {
+          continue;
+        }
 
-      const skill = await parseLocalSkillFile(
-        file,
-        workspaceUri,
-        candidate.detectionPath,
-        relativePath,
-      );
-      if (skill) {
-        skills.push(skill);
+        const skill = await parseLocalSkillFile(
+          file,
+          workspaceUri,
+          candidate.detectionPath,
+          relativePath,
+        );
+        if (skill) {
+          parsedSkills.push(skill);
+        }
+      } catch (error) {
+        logger.warn(`Failed to parse ${file.fsPath}:`, error);
       }
-    } catch (error) {
-      logger.warn(`Failed to parse ${file.fsPath}:`, error);
     }
+    return parsedSkills;
+  };
+
+  const configuredSkills = await parseCandidates(configuredCandidates);
+  skills.push(...configuredSkills);
+
+  if (shouldUseWorkspaceFallback(workspaceFallback, configuredSkills)) {
+    const fallbackCandidates = await findWorkspaceFallbackCandidates(
+      workspaceUri,
+      includeNonSkillResources,
+    );
+    skills.push(...(await parseCandidates(fallbackCandidates)));
   }
+
+  skills.push(
+    ...(await parseCandidates(builtInNodeModuleFiles.map((uri) => ({ uri })))),
+  );
 
   // AGENTS.md の登録状態をチェック
   await checkRegistrationStatus(skills, workspaceUri);

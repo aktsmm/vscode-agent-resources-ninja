@@ -1757,7 +1757,7 @@ test("built-in resource visibility is configurable", () => {
   assert.match(localSkillScannerSource, /MAX_LOCAL_RESOURCE_FILES\s*=\s*1000/);
   assert.match(
     localSkillScannerSource,
-    /const excludePattern = "\{\*\*\/node_modules\/\*\*,\*\*\/\.vscode-test\/\*\*\}"/,
+    /WORKSPACE_SCAN_EXCLUDE_PATTERN\s*=\s*"\{\*\*\/node_modules\/\*\*,\*\*\/\.vscode-test\/\*\*\}"/,
     "Workspace scanning must exclude .vscode-test even when built-ins are visible",
   );
   assert.match(localSkillScannerSource, /getBuiltInResourceSourceLabel/);

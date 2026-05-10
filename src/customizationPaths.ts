@@ -220,7 +220,7 @@ export function getConfiguredIncludeLocalResources(
   return (
     config.get<boolean>("includeLocalResources") ??
     config.get<boolean>("includeLocalSkills") ??
-    true
+    false
   );
 }
 
@@ -275,7 +275,10 @@ export function resolveGlobalInstructionFileUri(
     return undefined;
   }
 
-  if (isHomeRelativePath(instructionPath) || isAbsoluteConfiguredPath(instructionPath)) {
+  if (
+    isHomeRelativePath(instructionPath) ||
+    isAbsoluteConfiguredPath(instructionPath)
+  ) {
     return resolveConfiguredUri(
       workspaceUri,
       instructionPath,

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-05-10
+
+### Fixed
+
+- **Configured Workspace Scan Roots** - Workspace Resources now scans configured workspace directories first and only falls back to workspace-wide discovery when those roots have no matches, preventing arbitrary local files from becoming the default resource source / Workspace Resources は設定済み workspace directories を先にスキャンし、そこに一致がない場合だけ workspace-wide discovery に fallback するようにしました。任意のローカルファイルが既定の resource source になる挙動を防ぎます。
+
+### Changed
+
+- **Instruction Index Fallback Safety** - `resourceNinja.includeLocalResources` now defaults to off and explicitly controls whether fallback-discovered local `SKILL.md` files outside the configured Workspace Skill Directory are included in the generated Agent Skills index / `resourceNinja.includeLocalResources` の既定値を off にし、設定済み Workspace Skill Directory 外で fallback 検出されたローカル `SKILL.md` を生成 Agent Skills index に含めるかを明示制御するようにしました。
+
+### Tests
+
+- **Scan Policy Regression Coverage** - Added configured-root scan policy regression tests and revalidated manifest consistency, search logic, When to Use extraction, typecheck, lint, and bundle build / configured-root scan policy の回帰テストを追加し、manifest consistency、検索ロジック、When to Use 抽出、型チェック、lint、bundle build を再検証しました。
+
 ## [0.2.9] - 2026-05-09
 
 ### Added

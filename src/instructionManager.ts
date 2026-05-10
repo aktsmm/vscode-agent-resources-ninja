@@ -246,7 +246,13 @@ export async function updateInstructionFileAtUri(
   // ローカルスキルを取得（設定で有効な場合のみ）
   let localSkills: LocalSkill[] = [];
   if (includeLocalResources && skillSource.scope === "workspace") {
-    const allLocalSkills = await scanLocalSkills(workspaceUri);
+    const allLocalSkills = await scanLocalSkills(
+      workspaceUri,
+      false,
+      false,
+      false,
+      { workspaceFallback: "always" },
+    );
     const workspaceRelativeSkillsDir =
       getRelativeSkillsPathForWorkspace(resourcesDirectory);
 

@@ -403,7 +403,7 @@ Settings are ordered by the workflow users usually follow:
 |  13   | `resourceNinja.autoUpdateInstruction`          | `true`                 | Auto-update the Agent Skills index after skill changes                                   |
 |  14   | `resourceNinja.instructionFile`                | `AGENTS.md`            | Agent Skills index sync target _(requires Auto Update)_                                  |
 |  15   | `resourceNinja.customInstructionPath`          | `""`                   | Custom Agent Skills index path _(only when 'custom' selected)_                           |
-|  16   | `resourceNinja.includeLocalResources`          | `true`                 | Include local `SKILL.md` files in the Agent Skills index                                 |
+|  16   | `resourceNinja.includeLocalResources`          | `false`                | Include workspace-wide fallback `SKILL.md` files in the Agent Skills index               |
 |  17   | `resourceNinja.autoUpdateResourcesOnUpgrade`   | `prompt`               | Update installed remote skills on extension upgrade                                      |
 |  21   | `resourceNinja.outputFormat`                   | `full`                 | Output format (full / compact / legacy)                                                  |
 |  22   | `resourceNinja.showBuiltInResources`           | `false`                | Show built-in resources in User / Global Resource Home                                   |
@@ -419,8 +419,9 @@ When `autoUpdateInstruction` is enabled:
 
 1. **Workspace/User Profile/Global Resource Home skill install/uninstall** → Instruction file is automatically updated
 2. **Workspace instruction targets** index workspace skills; **Global Resource Home targets** such as `~/.copilot/copilot-instructions.md` index Global Resource Home skills
-3. **Local `SKILL.md` detected** → Added to the workspace skills index (if `resourceNinja.includeLocalResources` is true)
-4. **Register/Unregister command** → Manual control for local workspace skills
+3. **Configured workspace resource directories** → Scanned first for Workspace Resources
+4. **Workspace-wide fallback `SKILL.md` detected** → Added to the Agent Skills index only when `resourceNinja.includeLocalResources` is true
+5. **Register/Unregister command** → Manual control for local workspace skills
 
 Agents, prompts, instructions, and hooks are installed to native paths and managed from the resource views; they are not copied into the generated Agent Skills index.
 
