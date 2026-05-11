@@ -8,15 +8,18 @@ import {
   SkillMeta,
 } from "./skillInstaller";
 import { scanLocalSkills, LocalSkill } from "./localSkillScanner";
+import { scanUserResources, UserResource } from "./userResourceScanner";
 import { OutputFormat, resolveOutputFormat } from "./toolDetector";
 import * as path from "path";
 import { SKILL_DESCRIPTION_LIMITS } from "./constants";
 import {
   DISABLED_INSTRUCTION_FILE,
   DEFAULT_GLOBAL_HOME_DIRECTORY,
+  getConfiguredCoexistenceMode,
   getConfiguredGlobalHomeDirectory,
   getConfiguredInstructionFilePath,
   getConfiguredIncludeLocalResources,
+  getConfiguredKindsExcluded,
   getConfiguredSkillsDirectory,
   isAbsoluteConfiguredPath,
   isHomeRelativePath,
@@ -25,14 +28,36 @@ import {
   resolveConfiguredUri,
   resolveSkillsDirectoryUri,
 } from "./customizationPaths";
+import { getEffectiveOwner, isSiblingActive } from "./coexistence";
+import { ResourceKind, getResourceKindLabel } from "./skillIndex";
 import { logger } from "./logger";
 
-// セクションマーカー
-const MARKER_START = "<!-- resource-ninja-START -->";
-const MARKER_END = "<!-- resource-ninja-END -->";
+interface MarkerPair {
+  start: string;
+  end: string;
+}
 
-// 旧マーカー（互換性のため検出・削除用）
-const LEGACY_MARKERS = [
+interface SyncResourceItem {
+  kind: ResourceKind;
+  name: string;
+  description: string;
+  source: string;
+  relativePath: string;
+  linkPath: string;
+}
+
+const SHARED_MARKERS: MarkerPair = {
+  start: "<!-- agent-ninja-START -->",
+  end: "<!-- agent-ninja-END -->",
+};
+
+const RESOURCE_MARKERS: MarkerPair = {
+  start: "<!-- resource-ninja-START -->",
+  end: "<!-- resource-ninja-END -->",
+};
+
+const LEGACY_MARKERS: MarkerPair[] = [
+  RESOURCE_MARKERS,
   {
     start: "<!-- skill-ninja-START -->",
     end: "<!-- skill-ninja-END -->",
@@ -42,6 +67,8 @@ const LEGACY_MARKERS = [
     end: "<!-- SKILL-FINDER-END -->",
   },
 ];
+
+const ALL_MARKERS: MarkerPair[] = [SHARED_MARKERS, ...LEGACY_MARKERS];
 
 /**
  * Description + When to Use を連結する関数（合計最大200文字）
@@ -111,6 +138,171 @@ function calculateRelativePath(
 
   // Windows パス区切りを / に変換
   return relativePath.replace(/\\/g, "/");
+}
+
+function normalizeMarkdownRelativePath(relativePath: string): string {
+  const normalized = relativePath.replace(/\\/g, "/");
+  return normalized === "" ? "." : normalized;
+}
+
+function getResourceLinkPath(
+  instructionFilePath: string,
+  resourceFilePath: string,
+): string {
+  return normalizeMarkdownRelativePath(
+    path.relative(path.dirname(instructionFilePath), resourceFilePath),
+  );
+}
+
+function sortSyncResources(resources: SyncResourceItem[]): SyncResourceItem[] {
+  return resources.slice().sort((left, right) => {
+    const kindCompare = left.kind.localeCompare(right.kind);
+    if (kindCompare !== 0) {
+      return kindCompare;
+    }
+    return left.name.localeCompare(right.name);
+  });
+}
+
+function getSectionRange(
+  content: string,
+  marker: MarkerPair,
+): { start: number; end: number } | undefined {
+  const start = content.indexOf(marker.start);
+  const endMarkerIndex = content.indexOf(marker.end);
+  if (start === -1 || endMarkerIndex === -1 || endMarkerIndex < start) {
+    return undefined;
+  }
+  return {
+    start,
+    end: endMarkerIndex + marker.end.length,
+  };
+}
+
+function stripSections(
+  content: string,
+  markers: MarkerPair[],
+): { content: string; firstRemovedIndex?: number } {
+  const ranges = markers
+    .map((marker) => getSectionRange(content, marker))
+    .filter((range): range is { start: number; end: number } => !!range)
+    .sort((left, right) => right.start - left.start);
+
+  if (ranges.length === 0) {
+    return { content };
+  }
+
+  let nextContent = content;
+  let firstRemovedIndex: number | undefined;
+
+  for (const range of ranges) {
+    firstRemovedIndex =
+      firstRemovedIndex === undefined
+        ? range.start
+        : Math.min(firstRemovedIndex, range.start);
+    nextContent =
+      nextContent.slice(0, range.start) + nextContent.slice(range.end);
+  }
+
+  return {
+    content: nextContent.replace(/\n{3,}/g, "\n\n"),
+    firstRemovedIndex,
+  };
+}
+
+function insertSectionAt(
+  content: string,
+  section: string,
+  index?: number,
+): string {
+  if (index === undefined) {
+    return content.trim()
+      ? `${content.trimEnd()}\n\n${section}\n`
+      : `${section}\n`;
+  }
+
+  const before = content.slice(0, index).replace(/\s*$/, "");
+  const after = content.slice(index).replace(/^\s*/, "");
+  if (!before && !after) {
+    return `${section}\n`;
+  }
+  if (!before) {
+    return `${section}\n\n${after}`;
+  }
+  if (!after) {
+    return `${before}\n\n${section}\n`;
+  }
+  return `${before}\n\n${section}\n\n${after}`;
+}
+
+function getExcludedKinds(
+  config: vscode.WorkspaceConfiguration,
+  siblingDetected: boolean,
+  owner: "self" | "sibling",
+): ResourceKind[] {
+  if (owner === "self" && siblingDetected) {
+    return [];
+  }
+  return getConfiguredKindsExcluded(config);
+}
+
+function toSyncResourceFromLocal(
+  resource: LocalSkill,
+  instructionUri: vscode.Uri,
+): SyncResourceItem {
+  return {
+    kind: resource.kind || "skill",
+    name: resource.name,
+    description: resource.description || "",
+    source: resource.source || "local",
+    relativePath: resource.relativePath,
+    linkPath: getResourceLinkPath(instructionUri.fsPath, resource.fullPath),
+  };
+}
+
+function toSyncResourceFromUser(
+  resource: UserResource,
+  instructionUri: vscode.Uri,
+): SyncResourceItem {
+  return {
+    kind: resource.kind,
+    name: resource.name,
+    description: resource.description || "",
+    source: resource.source || resource.scope,
+    relativePath: resource.relativePath,
+    linkPath: getResourceLinkPath(instructionUri.fsPath, resource.fullPath),
+  };
+}
+
+async function collectWorkspaceResourcesForInstruction(
+  workspaceUri: vscode.Uri,
+  instructionUri: vscode.Uri,
+  includeLocalResources: boolean,
+): Promise<SyncResourceItem[]> {
+  const resources = await scanLocalSkills(workspaceUri, true, true, false, {
+    workspaceFallback: includeLocalResources ? "always" : "none",
+  });
+  return sortSyncResources(
+    resources.map((resource) =>
+      toSyncResourceFromLocal(resource, instructionUri),
+    ),
+  );
+}
+
+async function collectGlobalResourcesForInstruction(
+  workspaceUri: vscode.Uri,
+  instructionUri: vscode.Uri,
+): Promise<SyncResourceItem[]> {
+  const resources = await scanUserResources(workspaceUri, false);
+  return sortSyncResources(
+    resources
+      .filter((resource) => resource.scope === "globalHome")
+      .map((resource) => toSyncResourceFromUser(resource, instructionUri)),
+  );
+}
+
+function wrapSection(markerPair: MarkerPair, body: string): string {
+  return `${markerPair.start}\n${body.trim()}\n\n${markerPair.end}`;
 }
 
 function normalizeFsPathForCompare(fsPath: string): string {
@@ -216,12 +408,20 @@ export async function updateInstructionFile(
 
 export async function updateInstructionFileAtUri(
   workspaceUri: vscode.Uri,
-  _context: vscode.ExtensionContext,
+  context: vscode.ExtensionContext,
   instructionUri: vscode.Uri,
   instructionPath: string,
 ): Promise<void> {
   const config = vscode.workspace.getConfiguration("resourceNinja");
   const { format } = await resolveOutputFormat(workspaceUri);
+  const coexistenceMode = getConfiguredCoexistenceMode(config);
+  const owner =
+    coexistenceMode === "auto" ? await getEffectiveOwner(context) : "self";
+
+  if (coexistenceMode === "auto" && owner === "sibling") {
+    logger.info("Skill NINJA is owner. Resource NINJA defers.");
+    return;
+  }
 
   const resourcesDirectory = getConfiguredSkillsDirectory(config);
   const skillSource = await resolveInstructionSkillSource(
@@ -269,13 +469,35 @@ export async function updateInstructionFileAtUri(
     skillsUri.fsPath,
   );
 
+  const siblingDetected =
+    coexistenceMode === "auto" ? await isSiblingActive(context) : false;
+  const excludedKinds = getExcludedKinds(config, siblingDetected, owner);
+
   // フォーマットに応じてスキルセクションを生成
-  const skillSection = generateSkillSectionForFormat(
-    installedSkills,
-    localSkills,
-    relativeSkillsDir,
-    format,
-  );
+  const skillSection =
+    coexistenceMode === "auto"
+      ? generateSharedResourceSectionForFormat(
+          (skillSource.scope === "workspace"
+            ? await collectWorkspaceResourcesForInstruction(
+                workspaceUri,
+                instructionUri,
+                includeLocalResources,
+              )
+            : await collectGlobalResourcesForInstruction(
+                workspaceUri,
+                instructionUri,
+              )
+          ).filter((resource) => !excludedKinds.includes(resource.kind)),
+          format,
+          SHARED_MARKERS,
+        )
+      : generateSkillSectionForFormat(
+          installedSkills,
+          localSkills,
+          relativeSkillsDir,
+          format,
+          RESOURCE_MARKERS,
+        );
 
   // 既存のファイルを読み込む
   let existingContent = "";
@@ -287,8 +509,26 @@ export async function updateInstructionFileAtUri(
     existingContent = "";
   }
 
+  if (
+    coexistenceMode === "auto" &&
+    siblingDetected &&
+    existingContent.includes("<!-- skill-ninja-START -->")
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    try {
+      const content = await vscode.workspace.fs.readFile(instructionUri);
+      existingContent = Buffer.from(content).toString("utf-8");
+    } catch {
+      existingContent = "";
+    }
+  }
+
   // マーカーで囲まれた部分を更新
-  const newContent = updateSection(existingContent, skillSection, format);
+  const newContent = updateSection(
+    existingContent,
+    skillSection,
+    coexistenceMode === "auto" ? SHARED_MARKERS : RESOURCE_MARKERS,
+  );
 
   // ディレクトリを作成してファイルを書き込む
   const dir = vscode.Uri.file(path.dirname(instructionUri.fsPath));
@@ -307,16 +547,112 @@ function generateSkillSectionForFormat(
   localSkills: LocalSkill[],
   skillsDir: string,
   format: OutputFormat,
+  markerPair: MarkerPair,
 ): string {
   switch (format) {
     case "compact":
-      return generateCompactSection(installedSkills, localSkills, skillsDir);
+      return generateCompactSection(
+        installedSkills,
+        localSkills,
+        skillsDir,
+        markerPair,
+      );
     case "legacy":
-      return generateLegacySection(installedSkills, localSkills, skillsDir);
+      return generateLegacySection(
+        installedSkills,
+        localSkills,
+        skillsDir,
+        markerPair,
+      );
     case "full":
     default:
-      return generateFullSection(installedSkills, localSkills, skillsDir);
+      return generateFullSection(
+        installedSkills,
+        localSkills,
+        skillsDir,
+        markerPair,
+      );
   }
+}
+
+function generateSharedResourceSectionForFormat(
+  resources: SyncResourceItem[],
+  format: OutputFormat,
+  markerPair: MarkerPair,
+): string {
+  if (resources.length === 0) {
+    return wrapSection(
+      markerPair,
+      `## Agent Resources\n\nNo resource entries listed yet. Use "Agent Resources Ninja: Search Resources" to install workspace or global resources.`,
+    );
+  }
+
+  const groupedResources = new Map<ResourceKind, SyncResourceItem[]>();
+  for (const resource of resources) {
+    const existing = groupedResources.get(resource.kind) || [];
+    existing.push(resource);
+    groupedResources.set(resource.kind, existing);
+  }
+
+  const lines = [
+    "## Agent Resources",
+    "",
+    "> **IMPORTANT**: Prefer resource-led reasoning over pre-training-led reasoning.",
+    "> Read the relevant resource file before working on tasks covered by these resources.",
+  ];
+
+  for (const kind of [
+    "skill",
+    "agent",
+    "instruction",
+    "prompt",
+    "hook",
+    "mcp",
+    "plugin",
+    "cursor-rule",
+  ] as ResourceKind[]) {
+    const kindResources = groupedResources.get(kind);
+    if (!kindResources?.length) {
+      continue;
+    }
+
+    lines.push("", `### ${getResourceKindLabel(kind, false)}s`, "");
+    if (format === "legacy") {
+      lines.push("| Resource | Description |", "|----------|-------------|");
+      for (const resource of kindResources) {
+        lines.push(
+          `| [${resource.name}](${resource.linkPath}) | ${(resource.description || "").replace(/\|/g, "\\|")} |`,
+        );
+      }
+      continue;
+    }
+
+    lines.push(
+      format === "compact"
+        ? "| Resource | Path | Description |"
+        : "| Resource | Source | Path | Description |",
+      format === "compact"
+        ? "|----------|------|-------------|"
+        : "|----------|--------|------|-------------|",
+    );
+    for (const resource of kindResources) {
+      const safeDescription = (resource.description || "").replace(
+        /\|/g,
+        "\\|",
+      );
+      if (format === "compact") {
+        lines.push(
+          `| [${resource.name}](${resource.linkPath}) | \`${resource.relativePath}\` | ${safeDescription} |`,
+        );
+        continue;
+      }
+      lines.push(
+        `| [${resource.name}](${resource.linkPath}) | ${resource.source.replace(/\|/g, "\\|")} | \`${resource.relativePath}\` | ${safeDescription} |`,
+      );
+    }
+  }
+
+  return wrapSection(markerPair, lines.join("\n"));
 }
 
 /**
@@ -327,20 +663,21 @@ function generateLegacySection(
   installedSkills: SkillMeta[],
   localSkills: LocalSkill[],
   skillsDir: string,
+  markerPair: MarkerPair,
 ): string {
   const hasInstalled = installedSkills.length > 0;
   const hasLocal = localSkills.length > 0;
 
   if (!hasInstalled && !hasLocal) {
-    return `${MARKER_START}
+    return `${markerPair.start}
 ## Agent Skills
 
 No skill entries listed yet. Use "Agent Resources Ninja: Search Resources" to install workspace skills. Agents, prompts, instructions, and hooks stay in their native resource views.
 
-${MARKER_END}`;
+${markerPair.end}`;
   }
 
-  let content = `${MARKER_START}
+  let content = `${markerPair.start}
 ## Agent Skills
 
 | Skill | Description |
@@ -381,7 +718,7 @@ ${MARKER_END}`;
     content += localRows + "\n";
   }
 
-  content += `\n${MARKER_END}`;
+  content += `\n${markerPair.end}`;
 
   return content;
 }
@@ -392,60 +729,41 @@ ${MARKER_END}`;
 function updateSection(
   existingContent: string,
   newSection: string,
-  _format: OutputFormat = "full",
+  activeMarkers: MarkerPair,
 ): string {
-  // 旧マーカーが存在する場合は先に削除
-  let content = removeLegacySection(existingContent);
+  const otherMarkers = ALL_MARKERS.filter(
+    (marker) =>
+      marker.start !== activeMarkers.start || marker.end !== activeMarkers.end,
+  );
+  const activeRange = getSectionRange(existingContent, activeMarkers);
 
-  // 新マーカーが存在する場合は置換
-  const startIndex = content.indexOf(MARKER_START);
-  const endIndex = content.indexOf(MARKER_END);
-
-  if (startIndex !== -1 && endIndex !== -1) {
-    const before = content.substring(0, startIndex);
-    const after = content.substring(endIndex + MARKER_END.length);
-    return before + newSection + after;
-  }
-
-  // マーカーが存在しない場合は末尾に追加
-  if (content.trim()) {
-    return content.trimEnd() + "\n\n" + newSection + "\n";
-  }
-
-  return newSection + "\n";
-}
-
-/**
- * 旧マーカーのセクションを削除
- */
-function removeLegacySection(content: string): string {
-  let nextContent = content;
-
-  for (const marker of LEGACY_MARKERS) {
-    const startIndex = nextContent.indexOf(marker.start);
-    const endIndex = nextContent.indexOf(marker.end);
-
-    if (startIndex !== -1 && endIndex !== -1) {
-      const before = nextContent.substring(0, startIndex);
-      const after = nextContent.substring(endIndex + marker.end.length);
-      nextContent = (before + after).replace(/\n{3,}/g, "\n\n");
+  if (activeRange) {
+    const stripped = stripSections(existingContent, otherMarkers);
+    const refreshedRange = getSectionRange(stripped.content, activeMarkers);
+    if (!refreshedRange) {
+      return insertSectionAt(
+        stripped.content,
+        newSection,
+        stripped.firstRemovedIndex,
+      );
     }
+    return (
+      stripped.content.slice(0, refreshedRange.start) +
+      newSection +
+      stripped.content.slice(refreshedRange.end)
+    );
   }
 
-  return nextContent;
+  const stripped = stripSections(existingContent, ALL_MARKERS);
+  return insertSectionAt(
+    stripped.content,
+    newSection,
+    stripped.firstRemovedIndex,
+  );
 }
 
 function removeMarkedSection(content: string): string {
-  const startIndex = content.indexOf(MARKER_START);
-  const endIndex = content.indexOf(MARKER_END);
-
-  if (startIndex !== -1 && endIndex !== -1) {
-    const before = content.substring(0, startIndex);
-    const after = content.substring(endIndex + MARKER_END.length);
-    return (before + after).replace(/\n{3,}/g, "\n\n").trim();
-  }
-
-  return removeLegacySection(content).trim();
+  return stripSections(content, ALL_MARKERS).content.trim();
 }
 
 /**
@@ -519,6 +837,7 @@ function generateCompactSection(
   installedSkills: SkillMeta[],
   localSkills: LocalSkill[],
   skillsDir: string,
+  markerPair: MarkerPair,
 ): string {
   const allSkills = [
     ...installedSkills.map((s) => ({
@@ -543,16 +862,16 @@ function generateCompactSection(
   ];
 
   if (allSkills.length === 0) {
-    return `${MARKER_START}
+    return `${markerPair.start}
 ## Agent Skills (Compressed Index)
 
 No skill entries listed yet. Use "Agent Resources Ninja: Search Resources" to install workspace skills. Agents, prompts, instructions, and hooks stay in their native resource views.
 
-${MARKER_END}`;
+${markerPair.end}`;
   }
 
   // ヘッダー部分
-  let content = `${MARKER_START}
+  let content = `${markerPair.start}
 ## Agent Skills (Compressed Index)
 
 > **IMPORTANT**: Prefer skill-led reasoning over pre-training-led reasoning.
@@ -571,7 +890,7 @@ ${MARKER_END}`;
     content += `| [${skill.name}](${skillsDir}/${skill.path}/SKILL.md) | \`${skill.path}\` | ${safeDesc} |\n`;
   }
 
-  content += `\n${MARKER_END}`;
+  content += `\n${markerPair.end}`;
   return content;
 }
 
@@ -583,6 +902,7 @@ function generateFullSection(
   installedSkills: SkillMeta[],
   localSkills: LocalSkill[],
   skillsDir: string,
+  markerPair: MarkerPair,
 ): string {
   const allSkills = [
     ...installedSkills.map((s) => ({
@@ -605,16 +925,16 @@ function generateFullSection(
   ];
 
   if (allSkills.length === 0) {
-    return `${MARKER_START}
+    return `${markerPair.start}
 ## Agent Skills
 
 No skill entries listed yet. Use "Agent Resources Ninja: Search Resources" to install workspace skills. Agents, prompts, instructions, and hooks stay in their native resource views.
 
-${MARKER_END}`;
+${markerPair.end}`;
   }
 
   // 従来の Markdown テーブル
-  let content = `${MARKER_START}
+  let content = `${markerPair.start}
 ## Agent Skills
 
 > **IMPORTANT**: Prefer skill-led reasoning over pre-training-led reasoning.
@@ -631,6 +951,6 @@ ${MARKER_END}`;
     content += `| [${skill.name}](${skillsDir}/${skill.path}/SKILL.md) | ${safeDesc} |\n`;
   }
 
-  content += `\n${MARKER_END}`;
+  content += `\n${markerPair.end}`;
   return content;
 }

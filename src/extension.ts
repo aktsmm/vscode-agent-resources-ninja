@@ -7,13 +7,13 @@ import {
   Skill,
   Source,
   ResourceKind,
+  buildGitHubRawUrl,
+  buildGitHubResourceUrl,
   loadSkillIndex,
-  getSkillGitHubUrl,
-  getResourceContentPath,
+  getSkillGitHubUrlAsync,
   getResourceKind,
   getResourceKindIcon,
   getResourceKindLabel,
-  isResourceFilePath,
 } from "./skillIndex";
 import { searchSkills, SkillQuickPickItem } from "./skillSearch";
 import {
@@ -69,6 +69,16 @@ import { createChatParticipant } from "./chatParticipant";
 import { registerMcpTools } from "./mcpTools";
 import { logger, registerLogger } from "./logger";
 import {
+  AgentNinjaExtensionApi,
+  clearBeacon,
+  getEffectiveOwner,
+  getPublishedSelfBeacon,
+  isSiblingActive,
+  publishBeacon,
+  readSiblingBeacon,
+  subscribeOwnershipChanges,
+} from "./coexistence";
+import {
   detectResourceKindFromPath,
   getPluginIdFromPath,
   getResourceIdentityKeys,
@@ -102,19 +112,29 @@ import {
   resolveInstructionFileUri,
 } from "./customizationPaths";
 import { getVsCodeUserDataPath } from "./userDataPaths";
+import {
+  getStandaloneSharedModeSummary,
+  readSharedResourceIndex,
+} from "./sharedResourceIndexStore";
+import { readSharedSourcesManifest } from "./sharedSourcesManifestStore";
 
 // 現在の拡張機能バージョン
 const EXTENSION_VERSION =
   vscode.extensions.getExtension("yamapan.agent-resources-ninja")?.packageJSON
     ?.version || "0.0.0";
 
+let activeExtensionContext: vscode.ExtensionContext | undefined;
+
 async function deleteInstalledResourceByPath(
   kind: ResourceKind,
   fullPath: string,
 ): Promise<void> {
-  const isDirectoryBackedHook = kind === "hook" && !isHookConfigFilePath(fullPath);
+  const isDirectoryBackedHook =
+    kind === "hook" && !isHookConfigFilePath(fullPath);
   const targetUri = vscode.Uri.file(
-    kind === "skill" || isDirectoryBackedHook ? path.dirname(fullPath) : fullPath,
+    kind === "skill" || isDirectoryBackedHook
+      ? path.dirname(fullPath)
+      : fullPath,
   );
   await vscode.workspace.fs.delete(targetUri, {
     recursive: kind === "skill" || isDirectoryBackedHook,
@@ -141,9 +161,11 @@ const MAX_CREATE_RESOURCE_PATH_LENGTH = 240;
 const RESETTABLE_RESOURCE_NINJA_SETTINGS = [
   "autoUpdateInstruction",
   "autoUpdateResourcesOnUpgrade",
+  "coexistenceMode",
   "instructionFile",
   "customInstructionPath",
   "includeLocalResources",
+  "kindsExcluded",
   "resourcesDirectory",
   "workspaceAgentsDirectory",
   "workspaceInstructionsDirectory",
@@ -161,6 +183,8 @@ const RESETTABLE_RESOURCE_NINJA_SETTINGS = [
   "defaultInstallTarget",
   "showBuiltInResources",
   "remoteResourceViewMode",
+  "useSharedSourcesManifest",
+  "useSharedResourceIndex",
 ] as const;
 
 function getInstructionTargetLabel(
@@ -435,9 +459,19 @@ function getCreateResourceTemplate(
   }
 }
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(
+  context: vscode.ExtensionContext,
+): Promise<AgentNinjaExtensionApi> {
+  activeExtensionContext = context;
   registerLogger(context);
   logger.info("Agent Resources Ninja is now active!");
+  await publishBeacon(context);
+  context.subscriptions.push(
+    new vscode.Disposable(() => {
+      activeExtensionContext = undefined;
+      void clearBeacon(context);
+    }),
+  );
 
   // 設定値のマイグレーション（旧フォーマット名 → 新フォーマット名）
   const formatMigrated = migrateOutputFormatSetting();
@@ -532,6 +566,26 @@ export function activate(context: vscode.ExtensionContext) {
     workspaceFolder?.uri,
     recentlyInstalled,
   );
+
+  const refreshInstructionSync = async (): Promise<void> => {
+    workspaceProvider.refresh();
+    userResourcesProvider.refresh();
+    browseProvider.refresh();
+
+    if (!workspaceFolder) {
+      return;
+    }
+
+    const config = vscode.workspace.getConfiguration("resourceNinja");
+    if (
+      (config.get<boolean>("autoUpdateInstruction") ?? true) &&
+      isInstructionTargetEnabled(config)
+    ) {
+      await updateInstructionFile(workspaceFolder.uri, context);
+    }
+  };
+
+  subscribeOwnershipChanges(context, refreshInstructionSync);
 
   function markRecentlyInstalled(skill: Skill): void {
     const keys = getResourceIdentityKeys(skill);
@@ -699,6 +753,16 @@ export function activate(context: vscode.ExtensionContext) {
       browseProvider.refresh();
     }
 
+    if (
+      e.affectsConfiguration("resourceNinja.useSharedSourcesManifest") ||
+      e.affectsConfiguration("resourceNinja.useSharedResourceIndex")
+    ) {
+      skillIndex = await loadSkillIndex(context);
+      workspaceProvider.refresh();
+      userResourcesProvider.refresh();
+      browseProvider.refresh();
+    }
+
     const resourcePathSettings = [
       "resourceNinja.resourcesDirectory",
       "resourceNinja.workspaceAgentsDirectory",
@@ -726,7 +790,9 @@ export function activate(context: vscode.ExtensionContext) {
       e.affectsConfiguration("resourceNinja.customInstructionPath") ||
       e.affectsConfiguration("resourceNinja.globalResourceHomePreset") ||
       e.affectsConfiguration("resourceNinja.globalHomeDirectory") ||
-      e.affectsConfiguration("resourceNinja.outputFormat")
+      e.affectsConfiguration("resourceNinja.outputFormat") ||
+      e.affectsConfiguration("resourceNinja.coexistenceMode") ||
+      e.affectsConfiguration("resourceNinja.kindsExcluded")
     ) {
       const workspaceFolders = vscode.workspace.workspaceFolders;
       if (workspaceFolders && workspaceFolders.length > 0) {
@@ -1563,12 +1629,12 @@ export function activate(context: vscode.ExtensionContext) {
           ? !instructionTargetEnabled
             ? "説明文メタデータを保存します。インストラクションファイル同期先は無効です（空にするとデフォルトに戻ります）"
             : autoUpdateInstruction
-              ? `生成される Agent Skills index に表示する説明文を入力してください（同期先: ${instructionTarget}、空にするとデフォルトに戻ります）`
+              ? `生成される instruction block に表示する説明文を入力してください（同期先: ${instructionTarget}、空にするとデフォルトに戻ります）`
               : `説明文メタデータを保存します。自動更新は無効です。必要に応じて Update Instruction File で ${instructionTarget} を更新してください（空にするとデフォルトに戻ります）`
           : !instructionTargetEnabled
             ? "Save the description metadata. Instruction file sync target is disabled (leave empty to reset to default)"
             : autoUpdateInstruction
-              ? `Enter the description shown in the generated Agent Skills index (target: ${instructionTarget}; leave empty to reset to default)`
+              ? `Enter the description shown in the generated instruction block (target: ${instructionTarget}; leave empty to reset to default)`
               : `Save the description metadata. Automatic instruction updates are disabled; run Update Instruction File to refresh ${instructionTarget} when needed (leave empty to reset to default)`,
         value: currentValue,
         placeHolder: isJapanese()
@@ -2114,7 +2180,7 @@ export function activate(context: vscode.ExtensionContext) {
               selected.skill,
             );
           } else if (action?.value === "github") {
-            const url = getSkillGitHubUrl(
+            const url = await getSkillGitHubUrlAsync(
               selected.skill,
               skillIndex?.sources || [],
             );
@@ -3571,10 +3637,14 @@ export function activate(context: vscode.ExtensionContext) {
               quickPick.onDidTriggerItemButton(async (e) => {
                 const item = e.item;
                 const branch = item.result.defaultBranch || "main";
-                const resourcePath = item.result.path
-                  ? `${isResourceFilePath(item.result.path) ? "/blob" : "/tree"}/${branch}/${item.result.path}`
-                  : "";
-                const url = `${item.result.repoUrl}${resourcePath}`;
+                const url = buildGitHubResourceUrl(
+                  item.result.repoUrl,
+                  branch,
+                  {
+                    kind: item.result.kind,
+                    path: item.result.path,
+                  },
+                );
 
                 if (e.button === openGitHubButton) {
                   // GitHub を開く（QuickPick は閉じない）
@@ -3639,17 +3709,30 @@ export function activate(context: vscode.ExtensionContext) {
 
             if (action.value === "preview") {
               // プレビュー表示
-              const urlPath = getResourceContentPath({
-                path: selected.result.path,
-              });
               const branch = selected.result.defaultBranch || "main";
+              const githubUrl = buildGitHubResourceUrl(
+                selected.result.repoUrl,
+                branch,
+                {
+                  kind: selected.result.kind,
+                  path: selected.result.path,
+                },
+              );
+              const rawUrl = buildGitHubRawUrl(
+                selected.result.repoUrl,
+                branch,
+                {
+                  kind: selected.result.kind,
+                  path: selected.result.path,
+                },
+              );
               const skill: Skill = {
                 kind: selected.result.kind,
                 name: selected.result.name,
                 description: selected.result.description || "",
                 source: selected.result.repo,
-                url: `${selected.result.repoUrl}/blob/${branch}/${urlPath}`,
-                rawUrl: `https://raw.githubusercontent.com/${selected.result.repo}/${branch}/${urlPath}`,
+                url: githubUrl,
+                rawUrl: rawUrl,
                 path: selected.result.path,
                 categories: [],
                 stars: selected.result.stars,
@@ -3668,19 +3751,27 @@ export function activate(context: vscode.ExtensionContext) {
               continueSearch = false;
             } else if (action.value === "open") {
               const branch = selected.result.defaultBranch || "main";
-              const skillPath = selected.result.path
-                ? `${isResourceFilePath(selected.result.path) ? "/blob" : "/tree"}/${branch}/${selected.result.path}`
-                : "";
-              const url = `${selected.result.repoUrl}${skillPath}`;
+              const url = buildGitHubResourceUrl(
+                selected.result.repoUrl,
+                branch,
+                {
+                  kind: selected.result.kind,
+                  path: selected.result.path,
+                },
+              );
               await vscode.env.openExternal(vscode.Uri.parse(url));
               // 結果一覧に戻る
               continue;
             } else if (action.value === "copy-url") {
               const branch = selected.result.defaultBranch || "main";
-              const skillPath = selected.result.path
-                ? `${isResourceFilePath(selected.result.path) ? "/blob" : "/tree"}/${branch}/${selected.result.path}`
-                : "";
-              const url = `${selected.result.repoUrl}${skillPath}`;
+              const url = buildGitHubResourceUrl(
+                selected.result.repoUrl,
+                branch,
+                {
+                  kind: selected.result.kind,
+                  path: selected.result.path,
+                },
+              );
               await vscode.env.clipboard.writeText(url);
               vscode.window.showInformationMessage(
                 isJapanese()
@@ -4037,13 +4128,16 @@ export function activate(context: vscode.ExtensionContext) {
 
       if (skillOrItem instanceof SkillTreeItem) {
         if (skillOrItem.skill) {
-          url = getSkillGitHubUrl(skillOrItem.skill, skillIndex?.sources || []);
+          url = await getSkillGitHubUrlAsync(
+            skillOrItem.skill,
+            skillIndex?.sources || [],
+          );
         } else if (skillOrItem.source) {
           url = skillOrItem.source.url;
         }
       } else if (skillOrItem && "name" in skillOrItem) {
         const skill = skillOrItem as Skill;
-        url = getSkillGitHubUrl(skill, skillIndex?.sources || []);
+        url = await getSkillGitHubUrlAsync(skill, skillIndex?.sources || []);
       }
 
       if (url) {
@@ -4474,6 +4568,107 @@ export function activate(context: vscode.ExtensionContext) {
     },
   );
 
+  const showCoexistenceStatusCmd = vscode.commands.registerCommand(
+    "resourceNinja.showCoexistenceStatus",
+    async () => {
+      const config = vscode.workspace.getConfiguration("resourceNinja");
+      const selfBeacon = getPublishedSelfBeacon(context);
+      const siblingBeacon = await readSiblingBeacon(context);
+      const siblingDetected = await isSiblingActive(context);
+      const owner = await getEffectiveOwner(context);
+      const sourcesManifest = await readSharedSourcesManifest();
+      const sharedIndex = await readSharedResourceIndex();
+      const sharedSummary = getStandaloneSharedModeSummary(context);
+      const excludedKinds = config.get<string[]>("kindsExcluded", []);
+      const standaloneExcludedKinds = siblingDetected ? [] : excludedKinds;
+      const markdown = [
+        "# Resource Ninja Coexistence Status",
+        "",
+        `- Mode: ${config.get<string>("coexistenceMode", "auto")}`,
+        `- Owner: ${owner}`,
+        `- Sibling active: ${siblingDetected ? "yes" : "no"}`,
+        `- Shared dir: ${sharedSummary.sharedDir}`,
+        `- Shared sources manifest: ${sourcesManifest ? `${sourcesManifest.sources.length} sources` : "not initialized"}`,
+        `- Shared resource index: ${sharedIndex ? `${sharedIndex.lastFullScan}` : "not initialized"}`,
+        ...(standaloneExcludedKinds.length > 0
+          ? [
+              `- Standalone exclusions: ${standaloneExcludedKinds.join(", ")}`,
+              "- Hint: Run Resource NINJA: Recompute Coexistence Ownership after uninstalling the skill-only sibling extension. If you want skills listed again in standalone mode, remove `skill` from `resourceNinja.kindsExcluded`.",
+            ]
+          : siblingDetected && excludedKinds.length > 0
+            ? [
+                `- Standalone exclusions configured: ${excludedKinds.join(", ")} (ignored while the skill-only sibling extension is active)`,
+              ]
+            : []),
+        "",
+        "## Self Beacon",
+        "",
+        "```json",
+        JSON.stringify(selfBeacon || sharedSummary.beacon, null, 2),
+        "```",
+        "",
+        "## Sibling Beacon",
+        "",
+        "```json",
+        JSON.stringify(siblingBeacon || null, null, 2),
+        "```",
+      ].join("\n");
+
+      const doc = await vscode.workspace.openTextDocument({
+        content: markdown,
+        language: "markdown",
+      });
+      await vscode.window.showTextDocument(doc, { preview: false });
+    },
+  );
+
+  const recomputeOwnershipCmd = vscode.commands.registerCommand(
+    "resourceNinja.recomputeOwnership",
+    async () => {
+      await publishBeacon(context);
+      if (workspaceFolder) {
+        await refreshInstructionSync();
+      }
+      const owner = await getEffectiveOwner(context);
+      vscode.window.showInformationMessage(
+        isJapanese()
+          ? `共存状態を再評価しました。現在の owner は ${owner} です。`
+          : `Recomputed coexistence state. Current owner: ${owner}.`,
+      );
+    },
+  );
+
+  const cleanupOrphanBlockCmd = vscode.commands.registerCommand(
+    "resourceNinja.cleanupOrphanBlock",
+    async () => {
+      if (!workspaceFolder) {
+        vscode.window.showErrorMessage(messages.noWorkspace());
+        return;
+      }
+
+      const config = vscode.workspace.getConfiguration("resourceNinja");
+      const instructionUri = resolveInstructionFileUri(
+        workspaceFolder.uri,
+        config,
+      );
+      if (!instructionUri) {
+        vscode.window.showInformationMessage(
+          isJapanese()
+            ? "クリーンアップ対象の instruction file が設定されていません。"
+            : "No instruction file is configured for cleanup.",
+        );
+        return;
+      }
+
+      await removeSkillSectionFromFile(instructionUri);
+      vscode.window.showInformationMessage(
+        isJapanese()
+          ? `マーカーブロックを削除しました: ${instructionUri.fsPath}`
+          : `Removed marker block from ${instructionUri.fsPath}`,
+      );
+    },
+  );
+
   async function openInstructionFileForScope(
     scope: "workspace" | "globalHome",
   ): Promise<void> {
@@ -4668,15 +4863,12 @@ ${fileUri.fsPath}`,
         return;
       }
 
-      // スキルのGitHub URLを構築
       const currentIndex = await loadSkillIndex(context);
-      const source = currentIndex.sources.find(
-        (s) => s.id === item.skill!.source,
+      const url = await getSkillGitHubUrlAsync(
+        item.skill,
+        currentIndex.sources,
       );
-      if (source) {
-        const branch = source.branch || "main";
-        const route = isResourceFilePath(item.skill.path) ? "blob" : "tree";
-        const url = `${source.url}/${route}/${branch}/${item.skill.path}`;
+      if (url) {
         await vscode.env.clipboard.writeText(url);
         vscode.window.showInformationMessage(
           messages.copiedToClipboardWithValue(url),
@@ -4810,6 +5002,9 @@ ${fileUri.fsPath}`,
     createSkillCmd,
     updateInstructionCmd,
     updateGlobalInstructionCmd,
+    showCoexistenceStatusCmd,
+    recomputeOwnershipCmd,
+    cleanupOrphanBlockCmd,
     openInstructionFileCmd,
     openGlobalInstructionFileCmd,
     openSettingsCmd,
@@ -4884,6 +5079,9 @@ ${fileUri.fsPath}`,
 
   skillMdWatcher.onDidChange(handleSkillMdChange);
   context.subscriptions.push(skillMdWatcher);
+  return {
+    getAgentNinjaBeacon: () => getPublishedSelfBeacon(context),
+  };
 }
 
 /**
@@ -5047,4 +5245,8 @@ function migrateOutputFormatSetting(): boolean {
   return false;
 }
 
-export function deactivate() {}
+export async function deactivate(): Promise<void> {
+  if (activeExtensionContext) {
+    await clearBeacon(activeExtensionContext);
+  }
+}

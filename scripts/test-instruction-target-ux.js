@@ -94,9 +94,9 @@ test("edit when-to-use prompt avoids hardcoded AGENTS wording", () => {
   assert.doesNotMatch(editWhenToUseSource, /AGENTS\.md に表示/);
 });
 
-test("edit when-to-use prompt explains generated Agent Skills index", () => {
-  assert.match(editWhenToUseSource, /generated Agent Skills index/);
-  assert.match(editWhenToUseSource, /生成される Agent Skills index/);
+test("edit when-to-use prompt explains generated instruction block", () => {
+  assert.match(editWhenToUseSource, /generated instruction block/);
+  assert.match(editWhenToUseSource, /生成される instruction block/);
 });
 
 test("edit when-to-use prompt shows current target", () => {

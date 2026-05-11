@@ -209,6 +209,13 @@ test("README marketplace identity matches package metadata", () => {
   );
 });
 
+test("README links Japanese edition through GitHub absolute URL", () => {
+  assert.match(
+    readme,
+    /https:\/\/github\.com\/aktsmm\/vscode-agent-resources-ninja\/blob\/master\/README_ja\.md/,
+  );
+});
+
 test("README docs avoid legacy release-facing claims", () => {
   const docs = allDocsText();
   assert.doesNotMatch(docs, /8 Tools|8 ツール/);

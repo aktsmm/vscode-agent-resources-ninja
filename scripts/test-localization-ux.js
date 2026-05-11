@@ -277,19 +277,19 @@ test("settings descriptions explain MCP config safety", () => {
 test("settings descriptions distinguish skill index from native resource paths", () => {
   assert.match(
     nls["config.instructionFile.markdownDescription"],
-    /Agent Skills index/,
+    /generated instruction block/,
   );
   assert.match(
     nls["config.instructionFile.markdownDescription"],
-    /native paths/,
+    /index, not a copy/,
   );
   assert.match(
     nlsJa["config.instructionFile.markdownDescription"],
-    /Agent Skills index/,
+    /生成した instruction block/,
   );
   assert.match(
     nlsJa["config.instructionFile.markdownDescription"],
-    /ネイティブな保存先/,
+    /index として機能/,
   );
   assert.match(
     nls["config.globalResourceHomePreset.markdownDescription"],
@@ -331,7 +331,10 @@ test("settings output format copy stays professional", () => {
   assert.doesNotMatch(outputFormatText, /[🌟✅📦🕰️]/u);
   assert.doesNotMatch(outputFormatText, /\bOLD\b/);
   assert.match(outputFormatText, /compatibility mode|互換モード/);
-  assert.match(outputFormatText, /Agent Skills index/);
+  assert.match(
+    outputFormatText,
+    /generated instruction block|生成される instruction block/,
+  );
 });
 
 test("instruction file enum descriptions match exact targets", () => {

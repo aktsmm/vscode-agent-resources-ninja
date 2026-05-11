@@ -635,8 +635,10 @@ async function checkRegistrationStatus(
   }
 
   // マーカー
-  const MARKER_START = "<!-- resource-ninja-START -->";
-  const MARKER_END = "<!-- resource-ninja-END -->";
+  const MARKER_START = "<!-- agent-ninja-START -->";
+  const MARKER_END = "<!-- agent-ninja-END -->";
+  const LEGACY_RESOURCE_MARKER_START = "<!-- resource-ninja-START -->";
+  const LEGACY_RESOURCE_MARKER_END = "<!-- resource-ninja-END -->";
   const LEGACY_MARKER_START = "<!-- skill-ninja-START -->";
   const LEGACY_MARKER_END = "<!-- skill-ninja-END -->";
 
@@ -648,6 +650,12 @@ async function checkRegistrationStatus(
     let startIndex = text.indexOf(MARKER_START);
     let endIndex = text.indexOf(MARKER_END);
     let markerEnd = MARKER_END;
+
+    if (startIndex === -1 || endIndex === -1) {
+      startIndex = text.indexOf(LEGACY_RESOURCE_MARKER_START);
+      endIndex = text.indexOf(LEGACY_RESOURCE_MARKER_END);
+      markerEnd = LEGACY_RESOURCE_MARKER_END;
+    }
 
     if (startIndex === -1 || endIndex === -1) {
       startIndex = text.indexOf(LEGACY_MARKER_START);

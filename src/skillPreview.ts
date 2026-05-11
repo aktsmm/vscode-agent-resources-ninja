@@ -4,10 +4,9 @@
 import * as vscode from "vscode";
 import {
   loadSkillIndex,
-  getSkillGitHubUrl,
+  getSkillGitHubUrlAsync,
   getSourceBranch,
   getResourceContentPath,
-  isResourceFilePath,
   Skill,
   Source,
   getResourceKind,
@@ -729,31 +728,11 @@ export async function showSkillPreview(
             break;
           }
           case "openGitHub": {
-            let url = getSkillGitHubUrl(skill, sources);
+            let url = await getSkillGitHubUrlAsync(skill, sources, token);
             // フォールバック: skill.url または source/path から直接構築
             if (!url) {
               if (skill.url) {
                 url = skill.url;
-              } else if (skill.source && skill.path) {
-                // source が owner/repo 形式か source ID 形式かを判定
-                // ソース情報からブランチを取得（なければ main にフォールバック）
-                const sourceInfo = sources.find((s) => s.id === skill.source);
-                const branch = sourceInfo?.branch || "main";
-                const route = isResourceFilePath(skill.path) ? "blob" : "tree";
-                if (skill.source.includes("/")) {
-                  // owner/repo 形式（検索結果から）
-                  url = `https://github.com/${skill.source}/${route}/${branch}/${skill.path}`;
-                } else {
-                  // source ID 形式（インデックスから）→ ソース情報からURLを取得
-                  if (sourceInfo) {
-                    const match = sourceInfo.url.match(
-                      /github\.com\/([^/]+\/[^/]+)/,
-                    );
-                    if (match) {
-                      url = `https://github.com/${match[1]}/${route}/${branch}/${skill.path}`;
-                    }
-                  }
-                }
               }
             }
             if (url) {

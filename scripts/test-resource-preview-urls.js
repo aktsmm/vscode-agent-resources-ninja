@@ -47,6 +47,16 @@ function test(name, fn) {
   }
 }
 
+async function testAsync(name, fn) {
+  try {
+    await fn();
+    console.log(`PASS ${name}`);
+  } catch (error) {
+    console.error(`FAIL ${name}`);
+    throw error;
+  }
+}
+
 const skillIndexModule = requireTypeScriptModule(
   path.join(__dirname, "..", "src", "skillIndex.ts"),
   {
@@ -54,6 +64,10 @@ const skillIndexModule = requireTypeScriptModule(
     "./githubFetch": {
       createGitHubHeaders: () => ({}),
       fetchGitHubWithOptionalAuthRetry: async () => ({ ok: false }),
+    },
+    "./sharedResourceIndexStore": {
+      loadSharedStoresIntoSkillIndex: async (index) => index,
+      syncSharedStoresFromSkillIndex: async () => undefined,
     },
     "./logger": {
       logger: {
@@ -66,8 +80,10 @@ const skillIndexModule = requireTypeScriptModule(
 );
 
 const {
+  buildGitHubResourceUrl,
   getResourceContentPath,
   getSkillGitHubUrl,
+  getSkillGitHubUrlAsync,
   getSkillRawUrl,
   isResourceFilePath,
 } = skillIndexModule;
@@ -203,6 +219,33 @@ test("directory skills still preview SKILL.md and open as tree", () => {
   );
 });
 
+test("stored GitHub URLs keep their route while updating the branch", () => {
+  const skill = resource({
+    kind: "skill",
+    name: "humanize-writing",
+    path: "humanize-writing",
+  });
+  skill.source = "agent-skills";
+  skill.url =
+    "https://github.com/aktsmm/Agent-Skills/blob/main/humanize-writing/";
+
+  const legacySources = [
+    {
+      id: "agent-skills",
+      name: "Agent Skills",
+      url: "https://github.com/aktsmm/Agent-Skills",
+      type: "user-added",
+      branch: "master",
+      description: "Agent Skills",
+    },
+  ];
+
+  assert.strictEqual(
+    getSkillGitHubUrl(skill, legacySources),
+    "https://github.com/aktsmm/Agent-Skills/blob/master/humanize-writing/",
+  );
+});
+
 test("plugin manifests preview the manifest and open the plugin root", () => {
   const plugin = resource({
     kind: "plugin",
@@ -273,4 +316,69 @@ test("Cursor rules preview raw mdc files directly", () => {
   );
 });
 
-console.log("RESULT=PASS");
+test("resource URL builder handles file and directory paths consistently", () => {
+  assert.strictEqual(
+    buildGitHubResourceUrl(
+      "https://github.com/github/awesome-copilot",
+      "main",
+      { kind: "prompt", path: "prompts/example.prompt.md" },
+    ),
+    "https://github.com/github/awesome-copilot/blob/main/prompts/example.prompt.md",
+  );
+  assert.strictEqual(
+    buildGitHubResourceUrl(
+      "https://github.com/github/awesome-copilot",
+      "main",
+      { kind: "skill", path: "skills/example" },
+    ),
+    "https://github.com/github/awesome-copilot/tree/main/skills/example",
+  );
+});
+
+(async () => {
+  await testAsync(
+    "async GitHub URL resolution probes master and preserves stored route",
+    async () => {
+      const originalFetch = global.fetch;
+      global.fetch = async (url) => ({
+        ok:
+          typeof url === "string" &&
+          url ===
+            "https://raw.githubusercontent.com/aktsmm/Agent-Skills/master/humanize-writing/SKILL.md",
+      });
+
+      try {
+        const skill = resource({
+          kind: "skill",
+          name: "humanize-writing",
+          path: "humanize-writing",
+        });
+        skill.source = "agent-skills";
+        skill.url =
+          "https://github.com/aktsmm/Agent-Skills/blob/main/humanize-writing/";
+
+        const legacySources = [
+          {
+            id: "agent-skills",
+            name: "Agent Skills",
+            url: "https://github.com/aktsmm/Agent-Skills",
+            type: "user-added",
+            description: "Agent Skills",
+          },
+        ];
+
+        assert.strictEqual(
+          await getSkillGitHubUrlAsync(skill, legacySources),
+          "https://github.com/aktsmm/Agent-Skills/blob/master/humanize-writing/",
+        );
+      } finally {
+        global.fetch = originalFetch;
+      }
+    },
+  );
+
+  console.log("RESULT=PASS");
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

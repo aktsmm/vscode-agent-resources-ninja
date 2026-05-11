@@ -87,7 +87,7 @@ It gives you three practical views for everyday resource management: **Workspace
 - Installed MCP config resources continue to show whether they are only staged for review or already represented in `.vscode/mcp.json`.
 - Installed hook resources show whether their recommended entries are present in root `hooks.json` and whether referenced scripts are missing; diagnostics are static checks only, not hook execution.
 - Plugin manifest resources install as managed copies under `.github/plugins/<plugin>` or Global Resource Home `plugins/<plugin>`. Hooks, executable assets, and MCP config included in a plugin are copied for review and are not run or activated automatically.
-- Auto-update the generated **Agent Skills index** in instruction files (AGENTS.md / copilot-instructions.md / CLAUDE.md) when skill resources change
+- Auto-update the generated instruction block in instruction files (AGENTS.md / copilot-instructions.md / CLAUDE.md) when resources change
 - **Table Format** - Skill entries displayed in a generated table with a "When to Use" column
 - **Auto-extract "When to Use"** - Extracted from SKILL.md `## When to Use` section
 - **Edit Description** - Right-click installed skills to customize the instruction-file description
@@ -375,14 +375,15 @@ If you don't need MCP tools, you can disable them from GitHub Copilot Chat:
 
 Settings are ordered by the workflow users usually follow:
 
-| Group                   | Settings                                                                                     | Purpose                                                                   |
-| ----------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Install behavior        | `defaultInstallTarget`, `singleClickInstall`                                                 | Decide where click installs go                                            |
-| Workspace roots         | `resourcesDirectory`, `workspace*Directory`                                                  | Project-specific resources tracked with the workspace                     |
-| User roots              | `user*Directory`                                                                             | VS Code User Profile agents, prompts, and instructions                    |
-| Global Resource Home    | `globalResourceHomePreset`, `globalHomeDirectory`                                            | Shared resources for Copilot CLI, Claude-compatible tools, or open agents |
-| Instruction sync        | `autoUpdateInstruction`, `instructionFile`, `customInstructionPath`, `includeLocalResources` | Optional Agent Skills index generation                                    |
-| Display and maintenance | `outputFormat`, `showBuiltInResources`, `remoteResourceViewMode`, `language`, `githubToken`  | Presentation, discovery, and GitHub API behavior                          |
+| Group                   | Settings                                                                                                                         | Purpose                                                                   |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Install behavior        | `defaultInstallTarget`, `singleClickInstall`                                                                                     | Decide where click installs go                                            |
+| Workspace roots         | `resourcesDirectory`, `workspace*Directory`                                                                                      | Project-specific resources tracked with the workspace                     |
+| User roots              | `user*Directory`                                                                                                                 | VS Code User Profile agents, prompts, and instructions                    |
+| Global Resource Home    | `globalResourceHomePreset`, `globalHomeDirectory`                                                                                | Shared resources for Copilot CLI, Claude-compatible tools, or open agents |
+| Instruction sync        | `autoUpdateInstruction`, `instructionFile`, `customInstructionPath`, `includeLocalResources`, `coexistenceMode`, `kindsExcluded` | Optional shared instruction block generation                              |
+| Shared caches           | `useSharedSourcesManifest`, `useSharedResourceIndex`                                                                             | Cross-extension SSOT for sources and scanned resource metadata            |
+| Display and maintenance | `outputFormat`, `showBuiltInResources`, `remoteResourceViewMode`, `language`, `githubToken`                                      | Presentation, discovery, and GitHub API behavior                          |
 
 `globalResourceHomePreset` is the common case. `globalHomeDirectory` is an override: when it is not empty, it wins over the preset. Choose `custom` only when you also provide an override path.
 
@@ -401,16 +402,20 @@ Settings are ordered by the workflow users usually follow:
 |  10   | `resourceNinja.userPromptsDirectory`           | `""`                   | Optional User Profile prompt directory override                                          |
 |  11   | `resourceNinja.globalResourceHomePreset`       | `copilot`              | Known Global Resource Home preset (`~/.copilot`, `~/.claude`, `~/.agents`)               |
 |  12   | `resourceNinja.globalHomeDirectory`            | `""`                   | Optional custom Global Resource Home override                                            |
-|  13   | `resourceNinja.autoUpdateInstruction`          | `true`                 | Auto-update the Agent Skills index after skill changes                                   |
-|  14   | `resourceNinja.instructionFile`                | `AGENTS.md`            | Agent Skills index sync target _(requires Auto Update)_                                  |
-|  15   | `resourceNinja.customInstructionPath`          | `""`                   | Custom Agent Skills index path _(only when 'custom' selected)_                           |
-|  16   | `resourceNinja.includeLocalResources`          | `false`                | Include workspace-wide fallback `SKILL.md` files in the Agent Skills index               |
+|  13   | `resourceNinja.autoUpdateInstruction`          | `true`                 | Auto-update the generated instruction block after resource changes                        |
+|  14   | `resourceNinja.instructionFile`                | `AGENTS.md`            | Generated instruction block sync target _(requires Auto Update)_                         |
+|  15   | `resourceNinja.customInstructionPath`          | `""`                   | Custom generated instruction block path _(only when 'custom' selected)_                  |
+|  16   | `resourceNinja.includeLocalResources`          | `false`                | Include workspace-wide fallback `SKILL.md` files in the generated instruction block      |
 |  17   | `resourceNinja.autoUpdateResourcesOnUpgrade`   | `prompt`               | Update installed remote skills on extension upgrade                                      |
-|  21   | `resourceNinja.outputFormat`                   | `full`                 | Output format (full / compact / legacy)                                                  |
-|  22   | `resourceNinja.showBuiltInResources`           | `false`                | Show built-in resources in User / Global Resource Home                                   |
-|  23   | `resourceNinja.remoteResourceViewMode`         | `repositoryFirst`      | Remote Resources layout (repository-first / resource-type-first)                         |
-|  24   | `resourceNinja.language`                       | `auto`                 | UI language (auto / en / ja)                                                             |
-|  25   | `resourceNinja.githubToken`                    | `""`                   | GitHub Token (for API rate limit)                                                        |
+|  18   | `resourceNinja.coexistenceMode`                | `auto`                 | Shared marker ownership mode (`auto` / `independent`)                                    |
+|  19   | `resourceNinja.kindsExcluded`                  | `[]`                   | Resource kinds to omit from the shared instruction block when running standalone         |
+|  20   | `resourceNinja.useSharedSourcesManifest`       | `false`                | Enable shared `sources.json` SSOT for coexistence with the skill-only sibling extension  |
+|  21   | `resourceNinja.useSharedResourceIndex`         | `false`                | Enable shared `index.json` SSOT for coexistence with the skill-only sibling extension    |
+|  22   | `resourceNinja.outputFormat`                   | `full`                 | Output format (full / compact / legacy)                                                  |
+|  23   | `resourceNinja.showBuiltInResources`           | `false`                | Show built-in resources in User / Global Resource Home                                   |
+|  24   | `resourceNinja.remoteResourceViewMode`         | `repositoryFirst`      | Remote Resources layout (repository-first / resource-type-first)                         |
+|  25   | `resourceNinja.language`                       | `auto`                 | UI language (auto / en / ja)                                                             |
+|  26   | `resourceNinja.githubToken`                    | `""`                   | GitHub Token (for API rate limit)                                                        |
 
 > Settings are displayed in the order above
 
@@ -421,30 +426,42 @@ When `autoUpdateInstruction` is enabled:
 1. **Workspace/User Profile/Global Resource Home skill install/uninstall** → Instruction file is automatically updated
 2. **Workspace instruction targets** index workspace skills; **Global Resource Home targets** such as `~/.copilot/copilot-instructions.md` index Global Resource Home skills
 3. **Configured workspace resource directories** → Scanned first for Workspace Resources
-4. **Workspace-wide fallback `SKILL.md` detected** → Added to the Agent Skills index only when `resourceNinja.includeLocalResources` is true
+4. **Workspace-wide fallback `SKILL.md` detected** → Added to the generated instruction block only when `resourceNinja.includeLocalResources` is true
 5. **Register/Unregister command** → Manual control for local workspace skills
 
-Agents, prompts, instructions, and hooks are installed to native paths and managed from the resource views; they are not copied into the generated Agent Skills index.
+Installed files stay in their native paths. The generated instruction block is an index, not a copy of the resources.
 
-Generated instruction files contain a managed `resource-ninja-START` / `resource-ninja-END` section. Edit outside that managed section, or disable auto-update if you need full manual control over the file.
+### Coexistence Note
 
-The instruction file contains a managed section with **IMPORTANT prompt** and **Description column**:
+If you uninstall the skill-only sibling extension after running both extensions together, run `Resource NINJA: Recompute Coexistence Ownership` to refresh the current owner state.
+
+If skills still do not appear in standalone mode, check `resourceNinja.kindsExcluded`. Resource NINJA respects that setting when running alone, so remove `skill` from the list if you want skills to be listed again in the shared block.
+
+Generated instruction files contain a managed section. In the default `auto` mode this uses `agent-ninja-START` / `agent-ninja-END`. In `independent` mode it uses the legacy `resource-ninja-START` / `resource-ninja-END` markers. Edit outside that managed section, or disable auto-update if you need full manual control over the file.
+
+The default `auto` mode writes a shared managed section with **IMPORTANT prompt** and **Description column**:
 
 ```markdown
-<!-- resource-ninja-START -->
+<!-- agent-ninja-START -->
 
-## Agent Skills
+## Agent Resources
 
-> **IMPORTANT**: Prefer skill-led reasoning over pre-training-led reasoning.
-> Read the relevant SKILL.md before working on tasks covered by these skills.
+> **IMPORTANT**: Prefer resource-led reasoning over pre-training-led reasoning.
+> Read the relevant resource file before working on tasks covered by these resources.
 
 ### Skills
 
-| Skill                                            | Description                          |
-| ------------------------------------------------ | ------------------------------------ |
-| [skill-name](.github/skills/skill-name/SKILL.md) | Description text \| When to use text |
+| Resource                                         | Source | Path                        | Description                          |
+| ------------------------------------------------ | ------ | --------------------------- | ------------------------------------ |
+| [skill-name](.github/skills/skill-name/SKILL.md) | local  | `.github/skills/skill-name` | Description text \| When to use text |
 
-<!-- resource-ninja-END -->
+### Agents
+
+| Resource                                       | Source | Path                             | Description              |
+| ---------------------------------------------- | ------ | -------------------------------- | ------------------------ |
+| [review-agent](.github/agents/review.agent.md) | local  | `.github/agents/review.agent.md` | Review workflow guidance |
+
+<!-- agent-ninja-END -->
 ```
 
 **Description column format**: `{description:80} | {whenToUse:80}` (max 160 chars total)
@@ -461,32 +478,34 @@ The instruction file contains a managed section with **IMPORTANT prompt** and **
 
 ### IMPORTANT Prompt
 
-The `full` and `compact` formats include the **IMPORTANT prompt** that instructs agents to prioritize skill files:
+The `full` and `compact` formats include an **IMPORTANT prompt**. In the default `auto` mode it prioritizes resource files; in `independent` mode the legacy skill-focused wording is kept:
 
 ```markdown
-> **IMPORTANT**: Prefer skill-led reasoning over pre-training-led reasoning.
-> Read the relevant SKILL.md before working on tasks covered by these skills.
+> **IMPORTANT**: Prefer resource-led reasoning over pre-training-led reasoning.
+> Read the relevant resource file before working on tasks covered by these resources.
 ```
 
-### Example Output - Full Format (Default)
+### Example Output - Full Format (Default `auto` mode)
 
 ```markdown
-<!-- resource-ninja-START -->
+<!-- agent-ninja-START -->
 
-## Agent Skills
+## Agent Resources
 
-> **IMPORTANT**: Prefer skill-led reasoning over pre-training-led reasoning.
-> Read the relevant SKILL.md before working on tasks covered by these skills.
+> **IMPORTANT**: Prefer resource-led reasoning over pre-training-led reasoning.
+> Read the relevant resource file before working on tasks covered by these resources.
 
 ### Skills
 
-| Skill                                | Description                                         |
-| ------------------------------------ | --------------------------------------------------- |
-| [docx](.github/skills/docx/SKILL.md) | Process Word documents (.docx). Use for .docx files |
-| [pdf](.github/skills/pdf/SKILL.md)   | PDF manipulation toolkit. Extract text, create PDFs |
+| Resource                             | Source | Path                  | Description                                         |
+| ------------------------------------ | ------ | --------------------- | --------------------------------------------------- |
+| [docx](.github/skills/docx/SKILL.md) | local  | `.github/skills/docx` | Process Word documents (.docx). Use for .docx files |
+| [pdf](.github/skills/pdf/SKILL.md)   | local  | `.github/skills/pdf`  | PDF manipulation toolkit. Extract text, create PDFs |
 
-<!-- resource-ninja-END -->
+<!-- agent-ninja-END -->
 ```
+
+In `independent` mode, Resource NINJA keeps the legacy `resource-ninja` skill-only block for compatibility.
 
 ### How to Change Format
 

@@ -91,6 +91,59 @@ function readZipEntries(filePath) {
   return entries.sort();
 }
 
+function assertVsixPayloadMinimal(vsixPath, label) {
+  if (!fs.existsSync(vsixPath)) {
+    console.log(`SKIP ${label} payload stays release-minimal (VSIX not generated yet)`);
+    return;
+  }
+
+  const entries = readZipEntries(vsixPath);
+  const forbiddenPrefixes = [
+    "extension/.github/",
+    "extension/.vscode/",
+    "extension/.vscode-test/",
+    "extension/artifacts/",
+    "extension/docs/",
+    "extension/output/",
+    "extension/output_retro/",
+    "extension/output_sessions/",
+    "extension/scripts/",
+    "extension/src/",
+    "extension/test/",
+  ];
+  const forbiddenNames = new Set([
+    "extension/AGENTS.md",
+    "extension/AGENTS.md.backup",
+    "extension/NEXT_WORK.md",
+    "extension/PRODUCT_DIRECTION.md",
+    "extension/MIGRATION_NOTES.md",
+    "extension/README_ja.md",
+    "extension/package-lock.json",
+    "extension/compile-output.txt",
+    "extension/hooks.json",
+  ]);
+
+  for (const entry of entries) {
+    assert.ok(
+      !forbiddenNames.has(entry),
+      `Unexpected ${label} VSIX file: ${entry}`,
+    );
+    assert.ok(
+      !forbiddenPrefixes.some((prefix) => entry.startsWith(prefix)),
+      `Unexpected ${label} VSIX path: ${entry}`,
+    );
+    assert.ok(!entry.endsWith(".map"), `Unexpected ${label} VSIX sourcemap: ${entry}`);
+    assert.ok(
+      !entry.endsWith("-output.txt"),
+      `Unexpected ${label} VSIX output artifact: ${entry}`,
+    );
+    assert.ok(
+      !entry.endsWith("-exit.txt"),
+      `Unexpected ${label} VSIX exit artifact: ${entry}`,
+    );
+  }
+}
+
 test("gitignore covers local release and validation artifacts", () => {
   for (const pattern of [
     "*.vsix",
@@ -131,6 +184,10 @@ test("vscodeignore excludes development and validation artifacts", () => {
     "node_modules/**",
     "package-lock.json",
     "*.vsix",
+    "README_ja.md",
+    "artifacts/**",
+    "docs/**",
+    "output/**",
     "compile-output.txt",
     "*-exit.txt",
     "*-output.txt",
@@ -186,55 +243,35 @@ test("package lock version matches package version", () => {
   assert.strictEqual(packageLock.packages?.[""]?.version, packageJson.version);
 });
 
+test("package icon assets referenced by manifest exist", () => {
+  for (const iconPath of [
+    packageJson.icon,
+    packageJson.contributes?.viewsContainers?.activitybar?.[0]?.icon,
+  ]) {
+    assert.ok(iconPath, "Expected icon path in package manifest");
+    assert.ok(
+      fs.existsSync(path.join(repoRoot, iconPath)),
+      `Missing icon asset: ${iconPath}`,
+    );
+  }
+});
+
 test("existing VSIX payload stays release-minimal", () => {
   const vsixPath = path.join(
     repoRoot,
     `agent-resources-ninja-${packageJson.version}.vsix`,
   );
-  if (!fs.existsSync(vsixPath)) {
-    console.log(
-      "SKIP existing VSIX payload stays release-minimal (VSIX not generated yet)",
-    );
-    return;
-  }
-  const entries = readZipEntries(vsixPath);
-  const forbiddenPrefixes = [
-    "extension/.github/",
-    "extension/.vscode/",
-    "extension/.vscode-test/",
-    "extension/docs/",
-    "extension/output_retro/",
-    "extension/output_sessions/",
-    "extension/scripts/",
-    "extension/src/",
-    "extension/test/",
-  ];
-  const forbiddenNames = new Set([
-    "extension/AGENTS.md",
-    "extension/AGENTS.md.backup",
-    "extension/NEXT_WORK.md",
-    "extension/PRODUCT_DIRECTION.md",
-    "extension/MIGRATION_NOTES.md",
-    "extension/package-lock.json",
-    "extension/compile-output.txt",
-    "extension/hooks.json",
-  ]);
-  for (const entry of entries) {
-    assert.ok(!forbiddenNames.has(entry), `Unexpected VSIX file: ${entry}`);
-    assert.ok(
-      !forbiddenPrefixes.some((prefix) => entry.startsWith(prefix)),
-      `Unexpected VSIX path: ${entry}`,
-    );
-    assert.ok(!entry.endsWith(".map"), `Unexpected VSIX sourcemap: ${entry}`);
-    assert.ok(
-      !entry.endsWith("-output.txt"),
-      `Unexpected VSIX output artifact: ${entry}`,
-    );
-    assert.ok(
-      !entry.endsWith("-exit.txt"),
-      `Unexpected VSIX exit artifact: ${entry}`,
-    );
-  }
+  assertVsixPayloadMinimal(vsixPath, "release");
+});
+
+test("existing dev VSIX payload stays release-minimal", () => {
+  const devVsixPath = path.join(
+    repoRoot,
+    "artifacts",
+    "vsix",
+    `agent-resources-ninja-${packageJson.version}-coexistence-dev.vsix`,
+  );
+  assertVsixPayloadMinimal(devVsixPath, "dev");
 });
 
 console.log("RESULT=PASS");

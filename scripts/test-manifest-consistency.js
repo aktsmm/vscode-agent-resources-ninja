@@ -123,6 +123,36 @@ function test(name, fn) {
   }
 }
 
+function parseReadmeSettingsTable(readmeText) {
+  const lines = readmeText.split(/\r?\n/);
+  const headerIndex = lines.findIndex(
+    (line) =>
+      line.includes("| Order | Setting") || line.includes("| 順序 | Setting"),
+  );
+  assert.ok(headerIndex >= 0, "Expected README settings table header");
+
+  const entries = [];
+  for (let index = headerIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.startsWith("> ")) {
+      break;
+    }
+    if (!/^\|\s*\d+\s*\|/.test(line)) {
+      continue;
+    }
+    const columns = line
+      .split("|")
+      .slice(1, -1)
+      .map((column) => column.trim());
+    entries.push({
+      order: Number(columns[0]),
+      setting: columns[1].replace(/`/g, "").replace(/^resourceNinja\./, ""),
+    });
+  }
+
+  return entries;
+}
+
 test("chat participant id matches implementation", () => {
   const participants = packageJson.contributes?.chatParticipants || [];
   assert.ok(participants.some((participant) => participant.id === "resources"));
@@ -994,19 +1024,19 @@ test("settings distinguish skill index sync from native non-skill resource paths
   const config = packageJson.contributes?.configuration?.properties || {};
   assert.match(
     nls["config.instructionFile.markdownDescription"],
-    /Agent Skills index/,
+    /generated instruction block/,
   );
   assert.match(
     nls["config.instructionFile.markdownDescription"],
-    /Agents, prompts, instructions, and hooks[\s\S]*native paths/,
+    /index, not a copy/,
   );
   assert.match(
     nls["config.autoUpdateInstruction.markdownDescription"],
-    /skill install\/uninstall[\s\S]*Global Resource Home skills[\s\S]*skill entries only/,
+    /resource install\/uninstall[\s\S]*shared `agent-ninja` block[\s\S]*legacy `resource-ninja` skill block/,
   );
   assert.match(
     nls["config.includeLocalResources.markdownDescription"],
-    /SKILL\.md[\s\S]*Agent Skills index/,
+    /SKILL\.md[\s\S]*generated instruction block/,
   );
   assert.match(
     nls["config.resourcesDirectory.markdownDescription"],
@@ -1099,6 +1129,21 @@ test("settings distinguish skill index sync from native non-skill resource paths
     /test-mcp-config-merge\.js/,
     "Resource test suite should validate MCP config merge behavior",
   );
+});
+
+test("README settings tables stay in sync with package.json order", () => {
+  const config = packageJson.contributes?.configuration?.properties || {};
+  const expected = Object.entries(config)
+    .filter(([key]) => key.startsWith("resourceNinja."))
+    .filter(([key]) => key !== "resourceNinja.versionInfo")
+    .map(([key, value]) => ({
+      setting: key.replace(/^resourceNinja\./, ""),
+      order: value.order,
+    }))
+    .sort((left, right) => left.order - right.order);
+
+  assert.deepStrictEqual(parseReadmeSettingsTable(readme), expected);
+  assert.deepStrictEqual(parseReadmeSettingsTable(readmeJa), expected);
 });
 
 test("activation events are lazy and contribution complete", () => {

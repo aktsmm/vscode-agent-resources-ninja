@@ -2,7 +2,7 @@
   "name": "agent-resources-ninja",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "publisher": "yamapan",
   "license": "CC-BY-NC-SA-4.0",
   "icon": "resources/icon.png",
@@ -673,6 +673,24 @@
         "icon": "$(sync)"
       },
       {
+        "command": "resourceNinja.showCoexistenceStatus",
+        "title": "%command.showCoexistenceStatus%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(info)"
+      },
+      {
+        "command": "resourceNinja.recomputeOwnership",
+        "title": "%command.recomputeOwnership%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "resourceNinja.cleanupOrphanBlock",
+        "title": "%command.cleanupOrphanBlock%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(trash)"
+      },
+      {
         "command": "resourceNinja.openInstructionFile",
         "title": "%command.openInstructionFile%",
         "category": "Agent Resources Ninja",
@@ -1306,17 +1324,62 @@
           "order": 12,
           "markdownDescription": "%config.globalHomeDirectory.markdownDescription%"
         },
+        "resourceNinja.coexistenceMode": {
+          "type": "string",
+          "default": "auto",
+          "order": 18,
+          "enum": [
+            "auto",
+            "independent"
+          ],
+          "enumDescriptions": [
+            "%config.coexistenceMode.auto%",
+            "%config.coexistenceMode.independent%"
+          ],
+          "markdownDescription": "%config.coexistenceMode.markdownDescription%"
+        },
+        "resourceNinja.kindsExcluded": {
+          "type": "array",
+          "default": [],
+          "order": 19,
+          "items": {
+            "type": "string",
+            "enum": [
+              "skill",
+              "agent",
+              "instruction",
+              "prompt",
+              "hook",
+              "mcp",
+              "plugin",
+              "cursor-rule"
+            ]
+          },
+          "markdownDescription": "%config.kindsExcluded.markdownDescription%"
+        },
+        "resourceNinja.useSharedSourcesManifest": {
+          "type": "boolean",
+          "default": false,
+          "order": 20,
+          "markdownDescription": "%config.useSharedSourcesManifest.markdownDescription%"
+        },
+        "resourceNinja.useSharedResourceIndex": {
+          "type": "boolean",
+          "default": false,
+          "order": 21,
+          "markdownDescription": "%config.useSharedResourceIndex.markdownDescription%"
+        },
         "resourceNinja.githubToken": {
           "type": "string",
           "default": "",
           "editPresentation": "password",
-          "order": 25,
+          "order": 26,
           "markdownDescription": "%config.githubToken.markdownDescription%"
         },
         "resourceNinja.language": {
           "type": "string",
           "default": "auto",
-          "order": 24,
+          "order": 25,
           "enum": [
             "auto",
             "en",
@@ -1332,7 +1395,7 @@
         "resourceNinja.outputFormat": {
           "type": "string",
           "default": "full",
-          "order": 21,
+          "order": 22,
           "enum": [
             "full",
             "compact",
@@ -1372,13 +1435,13 @@
         "resourceNinja.showBuiltInResources": {
           "type": "boolean",
           "default": false,
-          "order": 22,
+          "order": 23,
           "markdownDescription": "%config.showBuiltInResources.markdownDescription%"
         },
         "resourceNinja.remoteResourceViewMode": {
           "type": "string",
           "default": "repositoryFirst",
-          "order": 23,
+          "order": 24,
           "enum": [
             "repositoryFirst",
             "resourceTypeFirst"

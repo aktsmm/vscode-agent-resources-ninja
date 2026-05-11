@@ -1,6 +1,7 @@
 import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
+import { ResourceKind } from "./skillIndex";
 
 export const DEFAULT_SKILLS_DIRECTORY = ".github/skills";
 export const DEFAULT_WORKSPACE_AGENTS_DIRECTORY = ".github/agents";
@@ -12,6 +13,8 @@ export const DEFAULT_GLOBAL_HOME_DIRECTORY = "~/.copilot";
 export const DEFAULT_GLOBAL_RESOURCE_HOME_PRESET = "copilot";
 export const DEFAULT_INSTRUCTION_FILE = "AGENTS.md";
 export const DISABLED_INSTRUCTION_FILE = "none";
+
+export type CoexistenceMode = "auto" | "independent";
 
 export type GlobalResourceHomePreset =
   | "copilot"
@@ -90,11 +93,76 @@ export function getConfiguredInstructionFilePath(
 export function getConfiguredSkillsDirectory(
   config: vscode.WorkspaceConfiguration,
 ): string {
-  return (
-    config.get<string>("resourcesDirectory") ||
-    config.get<string>("skillsDirectory") ||
-    DEFAULT_SKILLS_DIRECTORY
+  const resourcesDirectoryInspect =
+    config.inspect<string>("resourcesDirectory");
+  const configuredResourcesDirectory =
+    resourcesDirectoryInspect?.workspaceValue ||
+    resourcesDirectoryInspect?.workspaceFolderValue ||
+    resourcesDirectoryInspect?.globalValue;
+  if (typeof configuredResourcesDirectory === "string") {
+    const trimmed = configuredResourcesDirectory.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+
+  const legacySkillsDirectoryInspect =
+    config.inspect<string>("skillsDirectory");
+  const configuredLegacySkillsDirectory =
+    legacySkillsDirectoryInspect?.workspaceValue ||
+    legacySkillsDirectoryInspect?.workspaceFolderValue ||
+    legacySkillsDirectoryInspect?.globalValue;
+  if (typeof configuredLegacySkillsDirectory === "string") {
+    const trimmed = configuredLegacySkillsDirectory.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+
+  const siblingSkillsDirectory = vscode.workspace
+    .getConfiguration("skillNinja")
+    .get<string>("skillsDirectory")
+    ?.trim();
+  if (siblingSkillsDirectory) {
+    return siblingSkillsDirectory;
+  }
+
+  return DEFAULT_SKILLS_DIRECTORY;
+}
+
+export function getConfiguredCoexistenceMode(
+  config: vscode.WorkspaceConfiguration,
+): CoexistenceMode {
+  return config.get<CoexistenceMode>("coexistenceMode") || "auto";
+}
+
+export function getConfiguredKindsExcluded(
+  config: vscode.WorkspaceConfiguration,
+): ResourceKind[] {
+  const configuredKinds = config.get<string[]>("kindsExcluded") || [];
+  return configuredKinds.filter(
+    (kind): kind is ResourceKind =>
+      kind === "skill" ||
+      kind === "agent" ||
+      kind === "instruction" ||
+      kind === "prompt" ||
+      kind === "hook" ||
+      kind === "mcp" ||
+      kind === "plugin" ||
+      kind === "cursor-rule",
   );
+}
+
+export function getConfiguredUseSharedSourcesManifest(
+  config: vscode.WorkspaceConfiguration,
+): boolean {
+  return config.get<boolean>("useSharedSourcesManifest") ?? false;
+}
+
+export function getConfiguredUseSharedResourceIndex(
+  config: vscode.WorkspaceConfiguration,
+): boolean {
+  return config.get<boolean>("useSharedResourceIndex") ?? false;
 }
 
 export function getConfiguredWorkspaceAgentsDirectory(

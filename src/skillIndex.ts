@@ -7,6 +7,10 @@ import {
   fetchGitHubWithOptionalAuthRetry,
 } from "./githubFetch";
 import { logger } from "./logger";
+import {
+  loadSharedStoresIntoSkillIndex,
+  syncSharedStoresFromSkillIndex,
+} from "./sharedResourceIndexStore";
 
 export type ResourceKind =
   | "skill"
@@ -136,7 +140,7 @@ export interface Source {
   name: string;
   url: string;
   type: string;
-  branch?: string; // デフォルトブランチ（省略時は"main"）
+  branch?: string; // 明示的なデフォルトブランチ（省略時は runtime で解決）
   includePaths?: string[]; // Only index resources under these path prefixes
   excludePaths?: string[]; // Exclude resources under these path prefixes
   description: string;
@@ -231,6 +235,8 @@ export async function loadSkillIndex(
     // バンドルがなければ null のまま
   }
 
+  let effectiveIndex: SkillIndex;
+
   try {
     // ローカルインデックスを読み込む
     const content = await vscode.workspace.fs.readFile(localIndexPath);
@@ -245,10 +251,10 @@ export async function loadSkillIndex(
       if (shouldPersistMergedIndex(localIndex, mergedIndex)) {
         await saveSkillIndex(context, mergedIndex);
       }
-      return mergedIndex;
+      effectiveIndex = mergedIndex;
+    } else {
+      effectiveIndex = localIndex;
     }
-
-    return localIndex;
   } catch {
     // ローカルにない場合はバンドルされたインデックスを使用
     if (bundledIndex) {
@@ -258,19 +264,33 @@ export async function loadSkillIndex(
         localIndexPath,
         Buffer.from(JSON.stringify(bundledIndex, null, 2), "utf-8"),
       );
-      return bundledIndex;
+      effectiveIndex = bundledIndex;
+    } else {
+      logger.warn("No skill index found, using empty index");
+      effectiveIndex = {
+        version: "1.0.0",
+        lastUpdated: new Date().toISOString().split("T")[0],
+        sources: [],
+        skills: [],
+        categories: [],
+      };
     }
-
-    // バンドルされたインデックスもない場合は空のインデックスを返す
-    logger.warn("No skill index found, using empty index");
-    return {
-      version: "1.0.0",
-      lastUpdated: new Date().toISOString().split("T")[0],
-      sources: [],
-      skills: [],
-      categories: [],
-    };
   }
+
+  const sharedMergedIndex = await loadSharedStoresIntoSkillIndex(
+    context,
+    effectiveIndex,
+  );
+
+  if (shouldPersistMergedIndex(effectiveIndex, sharedMergedIndex)) {
+    await vscode.workspace.fs.createDirectory(context.globalStorageUri);
+    await vscode.workspace.fs.writeFile(
+      localIndexPath,
+      Buffer.from(JSON.stringify(sharedMergedIndex, null, 2), "utf-8"),
+    );
+  }
+
+  return sharedMergedIndex;
 }
 
 /**
@@ -553,6 +573,7 @@ export async function saveSkillIndex(
     localIndexPath,
     Buffer.from(JSON.stringify(index, null, 2), "utf-8"),
   );
+  await syncSharedStoresFromSkillIndex(context, index);
 }
 
 // デフォルトブランチのキャッシュ（リポジトリURL → ブランチ名）
@@ -571,6 +592,57 @@ async function checkUrlExists(url: string, token?: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function normalizeGitHubRepoUrl(url: string): string {
+  return url.replace(/\.git$/, "").replace(/\/$/, "");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function rewriteStoredGitHubUrl(
+  skill: Pick<Skill, "url">,
+  sourceUrl: string,
+  branch: string,
+): string | undefined {
+  if (!skill.url) {
+    return undefined;
+  }
+
+  const repoUrl = normalizeGitHubRepoUrl(sourceUrl);
+  const pattern = new RegExp(
+    `^${escapeRegExp(repoUrl)}/(blob|tree)/[^/]+(?<suffix>/.*)?$`,
+  );
+  const match = skill.url.match(pattern);
+  if (!match) {
+    return undefined;
+  }
+
+  const suffix = match.groups?.suffix || "";
+  return `${repoUrl}/${match[1]}/${branch}${suffix}`;
+}
+
+function getRawUrlFromSkillUrl(
+  skill: Pick<Skill, "url" | "rawUrl">,
+): string | undefined {
+  if (skill.rawUrl) {
+    return skill.rawUrl;
+  }
+  if (!skill.url) {
+    return undefined;
+  }
+
+  const match = skill.url.match(
+    /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/([^/]+)\/(.+)$/,
+  );
+  if (!match) {
+    return undefined;
+  }
+
+  const [, owner, repo, branch, path] = match;
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
 }
 
 /**
@@ -673,6 +745,40 @@ export function getResourceContentPath(
   return `${resource.path.replace(/\/+$/, "")}/${defaultFileName}`;
 }
 
+export function buildGitHubResourceUrl(
+  repoUrl: string,
+  branch: string,
+  resource: Pick<Skill, "path" | "kind" | "pluginRoot">,
+): string {
+  const baseUrl = normalizeGitHubRepoUrl(repoUrl);
+  if (getResourceKind(resource) === "plugin") {
+    const pluginPath = resource.pluginRoot || resource.path;
+    return pluginPath === "."
+      ? `${baseUrl}/tree/${branch}`
+      : `${baseUrl}/tree/${branch}/${pluginPath}`;
+  }
+  const route = isResourceFilePath(resource.path) ? "blob" : "tree";
+  return `${baseUrl}/${route}/${branch}/${resource.path}`;
+}
+
+export function buildGitHubRawUrl(
+  repoUrl: string,
+  branch: string,
+  resource: Pick<Skill, "path" | "kind" | "pluginManifestPath">,
+  fileName: string = "SKILL.md",
+): string | undefined {
+  const match = normalizeGitHubRepoUrl(repoUrl).match(
+    /github\.com\/([^/]+)\/([^/]+)/,
+  );
+  if (!match) {
+    return undefined;
+  }
+
+  const [, owner, repo] = match;
+  const contentPath = getResourceContentPath(resource, fileName);
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${contentPath}`;
+}
+
 /**
  * ソース情報からスキルの GitHub URL を取得する（非同期版）
  */
@@ -683,19 +789,15 @@ export async function getSkillGitHubUrlAsync(
 ): Promise<string | undefined> {
   const source = sources.find((s) => s.id === skill.source);
   if (!source) {
-    return undefined;
+    return skill.url;
   }
 
-  const branch = await getSourceBranch(source, token);
-  const baseUrl = source.url.replace(/\/$/, "");
-  if (getResourceKind(skill) === "plugin") {
-    const pluginPath = skill.pluginRoot || skill.path;
-    return pluginPath === "."
-      ? `${baseUrl}/tree/${branch}`
-      : `${baseUrl}/tree/${branch}/${pluginPath}`;
+  const branch = await getSourceBranch(source, token, skill.path);
+  const storedUrl = rewriteStoredGitHubUrl(skill, source.url, branch);
+  if (storedUrl) {
+    return storedUrl;
   }
-  const route = isResourceFilePath(skill.path) ? "blob" : "tree";
-  return `${baseUrl}/${route}/${branch}/${skill.path}`;
+  return buildGitHubResourceUrl(source.url, branch, skill);
 }
 
 /**
@@ -707,21 +809,20 @@ export function getSkillGitHubUrl(
 ): string | undefined {
   const source = sources.find((s) => s.id === skill.source);
   if (!source) {
-    return undefined;
+    return skill.url;
   }
 
-  // キャッシュがあればそれを使用、なければ設定値か main
   const cachedBranch = branchCache.get(source.url);
-  const branch = cachedBranch || source.branch || "main";
-  const baseUrl = source.url.replace(/\/$/, "");
-  if (getResourceKind(skill) === "plugin") {
-    const pluginPath = skill.pluginRoot || skill.path;
-    return pluginPath === "."
-      ? `${baseUrl}/tree/${branch}`
-      : `${baseUrl}/tree/${branch}/${pluginPath}`;
+  const branch = cachedBranch || source.branch;
+  if (branch) {
+    const storedUrl = rewriteStoredGitHubUrl(skill, source.url, branch);
+    if (storedUrl) {
+      return storedUrl;
+    }
+    return buildGitHubResourceUrl(source.url, branch, skill);
   }
-  const route = isResourceFilePath(skill.path) ? "blob" : "tree";
-  return `${baseUrl}/${route}/${branch}/${skill.path}`;
+
+  return skill.url || buildGitHubResourceUrl(source.url, "main", skill);
 }
 
 /**
@@ -735,18 +836,14 @@ export async function getSkillRawUrlAsync(
 ): Promise<string | undefined> {
   const source = sources.find((s) => s.id === skill.source);
   if (!source) {
-    return undefined;
+    return getRawUrlFromSkillUrl(skill);
   }
 
-  const match = source.url.match(/github\.com\/([^/]+)\/([^/]+)/);
-  if (!match) {
-    return undefined;
-  }
-
-  const [, owner, repo] = match;
-  const branch = await getSourceBranch(source, token);
-  const contentPath = getResourceContentPath(skill, fileName);
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${contentPath}`;
+  const branch = await getSourceBranch(source, token, skill.path);
+  return (
+    buildGitHubRawUrl(source.url, branch, skill, fileName) ||
+    getRawUrlFromSkillUrl(skill)
+  );
 }
 
 /**
@@ -759,19 +856,20 @@ export function getSkillRawUrl(
 ): string | undefined {
   const source = sources.find((s) => s.id === skill.source);
   if (!source) {
-    return undefined;
+    return getRawUrlFromSkillUrl(skill);
   }
 
-  // GitHub raw URL を構築
-  // https://github.com/owner/repo → https://raw.githubusercontent.com/owner/repo/main/path/file
-  const match = source.url.match(/github\.com\/([^/]+)\/([^/]+)/);
-  if (!match) {
-    return undefined;
-  }
-
-  const [, owner, repo] = match;
   const cachedBranch = branchCache.get(source.url);
-  const branch = cachedBranch || source.branch || "main";
-  const contentPath = getResourceContentPath(skill, fileName);
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${contentPath}`;
+  const branch = cachedBranch || source.branch;
+  if (branch) {
+    return (
+      buildGitHubRawUrl(source.url, branch, skill, fileName) ||
+      getRawUrlFromSkillUrl(skill)
+    );
+  }
+
+  return (
+    getRawUrlFromSkillUrl(skill) ||
+    buildGitHubRawUrl(source.url, "main", skill, fileName)
+  );
 }

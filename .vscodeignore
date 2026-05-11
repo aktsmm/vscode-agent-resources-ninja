@@ -12,6 +12,7 @@ eslint.config.mjs
 node_modules/**
 package-lock.json
 *.vsix
+README_ja.md
 
 # Exclude .github folder from package
 .github/
@@ -31,10 +32,12 @@ hooks.json
 *.log
 quality-*.log
 release-notes-v*.md
+artifacts/**
+docs/**
+output/**
 output_retro/**
 output_sessions/**
 output_blog_tips/**
-docs/screenshots/**
 scripts/**
 test/**
 

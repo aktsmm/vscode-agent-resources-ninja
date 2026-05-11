@@ -26,6 +26,10 @@ import { getGitHubToken } from "./githubAuth";
 export { checkGitHubAuth } from "./githubAuth";
 import { LICENSE_EXTRACTION, INDEX_LIMITS } from "./constants";
 import { logger } from "./logger";
+import {
+  shouldRunSharedScan,
+  updateSharedScanMetadata,
+} from "./sharedResourceIndexStore";
 
 const REQUEST_TIMEOUT_MS = 15000;
 const FETCH_CONCURRENCY = 8;
@@ -1546,6 +1550,7 @@ export async function updateIndexFromSources(
   const updatedSkills: Skill[] = [];
   const updatedBundles: Bundle[] = [];
   const totalSources = currentIndex.sources.length;
+  const scannedSourceIds: string[] = [];
 
   for (const source of currentIndex.sources) {
     try {
@@ -1553,6 +1558,21 @@ export async function updateIndexFromSources(
         message: `Updating ${source.name}...`,
         increment: (1 / totalSources) * 100,
       });
+
+      if (!(await shouldRunSharedScan(context, source.id))) {
+        logger.info(
+          `[Resource Ninja] Skipping shared scan for ${source.id} because a recent shared scan is available.`,
+        );
+        const existingSkills = currentIndex.skills.filter(
+          (skill) => skill.source === source.id,
+        );
+        updatedSkills.push(...existingSkills);
+        const existingBundles = (currentIndex.bundles || []).filter(
+          (bundle) => bundle.source === source.id,
+        );
+        updatedBundles.push(...existingBundles);
+        continue;
+      }
 
       // ソースに設定されたブランチを使用
       const result = await scanRepositoryForSkills(
@@ -1586,6 +1606,7 @@ export async function updateIndexFromSources(
             });
           }
         }
+        scannedSourceIds.push(source.id);
       }
     } catch (error) {
       logger.warn(`Failed to update source ${source.id}:`, error);
@@ -1617,6 +1638,7 @@ export async function updateIndexFromSources(
 
   // 保存
   await saveSkillIndex(context, updatedIndex);
+  await updateSharedScanMetadata(context, updatedIndex, scannedSourceIds);
 
   return updatedIndex;
 }
@@ -1650,6 +1672,13 @@ export async function updateIndexFromSingleSource(
     message: `Updating ${source.name}...`,
     increment: 50,
   });
+
+  if (!(await shouldRunSharedScan(context, sourceId))) {
+    logger.info(
+      `[Resource Ninja] Skipping shared scan for ${sourceId} because a recent shared scan is available.`,
+    );
+    return currentIndex;
+  }
 
   const result = await scanRepositoryForSkills(
     source.url,
@@ -1703,6 +1732,7 @@ export async function updateIndexFromSingleSource(
 
   // 保存
   await saveSkillIndex(context, updatedIndex);
+  await updateSharedScanMetadata(context, updatedIndex, [sourceId]);
 
   return updatedIndex;
 }
@@ -1764,6 +1794,7 @@ export async function addSource(
 
   // 保存
   await saveSkillIndex(context, updatedIndex);
+  await updateSharedScanMetadata(context, updatedIndex, [result.source.id]);
 
   return { index: updatedIndex, addedSkills: result.skills.length };
 }

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-05-12
+
+### Added
+
+- **Coexistence Owner Handoff** - Added shared-block coexistence controls for the skill-only sibling extension, including owner recompute/status commands, standalone exclusions hints, and Resource-side B/F fixtures for the uninstall handoff cases / skill-only sibling extension との shared block coexistence 制御を追加し、owner 再計算/状態表示コマンド、standalone exclusions hint、uninstall handoff 用の Resource 側 B/F fixture を実装しました。
+- **Shared Coexistence Stores** - Added shared `sources.json` and `index.json` stores plus locking helpers so Resource NINJA can reuse the sibling extension's SSOT safely during coexistence / coexistence 中に sibling extension と同じ SSOT を安全に共有できるよう、共有 `sources.json` と `index.json` store、および lock helper を追加しました。
+
+### Changed
+
+- **Instruction Sync Documentation Alignment** - Updated README / README_ja, settings copy, and instruction-target UX to describe the generated instruction block and the default shared `agent-ninja` markers instead of the old skill-only wording / README / README_ja、settings copy、instruction-target UX を更新し、旧 skill-only wording ではなく生成 instruction block と既定の共有 `agent-ninja` marker を説明するようにしました。
+- **Release Hygiene and VSIX Size** - Tightened `.vscodeignore`, excluded docs/output/local artifacts from VSIX payloads, and added release guards for both release/dev VSIX payloads plus icon asset presence / `.vscodeignore` を見直し、docs/output/ローカル artifact を VSIX payload から除外しました。release/dev 両 VSIX payload と icon asset 実在を検証する guard も追加しました。
+
+### Tests
+
+- **Coexistence and Packaging Validation** - Added coexistence regression coverage, README/settings order drift guards, README absolute-link guards for marketplace rendering, dev/release VSIX hygiene checks, and revalidated compile, resource regression, README UX, localization UX, instruction-target UX, coexistence tests, and npm audit / coexistence 回帰、README/settings order drift guard、Marketplace 向け README absolute-link guard、dev/release VSIX hygiene check を追加し、compile、resource 回帰、README UX、localization UX、instruction-target UX、coexistence test、npm audit を再検証しました。
+
 ## [0.2.11] - 2026-05-11
 
 ### Fixed
