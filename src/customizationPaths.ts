@@ -158,7 +158,7 @@ export function getConfiguredKindsExcluded(
 function getConfiguredInstructionBlockIncludeAgents(
   config: vscode.WorkspaceConfiguration,
 ): boolean {
-  return config.get<boolean>("instructionBlock.includeAgents") ?? true;
+  return config.get<boolean>("instructionBlock.includeAgents") ?? false;
 }
 
 function getConfiguredInstructionBlockIncludeInstructions(

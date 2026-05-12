@@ -375,51 +375,51 @@ If you don't need MCP tools, you can disable them from GitHub Copilot Chat:
 
 Settings are ordered by the workflow users usually follow:
 
-| Group                   | Settings                                                                                                                         | Purpose                                                                   |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Install behavior        | `defaultInstallTarget`, `singleClickInstall`                                                                                     | Decide where click installs go                                            |
-| Workspace roots         | `resourcesDirectory`, `workspace*Directory`                                                                                      | Project-specific resources tracked with the workspace                     |
-| User roots              | `user*Directory`                                                                                                                 | VS Code User Profile agents, prompts, and instructions                    |
-| Global Resource Home    | `globalResourceHomePreset`, `globalHomeDirectory`                                                                                | Shared resources for Copilot CLI, Claude-compatible tools, or open agents |
-| Instruction sync        | `autoUpdateInstruction`, `instructionFile`, `customInstructionPath`, `includeLocalResources`, `coexistenceMode`, `kindsExcluded`, `instructionBlock.includeAgents`, `instructionBlock.includeInstructions`, `instructionBlock.globalHome.includeAgents`, `instructionBlock.globalHome.includeInstructions` | Optional shared instruction block generation and kind policy |
-| Shared caches           | `useSharedSourcesManifest`, `useSharedResourceIndex`                                                                             | Cross-extension SSOT for sources and scanned resource metadata            |
-| Display and maintenance | `outputFormat`, `showBuiltInResources`, `remoteResourceViewMode`, `language`, `githubToken`                                      | Presentation, discovery, and GitHub API behavior                          |
+| Group                   | Settings                                                                                                                                                                                                                                                                                                   | Purpose                                                                   |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Install behavior        | `defaultInstallTarget`, `singleClickInstall`                                                                                                                                                                                                                                                               | Decide where click installs go                                            |
+| Workspace roots         | `resourcesDirectory`, `workspace*Directory`                                                                                                                                                                                                                                                                | Project-specific resources tracked with the workspace                     |
+| User roots              | `user*Directory`                                                                                                                                                                                                                                                                                           | VS Code User Profile agents, prompts, and instructions                    |
+| Global Resource Home    | `globalResourceHomePreset`, `globalHomeDirectory`                                                                                                                                                                                                                                                          | Shared resources for Copilot CLI, Claude-compatible tools, or open agents |
+| Instruction sync        | `autoUpdateInstruction`, `instructionFile`, `customInstructionPath`, `includeLocalResources`, `coexistenceMode`, `kindsExcluded`, `instructionBlock.includeAgents`, `instructionBlock.includeInstructions`, `instructionBlock.globalHome.includeAgents`, `instructionBlock.globalHome.includeInstructions` | Optional shared instruction block generation and kind policy              |
+| Shared caches           | `useSharedSourcesManifest`, `useSharedResourceIndex`                                                                                                                                                                                                                                                       | Cross-extension SSOT for sources and scanned resource metadata            |
+| Display and maintenance | `outputFormat`, `showBuiltInResources`, `remoteResourceViewMode`, `language`, `githubToken`                                                                                                                                                                                                                | Presentation, discovery, and GitHub API behavior                          |
 
 `globalResourceHomePreset` is the common case. `globalHomeDirectory` is an override: when it is not empty, it wins over the preset. Choose `custom` only when you also provide an override path.
 
-| Order | Setting                                        | Default                | Description                                                                              |
-| :---: | ---------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------- |
-|   0   | `resourceNinja.defaultInstallTarget`           | `workspace`            | Default target for click/double-click installs                                           |
-|   1   | `resourceNinja.singleClickInstall`             | `false`                | Install resources with single click                                                      |
-|   2   | `resourceNinja.resourcesDirectory`             | `.github/skills`       | Workspace skill directory                                                                |
-|   3   | `resourceNinja.workspaceAgentsDirectory`       | `.github/agents`       | Workspace agent directory                                                                |
-|   4   | `resourceNinja.workspaceInstructionsDirectory` | `.github/instructions` | Workspace instruction directory                                                          |
-|   5   | `resourceNinja.workspacePromptsDirectory`      | `.github/prompts`      | Workspace prompt directory                                                               |
-|   6   | `resourceNinja.workspaceHooksDirectory`        | `.github/hooks`        | Workspace hook directory                                                                 |
-|   7   | `resourceNinja.workspaceMcpDirectory`          | `.github/mcp`          | Safe workspace MCP config staging directory before optional `.vscode/mcp.json` merge     |
-|   8   | `resourceNinja.userAgentsDirectory`            | `""`                   | Optional User Profile agent override; empty stores `.agent.md` in VS Code User `prompts` |
-|   9   | `resourceNinja.userInstructionsDirectory`      | `""`                   | Optional User Profile instruction directory override                                     |
-|  10   | `resourceNinja.userPromptsDirectory`           | `""`                   | Optional User Profile prompt directory override                                          |
-|  11   | `resourceNinja.globalResourceHomePreset`       | `copilot`              | Known Global Resource Home preset (`~/.copilot`, `~/.claude`, `~/.agents`)               |
-|  12   | `resourceNinja.globalHomeDirectory`            | `""`                   | Optional custom Global Resource Home override                                            |
-|  13   | `resourceNinja.autoUpdateInstruction`          | `true`                 | Auto-update the generated instruction block after resource changes                        |
-|  14   | `resourceNinja.instructionFile`                | `AGENTS.md`            | Generated instruction block sync target _(requires Auto Update)_                         |
-|  15   | `resourceNinja.customInstructionPath`          | `""`                   | Custom generated instruction block path _(only when 'custom' selected)_                  |
-|  16   | `resourceNinja.includeLocalResources`          | `false`                | Include workspace-wide fallback `SKILL.md` files in the generated instruction block      |
-|  17   | `resourceNinja.autoUpdateResourcesOnUpgrade`   | `prompt`               | Update installed remote skills on extension upgrade                                      |
-|  18   | `resourceNinja.coexistenceMode`                | `auto`                 | Shared marker ownership mode (`auto` / `independent`)                                    |
-|  19   | `resourceNinja.kindsExcluded`                  | `[]`                   | Legacy standalone compatibility exclusions for shared instruction blocks                 |
-|  20   | `resourceNinja.useSharedSourcesManifest`       | `false`                | Enable shared `sources.json` SSOT for coexistence with the skill-only sibling extension  |
-|  21   | `resourceNinja.useSharedResourceIndex`         | `false`                | Enable shared `index.json` SSOT for coexistence with the skill-only sibling extension    |
-|  22   | `resourceNinja.outputFormat`                   | `full`                 | Output format (full / compact / legacy)                                                  |
-|  23   | `resourceNinja.showBuiltInResources`           | `false`                | Show built-in resources in User / Global Resource Home                                   |
-|  24   | `resourceNinja.remoteResourceViewMode`         | `repositoryFirst`      | Remote Resources layout (repository-first / resource-type-first)                         |
-|  25   | `resourceNinja.language`                       | `auto`                 | UI language (auto / en / ja)                                                             |
-|  26   | `resourceNinja.githubToken`                    | `""`                   | GitHub Token (for API rate limit)                                                        |
-|  27   | `resourceNinja.instructionBlock.includeAgents` | `true`                 | Include `agent` resources in workspace instruction blocks                                |
-|  28   | `resourceNinja.instructionBlock.includeInstructions` | `false`          | Include `instruction` resources in workspace instruction blocks                          |
-|  29   | `resourceNinja.instructionBlock.globalHome.includeAgents` | `inherit`     | Override Global Resource Home agent listing policy (`inherit` / `on` / `off`)            |
-|  30   | `resourceNinja.instructionBlock.globalHome.includeInstructions` | `inherit` | Override Global Resource Home instruction listing policy (`inherit` / `on` / `off`)      |
+| Order | Setting                                                         | Default                | Description                                                                              |
+| :---: | --------------------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------- |
+|   0   | `resourceNinja.defaultInstallTarget`                            | `workspace`            | Default target for click/double-click installs                                           |
+|   1   | `resourceNinja.singleClickInstall`                              | `false`                | Install resources with single click                                                      |
+|   2   | `resourceNinja.resourcesDirectory`                              | `.github/skills`       | Workspace skill directory                                                                |
+|   3   | `resourceNinja.workspaceAgentsDirectory`                        | `.github/agents`       | Workspace agent directory                                                                |
+|   4   | `resourceNinja.workspaceInstructionsDirectory`                  | `.github/instructions` | Workspace instruction directory                                                          |
+|   5   | `resourceNinja.workspacePromptsDirectory`                       | `.github/prompts`      | Workspace prompt directory                                                               |
+|   6   | `resourceNinja.workspaceHooksDirectory`                         | `.github/hooks`        | Workspace hook directory                                                                 |
+|   7   | `resourceNinja.workspaceMcpDirectory`                           | `.github/mcp`          | Safe workspace MCP config staging directory before optional `.vscode/mcp.json` merge     |
+|   8   | `resourceNinja.userAgentsDirectory`                             | `""`                   | Optional User Profile agent override; empty stores `.agent.md` in VS Code User `prompts` |
+|   9   | `resourceNinja.userInstructionsDirectory`                       | `""`                   | Optional User Profile instruction directory override                                     |
+|  10   | `resourceNinja.userPromptsDirectory`                            | `""`                   | Optional User Profile prompt directory override                                          |
+|  11   | `resourceNinja.globalResourceHomePreset`                        | `copilot`              | Known Global Resource Home preset (`~/.copilot`, `~/.claude`, `~/.agents`)               |
+|  12   | `resourceNinja.globalHomeDirectory`                             | `""`                   | Optional custom Global Resource Home override                                            |
+|  13   | `resourceNinja.autoUpdateInstruction`                           | `true`                 | Auto-update the generated instruction block after resource changes                       |
+|  14   | `resourceNinja.instructionFile`                                 | `AGENTS.md`            | Generated instruction block sync target _(requires Auto Update)_                         |
+|  15   | `resourceNinja.customInstructionPath`                           | `""`                   | Custom generated instruction block path _(only when 'custom' selected)_                  |
+|  16   | `resourceNinja.includeLocalResources`                           | `false`                | Include workspace-wide fallback `SKILL.md` files in the generated instruction block      |
+|  17   | `resourceNinja.autoUpdateResourcesOnUpgrade`                    | `prompt`               | Update installed remote skills on extension upgrade                                      |
+|  18   | `resourceNinja.coexistenceMode`                                 | `auto`                 | Shared marker ownership mode (`auto` / `independent`)                                    |
+|  19   | `resourceNinja.kindsExcluded`                                   | `[]`                   | Legacy standalone compatibility exclusions for shared instruction blocks                 |
+|  20   | `resourceNinja.useSharedSourcesManifest`                        | `false`                | Enable shared `sources.json` SSOT for coexistence with the skill-only sibling extension  |
+|  21   | `resourceNinja.useSharedResourceIndex`                          | `false`                | Enable shared `index.json` SSOT for coexistence with the skill-only sibling extension    |
+|  22   | `resourceNinja.outputFormat`                                    | `full`                 | Output format (full / compact / legacy)                                                  |
+|  23   | `resourceNinja.showBuiltInResources`                            | `false`                | Show built-in resources in User / Global Resource Home                                   |
+|  24   | `resourceNinja.remoteResourceViewMode`                          | `repositoryFirst`      | Remote Resources layout (repository-first / resource-type-first)                         |
+|  25   | `resourceNinja.language`                                        | `auto`                 | UI language (auto / en / ja)                                                             |
+|  26   | `resourceNinja.githubToken`                                     | `""`                   | GitHub Token (for API rate limit)                                                        |
+|  27   | `resourceNinja.instructionBlock.includeAgents`                  | `false`                | Include `agent` resources in workspace instruction blocks                                |
+|  28   | `resourceNinja.instructionBlock.includeInstructions`            | `false`                | Include `instruction` resources in workspace instruction blocks                          |
+|  29   | `resourceNinja.instructionBlock.globalHome.includeAgents`       | `inherit`              | Override Global Resource Home agent listing policy (`inherit` / `on` / `off`)            |
+|  30   | `resourceNinja.instructionBlock.globalHome.includeInstructions` | `inherit`              | Override Global Resource Home instruction listing policy (`inherit` / `on` / `off`)      |
 
 > Settings are displayed in the order above
 
@@ -435,7 +435,7 @@ When `autoUpdateInstruction` is enabled:
 
 Installed files stay in their native paths. The generated instruction block is an index, not a copy of the resources.
 
-By default, shared instruction blocks stay intentionally small: `skill` is always listed, `agent` is listed by default, `instruction` is opt-in, and `prompt`, `hook`, `mcp`, `plugin`, and `cursor-rule` stay in their native resource views. Global Resource Home targets can inherit the workspace policy or override it without duplicating the same choice twice.
+By default, shared instruction blocks stay intentionally small: `skill` is always listed, `agent` and `instruction` are opt-in, and `prompt`, `hook`, `mcp`, `plugin`, and `cursor-rule` stay in their native resource views. Global Resource Home targets can inherit the workspace policy or override it without duplicating the same choice twice.
 
 ### Coexistence Note
 

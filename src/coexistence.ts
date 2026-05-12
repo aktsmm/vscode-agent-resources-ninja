@@ -239,7 +239,9 @@ export function subscribeOwnershipChanges(
   const configWatcher = vscode.workspace.onDidChangeConfiguration((event) => {
     if (
       event.affectsConfiguration("resourceNinja.coexistenceMode") ||
-      event.affectsConfiguration("resourceNinja.instructionBlock.includeAgents") ||
+      event.affectsConfiguration(
+        "resourceNinja.instructionBlock.includeAgents",
+      ) ||
       event.affectsConfiguration(
         "resourceNinja.instructionBlock.includeInstructions",
       ) ||

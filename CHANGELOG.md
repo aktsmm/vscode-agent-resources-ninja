@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.14] - 2026-05-13
+
+### Changed
+
+- **Instruction Block Agent Listing Default** - `resourceNinja.instructionBlock.includeAgents` now defaults to off, so generated instruction blocks list only mandatory `skill` entries unless agents are explicitly enabled / `resourceNinja.instructionBlock.includeAgents` の既定値を off にし、agents を明示的に有効化しない限り、生成 instruction block は必須の `skill` のみを掲載するようにしました。
+- **Settings UI Clarification** - Instruction-block settings now explain that they add agents or instructions to generated instruction blocks such as `AGENTS.md`, while `skill` stays mandatory and prompts/hooks/MCP configs/plugins/Cursor rules remain in their native views / instruction-block 設定の文言を更新し、`AGENTS.md` などの生成 instruction block に agents / instructions を追加する設定であること、`skill` は必須、prompts/hooks/MCP configs/plugins/Cursor rules はネイティブ view に残ることを明確化しました。
+
+### Tests
+
+- **Instruction Block Default-Off Coverage** - Revalidated instruction-block policy defaults, manifest consistency, README/settings alignment, coexistence fixtures, resource regressions, smoke test, and npm audit after switching the workspace agent listing default to off / workspace の agent 掲載既定値を off に切り替えたあと、instruction-block policy 既定値、manifest consistency、README/settings 整合、coexistence fixture、resource 回帰、smoke test、npm audit を再検証しました。
+
 ## [0.2.13] - 2026-05-13
 
 ### Changed

@@ -1044,16 +1044,14 @@ test("settings distinguish skill index sync from native non-skill resource paths
   );
   assert.match(
     nls["config.instructionBlock.includeAgents.markdownDescription"],
-    /Include `agent` resources[\s\S]*workspace targets/,
+    /Add `agent` resources[\s\S]*AGENTS\.md[\s\S]*workspace targets[\s\S]*Default: off/,
   );
   assert.match(
     nls["config.instructionBlock.includeInstructions.markdownDescription"],
-    /Include `instruction` resources[\s\S]*workspace targets/,
+    /Add `instruction` resources[\s\S]*AGENTS\.md[\s\S]*workspace targets[\s\S]*Default: off/,
   );
   assert.match(
-    nls[
-      "config.instructionBlock.globalHome.includeAgents.markdownDescription"
-    ],
+    nls["config.instructionBlock.globalHome.includeAgents.markdownDescription"],
     /inherit[\s\S]*do not need to enter the same choice twice/,
   );
   assert.match(

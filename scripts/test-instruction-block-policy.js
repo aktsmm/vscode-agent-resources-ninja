@@ -90,9 +90,9 @@ function createConfig(values) {
 
 const { getInstructionBlockKinds } = loadCustomizationPathsExports();
 
-test("instruction block policy defaults to skill plus agent", () => {
+test("instruction block policy defaults to skill only", () => {
   const kinds = getInstructionBlockKinds(createConfig({}), "workspace");
-  assert.deepStrictEqual(kinds, ["skill", "agent"]);
+  assert.deepStrictEqual(kinds, ["skill"]);
 });
 
 test("instruction block policy can opt workspace instructions in", () => {
@@ -102,17 +102,17 @@ test("instruction block policy can opt workspace instructions in", () => {
     }),
     "workspace",
   );
-  assert.deepStrictEqual(kinds, ["skill", "agent", "instruction"]);
+  assert.deepStrictEqual(kinds, ["skill", "instruction"]);
 });
 
-test("instruction block policy can opt workspace agents out", () => {
+test("instruction block policy can opt workspace agents in", () => {
   const kinds = getInstructionBlockKinds(
     createConfig({
-      "instructionBlock.includeAgents": false,
+      "instructionBlock.includeAgents": true,
     }),
     "workspace",
   );
-  assert.deepStrictEqual(kinds, ["skill"]);
+  assert.deepStrictEqual(kinds, ["skill", "agent"]);
 });
 
 test("global home policy inherits workspace toggles by default", () => {
@@ -157,7 +157,7 @@ test("legacy kindsExcluded can be ignored during sibling coexistence handling", 
     "workspace",
     { ignoreLegacyKindsExcluded: true },
   );
-  assert.deepStrictEqual(kinds, ["skill", "agent"]);
+  assert.deepStrictEqual(kinds, ["skill"]);
 });
 
 test("instruction manager applies scope-aware instruction block kinds in shared mode", () => {
@@ -176,7 +176,7 @@ test("manifest contributes instruction block policy settings", () => {
   const config = packageJson.contributes?.configuration?.properties || {};
   assert.strictEqual(
     config["resourceNinja.instructionBlock.includeAgents"]?.default,
-    true,
+    false,
   );
   assert.strictEqual(
     config["resourceNinja.instructionBlock.includeInstructions"]?.default,
@@ -187,7 +187,8 @@ test("manifest contributes instruction block policy settings", () => {
     ["inherit", "on", "off"],
   );
   assert.deepStrictEqual(
-    config["resourceNinja.instructionBlock.globalHome.includeInstructions"]?.enum,
+    config["resourceNinja.instructionBlock.globalHome.includeInstructions"]
+      ?.enum,
     ["inherit", "on", "off"],
   );
 });

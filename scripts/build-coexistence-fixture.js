@@ -163,7 +163,6 @@ function createWorkspaceSettings() {
         "resourceNinja.instructionFile": "AGENTS.md",
         "resourceNinja.coexistenceMode": "auto",
         "resourceNinja.includeLocalResources": true,
-        "resourceNinja.kindsExcluded": ["agent"],
         "resourceNinja.outputFormat": "full",
       },
       null,
@@ -252,7 +251,7 @@ function buildScenarioB() {
     renderScenarioReadme("Scenario B - Resource NINJA Solo", [
       "Open this folder with only Resource NINJA installed or enabled.",
       "Run Resource NINJA: Update Instruction File.",
-      "Expected result: the shared marker block is created and keeps only the `skill` row because the default policy lists `skill` + `agent`, then legacy `resourceNinja.kindsExcluded` removes `agent` in standalone mode.",
+      "Expected result: the shared marker block is created and keeps only the mandatory `skill` row because agents and instructions are opt-in.",
     ]),
   );
 }
@@ -282,7 +281,7 @@ function buildScenarioF() {
 }
 
 function buildRunbook() {
-  const content = `# Resource NINJA Coexistence Fixture Walkthrough\n\nThis fixture complements the Skill NINJA fixture set with the Resource-only scenarios that cannot be produced from the subset-side repository.\n\n## Included scenarios\n\n- B-resources-solo: Resource NINJA only, shared block generated in standalone mode with the new default policy (\`skill\` + \`agent\`) plus legacy \`kindsExcluded\` compatibility applied.\n- F-uninstall-skill: shared block starts in a prior coexistence state, then Resource NINJA refreshes after the skill-only sibling extension is disabled or uninstalled.\n\n## Common setup\n\n1. Build or install the coexistence test VSIX for Resource NINJA.\n2. Open one scenario folder in a fresh VS Code window.\n3. Verify \`.vscode/settings.json\` was loaded for the workspace.\n4. Compare \`AGENTS.md\` against \`expected-after.md\` after the manual command sequence.\n\n## Commands used during manual validation\n\n- Resource NINJA: Show Coexistence Status\n- Resource NINJA: Recompute Coexistence Ownership\n- Resource NINJA: Update Instruction File\n- Resource NINJA: Cleanup Shared Marker Block (optional reset)\n\n## Notes\n\nThese scenarios reflect the current Resource NINJA implementation semantics: in standalone mode, the generated shared block always keeps \`skill\`, lists \`agent\` by default, and applies legacy \`resourceNinja.kindsExcluded\` only as a compatibility layer. When the skill-only sibling extension is detected and Resource NINJA owns the shared block, those legacy exclusions are ignored at runtime.\n`;
+  const content = `# Resource NINJA Coexistence Fixture Walkthrough\n\nThis fixture complements the Skill NINJA fixture set with the Resource-only scenarios that cannot be produced from the subset-side repository.\n\n## Included scenarios\n\n- B-resources-solo: Resource NINJA only, shared block generated in standalone mode with the default skill-only policy.\n- F-uninstall-skill: shared block starts in a prior coexistence state, then Resource NINJA refreshes after the skill-only sibling extension is disabled or uninstalled.\n\n## Common setup\n\n1. Build or install the coexistence test VSIX for Resource NINJA.\n2. Open one scenario folder in a fresh VS Code window.\n3. Verify \`.vscode/settings.json\` was loaded for the workspace.\n4. Compare \`AGENTS.md\` against \`expected-after.md\` after the manual command sequence.\n\n## Commands used during manual validation\n\n- Resource NINJA: Show Coexistence Status\n- Resource NINJA: Recompute Coexistence Ownership\n- Resource NINJA: Update Instruction File\n- Resource NINJA: Cleanup Shared Marker Block (optional reset)\n\n## Notes\n\nThese scenarios reflect the current Resource NINJA implementation semantics: in standalone mode, the generated shared block always keeps \`skill\`. Agents and instructions are opt-in through \`instructionBlock.*\` settings, and legacy \`resourceNinja.kindsExcluded\` is only a compatibility layer for optional kinds. When the skill-only sibling extension is detected and Resource NINJA owns the shared block, those legacy exclusions are ignored at runtime.\n`;
   writeFile("run.md", content);
 }
 
