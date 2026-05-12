@@ -97,6 +97,7 @@ import {
   getConfiguredAutoUpdateResourcesOnUpgrade,
   getConfiguredGlobalHomeDirectory,
   getConfiguredInstructionFilePath,
+  getInstructionBlockKinds,
   getConfiguredSkillsDirectory,
   getConfiguredUserAgentsDirectory,
   getConfiguredUserInstructionsDirectory,
@@ -165,6 +166,10 @@ const RESETTABLE_RESOURCE_NINJA_SETTINGS = [
   "instructionFile",
   "customInstructionPath",
   "includeLocalResources",
+  "instructionBlock.includeAgents",
+  "instructionBlock.includeInstructions",
+  "instructionBlock.globalHome.includeAgents",
+  "instructionBlock.globalHome.includeInstructions",
   "kindsExcluded",
   "resourcesDirectory",
   "workspaceAgentsDirectory",
@@ -792,6 +797,16 @@ export async function activate(
       e.affectsConfiguration("resourceNinja.globalHomeDirectory") ||
       e.affectsConfiguration("resourceNinja.outputFormat") ||
       e.affectsConfiguration("resourceNinja.coexistenceMode") ||
+      e.affectsConfiguration("resourceNinja.instructionBlock.includeAgents") ||
+      e.affectsConfiguration(
+        "resourceNinja.instructionBlock.includeInstructions",
+      ) ||
+      e.affectsConfiguration(
+        "resourceNinja.instructionBlock.globalHome.includeAgents",
+      ) ||
+      e.affectsConfiguration(
+        "resourceNinja.instructionBlock.globalHome.includeInstructions",
+      ) ||
       e.affectsConfiguration("resourceNinja.kindsExcluded")
     ) {
       const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -4581,6 +4596,20 @@ export async function activate(
       const sharedSummary = getStandaloneSharedModeSummary(context);
       const excludedKinds = config.get<string[]>("kindsExcluded", []);
       const standaloneExcludedKinds = siblingDetected ? [] : excludedKinds;
+      const workspaceInstructionKinds = getInstructionBlockKinds(
+        config,
+        "workspace",
+        {
+          ignoreLegacyKindsExcluded: siblingDetected,
+        },
+      );
+      const globalInstructionKinds = getInstructionBlockKinds(
+        config,
+        "globalHome",
+        {
+          ignoreLegacyKindsExcluded: siblingDetected,
+        },
+      );
       const markdown = [
         "# Resource Ninja Coexistence Status",
         "",
@@ -4590,14 +4619,16 @@ export async function activate(
         `- Shared dir: ${sharedSummary.sharedDir}`,
         `- Shared sources manifest: ${sourcesManifest ? `${sourcesManifest.sources.length} sources` : "not initialized"}`,
         `- Shared resource index: ${sharedIndex ? `${sharedIndex.lastFullScan}` : "not initialized"}`,
+        `- Instruction block kinds (workspace): ${workspaceInstructionKinds.join(", ")}`,
+        `- Instruction block kinds (global home): ${globalInstructionKinds.join(", ")}`,
         ...(standaloneExcludedKinds.length > 0
           ? [
-              `- Standalone exclusions: ${standaloneExcludedKinds.join(", ")}`,
-              "- Hint: Run Resource NINJA: Recompute Coexistence Ownership after uninstalling the skill-only sibling extension. If you want skills listed again in standalone mode, remove `skill` from `resourceNinja.kindsExcluded`.",
+              `- Legacy standalone exclusions: ${standaloneExcludedKinds.join(", ")}`,
+              "- Hint: Run Resource NINJA: Recompute Coexistence Ownership after uninstalling the skill-only sibling extension. Legacy `resourceNinja.kindsExcluded` exclusions apply only in standalone mode and never remove `skill`.",
             ]
           : siblingDetected && excludedKinds.length > 0
             ? [
-                `- Standalone exclusions configured: ${excludedKinds.join(", ")} (ignored while the skill-only sibling extension is active)`,
+                `- Legacy standalone exclusions configured: ${excludedKinds.join(", ")} (ignored while the skill-only sibling extension is active)`,
               ]
             : []),
         "",

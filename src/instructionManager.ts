@@ -19,7 +19,8 @@ import {
   getConfiguredGlobalHomeDirectory,
   getConfiguredInstructionFilePath,
   getConfiguredIncludeLocalResources,
-  getConfiguredKindsExcluded,
+  getInstructionBlockKinds,
+  InstructionBlockScope,
   getConfiguredSkillsDirectory,
   isAbsoluteConfiguredPath,
   isHomeRelativePath,
@@ -235,15 +236,15 @@ function insertSectionAt(
   return `${before}\n\n${section}\n\n${after}`;
 }
 
-function getExcludedKinds(
+function getInstructionBlockKindsForRuntime(
   config: vscode.WorkspaceConfiguration,
+  scope: InstructionBlockScope,
   siblingDetected: boolean,
   owner: "self" | "sibling",
 ): ResourceKind[] {
-  if (owner === "self" && siblingDetected) {
-    return [];
-  }
-  return getConfiguredKindsExcluded(config);
+  return getInstructionBlockKinds(config, scope, {
+    ignoreLegacyKindsExcluded: owner === "self" && siblingDetected,
+  });
 }
 
 function toSyncResourceFromLocal(
@@ -471,7 +472,12 @@ export async function updateInstructionFileAtUri(
 
   const siblingDetected =
     coexistenceMode === "auto" ? await isSiblingActive(context) : false;
-  const excludedKinds = getExcludedKinds(config, siblingDetected, owner);
+  const instructionBlockKinds = getInstructionBlockKindsForRuntime(
+    config,
+    skillSource.scope,
+    siblingDetected,
+    owner,
+  );
 
   // フォーマットに応じてスキルセクションを生成
   const skillSection =
@@ -487,7 +493,7 @@ export async function updateInstructionFileAtUri(
                 workspaceUri,
                 instructionUri,
               )
-          ).filter((resource) => !excludedKinds.includes(resource.kind)),
+          ).filter((resource) => instructionBlockKinds.includes(resource.kind)),
           format,
           SHARED_MARKERS,
         )

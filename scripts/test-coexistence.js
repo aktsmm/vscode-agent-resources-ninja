@@ -26,6 +26,10 @@ test("manifest exposes coexistence commands and settings", () => {
   const settings = packageJson.contributes.configuration.properties;
   assert(settings["resourceNinja.coexistenceMode"]);
   assert(settings["resourceNinja.kindsExcluded"]);
+  assert(settings["resourceNinja.instructionBlock.includeAgents"]);
+  assert(settings["resourceNinja.instructionBlock.includeInstructions"]);
+  assert(settings["resourceNinja.instructionBlock.globalHome.includeAgents"]);
+  assert(settings["resourceNinja.instructionBlock.globalHome.includeInstructions"]);
   assert(settings["resourceNinja.useSharedSourcesManifest"]);
   assert(settings["resourceNinja.useSharedResourceIndex"]);
 });

@@ -363,7 +363,7 @@ test("hook plugin cleanup removes folders but keeps JSON configs file-scoped", (
   assert.match(extensionSource, /!isHookConfigFilePath\(fullPath\)/);
   assert.match(
     extensionSource,
-    /kind === "skill" \|\| isDirectoryBackedHook \? path\.dirname\(fullPath\) : fullPath/,
+    /kind === "skill" \|\| isDirectoryBackedHook[\s\S]*path\.dirname\(fullPath\)[\s\S]*: fullPath/,
   );
   assert.match(
     extensionSource,

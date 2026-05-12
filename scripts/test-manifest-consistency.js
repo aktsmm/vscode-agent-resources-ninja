@@ -991,6 +991,10 @@ test("settings order keeps install and destination paths first", () => {
     "resourceNinja.remoteResourceViewMode",
     "resourceNinja.language",
     "resourceNinja.githubToken",
+    "resourceNinja.instructionBlock.includeAgents",
+    "resourceNinja.instructionBlock.includeInstructions",
+    "resourceNinja.instructionBlock.globalHome.includeAgents",
+    "resourceNinja.instructionBlock.globalHome.includeInstructions",
   ];
 
   for (let index = 1; index < orderedSettings.length; index += 1) {
@@ -1039,6 +1043,30 @@ test("settings distinguish skill index sync from native non-skill resource paths
     /SKILL\.md[\s\S]*generated instruction block/,
   );
   assert.match(
+    nls["config.instructionBlock.includeAgents.markdownDescription"],
+    /Include `agent` resources[\s\S]*workspace targets/,
+  );
+  assert.match(
+    nls["config.instructionBlock.includeInstructions.markdownDescription"],
+    /Include `instruction` resources[\s\S]*workspace targets/,
+  );
+  assert.match(
+    nls[
+      "config.instructionBlock.globalHome.includeAgents.markdownDescription"
+    ],
+    /inherit[\s\S]*do not need to enter the same choice twice/,
+  );
+  assert.match(
+    nls[
+      "config.instructionBlock.globalHome.includeInstructions.markdownDescription"
+    ],
+    /inherit[\s\S]*do not need to enter the same choice twice/,
+  );
+  assert.match(
+    nls["config.kindsExcluded.markdownDescription"],
+    /Deprecated compatibility[\s\S]*`skill` is always kept/,
+  );
+  assert.match(
     nls["config.resourcesDirectory.markdownDescription"],
     /workspace-relative, absolute, and `~\/` paths/,
   );
@@ -1069,6 +1097,7 @@ test("settings distinguish skill index sync from native non-skill resource paths
     "Instruction file setting should offer the Copilot CLI global local instructions file",
   );
   assert.match(instructionManagerSource, /resolveInstructionSkillSource/);
+  assert.match(instructionManagerSource, /getInstructionBlockKindsForRuntime/);
   assert.match(instructionManagerSource, /getInstalledSkillsWithMetaFromRoot/);
   assert.match(
     instructionManagerSource,
@@ -1078,6 +1107,11 @@ test("settings distinguish skill index sync from native non-skill resource paths
   assert.match(
     packageJson.scripts?.["test:resources"] || "",
     /test-global-home-routing\.js/,
+  );
+  assert.match(
+    packageJson.scripts?.["test:resources"] || "",
+    /test-instruction-block-policy\.js/,
+    "Resource test suite should validate instruction block policy defaults and overrides",
   );
   assert.match(
     packageJson.scripts?.["test:resources"] || "",

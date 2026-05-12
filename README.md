@@ -381,7 +381,7 @@ Settings are ordered by the workflow users usually follow:
 | Workspace roots         | `resourcesDirectory`, `workspace*Directory`                                                                                      | Project-specific resources tracked with the workspace                     |
 | User roots              | `user*Directory`                                                                                                                 | VS Code User Profile agents, prompts, and instructions                    |
 | Global Resource Home    | `globalResourceHomePreset`, `globalHomeDirectory`                                                                                | Shared resources for Copilot CLI, Claude-compatible tools, or open agents |
-| Instruction sync        | `autoUpdateInstruction`, `instructionFile`, `customInstructionPath`, `includeLocalResources`, `coexistenceMode`, `kindsExcluded` | Optional shared instruction block generation                              |
+| Instruction sync        | `autoUpdateInstruction`, `instructionFile`, `customInstructionPath`, `includeLocalResources`, `coexistenceMode`, `kindsExcluded`, `instructionBlock.includeAgents`, `instructionBlock.includeInstructions`, `instructionBlock.globalHome.includeAgents`, `instructionBlock.globalHome.includeInstructions` | Optional shared instruction block generation and kind policy |
 | Shared caches           | `useSharedSourcesManifest`, `useSharedResourceIndex`                                                                             | Cross-extension SSOT for sources and scanned resource metadata            |
 | Display and maintenance | `outputFormat`, `showBuiltInResources`, `remoteResourceViewMode`, `language`, `githubToken`                                      | Presentation, discovery, and GitHub API behavior                          |
 
@@ -408,7 +408,7 @@ Settings are ordered by the workflow users usually follow:
 |  16   | `resourceNinja.includeLocalResources`          | `false`                | Include workspace-wide fallback `SKILL.md` files in the generated instruction block      |
 |  17   | `resourceNinja.autoUpdateResourcesOnUpgrade`   | `prompt`               | Update installed remote skills on extension upgrade                                      |
 |  18   | `resourceNinja.coexistenceMode`                | `auto`                 | Shared marker ownership mode (`auto` / `independent`)                                    |
-|  19   | `resourceNinja.kindsExcluded`                  | `[]`                   | Resource kinds to omit from the shared instruction block when running standalone         |
+|  19   | `resourceNinja.kindsExcluded`                  | `[]`                   | Legacy standalone compatibility exclusions for shared instruction blocks                 |
 |  20   | `resourceNinja.useSharedSourcesManifest`       | `false`                | Enable shared `sources.json` SSOT for coexistence with the skill-only sibling extension  |
 |  21   | `resourceNinja.useSharedResourceIndex`         | `false`                | Enable shared `index.json` SSOT for coexistence with the skill-only sibling extension    |
 |  22   | `resourceNinja.outputFormat`                   | `full`                 | Output format (full / compact / legacy)                                                  |
@@ -416,6 +416,10 @@ Settings are ordered by the workflow users usually follow:
 |  24   | `resourceNinja.remoteResourceViewMode`         | `repositoryFirst`      | Remote Resources layout (repository-first / resource-type-first)                         |
 |  25   | `resourceNinja.language`                       | `auto`                 | UI language (auto / en / ja)                                                             |
 |  26   | `resourceNinja.githubToken`                    | `""`                   | GitHub Token (for API rate limit)                                                        |
+|  27   | `resourceNinja.instructionBlock.includeAgents` | `true`                 | Include `agent` resources in workspace instruction blocks                                |
+|  28   | `resourceNinja.instructionBlock.includeInstructions` | `false`          | Include `instruction` resources in workspace instruction blocks                          |
+|  29   | `resourceNinja.instructionBlock.globalHome.includeAgents` | `inherit`     | Override Global Resource Home agent listing policy (`inherit` / `on` / `off`)            |
+|  30   | `resourceNinja.instructionBlock.globalHome.includeInstructions` | `inherit` | Override Global Resource Home instruction listing policy (`inherit` / `on` / `off`)      |
 
 > Settings are displayed in the order above
 
@@ -431,11 +435,13 @@ When `autoUpdateInstruction` is enabled:
 
 Installed files stay in their native paths. The generated instruction block is an index, not a copy of the resources.
 
+By default, shared instruction blocks stay intentionally small: `skill` is always listed, `agent` is listed by default, `instruction` is opt-in, and `prompt`, `hook`, `mcp`, `plugin`, and `cursor-rule` stay in their native resource views. Global Resource Home targets can inherit the workspace policy or override it without duplicating the same choice twice.
+
 ### Coexistence Note
 
 If you uninstall the skill-only sibling extension after running both extensions together, run `Resource NINJA: Recompute Coexistence Ownership` to refresh the current owner state.
 
-If skills still do not appear in standalone mode, check `resourceNinja.kindsExcluded`. Resource NINJA respects that setting when running alone, so remove `skill` from the list if you want skills to be listed again in the shared block.
+Legacy `resourceNinja.kindsExcluded` still works as a compatibility layer in standalone mode, but it no longer defines the default policy. Use the `instructionBlock.*` settings for the primary behavior. Legacy exclusions never remove `skill`, and they are ignored while the skill-only sibling extension is active.
 
 Generated instruction files contain a managed section. In the default `auto` mode this uses `agent-ninja-START` / `agent-ninja-END`. In `independent` mode it uses the legacy `resource-ninja-START` / `resource-ninja-END` markers. Edit outside that managed section, or disable auto-update if you need full manual control over the file.
 

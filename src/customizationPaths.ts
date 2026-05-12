@@ -15,6 +15,8 @@ export const DEFAULT_INSTRUCTION_FILE = "AGENTS.md";
 export const DISABLED_INSTRUCTION_FILE = "none";
 
 export type CoexistenceMode = "auto" | "independent";
+export type InstructionBlockScope = "workspace" | "globalHome";
+export type InstructionBlockScopeOverride = "inherit" | "on" | "off";
 
 export type GlobalResourceHomePreset =
   | "copilot"
@@ -150,6 +152,93 @@ export function getConfiguredKindsExcluded(
       kind === "mcp" ||
       kind === "plugin" ||
       kind === "cursor-rule",
+  );
+}
+
+function getConfiguredInstructionBlockIncludeAgents(
+  config: vscode.WorkspaceConfiguration,
+): boolean {
+  return config.get<boolean>("instructionBlock.includeAgents") ?? true;
+}
+
+function getConfiguredInstructionBlockIncludeInstructions(
+  config: vscode.WorkspaceConfiguration,
+): boolean {
+  return config.get<boolean>("instructionBlock.includeInstructions") ?? false;
+}
+
+function getConfiguredInstructionBlockOverride(
+  config: vscode.WorkspaceConfiguration,
+  key:
+    | "instructionBlock.globalHome.includeAgents"
+    | "instructionBlock.globalHome.includeInstructions",
+): InstructionBlockScopeOverride {
+  const value = config.get<InstructionBlockScopeOverride>(key) ?? "inherit";
+  return value === "on" || value === "off" || value === "inherit"
+    ? value
+    : "inherit";
+}
+
+function resolveInstructionBlockToggle(
+  baseValue: boolean,
+  overrideValue: InstructionBlockScopeOverride,
+): boolean {
+  switch (overrideValue) {
+    case "on":
+      return true;
+    case "off":
+      return false;
+    case "inherit":
+    default:
+      return baseValue;
+  }
+}
+
+export function getInstructionBlockKinds(
+  config: vscode.WorkspaceConfiguration,
+  scope: InstructionBlockScope,
+  options?: { ignoreLegacyKindsExcluded?: boolean },
+): ResourceKind[] {
+  const includeAgentsBase = getConfiguredInstructionBlockIncludeAgents(config);
+  const includeInstructionsBase =
+    getConfiguredInstructionBlockIncludeInstructions(config);
+
+  const includeAgents =
+    scope === "globalHome"
+      ? resolveInstructionBlockToggle(
+          includeAgentsBase,
+          getConfiguredInstructionBlockOverride(
+            config,
+            "instructionBlock.globalHome.includeAgents",
+          ),
+        )
+      : includeAgentsBase;
+  const includeInstructions =
+    scope === "globalHome"
+      ? resolveInstructionBlockToggle(
+          includeInstructionsBase,
+          getConfiguredInstructionBlockOverride(
+            config,
+            "instructionBlock.globalHome.includeInstructions",
+          ),
+        )
+      : includeInstructionsBase;
+
+  const kinds: ResourceKind[] = ["skill"];
+  if (includeAgents) {
+    kinds.push("agent");
+  }
+  if (includeInstructions) {
+    kinds.push("instruction");
+  }
+
+  if (options?.ignoreLegacyKindsExcluded) {
+    return kinds;
+  }
+
+  const legacyExcludedKinds = new Set(getConfiguredKindsExcluded(config));
+  return kinds.filter(
+    (kind) => kind === "skill" || !legacyExcludedKinds.has(kind),
   );
 }
 

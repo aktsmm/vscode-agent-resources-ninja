@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.13] - 2026-05-13
+
+### Changed
+
+- **Instruction Block Kind Policy** - Shared instruction blocks now default to listing `skill` plus `agent`, keep `instruction` opt-in, leave prompts/hooks/MCP/plugins/cursor rules in their native views, and add Global Resource Home overrides that can inherit the workspace policy without duplicate input / 共有 instruction block の既定掲載ポリシーを `skill` + `agent` に変更し、`instruction` は opt-in、prompts/hooks/MCP/plugins/cursor rules はネイティブ view に残すようにしました。Global Resource Home 向けには workspace 方針を継承できる override も追加しました。
+- **Legacy Exclusion Compatibility** - `resourceNinja.kindsExcluded` is now documented and treated as a legacy standalone compatibility layer; it no longer removes `skill` and is ignored while the skill-only sibling extension is active / `resourceNinja.kindsExcluded` を旧 standalone 互換レイヤーとして扱うよう整理しました。`skill` は除外されず、skill-only sibling extension と同居中は無視されます。
+
+### Tests
+
+- **Instruction Block Policy Coverage** - Added regression coverage for workspace/global instruction-block defaults and overrides, legacy exclusion compatibility, manifest settings exposure, and updated coexistence fixtures/docs / workspace/global の instruction-block 既定値と override、legacy exclusion 互換、manifest settings 公開、coexistence fixture/docs の回帰テストを追加しました。
+
 ## [0.2.12] - 2026-05-12
 
 ### Added
