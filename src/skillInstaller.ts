@@ -45,6 +45,7 @@ import {
 } from "./resourceKinds";
 import { getVsCodeUserDataPath } from "./userDataPaths";
 import { logger } from "./logger";
+import { openBugReport as openBugReportIssue } from "./bugReport";
 import {
   HookConfigUpdateResult,
   updateHookConfigForInstall,
@@ -1108,13 +1109,7 @@ async function validateInstalledSkill(
           `**SKILL.md Content (first 200 chars)**\n` +
           `\`\`\`\n${text.substring(0, 200)}\n\`\`\``;
 
-        // URLパラメータをエンコード
-        const params = new URLSearchParams({
-          title: issueTitle,
-          body: issueBody,
-        });
-        const issueUrl = `https://github.com/aktsmm/vscode-agent-resources-ninja/issues/new?${params.toString()}`;
-        await vscode.env.openExternal(vscode.Uri.parse(issueUrl));
+        await openBugReportIssue(issueTitle, issueBody);
       }
     }
   } catch (error) {
@@ -2068,12 +2063,7 @@ async function openBugReport(
     `**Possible Cause**\n` +
     `The skill index may contain outdated paths that no longer exist in the repository.`;
 
-  const params = new URLSearchParams({
-    title: issueTitle,
-    body: issueBody,
-  });
-  const issueUrl = `https://github.com/aktsmm/vscode-agent-resources-ninja/issues/new?${params.toString()}`;
-  await vscode.env.openExternal(vscode.Uri.parse(issueUrl));
+  await openBugReportIssue(issueTitle, issueBody);
 }
 
 /**

@@ -20,6 +20,7 @@ import {
   installSkill,
   InstallTargetScope,
   getResourceTargetUri,
+  SkillMeta,
   uninstallSkill,
   uninstallSkillByPath,
   getInstalledSkills,
@@ -68,6 +69,7 @@ import {
 import { createChatParticipant } from "./chatParticipant";
 import { registerMcpTools } from "./mcpTools";
 import { logger, registerLogger } from "./logger";
+import { openBugReport } from "./bugReport";
 import {
   AgentNinjaExtensionApi,
   clearBeacon,
@@ -125,6 +127,62 @@ const EXTENSION_VERSION =
     ?.version || "0.0.0";
 
 let activeExtensionContext: vscode.ExtensionContext | undefined;
+
+function normalizeInstalledRemotePath(
+  remotePath: string | undefined,
+): string | undefined {
+  const normalized = remotePath?.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  return normalized || undefined;
+}
+
+function isIndexTrackedInstalledSkill(meta: Pick<SkillMeta, "remotePath">): boolean {
+  return !!normalizeInstalledRemotePath(meta.remotePath);
+}
+
+function findIndexedSkillForInstalledMeta(
+  index: SkillIndex,
+  meta: Pick<SkillMeta, "name" | "source" | "remotePath">,
+): Skill | undefined {
+  const normalizedRemotePath = normalizeInstalledRemotePath(meta.remotePath);
+
+  if (normalizedRemotePath && meta.source && meta.source !== "local") {
+    const matchedByRemotePath = index.skills.find(
+      (skill: Skill) =>
+        getResourceKind(skill) === "skill" &&
+        skill.source === meta.source &&
+        normalizeInstalledRemotePath(skill.path) === normalizedRemotePath,
+    );
+    if (matchedByRemotePath) {
+      return matchedByRemotePath;
+    }
+  }
+
+  let skill = index.skills.find(
+    (candidate: Skill) =>
+      getResourceKind(candidate) === "skill" &&
+      candidate.name === meta.name &&
+      candidate.source === meta.source,
+  );
+  if (!skill && meta.source === "unknown") {
+    skill = index.skills.find(
+      (candidate: Skill) =>
+        getResourceKind(candidate) === "skill" &&
+        candidate.name === meta.name,
+    );
+  }
+
+  return skill;
+}
+
+function collectMissingIndexedInstalledSkills(
+  index: SkillIndex,
+  installedMeta: SkillMeta[],
+): string[] {
+  return installedMeta
+    .filter((meta) => isIndexTrackedInstalledSkill(meta))
+    .filter((meta) => !findIndexedSkillForInstalledMeta(index, meta))
+    .map((meta) => meta.name);
+}
 
 async function deleteInstalledResourceByPath(
   kind: ResourceKind,
@@ -521,18 +579,10 @@ export async function activate(
       const installedMeta = await getInstalledSkillsWithMeta(
         workspaceFolder.uri,
       );
-      const missingSkills: string[] = [];
-      for (const meta of installedMeta) {
-        let skill = index.skills.find(
-          (s: Skill) => s.name === meta.name && s.source === meta.source,
-        );
-        if (!skill && meta.source === "unknown") {
-          skill = index.skills.find((s: Skill) => s.name === meta.name);
-        }
-        if (!skill) {
-          missingSkills.push(meta.name);
-        }
-      }
+      const missingSkills = collectMissingIndexedInstalledSkills(
+        index,
+        installedMeta,
+      );
 
       if (missingSkills.length > 0) {
         const message = isJapanese()
@@ -2362,18 +2412,10 @@ export async function activate(
       let index = await loadSkillIndex(context);
 
       // インデックスに見つからないスキルがあるかチェック
-      const missingSkills: string[] = [];
-      for (const meta of installedMeta) {
-        let skill = index.skills.find(
-          (s: Skill) => s.name === meta.name && s.source === meta.source,
-        );
-        if (!skill && meta.source === "unknown") {
-          skill = index.skills.find((s: Skill) => s.name === meta.name);
-        }
-        if (!skill) {
-          missingSkills.push(meta.name);
-        }
-      }
+      const missingSkills = collectMissingIndexedInstalledSkills(
+        index,
+        installedMeta,
+      );
 
       // 見つからないスキルがある場合、インデックス更新を提案
       if (missingSkills.length > 0) {
@@ -2431,13 +2473,7 @@ export async function activate(
             });
 
             // スキル情報を取得
-            let skill = index.skills.find(
-              (s: Skill) => s.name === meta.name && s.source === meta.source,
-            );
-            // source が "unknown" の場合は name だけで検索
-            if (!skill && meta.source === "unknown") {
-              skill = index.skills.find((s: Skill) => s.name === meta.name);
-            }
+            const skill = findIndexedSkillForInstalledMeta(index, meta);
 
             if (skill) {
               try {
@@ -4694,8 +4730,8 @@ export async function activate(
       await removeSkillSectionFromFile(instructionUri);
       vscode.window.showInformationMessage(
         isJapanese()
-          ? `マーカーブロックを削除しました: ${instructionUri.fsPath}`
-          : `Removed marker block from ${instructionUri.fsPath}`,
+          ? `管理マーカーブロックを削除しました: ${instructionUri.fsPath}`
+          : `Removed managed marker block from ${instructionUri.fsPath}`,
       );
     },
   );
@@ -4978,12 +5014,7 @@ ${fileUri.fsPath}`,
           `- VS Code: ${vscode.version}\n` +
           `- OS: ${process.platform}\n`;
 
-      // Use URLSearchParams for proper encoding
-      const params = new URLSearchParams();
-      params.set("title", issueTitle);
-      params.set("body", issueBody);
-      const issueUrl = `https://github.com/aktsmm/vscode-agent-resources-ninja/issues/new?${params.toString()}`;
-      await vscode.env.openExternal(vscode.Uri.parse(issueUrl));
+      await openBugReport(issueTitle, issueBody);
     },
   );
 

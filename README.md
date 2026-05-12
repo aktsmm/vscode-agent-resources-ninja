@@ -443,7 +443,7 @@ If you uninstall the skill-only sibling extension after running both extensions 
 
 Legacy `resourceNinja.kindsExcluded` still works as a compatibility layer in standalone mode, but it no longer defines the default policy. Use the `instructionBlock.*` settings for the primary behavior. Legacy exclusions never remove `skill`, and they are ignored while the skill-only sibling extension is active.
 
-Generated instruction files contain a managed section. In the default `auto` mode this uses `agent-ninja-START` / `agent-ninja-END`. In `independent` mode it uses the legacy `resource-ninja-START` / `resource-ninja-END` markers. Edit outside that managed section, or disable auto-update if you need full manual control over the file.
+Generated instruction files contain a managed section. In the default `auto` mode this uses `agent-ninja-START` / `agent-ninja-END`. In `independent` mode it uses the legacy `resource-ninja-START` / `resource-ninja-END` markers. Edit outside that managed section, or disable auto-update if you need full manual control over the file. To reset the generated section safely, use `Resource NINJA: Remove Managed Marker Block` and then regenerate it with `Update Instruction File`.
 
 The default `auto` mode writes a shared managed section with **IMPORTANT prompt** and **Description column**:
 

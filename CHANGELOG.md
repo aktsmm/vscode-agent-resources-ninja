@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.15] - 2026-05-13
+
+### Fixed
+
+- **Installed Skill Index False Positives** - Startup and bulk reinstall flows now skip local-only skills that lack remote install metadata, so manually managed or sibling-managed skills under Global Resource Home are no longer incorrectly reported as missing from the bundled index / 起動時と一括再インストール時の index 整合性チェックで、remote install metadata を持たない local-only skill を除外するようにしました。これにより Global Resource Home 配下の手動管理 skill や sibling-managed skill が、bundled index にないものとして誤警告されなくなりました。
+- **Release Build Log Clarity** - One-shot bundle builds now log `[build]` instead of `[watch]`, avoiding false watch-mode cues during release and CI verification / one-shot bundle build のログを `[watch]` ではなく `[build]` に変更し、release と CI の検証中に watch 実行と誤解しにくくしました。
+
+### Changed
+
+- **Bug Report Helper Consolidation** - Centralized GitHub Issue URL generation and browser launch into a shared helper so report-bug flows in commands and installer recovery paths stay consistent / GitHub Issue URL の生成とブラウザ起動を shared helper に集約し、command と installer recovery path の bug report 導線を一貫化しました。
+- **Managed Block Reset Wording** - Renamed the cleanup command and related copy to describe the actual behavior as removing the generated managed marker block, and documented the safe reset flow in README / README_ja and coexistence fixture docs / cleanup command と関連文言を、生成済み managed marker block を削除する実際の挙動に合わせて見直しました。README / README_ja と coexistence fixture docs にも安全な reset 手順を追記しました。
+
+### Tests
+
+- **Release Regression Coverage** - Revalidated typecheck, lint, production build, resource regression, manifest consistency, coexistence coverage, installed-skill index guards, When to Use extraction, search logic, npm audit, and attempted VS Code extension-host tests with the existing local update-state failure captured as a release note fallback / typecheck、lint、production build、resource 回帰、manifest consistency、coexistence coverage、installed-skill index guard、When to Use 抽出、検索ロジック、npm audit を再検証し、VS Code extension-host test は既存の local update-state failure を release note に記録する fallback で扱いました。
+
 ## [0.2.14] - 2026-05-13
 
 ### Changed

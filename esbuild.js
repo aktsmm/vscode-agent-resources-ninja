@@ -2,6 +2,7 @@ const esbuild = require("esbuild");
 
 const production = process.argv.includes("--production");
 const watch = process.argv.includes("--watch");
+const logPrefix = watch ? "[watch]" : "[build]";
 
 async function main() {
   const ctx = await esbuild.context({
@@ -20,7 +21,7 @@ async function main() {
         name: "esbuild-problem-matcher",
         setup(build) {
           build.onStart(() => {
-            console.log("[watch] build started");
+            console.log(`${logPrefix} build started`);
           });
           build.onEnd((result) => {
             result.errors.forEach(({ text, location }) => {
@@ -29,7 +30,7 @@ async function main() {
                 `    ${location.file}:${location.line}:${location.column}:`
               );
             });
-            console.log("[watch] build finished");
+            console.log(`${logPrefix} build finished`);
           });
         },
       },
