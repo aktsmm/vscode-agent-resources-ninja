@@ -196,13 +196,14 @@ test("user global resources expose reinstall actions", () => {
 });
 
 test("bundle-facing language is install set language", () => {
-  assert.strictEqual(nls["command.installBundle"], "Install Set");
+  assert.strictEqual(nls["command.installBundle"], "Install Curated Set");
   assert.strictEqual(
     nlsJa["command.installBundle"],
-    "インストールセットをインストール",
+    "おすすめセットをインストール",
   );
-  assert.match(treeProviderSource, /Install Sets/);
-  assert.match(treeProviderSource, /インストールセット/);
+  assert.match(treeProviderSource, /Curated Install Sets/);
+  assert.match(treeProviderSource, /おすすめまとめインストール/);
+  assert.match(treeProviderSource, /formatResourceKindCountSummary/);
   assert.doesNotMatch(extensionSource, /Select Bundle Resources/);
   assert.doesNotMatch(extensionSource, /Bundle インストール対象/);
 });
@@ -210,11 +211,11 @@ test("bundle-facing language is install set language", () => {
 test("plugin resources install is a separate visible action", () => {
   assert.strictEqual(
     nls["command.installPluginResources"],
-    "Install Plugin Resources",
+    "Pick & Install from Plugin",
   );
   assert.strictEqual(
     nlsJa["command.installPluginResources"],
-    "プラグインリソースをインストール",
+    "プラグイン中身を選んでインストール",
   );
   assert.ok(
     itemMenuHas(
@@ -223,6 +224,8 @@ test("plugin resources install is a separate visible action", () => {
     ),
   );
   assert.match(extensionSource, /resourceNinja\.installPluginResources/);
+  assert.match(extensionSource, /everything is preselected/);
+  assert.match(extensionSource, /すべて選択済み、不要なら解除/);
 });
 
 test("plugin grouped resources install uses virtual install sets", () => {
@@ -240,14 +243,16 @@ test("plugin grouped resources install uses virtual install sets", () => {
 });
 
 test("plugin grouping labels distinguish remote contents from installed origins", () => {
-  assert.match(treeProviderSource, /Grouped by Plugin/);
-  assert.match(treeProviderSource, /プラグイン別/);
+  assert.match(treeProviderSource, /Pick from a Plugin/);
+  assert.match(treeProviderSource, /プラグイン中身を選択/);
+  assert.match(treeProviderSource, /Indexed contents only/);
+  assert.match(treeProviderSource, /インデックス済み中身のみ/);
   assert.match(treeProviderSource, /"Plugin"\}: \$\{pluginLabel\}/);
   assert.match(treeProviderSource, /Remote path/);
-  assert.match(treeProviderSource, /Grouped by Plugin/);
+  assert.match(treeProviderSource, /Plugin resource kind row/);
   assert.match(userResourcesProviderSource, /"Plugin"\}: \$\{pluginId\}/);
-  assert.match(userResourcesProviderSource, /Grouped by Plugin/);
-  assert.match(userResourcesProviderSource, /プラグイン別/);
+  assert.match(userResourcesProviderSource, /Plugin Origins/);
+  assert.match(userResourcesProviderSource, /プラグイン由来/);
 });
 
 test("installed plugin grouping falls back beyond remotePath", () => {
@@ -381,10 +386,12 @@ test("install set success reports skipped resources", () => {
 });
 
 test("docs explain install sets and plugin grouping", () => {
-  assert.match(readme, /Install Sets/);
-  assert.match(readme, /Grouped by Plugin/);
-  assert.match(readmeJa, /インストールセット/);
-  assert.match(readmeJa, /プラグイン別/);
+  assert.match(readme, /Curated Install Sets/);
+  assert.match(readme, /Pick from a Plugin/);
+  assert.match(readme, /Plugin Origins/);
+  assert.match(readmeJa, /おすすめまとめインストール/);
+  assert.match(readmeJa, /プラグイン中身を選択/);
+  assert.match(readmeJa, /プラグイン由来/);
 });
 
 test("create resource workspace roots use configured resource directories", () => {

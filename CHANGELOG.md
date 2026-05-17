@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.17] - 2026-05-17
+
+### Changed
+
+- **Plugin Package vs Contents UX** - Remote Resources now separates plugin package install, indexed plugin contents selection, curated install sets, and installed plugin-origin grouping with distinct labels such as `Pick from a Plugin`, `Curated Install Sets`, and `Plugin Origins` / Remote Resources と Installed views で、plugin package install、インデックス済み plugin 中身の選択、curated install set、installed 側の plugin 由来グループを別ラベルに分離しました。`Pick from a Plugin`、`Curated Install Sets`、`Plugin Origins` などで役割を明確化しています。
+- **Microsoft Azure Resource Set Naming** - Renamed Microsoft Azure plugin-derived bundle and source labels so they read as skills / MCP resource sets instead of full plugin package installs / Microsoft Azure の plugin 由来 bundle と source の表示名を、plugin 本体の install ではなく skills / MCP resource set と読める名称へ変更しました。
+- **Bundle Summary and Checklist Affordance** - Curated sets and plugin-content picks now show resource-kind count summaries such as `31 skills + 1 MCP`, and checklist installs explicitly state that everything is preselected unless the user deselects items / curated set と plugin-content pick に `31 skills + 1 MCP` のような resource kind 件数サマリーを表示し、チェックリスト install では全件が事前選択済みで不要なものだけ外せばよいことを明示するようにしました。
+
+### Tests
+
+- **Plugin UX Regression Coverage** - Revalidated manifest consistency, README release UX, search/source disambiguation, plugin-derived bundle safety, Azure source indexing, localization UX, smoke test, and audit after clarifying plugin package vs indexed contents vs curated sets / plugin package と indexed contents と curated set の区別を明確化したあと、manifest consistency、README release UX、検索時の source 識別、plugin-derived bundle safety、Azure source indexing、localization UX、smoke test、audit を再検証しました。
+
 ## [0.2.16] - 2026-05-17
 
 ### Added

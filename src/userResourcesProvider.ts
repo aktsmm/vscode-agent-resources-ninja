@@ -501,7 +501,7 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
       0,
     );
     const item = new UserResourceTreeItem(
-      isJapanese() ? "プラグイン別" : "Grouped by Plugin",
+      isJapanese() ? "プラグイン由来" : "Plugin Origins",
       `${pluginGroups.length} groups · ${resourceCount} resources`,
       vscode.TreeItemCollapsibleState.Collapsed,
       "pluginSection",

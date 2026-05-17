@@ -59,7 +59,7 @@ for (const { source, bundleId, mode } of pluginBundles) {
   if (mode === "skill-only") {
     assert.match(
       bundle.description,
-      /Safe skill-only bundle/,
+      /Safe skills set|Safe skill-only bundle/,
       `${bundleId} should clearly describe its safety boundary`,
     );
     assert.match(

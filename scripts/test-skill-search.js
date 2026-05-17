@@ -69,12 +69,12 @@ const index = {
     { id: "community-source", name: "Community Source", type: "community" },
     {
       id: "microsoft-copilot-for-azure-plugin",
-      name: "GitHub Copilot for Azure Plugin Skills (Official)",
+      name: "GitHub Copilot for Azure Skills (Official)",
       type: "official",
     },
     {
       id: "microsoft-azure-skills",
-      name: "Microsoft Azure Skills Plugin (Official)",
+      name: "Microsoft Azure Skills + MCP (Official)",
       type: "official",
     },
     { id: "awesome-source", name: "Awesome Source", type: "awesome-list" },
@@ -209,11 +209,8 @@ test("duplicate skill names prefer top-level distribution paths", () => {
 
 test("duplicate skill names show friendly source names", () => {
   const results = searchSkills(index, "azure-rbac", "skill");
-  assert.match(results[0].description, /Microsoft Azure Skills Plugin/);
-  assert.match(
-    results[1].description,
-    /GitHub Copilot for Azure Plugin Skills/,
-  );
+  assert.match(results[0].description, /Microsoft Azure Skills \+ MCP/);
+  assert.match(results[1].description, /GitHub Copilot for Azure Skills/);
 });
 
 test("duplicate skill names include source id and path detail", () => {

@@ -36,21 +36,21 @@
     },
     {
       "id": "microsoft-copilot-for-azure-plugin",
-      "name": "GitHub Copilot for Azure Plugin Skills (Official)",
+      "name": "GitHub Copilot for Azure Skills (Official)",
       "url": "https://github.com/microsoft/GitHub-Copilot-for-Azure",
       "type": "official",
       "includePaths": ["plugin/skills/"],
-      "description": "Official GitHub Copilot for Azure plugin skills",
-      "description_ja": "GitHub Copilot for Azure 公式プラグイン skills"
+      "description": "Official GitHub Copilot for Azure skills indexed from the plugin payload",
+      "description_ja": "plugin payload から収録した GitHub Copilot for Azure 公式 skills"
     },
     {
       "id": "microsoft-azure-skills",
-      "name": "Microsoft Azure Skills Plugin (Official)",
+      "name": "Microsoft Azure Skills + MCP (Official)",
       "url": "https://github.com/microsoft/azure-skills",
       "type": "official",
       "includePaths": ["skills/", ".mcp.json"],
-      "description": "Official Microsoft Azure skills plugin resources",
-      "description_ja": "Microsoft Azure 公式 Skills Plugin リソース"
+      "description": "Official Microsoft Azure skills and MCP config resources",
+      "description_ja": "Microsoft Azure 公式 skills と MCP config リソース"
     },
     {
       "id": "aws-agent-plugins",
@@ -350,10 +350,10 @@
     },
     {
       "id": "microsoft-copilot-for-azure-plugin-skills",
-      "name": "GitHub Copilot for Azure Plugin Skill Bundle",
+      "name": "GitHub Copilot for Azure Skills Set",
       "source": "microsoft-copilot-for-azure-plugin",
-      "description": "Safe skill-only bundle for official GitHub Copilot for Azure plugin skills. Installs indexed skills only; hooks, MCP configuration, and executable plugin setup are not enabled automatically.",
-      "description_ja": "GitHub Copilot for Azure 公式プラグイン skills の安全な skill-only バンドル。インデックス済み skills のみをインストールし、hooks、MCP 設定、実行系 plugin セットアップは自動有効化しません。",
+      "description": "Safe skills set for official GitHub Copilot for Azure resources indexed from the plugin payload. Installs indexed skills only; hooks, MCP configuration, and executable plugin setup are not enabled automatically.",
+      "description_ja": "plugin payload から収録した GitHub Copilot for Azure 公式 skills の安全なセット。インデックス済み skills のみをインストールし、hooks、MCP 設定、実行系 plugin セットアップは自動有効化しません。",
       "skills": [
         "airunway-aks-setup",
         "appinsights-instrumentation",
@@ -423,10 +423,10 @@
     },
     {
       "id": "microsoft-azure-skills-plugin-resources",
-      "name": "Microsoft Azure Skills Plugin Resource Bundle",
+      "name": "Microsoft Azure Skills + MCP Set",
       "source": "microsoft-azure-skills",
-      "description": "Selectable bundle for official Microsoft Azure Skills Plugin resources. Installs Azure skills plus the Azure MCP config as a reviewable MCP resource with optional workspace mcp.json merge.",
-      "description_ja": "Microsoft Azure Skills Plugin 公式リソースの選択式バンドル。Azure skills と Azure MCP config を確認用 MCP リソースとしてインストールできます。MCP 設定は確認用にコピーし、自動有効化しません。",
+      "description": "Selectable set for official Microsoft Azure skills and MCP config resources. Installs Azure skills plus the Azure MCP config as a reviewable MCP resource with optional workspace mcp.json merge.",
+      "description_ja": "Microsoft Azure 公式 skills と MCP config リソースの選択式セット。Azure skills と Azure MCP config を確認用 MCP リソースとしてインストールできます。MCP 設定は確認用にコピーし、自動有効化しません。",
       "skills": [
         "airunway-aks-setup",
         "appinsights-instrumentation",

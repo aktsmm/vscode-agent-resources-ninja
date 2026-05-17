@@ -65,7 +65,7 @@
 
 - リソースをキーワード検索（ローカル＆GitHub）
 - QuickPick 検索結果を resource kind（skills、agents、instructions、prompts、hooks、MCP config、plugins、Cursor rules）で絞り込み
-- **インストールセット** は curated な選択式インストール単位です。**プラグイン別** は plugin package の manifest とインデックス済み子リソースをまとめて表示します。子リソースは各 resource kind にも表示され、行の詳細で plugin 由来が分かります。
+- **おすすめまとめインストール** は curated な選択式インストールのショートカットです。プラグインをまるごとインストールしたい場合は **プラグイン** の行を使います。**プラグイン中身を選択** はインデックス済みの plugin 中身だけをまとめて表示し、プラグイン本体を入れずに子リソースを選んでインストールできます。子リソースは各 resource kind にも表示され、行の詳細で plugin 由来が分かります。Installed 側の view では plugin 由来リソースを **プラグイン由来** にまとめて表示します。
 - Remote Resources の行では agents、hooks、MCP config、plugins、Cursor rules などすべての resource kind でインストール済み状態を文字と色で表示します。
 - MCP config の行は、確認用コピーなのか `.vscode/mcp.json` へマージ済みなのかを staged / merged 状態として詳細と tooltip に表示します。
 - Hook の行は configured / not configured、設定ソース、イベント、script path 警告などの静的診断を表示します。Agent Resources Ninja は hook を実行しません。
@@ -157,8 +157,8 @@ ext install yamapan.agent-resources-ninja
 | [github/awesome-copilot](https://github.com/github/awesome-copilot)                                                           | Official  | plugin から公開された skills / agents を含む GitHub 公式 Copilot リソース |
 | [cursor/plugins](https://github.com/cursor/plugins)                                                                           | Official  | Cursor 公式 plugin manifest、skills、agents、rules                        |
 | [MicrosoftDocs/Agent-Skills](https://github.com/MicrosoftDocs/Agent-Skills)                                                   | Official  | Microsoft 公式 Azure Agent Skills                                         |
-| [microsoft/GitHub-Copilot-for-Azure](https://github.com/microsoft/GitHub-Copilot-for-Azure)                                   | Official  | GitHub Copilot for Azure 公式プラグイン skills                            |
-| [microsoft/azure-skills](https://github.com/microsoft/azure-skills)                                                           | Official  | Azure skills と MCP config を含む Microsoft Azure Skills Plugin リソース  |
+| [microsoft/GitHub-Copilot-for-Azure](https://github.com/microsoft/GitHub-Copilot-for-Azure)                                   | Official  | plugin payload から収録した GitHub Copilot for Azure 公式 skills          |
+| [microsoft/azure-skills](https://github.com/microsoft/azure-skills)                                                           | Official  | Microsoft Azure 公式 skills と MCP config リソース                        |
 | [awslabs/agent-plugins](https://github.com/awslabs/agent-plugins)                                                             | Official  | AWS Labs の Agent Plugins skills                                          |
 | [elastic/agent-skills](https://github.com/elastic/agent-skills)                                                               | Official  | Elastic 公式 Agent Skills                                                 |
 | [google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli)                                                       | Official  | Gemini CLI 公式 skills                                                    |

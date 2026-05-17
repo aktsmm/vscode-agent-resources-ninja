@@ -332,7 +332,7 @@ test("language model resource actions are kind-aware and ambiguity-safe", () => 
 
 test("bundle install uses selectable resource checklist", () => {
   assert.match(extensionSource, /canPickMany:\s*true/);
-  assert.match(extensionSource, /Select Install Set Resources/);
+  assert.match(extensionSource, /Select Curated Set Resources/);
   assert.doesNotMatch(extensionSource, /Select Bundle Resources/);
   assert.match(extensionSource, /getResourceKindIcon\(kind\)/);
   assert.match(extensionSource, /selectedKindSummary/);
@@ -1441,7 +1441,7 @@ test("plugin grouped resources can be installed as a selectable set", () => {
         item.command === "resourceNinja.installPluginResources" &&
         item.when === "view == resourceNinja.browseView && viewItem == plugin",
     ),
-    "Remote plugin groups should expose Install Plugin Resources",
+    "Remote plugin groups should expose Pick & Install from Plugin",
   );
   assert.match(extensionSource, /resourceNinja\.installPluginResources/);
   assert.match(extensionSource, /resourceNinja\.installBundle/);
@@ -1450,18 +1450,18 @@ test("plugin grouped resources can be installed as a selectable set", () => {
     treeProviderSource,
     /plugin\.resources\.map\(\(resource\) => resource\.path\)/,
   );
-  assert.match(treeProviderSource, /Grouped by Plugin/);
+  assert.match(treeProviderSource, /Pick from a Plugin/);
   assert.match(treeProviderSource, /getPluginPackageCandidates/);
   assert.match(treeProviderSource, /getPluginPackageId/);
   assert.match(treeProviderSource, /getPluginPackageLabel/);
-  assert.strictEqual(nls["command.installBundle"], "Install Set");
+  assert.strictEqual(nls["command.installBundle"], "Install Curated Set");
   assert.strictEqual(
     nls["command.installPluginResources"],
-    "Install Plugin Resources",
+    "Pick & Install from Plugin",
   );
   assert.strictEqual(
     nlsJa["command.installPluginResources"],
-    "プラグインリソースをインストール",
+    "プラグイン中身を選んでインストール",
   );
 });
 

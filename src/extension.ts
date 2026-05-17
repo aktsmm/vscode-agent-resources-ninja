@@ -2849,7 +2849,7 @@ export async function activate(
     },
   );
 
-  // Command: Install Set (selectable resource group)
+  // Command: Install Curated Set / plugin contents checklist
   const installBundleCmd = vscode.commands.registerCommand(
     "resourceNinja.installBundle",
     async (item?: SkillTreeItem) => {
@@ -2863,11 +2863,12 @@ export async function activate(
       if (!bundle) {
         vscode.window.showErrorMessage(
           isJapanese()
-            ? "インストールセット情報がありません"
-            : "No install set information",
+            ? "選択インストール情報がありません"
+            : "No grouped install information",
         );
         return;
       }
+      const isPluginPick = bundle.id.startsWith("plugin:");
 
       const index = await loadSkillIndex(context);
 
@@ -2934,11 +2935,19 @@ export async function activate(
       const selectedItems = await vscode.window.showQuickPick(selectableItems, {
         canPickMany: true,
         placeHolder: isJapanese()
-          ? `${bundle.name} からインストールするリソースを選択`
-          : `Select resources to install from ${bundle.name}`,
+          ? isPluginPick
+            ? `${bundle.name} からインストールする中身を選択（すべて選択済み、不要なら解除）`
+            : `${bundle.name} からインストールするリソースを選択（すべて選択済み、不要なら解除）`
+          : isPluginPick
+            ? `Select indexed contents to install from ${bundle.name} (everything is preselected)`
+            : `Select resources to install from ${bundle.name} (everything is preselected)`,
         title: isJapanese()
-          ? "インストールセット対象の選択"
-          : "Select Install Set Resources",
+          ? isPluginPick
+            ? "プラグイン中身の選択"
+            : "おすすめセット対象の選択"
+          : isPluginPick
+            ? "Select Plugin Contents"
+            : "Select Curated Set Resources",
       });
 
       if (!selectedItems || selectedItems.length === 0) {
@@ -2983,8 +2992,12 @@ export async function activate(
       // 確認ダイアログ
       const confirm = await vscode.window.showInformationMessage(
         isJapanese()
-          ? `「${bundle.name}」から選択した ${selectedItems.length} 個のリソースをインストールしますか？\n${selectedKindSummary}${hasMcpConfig ? "\nMCP config は選択した方法で処理します。" : ""}`
-          : `Install ${selectedItems.length} selected resources from "${bundle.name}"?\n${selectedKindSummary}${hasMcpConfig ? "\nMCP config files will use the selected activation mode." : ""}`,
+          ? isPluginPick
+            ? `「${bundle.name}」から選択した ${selectedItems.length} 個の中身をインストールしますか？\n${selectedKindSummary}\nこれはプラグイン本体ではなく、インデックス済み中身の選択 install です。${hasMcpConfig ? "\nMCP config は選択した方法で処理します。" : ""}`
+            : `おすすめセット「${bundle.name}」から選択した ${selectedItems.length} 個のリソースをインストールしますか？\n${selectedKindSummary}\nこれは curated なおすすめまとめ install ショートカットです。${hasMcpConfig ? "\nMCP config は選択した方法で処理します。" : ""}`
+          : isPluginPick
+            ? `Install ${selectedItems.length} selected contents from "${bundle.name}"?\n${selectedKindSummary}\nThis installs indexed contents only, not the plugin package itself.${hasMcpConfig ? "\nMCP config files will use the selected activation mode." : ""}`
+            : `Install ${selectedItems.length} selected resources from curated set "${bundle.name}"?\n${selectedKindSummary}\nThis is a curated install shortcut.${hasMcpConfig ? "\nMCP config files will use the selected activation mode." : ""}`,
         { modal: true },
         isJapanese() ? "インストール" : "Install",
       );
@@ -3003,8 +3016,12 @@ export async function activate(
         {
           location: vscode.ProgressLocation.Notification,
           title: isJapanese()
-            ? `${bundle.name} をインストール中...`
-            : `Installing ${bundle.name}...`,
+            ? isPluginPick
+              ? `${bundle.name} の中身をインストール中...`
+              : `${bundle.name} をインストール中...`
+            : isPluginPick
+              ? `Installing selected contents from ${bundle.name}...`
+              : `Installing ${bundle.name}...`,
           cancellable: false,
         },
         async (progress) => {
@@ -3095,8 +3112,12 @@ export async function activate(
           : "";
         vscode.window.showInformationMessage(
           isJapanese()
-            ? `${bundle.name} のインストール完了（${selectedItems.length} 個のリソース${skippedSummary}）`
-            : `${bundle.name} installed (${selectedItems.length} resources${skippedSummary})`,
+            ? isPluginPick
+              ? `${bundle.name} の中身インストール完了（${selectedItems.length} 個のリソース${skippedSummary}）`
+              : `${bundle.name} のインストール完了（${selectedItems.length} 個のリソース${skippedSummary}）`
+            : isPluginPick
+              ? `${bundle.name} contents installed (${selectedItems.length} resources${skippedSummary})`
+              : `${bundle.name} installed (${selectedItems.length} resources${skippedSummary})`,
         );
       }
 
@@ -3125,8 +3146,8 @@ export async function activate(
       if (!item?.bundle) {
         vscode.window.showErrorMessage(
           isJapanese()
-            ? "プラグインリソースのグループ情報がありません"
-            : "No grouped plugin resource information",
+            ? "プラグイン中身のグループ情報がありません"
+            : "No grouped plugin contents information",
         );
         return;
       }

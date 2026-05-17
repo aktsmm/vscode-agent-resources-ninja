@@ -68,6 +68,51 @@ interface WorkspacePluginGroup {
   resources: WorkspaceSkill[];
 }
 
+function formatResourceKindCountSummary(
+  resources: Array<{ kind?: ResourceKind }>,
+  isJa: boolean,
+): string | undefined {
+  const counts = new Map<ResourceKind, number>();
+  for (const resource of resources) {
+    const kind = resource.kind || "skill";
+    counts.set(kind, (counts.get(kind) || 0) + 1);
+  }
+  if (counts.size === 0) {
+    return undefined;
+  }
+  const englishLabel = (kind: ResourceKind, count: number): string => {
+    switch (kind) {
+      case "skill":
+        return count === 1 ? "skill" : "skills";
+      case "agent":
+        return count === 1 ? "agent" : "agents";
+      case "instruction":
+        return count === 1 ? "instruction" : "instructions";
+      case "prompt":
+        return count === 1 ? "prompt" : "prompts";
+      case "hook":
+        return count === 1 ? "hook" : "hooks";
+      case "mcp":
+        return "MCP";
+      case "plugin":
+        return count === 1 ? "plugin" : "plugins";
+      case "cursor-rule":
+        return count === 1 ? "Cursor rule" : "Cursor rules";
+      default:
+        return kind;
+    }
+  };
+  return RESOURCE_KIND_ORDER.filter((kind) => counts.has(kind))
+    .map((kind) => {
+      const count = counts.get(kind) || 0;
+      if (isJa) {
+        return `${count}件の${getResourceKindLabel(kind, true)}`;
+      }
+      return `${count} ${englishLabel(kind, count)}`;
+    })
+    .join(" + ");
+}
+
 function getWorkspacePluginId(resource: WorkspaceSkill): string | undefined {
   return (
     getPluginIdFromPath(resource.remotePath) ||
@@ -338,7 +383,7 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
       0,
     );
     const item = new SkillTreeItem(
-      isJapanese() ? "プラグイン別" : "Grouped by Plugin",
+      isJapanese() ? "プラグイン由来" : "Plugin Origins",
       `${pluginGroups.length} groups · ${resourceCount} resources`,
       vscode.TreeItemCollapsibleState.Collapsed,
       "workspacePluginSection",
@@ -802,14 +847,14 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
           items.push(item);
         }
 
-        this.addBundleSection(items);
         this.addPluginSection(items);
+        this.addBundleSection(items);
 
         return items;
       }
 
-      this.addBundleSection(items);
       this.addPluginSection(items);
+      this.addBundleSection(items);
 
       for (const source of this.getOrderedSources()) {
         items.push(this.createSourceItem(source));
@@ -879,13 +924,23 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
       return this.getOrderedBundles().map((bundle) => {
         const source = this.getSourceForBundle(bundle);
         const sourceTypeLabel = this.getBundleSourceTypeLabel(source);
-        const description =
+        const resourceSummary = formatResourceKindCountSummary(
+          this.getResourcesForBundle(bundle),
+          isJa,
+        );
+        const description = [
+          sourceTypeLabel,
+          resourceSummary,
+          isJa ? "おすすめまとめ install" : "Curated install shortcut",
           isJa && bundle.description_ja
             ? bundle.description_ja
-            : bundle.description;
+            : bundle.description,
+        ]
+          .filter((part): part is string => !!part)
+          .join(" · ");
         const item = new SkillTreeItem(
           bundle.name,
-          sourceTypeLabel ? `${sourceTypeLabel} · ${description}` : description,
+          description,
           vscode.TreeItemCollapsibleState.Collapsed,
           "bundle",
           undefined,
@@ -938,23 +993,32 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
     }
 
     if (element.contextValue === "pluginSection") {
+      const isJa = isJapanese();
       return this.getPluginGroups().map((plugin) => {
         const source = this.getSourceForPlugin(plugin);
         const sourceLabel = this.getBundleSourceTypeLabel(source);
-        const description = sourceLabel
-          ? `${sourceLabel} · ${plugin.resources.length} indexed resources`
-          : `${plugin.resources.length} indexed resources`;
+        const resourceSummary = formatResourceKindCountSummary(
+          plugin.resources,
+          isJa,
+        );
+        const description = [
+          sourceLabel,
+          resourceSummary,
+          isJa ? "インデックス済み中身のみ" : "Indexed contents only",
+        ]
+          .filter((part): part is string => !!part)
+          .join(" · ");
         const installOrder = plugin.resources.map((resource) => resource.path);
         const virtualBundle: Bundle = {
           id: `plugin:${plugin.id}`,
           name: isJapanese()
-            ? `${plugin.label} のインデックス済みリソース`
-            : `${plugin.label} indexed resources`,
+            ? `${plugin.label} の中身を選択`
+            : `Pick from ${plugin.label}`,
           source: source?.id || plugin.resources[0]?.source || "",
           description:
-            "Selectable install set generated from indexed resources in this plugin path. Only indexed resources are installed; executable plugin setup is not enabled automatically.",
+            "Pick indexed contents from this plugin. Install the full plugin package from the Plugin resource kind row. Executable plugin setup is not enabled automatically.",
           description_ja:
-            "この plugin path 内のインデックス済みリソースから生成した選択式インストールセット。インデックス済みリソースのみをインストールし、実行系 plugin セットアップは自動有効化しません。",
+            "このプラグインのインデックス済み中身を選んでインストールします。プラグイン本体は「プラグイン」種別の行からインストールし、実行系 plugin セットアップも自動有効化しません。",
           skills: installOrder,
           installOrder,
         };
@@ -1081,6 +1145,26 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
     return sourceId
       ? this.skillIndex?.sources.find((source) => source.id === sourceId)
       : undefined;
+  }
+
+  private getResourcesForBundle(bundle: Bundle): Skill[] {
+    if (!this.skillIndex) {
+      return [];
+    }
+    const identifiers = bundle.installOrder || bundle.skills;
+    return identifiers
+      .map(
+        (identifier) =>
+          this.skillIndex!.skills.find(
+            (skill) =>
+              skill.name === identifier && skill.source === bundle.source,
+          ) ||
+          this.skillIndex!.skills.find(
+            (skill) =>
+              skill.path === identifier && skill.source === bundle.source,
+          ),
+      )
+      .filter((skill): skill is Skill => !!skill);
   }
 
   private getPluginSortWeight(plugin: PluginGroup): number {
@@ -1218,7 +1302,7 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
     }
 
     const bundleItem = new SkillTreeItem(
-      isJapanese() ? "インストールセット" : "Install Sets",
+      isJapanese() ? "おすすめまとめインストール" : "Curated Install Sets",
       `${this.skillIndex.bundles.length} sets`,
       vscode.TreeItemCollapsibleState.Collapsed,
       "bundleSection",
@@ -1241,7 +1325,7 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
       0,
     );
     const item = new SkillTreeItem(
-      isJapanese() ? "プラグイン別" : "Grouped by Plugin",
+      isJapanese() ? "プラグイン中身を選択" : "Pick from a Plugin",
       `${pluginGroups.length} groups · ${resourceCount} resources`,
       vscode.TreeItemCollapsibleState.Collapsed,
       "pluginSection",
@@ -1438,11 +1522,21 @@ export class SkillTreeItem extends vscode.TreeItem {
     } else if (bundle) {
       const isJa = isJapanese();
       const skillsLabel = isJa ? "スキル" : "Skills";
+      const extraNote =
+        contextValue === "plugin"
+          ? isJa
+            ? "\nこのプラグインのインデックス済み中身だけを選んでインストールします。プラグイン本体は「プラグイン」種別の行から入れます。"
+            : "\nPick indexed contents only from this plugin. Install the full plugin package from the Plugin resource kind row."
+          : contextValue === "bundle"
+            ? isJa
+              ? "\nこれは curated なおすすめまとめ install ショートカットです。"
+              : "\nThis is a curated install shortcut."
+            : "";
       this.tooltip = `${bundle.name}\n${
         isJa && bundle.description_ja
           ? bundle.description_ja
           : bundle.description
-      }\n${skillsLabel}: ${bundle.skills.join(", ")}`;
+      }${extraNote}\n${skillsLabel}: ${bundle.skills.join(", ")}`;
     }
   }
 }

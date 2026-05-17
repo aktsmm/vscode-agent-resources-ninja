@@ -69,7 +69,7 @@ It gives you three practical views for everyday resource management: **Workspace
 
 - Search resources by keyword (local & GitHub)
 - Filter QuickPick search results by resource kind: skills, agents, instructions, prompts, hooks, MCP config resources, plugins, or Cursor rules
-- **Install Sets** are curated, selectable install groups. **Grouped by Plugin** shows plugin package manifests and their indexed child resources together; each child resource also remains visible under its own resource kind with plugin origin shown in the row details.
+- **Curated Install Sets** are curated, selectable install shortcuts. Use **Plugin** rows to install a whole plugin package. **Pick from a Plugin** shows indexed plugin contents only, so you can choose child resources without installing the whole plugin package; each child resource also remains visible under its own resource kind with plugin origin shown in the row details. Installed views group plugin-derived resources under **Plugin Origins**.
 - Remote rows show installed state in text and color for every resource kind, including agents, hooks, MCP config resources, plugins, and Cursor rules.
 - MCP config rows distinguish review copies from `.vscode/mcp.json` merges with staged / merged status in row details and tooltips.
 - Hook rows show static configuration diagnostics such as configured / not configured status, config source, events, and missing script warnings. Agent Resources Ninja does not run hooks.
@@ -161,8 +161,8 @@ Preset index includes skills, agents, prompts, instructions, hooks, MCP config r
 | [github/awesome-copilot](https://github.com/github/awesome-copilot)                                                           | Official  | GitHub official Copilot resources, including plugin-published skills and agents |
 | [cursor/plugins](https://github.com/cursor/plugins)                                                                           | Official  | Cursor official plugin manifests, skills, agents, and rules                     |
 | [MicrosoftDocs/Agent-Skills](https://github.com/MicrosoftDocs/Agent-Skills)                                                   | Official  | Microsoft official Azure agent skills                                           |
-| [microsoft/GitHub-Copilot-for-Azure](https://github.com/microsoft/GitHub-Copilot-for-Azure)                                   | Official  | GitHub Copilot for Azure plugin skills                                          |
-| [microsoft/azure-skills](https://github.com/microsoft/azure-skills)                                                           | Official  | Microsoft Azure Skills plugin resources, including Azure skills and MCP config  |
+| [microsoft/GitHub-Copilot-for-Azure](https://github.com/microsoft/GitHub-Copilot-for-Azure)                                   | Official  | GitHub Copilot for Azure skills indexed from the plugin payload                 |
+| [microsoft/azure-skills](https://github.com/microsoft/azure-skills)                                                           | Official  | Microsoft Azure skills and MCP config resources                                 |
 | [awslabs/agent-plugins](https://github.com/awslabs/agent-plugins)                                                             | Official  | AWS Labs agent plugin skills                                                    |
 | [elastic/agent-skills](https://github.com/elastic/agent-skills)                                                               | Official  | Elastic official agent skills                                                   |
 | [google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli)                                                       | Official  | Gemini CLI official skills                                                      |

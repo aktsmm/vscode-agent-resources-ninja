@@ -276,6 +276,21 @@ test("README source tables keep qdhenry row inside the table", () => {
   assert.doesNotMatch(afterMcpSafetyJa, /\| \[qdhenry\/Claude-Command-Suite\]/);
 });
 
+test("README distinguishes full plugin install from indexed plugin contents", () => {
+  assert.match(readme, /Curated Install Sets/);
+  assert.match(readme, /Pick from a Plugin/);
+  assert.match(
+    readme,
+    /Use \*\*Plugin\*\* rows to install a whole plugin package/,
+  );
+  assert.match(readmeJa, /おすすめまとめインストール/);
+  assert.match(readmeJa, /プラグイン中身を選択/);
+  assert.match(
+    readmeJa,
+    /プラグインをまるごとインストールしたい場合は \*\*プラグイン\*\* の行/,
+  );
+});
+
 test("README source tables use only known source type labels", () => {
   for (const row of getSourceTableRows(readme).concat(
     getSourceTableRows(readmeJa),
