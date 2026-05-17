@@ -19,9 +19,10 @@ import {
   isBuiltInResourcePath,
   shouldReplaceBuiltInResourcePath,
 } from "./resourceKinds";
+import { isJapanese } from "./i18n";
 import { getVsCodeUserDataPath } from "./userDataPaths";
 
-export type UserResourceScope = "userData" | "globalHome";
+export type UserResourceScope = "userData" | "globalHome" | "extension";
 
 export interface UserResourceRoot {
   scope: UserResourceScope;
@@ -30,6 +31,8 @@ export interface UserResourceRoot {
   uri: vscode.Uri;
   relativeBase?: string;
   builtInOnly?: boolean;
+  readOnly?: boolean;
+  exactFile?: boolean;
 }
 
 export interface UserResource {
@@ -50,6 +53,7 @@ export interface UserResource {
   rootLabel: string;
   rootFsPath: string;
   isBuiltIn?: boolean;
+  isReadOnly?: boolean;
   lifecycleLabel?: string;
   lifecycleTooltipLines?: string[];
 }
@@ -69,6 +73,15 @@ interface ResourceInstallMeta {
 interface CollectResourceFilesOptions {
   prioritizeResourceDirectories?: boolean;
   skipRuntimeDirectories?: boolean;
+}
+
+interface ExtensionPackageJson {
+  displayName?: string;
+  name?: string;
+  contributes?: {
+    chatAgents?: Array<{ path?: unknown }>;
+    chatPromptFiles?: Array<{ path?: unknown }>;
+  };
 }
 
 const RESOURCE_DIRECTORY_NAMES = new Set([
@@ -100,6 +113,55 @@ const GLOBAL_HOME_RUNTIME_DIRECTORY_NAMES = new Set([
   "session-store",
 ]);
 
+const EXTENSION_RESOURCE_DIRECTORIES = [
+  "agents",
+  "hooks",
+  "instructions",
+  "mcp",
+  "prompts",
+  "skills",
+];
+
+function getInstalledExtensionToolLabel(
+  extension: vscode.Extension<unknown>,
+): string {
+  const packageJson = extension.packageJSON as ExtensionPackageJson;
+  return packageJson.displayName || packageJson.name || extension.id;
+}
+
+function getExtensionManifestResourcePaths(
+  extension: vscode.Extension<unknown>,
+): string[] {
+  const packageJson = extension.packageJSON as ExtensionPackageJson;
+  const contributes = packageJson.contributes;
+  const candidates = [
+    ...(contributes?.chatAgents || []),
+    ...(contributes?.chatPromptFiles || []),
+  ];
+  return candidates
+    .map((candidate) => candidate.path)
+    .filter((candidate): candidate is string => typeof candidate === "string")
+    .map((candidate) => normalizeSeparators(candidate).replace(/^\/+/, ""));
+}
+
+function isInstalledExtensionPath(extensionPath: string): boolean {
+  const lowerPath = normalizeSeparators(extensionPath).toLowerCase();
+  return /(^|\/)\.vscode(-insiders)?\/extensions\//.test(lowerPath);
+}
+
+function getUserResourceScopeOrder(scope: UserResourceScope): number {
+  switch (scope) {
+    case "userData":
+      return 0;
+    case "globalHome":
+      return 1;
+    case "extension":
+      return 2;
+    default:
+      return 9;
+  }
+}
+
 function getGlobalHomeToolLabel(config: vscode.WorkspaceConfiguration): string {
   if (config.get<string>("globalHomeDirectory")?.trim()) {
     return "Custom resource home";
@@ -115,6 +177,10 @@ function getGlobalHomeToolLabel(config: vscode.WorkspaceConfiguration): string {
     default:
       return "GitHub Copilot CLI";
   }
+}
+
+function getInstalledExtensionsScopeLabel(): string {
+  return isJapanese() ? "インストール済み拡張機能" : "Installed Extensions";
 }
 
 function normalizeSeparators(value: string): string {
@@ -137,6 +203,12 @@ function getRelativeFsPath(baseFsPath: string, targetFsPath: string): string {
   }
 
   return target;
+}
+
+function getFileName(fsPath: string): string {
+  const normalized = normalizeSeparators(fsPath).replace(/\/+$/g, "");
+  const lastSlash = normalized.lastIndexOf("/");
+  return lastSlash >= 0 ? normalized.slice(lastSlash + 1) : normalized;
 }
 
 function getKnownRoots(
@@ -277,6 +349,48 @@ function getKnownRoots(
     }
   }
 
+  for (const extension of vscode.extensions.all) {
+    const extensionId = extension.id.toLowerCase();
+    const extensionPath = normalizeSeparators(extension.extensionPath);
+    const isVsCodeBundledExtension =
+      /(^|\/)resources\/app\/extensions\/[^/]+$/.test(
+        extensionPath.toLowerCase(),
+      );
+    if (
+      !isVsCodeBundledExtension &&
+      extensionId !== "github.copilot-chat" &&
+      !/(^|\/)github\.copilot-chat-[^/]+$/.test(extensionPath.toLowerCase()) &&
+      isInstalledExtensionPath(extensionPath)
+    ) {
+      const tool = getInstalledExtensionToolLabel(extension);
+      for (const directory of EXTENSION_RESOURCE_DIRECTORIES) {
+        roots.push({
+          scope: "extension",
+          label: getInstalledExtensionsScopeLabel(),
+          tool,
+          uri: vscode.Uri.joinPath(
+            extension.extensionUri,
+            "resources",
+            directory,
+          ),
+          relativeBase: directory,
+          readOnly: true,
+        });
+      }
+      for (const manifestPath of getExtensionManifestResourcePaths(extension)) {
+        roots.push({
+          scope: "extension",
+          label: getInstalledExtensionsScopeLabel(),
+          tool,
+          uri: vscode.Uri.joinPath(extension.extensionUri, manifestPath),
+          relativeBase: manifestPath,
+          readOnly: true,
+          exactFile: true,
+        });
+      }
+    }
+  }
+
   return roots;
 }
 
@@ -335,6 +449,17 @@ async function collectMarkdownFiles(
 ): Promise<vscode.Uri[]> {
   const files: vscode.Uri[] = [];
   const maxFiles = 2000;
+  const rootStat = await vscode.workspace.fs.stat(root);
+  if (hasFileType(rootStat.type, vscode.FileType.File)) {
+    const name = root.path.split("/").pop()?.toLowerCase() || "";
+    return name.endsWith(".md") ||
+      name.endsWith(".json") ||
+      name.endsWith(".mdc") ||
+      name.endsWith(".yml") ||
+      name.endsWith(".yaml")
+      ? [root]
+      : [];
+  }
 
   async function walk(current: vscode.Uri): Promise<void> {
     if (files.length >= maxFiles) {
@@ -444,6 +569,7 @@ async function parseResourceFile(
   const isBuiltIn =
     isBuiltInResourcePath(normalizedDetectionPath) ||
     isBuiltInResourcePath(fileUri.fsPath);
+  const isReadOnly = !!root.readOnly || isBuiltIn;
   if (root.builtInOnly && !isBuiltIn) {
     return undefined;
   }
@@ -473,6 +599,7 @@ async function parseResourceFile(
     rootLabel: root.label,
     rootFsPath: root.uri.fsPath,
     isBuiltIn,
+    isReadOnly,
   };
 }
 
@@ -494,9 +621,9 @@ export async function scanUserResources(
       includeBuiltInResources,
       {
         prioritizeResourceDirectories:
-          root.scope === "globalHome" && !root.builtInOnly,
+          root.scope === "globalHome" && !root.builtInOnly && !root.exactFile,
         skipRuntimeDirectories:
-          root.scope === "globalHome" && !root.builtInOnly,
+          root.scope === "globalHome" && !root.builtInOnly && !root.exactFile,
       },
     );
     for (const file of files) {
@@ -530,10 +657,21 @@ export async function scanUserResources(
   }
 
   return Array.from(resources.values()).sort((a, b) => {
+    const scopeOrderCompare =
+      getUserResourceScopeOrder(a.scope) - getUserResourceScopeOrder(b.scope);
+    if (scopeOrderCompare !== 0) return scopeOrderCompare;
+    if (a.scope === "extension" || b.scope === "extension") {
+      const toolCompare = a.tool.localeCompare(b.tool);
+      if (toolCompare !== 0) return toolCompare;
+    }
     const scopeCompare = a.scopeLabel.localeCompare(b.scopeLabel);
     if (scopeCompare !== 0) return scopeCompare;
     const kindCompare = a.kind.localeCompare(b.kind);
     if (kindCompare !== 0) return kindCompare;
+    const fileCompare = getFileName(a.fullPath).localeCompare(
+      getFileName(b.fullPath),
+    );
+    if (fileCompare !== 0) return fileCompare;
     return a.name.localeCompare(b.name);
   });
 }

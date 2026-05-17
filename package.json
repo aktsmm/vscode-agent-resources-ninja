@@ -2,7 +2,7 @@
   "name": "agent-resources-ninja",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.15",
+  "version": "0.2.16",
   "publisher": "yamapan",
   "license": "CC-BY-NC-SA-4.0",
   "icon": "resources/icon.png",
@@ -1145,7 +1145,7 @@
         },
         {
           "command": "resourceNinja.openUserResource",
-          "when": "view == resourceNinja.userResourcesView && (viewItem == userResource || viewItem == userRemoteResource || viewItem == builtInUserResource)",
+          "when": "view == resourceNinja.userResourcesView && (viewItem == userResource || viewItem == userRemoteResource || viewItem == builtInUserResource || viewItem == readOnlyUserResource)",
           "group": "inline@1"
         },
         {
@@ -1155,7 +1155,7 @@
         },
         {
           "command": "resourceNinja.revealUserResource",
-          "when": "view == resourceNinja.userResourcesView && (viewItem == userResource || viewItem == userRemoteResource || viewItem == builtInUserResource)",
+          "when": "view == resourceNinja.userResourcesView && (viewItem == userResource || viewItem == userRemoteResource || viewItem == builtInUserResource || viewItem == readOnlyUserResource)",
           "group": "inline@3"
         },
         {
@@ -1170,7 +1170,7 @@
         },
         {
           "command": "resourceNinja.copyUserResourcePath",
-          "when": "view == resourceNinja.userResourcesView && (viewItem == userResource || viewItem == userRemoteResource || viewItem == builtInUserResource)",
+          "when": "view == resourceNinja.userResourcesView && (viewItem == userResource || viewItem == userRemoteResource || viewItem == builtInUserResource || viewItem == readOnlyUserResource)",
           "group": "navigation@1"
         }
       ]

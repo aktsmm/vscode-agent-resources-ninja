@@ -870,6 +870,12 @@ test("detects Copilot Chat generated agents as built-in resources", () => {
     isBuiltInResourcePath(".github/agents/Plan.agent.md"),
     false,
   );
+  assert.strictEqual(
+    isBuiltInResourcePath(
+      "C:/Users/alice/.vscode/extensions/ms-azuretools.vscode-azure-github-copilot-1.0.201-win32-x64/resources/agents/azure-iac-exporter.agent.md",
+    ),
+    false,
+  );
 });
 
 test("detects future Copilot built-in resource layouts defensively", () => {

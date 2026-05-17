@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.16] - 2026-05-17
+
+### Added
+
+- **Installed Extension Resource Discovery** - User / Global Resource Home now discovers read-only resources packaged in installed marketplace extensions, including `resources/agents`, `resources/skills`, `resources/prompts`, `resources/instructions`, `resources/hooks`, and `resources/mcp`, plus manifest-declared `chatAgents` / `chatPromptFiles` files / User / Global Resource Home で、インストール済み marketplace 拡張に同梱された読み取り専用リソースを検出するようにしました。`resources/agents`、`resources/skills`、`resources/prompts`、`resources/instructions`、`resources/hooks`、`resources/mcp` に加え、manifest の `chatAgents` / `chatPromptFiles` で宣言されたファイルも対象です。
+
+### Changed
+
+- **Read-only Extension Grouping** - Installed extension resources are grouped separately from built-in resources, shown by extension and kind, and remain openable/copyable without exposing delete or reinstall actions / installed extension resources を built-in resources と分離し、拡張ごと・種別ごとに表示するようにしました。開く・表示・パスコピーは可能ですが、削除や再インストールは出しません。
+- **Localization and Docs Alignment** - Localized the Installed Extensions scope label and updated README / README_ja plus welcome copy so the User / Global view behavior matches the current read-only discovery model / Installed Extensions のスコープ名をローカライズし、README / README_ja と welcome copy を更新して、User / Global view の現在の読み取り専用 discovery 挙動と一致させました。
+
+### Tests
+
+- **Release Validation** - Revalidated compile, resource regression, manifest consistency, view welcome UX, localization UX, npm audit, and VS Code integration tests after adding installed extension discovery and manifest-aware exact-file scanning / installed extension discovery と manifest-aware exact-file scanning の追加後、compile、resource 回帰、manifest consistency、view welcome UX、localization UX、npm audit、VS Code integration test を再検証しました。
+
 ## [0.2.15] - 2026-05-13
 
 ### Fixed

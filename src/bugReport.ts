@@ -10,6 +10,11 @@ export function buildBugReportUrl(title: string, body: string): string {
   return `${BUG_REPORT_ISSUE_URL}?${params.toString()}`;
 }
 
-export async function openBugReport(title: string, body: string): Promise<void> {
-  await vscode.env.openExternal(vscode.Uri.parse(buildBugReportUrl(title, body)));
+export async function openBugReport(
+  title: string,
+  body: string,
+): Promise<void> {
+  await vscode.env.openExternal(
+    vscode.Uri.parse(buildBugReportUrl(title, body)),
+  );
 }

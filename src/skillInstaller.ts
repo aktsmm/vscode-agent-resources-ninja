@@ -210,7 +210,8 @@ export function getResourceTargetUri(
     skill,
     path.posix.basename(normalizedRemotePath),
   );
-  const isHookConfigFile = kind === "hook" && isHookConfigFilePath(normalizedRemotePath);
+  const isHookConfigFile =
+    kind === "hook" && isHookConfigFilePath(normalizedRemotePath);
   const resourceFolderName = sanitizeSkillName(
     kind === "skill"
       ? skill.name
@@ -1160,7 +1161,8 @@ export async function uninstallSkillByPath(
   const normalizedPath = relativePath.replace(/\\/g, "/");
   const kind = detectResourceKindFromPath(normalizedPath) || "skill";
   const isAbsoluteResourcePath = path.isAbsolute(relativePath);
-  const isHookConfigFile = kind === "hook" && isHookConfigFilePath(normalizedPath);
+  const isHookConfigFile =
+    kind === "hook" && isHookConfigFilePath(normalizedPath);
 
   let skillPath: vscode.Uri;
   if (isAbsoluteResourcePath) {

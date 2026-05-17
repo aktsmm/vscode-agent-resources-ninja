@@ -135,7 +135,9 @@ function normalizeInstalledRemotePath(
   return normalized || undefined;
 }
 
-function isIndexTrackedInstalledSkill(meta: Pick<SkillMeta, "remotePath">): boolean {
+function isIndexTrackedInstalledSkill(
+  meta: Pick<SkillMeta, "remotePath">,
+): boolean {
   return !!normalizeInstalledRemotePath(meta.remotePath);
 }
 
@@ -166,8 +168,7 @@ function findIndexedSkillForInstalledMeta(
   if (!skill && meta.source === "unknown") {
     skill = index.skills.find(
       (candidate: Skill) =>
-        getResourceKind(candidate) === "skill" &&
-        candidate.name === meta.name,
+        getResourceKind(candidate) === "skill" && candidate.name === meta.name,
     );
   }
 
@@ -1060,7 +1061,7 @@ export async function activate(
     "resourceNinja.deleteUserResource",
     async (item: UserResourceTreeItem) => {
       const resource = item?.resource;
-      if (!resource || resource.isBuiltIn) {
+      if (!resource || resource.isBuiltIn || resource.isReadOnly) {
         return;
       }
       const wsFolder = vscode.workspace.workspaceFolders?.[0];
@@ -1145,7 +1146,7 @@ export async function activate(
     "resourceNinja.reinstallUserResource",
     async (item: UserResourceTreeItem, suppressSuccessMessage?: boolean) => {
       const resource = item?.resource;
-      if (!resource || resource.isBuiltIn) {
+      if (!resource || resource.isBuiltIn || resource.isReadOnly) {
         return false;
       }
       if (!isRemoteInstalledUserResource(resource)) {
@@ -1305,7 +1306,7 @@ export async function activate(
 
       const allResources = userResourcesProvider
         .getResources()
-        .filter((resource) => !resource.isBuiltIn);
+        .filter((resource) => !resource.isBuiltIn && !resource.isReadOnly);
 
       let targets: UserResource[] = [];
       if (item.nodeType === "kind" && item.scope && item.kind) {
@@ -1475,7 +1476,8 @@ export async function activate(
         : [];
       const userResources = await scanUserResources(wsFolder?.uri, false);
       const userPluginResources = userResources.filter(
-        (resource) => getInstalledPluginId(resource) === pluginId,
+        (resource) =>
+          !resource.isReadOnly && getInstalledPluginId(resource) === pluginId,
       );
       const resources = [
         ...workspaceResources.map((resource) => ({

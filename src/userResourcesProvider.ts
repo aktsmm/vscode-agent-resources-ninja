@@ -31,10 +31,12 @@ type UserResourceNodeType =
   | "scope"
   | "builtInScope"
   | "builtInTool"
+  | "extensionTool"
   | "pluginSection"
   | "plugin"
   | "kind"
   | "builtInKind"
+  | "extensionKind"
   | "remoteResource"
   | "resource"
   | "placeholder";
@@ -52,6 +54,8 @@ const KIND_ORDER: ResourceKind[] = [
 
 function getScopeIcon(scope: UserResourceScope): string {
   switch (scope) {
+    case "extension":
+      return "extensions";
     case "userData":
       return "account";
     case "globalHome":
@@ -73,7 +77,15 @@ function formatRootPathForDisplay(fsPath: string): string {
   return normalizedPath;
 }
 
-function formatScopeDescription(resource: UserResource, count: number): string {
+function formatScopeDescription(
+  resource: UserResource,
+  count: number,
+  resources: UserResource[],
+): string {
+  if (resource.scope === "extension") {
+    const extensionCount = new Set(resources.map((item) => item.tool)).size;
+    return `${extensionCount} extensions · ${count} resources`;
+  }
   const details = [resource.tool];
   if (resource.scope === "globalHome") {
     details.push(formatRootPathForDisplay(resource.rootFsPath));
@@ -203,15 +215,18 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
         ).values(),
       );
       const items = scopes.map((resource) => {
-        const count = regularResources.filter(
+        const scopedResources = regularResources.filter(
           (candidate) =>
             candidate.scope === resource.scope &&
             candidate.scopeLabel === resource.scopeLabel,
-        ).length;
+        );
+        const count = scopedResources.length;
         const item = new UserResourceTreeItem(
           resource.scopeLabel,
-          formatScopeDescription(resource, count),
-          vscode.TreeItemCollapsibleState.Expanded,
+          formatScopeDescription(resource, count, scopedResources),
+          resource.scope === "extension"
+            ? vscode.TreeItemCollapsibleState.Collapsed
+            : vscode.TreeItemCollapsibleState.Expanded,
           "scope",
           undefined,
           resource.scope,
@@ -219,7 +234,7 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
           resource.scopeLabel,
         );
         item.iconPath = new vscode.ThemeIcon(getScopeIcon(resource.scope));
-        item.tooltip = `${resource.scopeLabel}\n${formatScopeDescription(resource, count)}\n${resource.rootFsPath}`;
+        item.tooltip = `${resource.scopeLabel}\n${formatScopeDescription(resource, count, scopedResources)}\n${resource.rootFsPath}`;
         return item;
       });
 
@@ -246,10 +261,44 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
           resource.scope === element.scope &&
           resource.scopeLabel === element.scopeLabel,
       );
+      if (element.scope === "extension") {
+        const tools = Array.from(
+          new Set(scopedResources.map((resource) => resource.tool)),
+        ).sort((a, b) => a.localeCompare(b));
+        return tools.map((tool) => {
+          const resources = scopedResources.filter(
+            (resource) => resource.tool === tool,
+          );
+          const item = new UserResourceTreeItem(
+            tool,
+            `${resources.length} resources`,
+            vscode.TreeItemCollapsibleState.Collapsed,
+            "extensionTool",
+            undefined,
+            element.scope,
+            undefined,
+            tool,
+          );
+          item.iconPath = new vscode.ThemeIcon("extensions");
+          return item;
+        });
+      }
       const items: UserResourceTreeItem[] = [];
       this.addPluginSection(items, scopedResources, element);
       items.push(...this.createKindItems(scopedResources, "kind", element));
       return items;
+    }
+
+    if (element.nodeType === "extensionTool" && element.scopeLabel) {
+      return this.createKindItems(
+        this.getRegularResources().filter(
+          (resource) =>
+            resource.scope === "extension" &&
+            resource.tool === element.scopeLabel,
+        ),
+        "extensionKind",
+        element,
+      );
     }
 
     if (element.nodeType === "pluginSection" && element.scope) {
@@ -343,6 +392,21 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
         .map((resource) => this.createResourceItem(resource));
     }
 
+    if (
+      element.nodeType === "extensionKind" &&
+      element.kind &&
+      element.scopeLabel
+    ) {
+      return this.getRegularResources()
+        .filter(
+          (resource) =>
+            resource.scope === "extension" &&
+            resource.tool === element.scopeLabel &&
+            resource.kind === element.kind,
+        )
+        .map((resource) => this.createResourceItem(resource));
+    }
+
     return [];
   }
 
@@ -370,6 +434,7 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
 
   private isRemoteInstalled(resource: UserResource): boolean {
     return (
+      !resource.isReadOnly &&
       !resource.isBuiltIn &&
       !!resource.remotePath &&
       !!resource.source &&
@@ -379,7 +444,7 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
 
   private createKindItems(
     resources: UserResource[],
-    nodeType: "kind" | "builtInKind",
+    nodeType: "kind" | "builtInKind" | "extensionKind",
     parent: UserResourceTreeItem,
   ): UserResourceTreeItem[] {
     const presentKinds = KIND_ORDER.filter((kind) =>
@@ -458,7 +523,7 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
 
   private async enrichResourceStatuses(): Promise<void> {
     for (const resource of this.resources) {
-      if (resource.isBuiltIn) {
+      if (resource.isBuiltIn || resource.isReadOnly) {
         continue;
       }
       if (resource.kind === "mcp") {
@@ -515,15 +580,17 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
       ? `${isJapanese() ? "プラグイン" : "Plugin"}: ${pluginId}`
       : undefined;
     const description = resource.isBuiltIn
-      ? `built-in · ${resource.tool}`
-      : [
-          recentLabel,
-          pluginLabel,
-          resource.lifecycleLabel,
-          resource.description || resource.relativePath,
-        ]
-          .filter((part): part is string => !!part)
-          .join(" · ");
+      ? `${isJapanese() ? "組み込み" : "Built-in"} · ${resource.tool}`
+      : resource.isReadOnly
+        ? `${isJapanese() ? "拡張同梱" : "Extension-packaged"} · ${resource.tool} · ${resource.description || resource.relativePath}`
+        : [
+            recentLabel,
+            pluginLabel,
+            resource.lifecycleLabel,
+            resource.description || resource.relativePath,
+          ]
+            .filter((part): part is string => !!part)
+            .join(" · ");
     return new UserResourceTreeItem(
       `${isRecent ? "🆕 " : ""}${resource.name}`,
       description,
@@ -558,17 +625,21 @@ export class UserResourceTreeItem extends vscode.TreeItem {
       nodeType === "resource" || nodeType === "remoteResource"
         ? resource?.isBuiltIn
           ? "builtInUserResource"
-          : nodeType === "remoteResource"
-            ? "userRemoteResource"
-            : "userResource"
+          : resource?.isReadOnly
+            ? "readOnlyUserResource"
+            : nodeType === "remoteResource"
+              ? "userRemoteResource"
+              : "userResource"
         : nodeType;
 
     if (resource) {
       this.resourceUri = vscode.Uri.file(resource.fullPath);
       this.iconPath = new vscode.ThemeIcon(getResourceKindIcon(resource.kind));
       const status = resource.isBuiltIn
-        ? `Built-in · ${resource.tool}`
-        : resource.scopeLabel;
+        ? `${isJapanese() ? "組み込み" : "Built-in"} · ${resource.tool}`
+        : resource.isReadOnly
+          ? `${isJapanese() ? "拡張同梱" : "Extension-packaged"} · ${resource.tool}`
+          : resource.scopeLabel;
       const pluginId =
         getPluginIdFromPath(resource.remotePath) ||
         getPluginIdFromPath(resource.relativePath) ||

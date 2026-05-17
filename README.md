@@ -53,6 +53,7 @@ It gives you three practical views for everyday resource management: **Workspace
 - Manage multiple resource kinds: skills, agents, prompts, instructions, hooks, MCP config resources, plugin manifests, and Cursor rules
 - Browse remote resources by source or by Resource Type
 - Inspect user/global resources from VS Code User Data and the selected Global Resource Home
+- Discover read-only resources packaged inside installed VS Code extensions, including chat agents and prompts that ship with product extensions
 - Choose explicit install targets: Workspace, User Profile, Global Resource Home, or Custom
 
 ### 📁 Local Resource Management
@@ -215,12 +216,14 @@ Generic MCP config file names such as `mcp.json` and `.mcp.json` are installed w
 
 - VS Code User `prompts` (including `.agent.md`), `instructions`, and legacy `agents`
 - Global Resource Home resources under the selected preset (`~/.copilot`, `~/.claude`, or `~/.agents`), including product-native instruction files such as `copilot-instructions.md`, skills under `skills/*/SKILL.md`, agents under `agents/`, Copilot hook config files under `hooks/*.json`, and Copilot CLI `mcp-config.json`
+- Read-only installed extension resources scanned from marketplace extension `resources/agents`, `resources/skills`, `resources/prompts`, `resources/instructions`, `resources/hooks`, `resources/mcp`, and manifest-declared `chatAgents` / `chatPromptFiles`
 
 - Built-in VS Code / GitHub Copilot Chat / GitHub Copilot CLI resources are hidden by default and can be toggled into source-specific groups, including Copilot Chat `/create-*` prompt skills bundled under `assets/prompts`
 - Built-in resources are read-only definitions scanned from known VS Code, GitHub Copilot Chat, and GitHub Copilot CLI locations; they are shown for discovery, not modification.
+- Installed extension resources are also read-only and are shown for discovery, not modification.
 - Copilot CLI runtime logs, session state, OAuth cache, and restart state under `~/.copilot` are skipped so user-authored resources remain visible even when the CLI home contains many session files.
 - Non-built-in User / Global Resource Home resources can be opened, revealed, copied, or deleted from the right-click menu
-- Built-in resources are read-only and can never be selected as install targets
+- Built-in and installed extension resources are read-only and can never be selected as install targets
 - Workspace `.github` resources stay in **Workspace Resources**
 
 4. **Remote Resources** - Browse web resources by source repository
