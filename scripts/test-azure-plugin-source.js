@@ -77,12 +77,10 @@ async function main() {
     "plugin/.plugin/plugin.json",
   );
   assert.ok(
-    resources
-      .filter((resource) => resource.kind !== "plugin")
-      .length === 32 &&
+    resources.filter((resource) => resource.kind !== "plugin").length === 32 &&
       resources
         .filter((resource) => resource.kind !== "plugin")
-      .every((resource) => (resource.kind || "skill") === "skill"),
+        .every((resource) => (resource.kind || "skill") === "skill"),
   );
   assert.ok(
     resources

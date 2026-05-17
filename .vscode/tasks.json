@@ -29,6 +29,55 @@
 					"endsPattern": "\\[watch\\] build finished"
 				}
 			}
+		},
+		{
+			"label": "temp-confirm-location-branch",
+			"type": "shell",
+			"command": "pwsh",
+			"args": [
+				"Get-Location; git branch --show-current"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "temp-git-config-name",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"config",
+				"user.name"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "temp-git-status-short",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"status",
+				"--short"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "temp-git-diff-stat",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"diff",
+				"--stat"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "temp-git-diff-tasks",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"diff",
+				".vscode/tasks.json"
+			],
+			"isBackground": false
 		}
 	]
 }

@@ -1087,7 +1087,9 @@ test("bundled official product presets use filtered resource roots", () => {
     "goose-official": 4,
   };
 
-  for (const [sourceId, expectedCount] of Object.entries(skillOnlyExpectedCounts)) {
+  for (const [sourceId, expectedCount] of Object.entries(
+    skillOnlyExpectedCounts,
+  )) {
     const resources = bundledIndex.skills.filter(
       (resource) => resource.source === sourceId,
     );

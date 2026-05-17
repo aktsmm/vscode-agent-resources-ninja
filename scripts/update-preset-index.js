@@ -572,7 +572,11 @@ function createResourceKey(resource) {
 
 function createResourceDisplayKey(resource) {
   if (getResourceKind(resource) === "plugin") {
-    return [resource.source, "plugin", resource.pluginRoot || resource.path].join(":");
+    return [
+      resource.source,
+      "plugin",
+      resource.pluginRoot || resource.path,
+    ].join(":");
   }
   const pluginId = getPluginIdFromPath(resource.path);
   const description = String(resource.description || "")

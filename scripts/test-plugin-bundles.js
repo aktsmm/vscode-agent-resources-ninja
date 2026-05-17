@@ -27,21 +27,25 @@ const pluginBundles = [
 ];
 
 function namesForSource(source) {
-  return [...new Set(
-    index.skills
-      .filter((resource) => resource.source === source)
-      .filter((resource) => (resource.kind || "skill") === "skill")
-      .map((resource) => resource.name),
-  )].sort();
+  return [
+    ...new Set(
+      index.skills
+        .filter((resource) => resource.source === source)
+        .filter((resource) => (resource.kind || "skill") === "skill")
+        .map((resource) => resource.name),
+    ),
+  ].sort();
 }
 
 function resourceNamesForSource(source) {
-  return [...new Set(
-    index.skills
-      .filter((resource) => resource.source === source)
-      .filter((resource) => (resource.kind || "skill") !== "plugin")
-      .map((resource) => resource.name),
-  )].sort();
+  return [
+    ...new Set(
+      index.skills
+        .filter((resource) => resource.source === source)
+        .filter((resource) => (resource.kind || "skill") !== "plugin")
+        .map((resource) => resource.name),
+    ),
+  ].sort();
 }
 
 function sorted(values) {
