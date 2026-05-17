@@ -421,19 +421,30 @@ test("bundled Microsoft Azure Skills plugin source is complete", () => {
   assert.ok(source, "Expected microsoft-azure-skills source in bundled index");
   assert.strictEqual(source.type, "official");
   assert.strictEqual(source.url, "https://github.com/microsoft/azure-skills");
-  assert.deepStrictEqual(source.includePaths, ["skills/", ".mcp.json"]);
+  assert.deepStrictEqual(source.includePaths, [
+    "skills/",
+    ".mcp.json",
+    "plugin.json",
+    ".claude-plugin/",
+    ".cursor-plugin/",
+    "gemini-extension.json",
+  ]);
 
   const resources = bundledIndex.skills.filter(
     (resource) => resource.source === "microsoft-azure-skills",
   );
-  assert.strictEqual(resources.length, 32);
+  assert.strictEqual(resources.length, 34);
   assert.strictEqual(
     resources.filter((resource) => (resource.kind || "skill") === "skill")
       .length,
-    31,
+    32,
   );
   assert.strictEqual(
     resources.filter((resource) => resource.kind === "mcp").length,
+    1,
+  );
+  assert.strictEqual(
+    resources.filter((resource) => resource.kind === "plugin").length,
     1,
   );
   assert.ok(
@@ -455,8 +466,11 @@ test("bundled Microsoft Azure Skills plugin source is complete", () => {
   assert.match(bundle.description, /optional workspace mcp\.json merge/);
   assert.deepStrictEqual(
     [...bundle.skills].sort(),
-    resources.map((resource) => resource.name).sort(),
-    "Azure Skills bundle should include every indexed resource from the source",
+    resources
+      .filter((resource) => resource.kind !== "plugin")
+      .map((resource) => resource.name)
+      .sort(),
+    "Azure Skills bundle should include every indexed non-plugin resource from the source",
   );
   assert.deepStrictEqual(bundle.installOrder, bundle.skills);
   assert.ok(

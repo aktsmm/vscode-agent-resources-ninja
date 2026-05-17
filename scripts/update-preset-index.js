@@ -572,14 +572,7 @@ function createResourceKey(resource) {
 
 function createResourceDisplayKey(resource) {
   if (getResourceKind(resource) === "plugin") {
-    return [
-      resource.source,
-      "plugin",
-      resource.pluginRoot || resource.path,
-      String(resource.name || "")
-        .trim()
-        .toLowerCase(),
-    ].join(":");
+    return [resource.source, "plugin", resource.pluginRoot || resource.path].join(":");
   }
   const pluginId = getPluginIdFromPath(resource.path);
   const description = String(resource.description || "")
@@ -621,6 +614,16 @@ function shouldPreferResource(candidate, existing) {
       existing.pluginManifestKind === "marketplace" ? 1 : 0;
     if (candidateWeight !== existingWeight)
       return candidateWeight < existingWeight;
+
+    const candidateManifestPath = String(
+      candidate.pluginManifestPath || candidate.path || "",
+    );
+    const existingManifestPath = String(
+      existing.pluginManifestPath || existing.path || "",
+    );
+    if (candidateManifestPath.length !== existingManifestPath.length) {
+      return candidateManifestPath.length < existingManifestPath.length;
+    }
   }
   const candidatePath = String(candidate.path || "");
   const existingPath = String(existing.path || "");
@@ -673,6 +676,44 @@ function getPluginRootsFromPaths(paths) {
   ).sort((a, b) => b.length - a.length);
 }
 
+function shouldPreferPluginManifestInfo(candidate, existing) {
+  if (!existing) return true;
+  const candidateWeight =
+    candidate.pluginManifestKind === "marketplace" ? 1 : 0;
+  const existingWeight = existing.pluginManifestKind === "marketplace" ? 1 : 0;
+  if (candidateWeight !== existingWeight) {
+    return candidateWeight < existingWeight;
+  }
+  return (
+    candidate.pluginManifestPath.length < existing.pluginManifestPath.length
+  );
+}
+
+function getPluginManifestInfoByRoot(paths) {
+  const pluginInfos = new Map();
+
+  for (const filePath of paths) {
+    const kind = detectResourceKindFromPath(filePath);
+    if (kind !== "plugin") {
+      continue;
+    }
+
+    const pluginRoot = getPluginRootFromManifestPath(filePath) || ".";
+    const pluginInfo = {
+      pluginRoot,
+      pluginManifestPath: filePath.replace(/\\/g, "/"),
+      pluginManifestKind: getPluginManifestKind(filePath),
+    };
+
+    const existing = pluginInfos.get(pluginRoot);
+    if (shouldPreferPluginManifestInfo(pluginInfo, existing)) {
+      pluginInfos.set(pluginRoot, pluginInfo);
+    }
+  }
+
+  return pluginInfos;
+}
+
 function getRelativePathFromPluginRoot(filePath, pluginRoot) {
   const normalizedPath = String(filePath)
     .replace(/\\/g, "/")
@@ -686,6 +727,33 @@ function getRelativePathFromPluginRoot(filePath, pluginRoot) {
   return normalizedPath.startsWith(`${normalizedRoot}/`)
     ? normalizedPath.slice(normalizedRoot.length + 1)
     : undefined;
+}
+
+function getOwningPluginManifestInfo(filePath, kind, pluginManifestInfoByRoot) {
+  const normalizedPath = String(filePath)
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "");
+
+  for (const [pluginRoot, pluginInfo] of pluginManifestInfoByRoot.entries()) {
+    if (normalizedPath === pluginInfo.pluginManifestPath) {
+      continue;
+    }
+
+    const relativePath = getRelativePathFromPluginRoot(
+      normalizedPath,
+      pluginRoot,
+    );
+    if (!relativePath) {
+      continue;
+    }
+
+    const childKind = detectPluginChildResourceKind(relativePath);
+    if (childKind || pluginRoot === ".") {
+      return pluginInfo;
+    }
+  }
+
+  return undefined;
 }
 
 function detectPluginChildResourceKind(relativePath) {
@@ -729,8 +797,11 @@ async function processTree(data, owner, repoName, branch, source) {
   const skillRootDirectories = getSkillRootDirectoriesFromPaths(
     allowedBlobFiles.map((item) => item.path),
   );
-  const pluginRoots = getPluginRootsFromPaths(
+  const pluginManifestInfoByRoot = getPluginManifestInfoByRoot(
     allowedBlobFiles.map((item) => item.path),
+  );
+  const pluginRoots = Array.from(pluginManifestInfoByRoot.keys()).sort(
+    (a, b) => b.length - a.length,
   );
   const resourceFiles = allowedBlobFiles.filter((item) => {
     const kind = detectResourceKindWithPluginRoots(item.path, pluginRoots);
@@ -770,6 +841,17 @@ async function processTree(data, owner, repoName, branch, source) {
           );
           if (!kind) return null;
 
+          const pluginInfo =
+            kind === "plugin"
+              ? pluginManifestInfoByRoot.get(
+                  getPluginRootFromManifestPath(file.path) || ".",
+                )
+              : getOwningPluginManifestInfo(
+                  file.path,
+                  kind,
+                  pluginManifestInfoByRoot,
+                );
+
           const rawUrl = `https://raw.githubusercontent.com/${owner}/${repoName}/${branch}/${file.path}`;
           const response = await fetchWithTimeout(rawUrl);
           if (!response.ok) return null;
@@ -801,11 +883,11 @@ async function processTree(data, owner, repoName, branch, source) {
             license: skillInfo.license,
             author: skillInfo.author,
             version: skillInfo.version,
-            ...(kind === "plugin"
+            ...(pluginInfo
               ? {
-                  pluginRoot: skillInfo.pluginRoot,
-                  pluginManifestPath: skillInfo.pluginManifestPath,
-                  pluginManifestKind: skillInfo.pluginManifestKind,
+                  pluginRoot: pluginInfo.pluginRoot,
+                  pluginManifestPath: pluginInfo.pluginManifestPath,
+                  pluginManifestKind: pluginInfo.pluginManifestKind,
                 }
               : {}),
           };

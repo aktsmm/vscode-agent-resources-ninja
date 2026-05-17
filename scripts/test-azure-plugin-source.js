@@ -45,17 +45,49 @@ async function main() {
   const source = index.sources.find((candidate) => candidate.id === SOURCE_ID);
   assert.ok(source, "Azure plugin source should be bundled");
   assert.strictEqual(source.type, "official");
-  assert.deepStrictEqual(source.includePaths, ["plugin/skills/"]);
+  assert.deepStrictEqual(source.includePaths, [
+    "plugin/skills/",
+    "plugin/.plugin/",
+    "plugin/.claude-plugin/",
+    "plugin/.cursor-plugin/",
+    "plugin/gemini-extension.json",
+  ]);
 
   const resources = index.skills.filter(
     (resource) => resource.source === SOURCE_ID,
   );
-  assert.strictEqual(resources.length, 31, "Expected 31 Azure plugin skills");
-  assert.ok(
-    resources.every((resource) => (resource.kind || "skill") === "skill"),
+  assert.strictEqual(
+    resources.length,
+    33,
+    "Expected 32 Azure plugin skills plus one plugin manifest",
+  );
+  const pluginResources = resources.filter(
+    (resource) => resource.kind === "plugin",
+  );
+  assert.strictEqual(
+    pluginResources.length,
+    1,
+    "Expected one Azure plugin manifest",
+  );
+  const azurePlugin = pluginResources[0];
+  assert.strictEqual(azurePlugin.path, "plugin");
+  assert.strictEqual(azurePlugin.pluginRoot, "plugin");
+  assert.strictEqual(
+    azurePlugin.pluginManifestPath,
+    "plugin/.plugin/plugin.json",
   );
   assert.ok(
-    resources.every((resource) => resource.path.startsWith("plugin/skills/")),
+    resources
+      .filter((resource) => resource.kind !== "plugin")
+      .length === 32 &&
+      resources
+        .filter((resource) => resource.kind !== "plugin")
+      .every((resource) => (resource.kind || "skill") === "skill"),
+  );
+  assert.ok(
+    resources
+      .filter((resource) => resource.kind !== "plugin")
+      .every((resource) => resource.path.startsWith("plugin/skills/")),
     "Azure plugin resources should stay under the filtered plugin/skills root",
   );
 
@@ -64,6 +96,11 @@ async function main() {
   );
   assert.ok(azureRbac, "Expected azure-rbac to be indexed");
   assert.strictEqual(azureRbac.path, "plugin/skills/azure-rbac");
+  assert.strictEqual(azureRbac.pluginRoot, "plugin");
+  assert.strictEqual(
+    azureRbac.pluginManifestPath,
+    "plugin/.plugin/plugin.json",
+  );
 
   let branch = "main";
   let azureRbacFiles = [`${azureRbac.path}/SKILL.md`];
@@ -86,11 +123,20 @@ async function main() {
     azureRbacFiles.includes(`${azureRbac.path}/SKILL.md`),
     "The indexed Azure plugin install path should contain SKILL.md upstream",
   );
+  assert.ok(
+    pluginResources.length === 1,
+    "Expected Azure plugin manifest resource to be indexed",
+  );
 
   const skillText = await fetchText(
     `https://raw.githubusercontent.com/${SOURCE_REPO}/${branch}/${azureRbac.path}/SKILL.md`,
   );
   assert.match(skillText, /^---\n[\s\S]*name:\s*azure-rbac/m);
+
+  const pluginJson = await fetchJson(
+    `https://raw.githubusercontent.com/${SOURCE_REPO}/${branch}/plugin/.plugin/plugin.json`,
+  );
+  assert.strictEqual(pluginJson.name, "azure");
 
   const tempRoot = fs.mkdtempSync(
     path.join(os.tmpdir(), "resource-ninja-azure-plugin-"),

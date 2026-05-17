@@ -50,23 +50,42 @@ async function main() {
   assert.ok(source, "Microsoft Azure Skills source should be bundled");
   assert.strictEqual(source.type, "official");
   assert.strictEqual(source.url, SOURCE_URL);
-  assert.deepStrictEqual(source.includePaths, ["skills/", ".mcp.json"]);
+  assert.deepStrictEqual(source.includePaths, [
+    "skills/",
+    ".mcp.json",
+    "plugin.json",
+    ".claude-plugin/",
+    ".cursor-plugin/",
+    "gemini-extension.json",
+  ]);
 
   const resources = index.skills.filter(
     (resource) => resource.source === SOURCE_ID,
   );
   assert.strictEqual(
     resources.length,
-    32,
-    "Expected 32 Azure Skills resources",
+    34,
+    "Expected 34 Azure Skills resources including one plugin manifest",
   );
 
   const skillResources = resources.filter(
     (resource) => (resource.kind || "skill") === "skill",
   );
   const mcpResources = resources.filter((resource) => resource.kind === "mcp");
-  assert.strictEqual(skillResources.length, 31, "Expected 31 Azure skills");
+  const pluginResources = resources.filter(
+    (resource) => resource.kind === "plugin",
+  );
+  assert.strictEqual(skillResources.length, 32, "Expected 32 Azure skills");
   assert.strictEqual(mcpResources.length, 1, "Expected one Azure MCP config");
+  assert.strictEqual(
+    pluginResources.length,
+    1,
+    "Expected one Azure plugin manifest",
+  );
+  assert.strictEqual(pluginResources[0].path, ".");
+  assert.strictEqual(pluginResources[0].pluginRoot, ".");
+  assert.strictEqual(pluginResources[0].pluginManifestPath, "plugin.json");
+  assert.strictEqual(pluginResources[0].pluginManifestKind, "plugin");
 
   assert.ok(
     skillResources.every((resource) => resource.path.startsWith("skills/")),
@@ -92,6 +111,7 @@ async function main() {
     "azure-validate",
     "azure-deploy",
     "azure-rbac",
+    "azure-reliability",
     "azure-cost",
     "azure-diagnostics",
     "microsoft-foundry",
@@ -106,6 +126,8 @@ async function main() {
 
   const azureRbac = resourceByName(skillResources, "azure-rbac");
   assert.strictEqual(azureRbac.path, "skills/azure-rbac");
+  assert.strictEqual(azureRbac.pluginRoot, ".");
+  assert.strictEqual(azureRbac.pluginManifestPath, "plugin.json");
   assert.match(azureRbac.description, /Azure/i);
 
   const nestedDeployModel = resourceByName(skillResources, "deploy-model");
@@ -119,6 +141,8 @@ async function main() {
   assert.strictEqual(azureMcp.name, "azure");
   assert.strictEqual(azureMcp.path, ".mcp.json");
   assert.strictEqual(azureMcp.description, "MCP configuration for azure");
+  assert.strictEqual(azureMcp.pluginRoot, ".");
+  assert.strictEqual(azureMcp.pluginManifestPath, "plugin.json");
 
   const bundle = index.bundles.find(
     (candidate) => candidate.id === "microsoft-azure-skills-plugin-resources",
@@ -134,8 +158,11 @@ async function main() {
   assert.deepStrictEqual(bundle.installOrder, bundle.skills);
   assert.deepStrictEqual(
     [...bundle.skills].sort(),
-    resources.map((resource) => resource.name).sort(),
-    "Bundle should include every indexed Microsoft Azure Skills resource",
+    resources
+      .filter((resource) => resource.kind !== "plugin")
+      .map((resource) => resource.name)
+      .sort(),
+    "Bundle should include every indexed non-plugin Microsoft Azure Skills resource",
   );
 
   let branch = "main";
@@ -162,6 +189,10 @@ async function main() {
       upstreamPaths.includes(".mcp.json"),
       "Upstream root MCP config should exist",
     );
+    assert.ok(
+      upstreamPaths.includes("plugin.json"),
+      "Upstream root plugin manifest should exist",
+    );
   } catch (error) {
     console.warn(
       "WARN GitHub API tree unavailable; verifying indexed Azure Skills content through raw URLs only",
@@ -182,6 +213,11 @@ async function main() {
     "Upstream MCP config should define azure server",
   );
   assert.strictEqual(mcpJson.mcpServers.azure.command, "npx");
+
+  const pluginJson = await fetchJson(
+    `https://raw.githubusercontent.com/${SOURCE_REPO}/${branch}/plugin.json`,
+  );
+  assert.strictEqual(pluginJson.name, "azure");
 
   const updaterSource = fs.readFileSync(
     path.join(__dirname, "update-preset-index.js"),

@@ -236,13 +236,14 @@ function getPluginFallbackRoot(resourcePath?: string): string | undefined {
 function getPluginPackageRoot(
   resource: PluginPackageResource,
 ): string | undefined {
-  if (resource.kind === "plugin") {
-    return normalizePluginRoot(
-      resource.pluginRoot ||
-        getPluginRootFromManifestPath(
-          resource.pluginManifestPath || resource.path,
-        ),
-    );
+  const explicitRoot = normalizePluginRoot(
+    resource.pluginRoot ||
+      getPluginRootFromManifestPath(
+        resource.pluginManifestPath || resource.path,
+      ),
+  );
+  if (explicitRoot) {
+    return explicitRoot;
   }
   return getPluginFallbackRoot(resource.path);
 }

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.18] - 2026-05-17
+
+### Fixed
+
+- **Plugin Manifest Source Coverage** - Official plugin-distributed sources such as Microsoft Azure now index their plugin manifests alongside skills / MCP configs, so the Remote Resources plugin section can show actual plugin packages instead of hiding them behind skill-only groupings / Microsoft Azure などの公式 plugin 配布 source で、skills / MCP config だけでなく plugin manifest も同時に index するようにしました。これにより Remote Resources の plugin section で実際の plugin package を表示できます。
+- **Plugin Package Root Propagation** - Child resources now preserve plugin root / manifest metadata even when their install path does not start with `plugins/`, so plugin grouping works for top-level marketplace layouts as well as nested plugin payloads / child resource が `plugins/` で始まらない install path でも plugin root / manifest metadata を保持するようにし、top-level marketplace layout と nested plugin payload の両方で plugin grouping が機能するようにしました。
+- **Stale Official Install Sets** - Synced the Azure and AWS curated install sets with the current upstream indexed resource lists, including newly added skills such as `azure-reliability` and the latest AWS plugin skills / Azure と AWS の curated install set を現在の upstream index に同期し、`azure-reliability` などの追加 skill や最新の AWS plugin skills を含めるようにしました。
+
+### Tests
+
+- **Plugin Source Regression Coverage** - Revalidated Azure plugin sources, Azure skills marketplace sources, plugin bundle completeness, plugin manifest parsing, full plugin index modeling, UI scope actions, and compile after widening official plugin manifest coverage / 公式 plugin manifest coverage を広げたあと、Azure plugin source、Azure skills marketplace source、plugin bundle 完全性、plugin manifest parser、full plugin index model、UI scope actions、compile を再検証しました。
+
 ## [0.2.17] - 2026-05-17
 
 ### Changed

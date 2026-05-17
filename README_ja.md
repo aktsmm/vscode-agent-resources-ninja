@@ -66,6 +66,7 @@
 - リソースをキーワード検索（ローカル＆GitHub）
 - QuickPick 検索結果を resource kind（skills、agents、instructions、prompts、hooks、MCP config、plugins、Cursor rules）で絞り込み
 - **おすすめまとめインストール** は curated な選択式インストールのショートカットです。プラグインをまるごとインストールしたい場合は **プラグイン** の行を使います。**プラグイン中身を選択** はインデックス済みの plugin 中身だけをまとめて表示し、プラグイン本体を入れずに子リソースを選んでインストールできます。子リソースは各 resource kind にも表示され、行の詳細で plugin 由来が分かります。Installed 側の view では plugin 由来リソースを **プラグイン由来** にまとめて表示します。
+- 公式の plugin 配布 source は、upstream の manifest が `plugins/<name>/` 配下ではなく repository root や marketplace 向け top-level layout に置かれていても、plugin package 行と child resource 行の両方を表示できます。
 - Remote Resources の行では agents、hooks、MCP config、plugins、Cursor rules などすべての resource kind でインストール済み状態を文字と色で表示します。
 - MCP config の行は、確認用コピーなのか `.vscode/mcp.json` へマージ済みなのかを staged / merged 状態として詳細と tooltip に表示します。
 - Hook の行は configured / not configured、設定ソース、イベント、script path 警告などの静的診断を表示します。Agent Resources Ninja は hook を実行しません。

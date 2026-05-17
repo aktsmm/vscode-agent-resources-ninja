@@ -1080,17 +1080,14 @@ test("bundled awesome-copilot index includes non-skill resources", () => {
 });
 
 test("bundled official product presets use filtered resource roots", () => {
-  const expectedCounts = {
-    "aws-agent-plugins": 22,
-    "elastic-agent-skills": 33,
+  const skillOnlyExpectedCounts = {
     "google-gemini-cli": 11,
     "openai-codex": 10,
-    "anthropic-claude-code": 10,
     "cline-official": 1,
     "goose-official": 4,
   };
 
-  for (const [sourceId, expectedCount] of Object.entries(expectedCounts)) {
+  for (const [sourceId, expectedCount] of Object.entries(skillOnlyExpectedCounts)) {
     const resources = bundledIndex.skills.filter(
       (resource) => resource.source === sourceId,
     );
@@ -1103,6 +1100,42 @@ test("bundled official product presets use filtered resource roots", () => {
       resources.every((resource) => (resource.kind || "skill") === "skill"),
       `${sourceId} should currently contribute skills only`,
     );
+  }
+
+  const pluginSourceExpectations = {
+    "aws-agent-plugins": { total: 40, skills: 28, plugins: 9, hooks: 3 },
+    "elastic-agent-skills": { total: 71, skills: 66, plugins: 5 },
+    "anthropic-claude-code": {
+      total: 42,
+      skills: 10,
+      agents: 15,
+      plugins: 12,
+      hooks: 5,
+    },
+  };
+
+  for (const [sourceId, expected] of Object.entries(pluginSourceExpectations)) {
+    const resources = bundledIndex.skills.filter(
+      (resource) => resource.source === sourceId,
+    );
+    const counts = resources.reduce((acc, resource) => {
+      const kind = resource.kind || "skill";
+      acc[kind] = (acc[kind] || 0) + 1;
+      return acc;
+    }, {});
+    assert.strictEqual(
+      resources.length,
+      expected.total,
+      `Unexpected resource count for ${sourceId}`,
+    );
+    assert.strictEqual(counts.skill || 0, expected.skills);
+    assert.strictEqual(counts.plugin || 0, expected.plugins);
+    if (expected.agents !== undefined) {
+      assert.strictEqual(counts.agent || 0, expected.agents);
+    }
+    if (expected.hooks !== undefined) {
+      assert.strictEqual(counts.hook || 0, expected.hooks);
+    }
   }
 
   const excludedPathFragments = [
@@ -1145,7 +1178,9 @@ test("bundled resources respect source include and exclude path filters", () => 
       (resource) => resource.source === source.id,
     );
     for (const resource of resources) {
-      const resourcePath = String(resource.path || "")
+      const resourcePath = String(
+        resource.pluginManifestPath || resource.path || "",
+      )
         .replace(/\\/g, "/")
         .toLowerCase();
       assert.ok(

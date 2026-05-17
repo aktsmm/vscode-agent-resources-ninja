@@ -70,6 +70,7 @@ It gives you three practical views for everyday resource management: **Workspace
 - Search resources by keyword (local & GitHub)
 - Filter QuickPick search results by resource kind: skills, agents, instructions, prompts, hooks, MCP config resources, plugins, or Cursor rules
 - **Curated Install Sets** are curated, selectable install shortcuts. Use **Plugin** rows to install a whole plugin package. **Pick from a Plugin** shows indexed plugin contents only, so you can choose child resources without installing the whole plugin package; each child resource also remains visible under its own resource kind with plugin origin shown in the row details. Installed views group plugin-derived resources under **Plugin Origins**.
+- Official plugin-distributed sources can expose both the plugin package row and the child resource rows, even when the upstream manifest lives at the repository root or another marketplace-style top-level layout instead of `plugins/<name>/`.
 - Remote rows show installed state in text and color for every resource kind, including agents, hooks, MCP config resources, plugins, and Cursor rules.
 - MCP config rows distinguish review copies from `.vscode/mcp.json` merges with staged / merged status in row details and tooltips.
 - Hook rows show static configuration diagnostics such as configured / not configured status, config source, events, and missing script warnings. Agent Resources Ninja does not run hooks.

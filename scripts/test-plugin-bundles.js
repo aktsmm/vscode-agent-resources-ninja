@@ -27,18 +27,21 @@ const pluginBundles = [
 ];
 
 function namesForSource(source) {
-  return index.skills
-    .filter((resource) => resource.source === source)
-    .filter((resource) => (resource.kind || "skill") === "skill")
-    .map((resource) => resource.name)
-    .sort();
+  return [...new Set(
+    index.skills
+      .filter((resource) => resource.source === source)
+      .filter((resource) => (resource.kind || "skill") === "skill")
+      .map((resource) => resource.name),
+  )].sort();
 }
 
 function resourceNamesForSource(source) {
-  return index.skills
-    .filter((resource) => resource.source === source)
-    .map((resource) => resource.name)
-    .sort();
+  return [...new Set(
+    index.skills
+      .filter((resource) => resource.source === source)
+      .filter((resource) => (resource.kind || "skill") !== "plugin")
+      .map((resource) => resource.name),
+  )].sort();
 }
 
 function sorted(values) {
@@ -97,6 +100,23 @@ for (const { source, bundleId, mode } of pluginBundles) {
     bundle.installOrder,
     bundle.skills,
     `${bundleId} should keep explicit installOrder aligned with skills`,
+  );
+}
+
+for (const source of [
+  "microsoft-copilot-for-azure-plugin",
+  "microsoft-azure-skills",
+  "aws-agent-plugins",
+  "elastic-agent-skills",
+  "anthropic-claude-code",
+  "compound-engineering",
+]) {
+  const pluginResources = index.skills.filter(
+    (resource) => resource.source === source && resource.kind === "plugin",
+  );
+  assert.ok(
+    pluginResources.length >= 1,
+    `${source} should expose at least one plugin manifest resource`,
   );
 }
 
