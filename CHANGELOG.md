@@ -5,7 +5,18 @@ All notable changes to the "Agent Resources Ninja" extension will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.21] - 2026-05-19
+
+### Changed
+
+- Replaced the unified Ref catalog root with native README indexes for every resource kind, so Ref output now writes to paths such as `.github/skills/README.md`, `.github/agents/README.md`, and `~/.copilot/prompts/README.md` instead of `.github/resource-catalog/*.md` / Ref 出力の統一 catalog root を廃止し、すべての resource kind を native README index へ統一しました。これにより `.github/resource-catalog/*.md` ではなく `.github/skills/README.md`、`.github/agents/README.md`、`~/.copilot/prompts/README.md` などへ出力します。
+- Removed the `resourceNinja.refCatalogDirectory` setting and simplified Ref output to a single native-README placement rule, while keeping `resourceNinja.refCatalogFormat` as the detail-level switch / `resourceNinja.refCatalogDirectory` 設定を削除し、Ref 出力の配置ルールを native README へ一本化しました。詳細粒度の切り替えは `resourceNinja.refCatalogFormat` に集約しています。
+- Ref README indexes now use managed `resource-ninja-catalog` sections so cleanup can remove only generated content while preserving any manually authored README text outside the managed block / Ref 用 README index は `resource-ninja-catalog` の managed section を使うようにし、cleanup では生成部分だけを消して README の手書き内容を保持できるようにしました。
+- Aligned Resource Output wording across README, README_ja, Japanese settings copy, coexistence runbooks, and instruction-target UX so command names and user-visible guidance no longer mix the old instruction-file terminology / README、README_ja、日本語 settings copy、coexistence runbook、instruction-target UX の Resource Output 文言を揃え、旧 instruction-file 用語がコマンド名や利用者向けガイダンスに混ざらないようにしました。
+
+### Tests
+
+- Revalidated compile, extension-host smoke, resource regression, README/localization/coexistence guards, manifest consistency, and npm audit before release / リリース前に compile、extension-host smoke、resource 回帰、README/localization/coexistence guard、manifest consistency、npm audit を再検証しました。
 
 ## [0.2.20] - 2026-05-18
 

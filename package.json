@@ -2,7 +2,7 @@
   "name": "agent-resources-ninja",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.20",
+  "version": "0.2.21",
   "publisher": "yamapan",
   "license": "CC-BY-NC-SA-4.0",
   "icon": "resources/icon.png",
@@ -1401,16 +1401,10 @@
           ],
           "markdownDescription": "%config.outputFormat.markdownDescription%"
         },
-        "resourceNinja.refCatalogDirectory": {
-          "type": "string",
-          "default": "",
-          "order": 24,
-          "markdownDescription": "%config.refCatalogDirectory.markdownDescription%"
-        },
         "resourceNinja.refCatalogFormat": {
           "type": "string",
           "default": "full",
-          "order": 25,
+          "order": 24,
           "enum": [
             "full",
             "compact",
@@ -1450,13 +1444,13 @@
         "resourceNinja.showBuiltInResources": {
           "type": "boolean",
           "default": false,
-          "order": 26,
+          "order": 25,
           "markdownDescription": "%config.showBuiltInResources.markdownDescription%"
         },
         "resourceNinja.remoteResourceViewMode": {
           "type": "string",
           "default": "repositoryFirst",
-          "order": 27,
+          "order": 26,
           "enum": [
             "repositoryFirst",
             "resourceTypeFirst"
@@ -1470,7 +1464,7 @@
         "resourceNinja.language": {
           "type": "string",
           "default": "auto",
-          "order": 28,
+          "order": 27,
           "enum": [
             "auto",
             "en",
@@ -1487,25 +1481,25 @@
           "type": "string",
           "default": "",
           "editPresentation": "password",
-          "order": 29,
+          "order": 28,
           "markdownDescription": "%config.githubToken.markdownDescription%"
         },
         "resourceNinja.instructionBlock.includeAgents": {
           "type": "boolean",
           "default": false,
-          "order": 30,
+          "order": 29,
           "markdownDescription": "%config.instructionBlock.includeAgents.markdownDescription%"
         },
         "resourceNinja.instructionBlock.includeInstructions": {
           "type": "boolean",
           "default": false,
-          "order": 31,
+          "order": 30,
           "markdownDescription": "%config.instructionBlock.includeInstructions.markdownDescription%"
         },
         "resourceNinja.instructionBlock.globalHome.includeAgents": {
           "type": "string",
           "default": "inherit",
-          "order": 32,
+          "order": 31,
           "enum": [
             "inherit",
             "on",
@@ -1521,7 +1515,7 @@
         "resourceNinja.instructionBlock.globalHome.includeInstructions": {
           "type": "string",
           "default": "inherit",
-          "order": 33,
+          "order": 32,
           "enum": [
             "inherit",
             "on",

@@ -184,11 +184,11 @@ test("user global resources expose reinstall actions", () => {
   );
   assert.strictEqual(
     nls["command.reinstallUserResource"],
-    "Reinstall User / Global Resource Home Resource",
+    "Reinstall User / Global Resource",
   );
   assert.strictEqual(
     nlsJa["command.reinstallUserResource"],
-    "ユーザー / Global Resource Home リソースを再インストール",
+    "ユーザー / グローバル リソースを再インストール",
   );
   assert.match(userResourcesProviderSource, /userRemoteResource/);
   assert.match(extensionSource, /resourceNinja\.reinstallUserResource/);
@@ -504,7 +504,7 @@ test("user-facing terminology prefers global resource home", () => {
   assert.strictEqual(nls["view.userResources"], "User / Global Resource Home");
   assert.strictEqual(
     nlsJa["view.userResources"],
-    "ユーザー / Global Resource Home",
+    "ユーザー / グローバル リソース",
   );
   assert.strictEqual(
     nls["config.defaultInstallTarget.globalHome"],
@@ -514,10 +514,13 @@ test("user-facing terminology prefers global resource home", () => {
     nlsJa["config.defaultInstallTarget.globalHome"],
     "Global Resource Home - 選択中の共有リソースルートにインストール",
   );
-  assert.match(extensionSource, /label: "Global Resource Home"/);
+  assert.match(
+    extensionSource,
+    /label: isJa \? "グローバル リソース" : "Global Resource Home"/,
+  );
   assert.match(userResourcesProviderSource, /Global Resource Home/);
   assert.match(readme, /Global Resource Home/);
-  assert.match(readmeJa, /Global Resource Home/);
+  assert.match(readmeJa, /グローバル リソース|Global Resource Home/);
 });
 
 test("user global resource empty state gives next action", () => {

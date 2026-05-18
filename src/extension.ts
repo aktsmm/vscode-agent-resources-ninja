@@ -249,7 +249,6 @@ const RESETTABLE_RESOURCE_NINJA_SETTINGS = [
   "language",
   "useRefOutput",
   "outputFormat",
-  "refCatalogDirectory",
   "refCatalogFormat",
   "singleClickInstall",
   "defaultInstallTarget",
@@ -857,7 +856,6 @@ export async function activate(
       e.affectsConfiguration("resourceNinja.globalHomeDirectory") ||
       e.affectsConfiguration("resourceNinja.useRefOutput") ||
       e.affectsConfiguration("resourceNinja.outputFormat") ||
-      e.affectsConfiguration("resourceNinja.refCatalogDirectory") ||
       e.affectsConfiguration("resourceNinja.refCatalogFormat") ||
       e.affectsConfiguration("resourceNinja.coexistenceMode") ||
       e.affectsConfiguration("resourceNinja.instructionBlock.includeAgents") ||
@@ -912,7 +910,7 @@ export async function activate(
             );
           } catch (err) {
             logger.error(
-              "Failed to update instruction file on setting change:",
+              "Failed to update resource output on setting change:",
               err,
             );
           }
@@ -1720,12 +1718,12 @@ export async function activate(
             ? "説明文メタデータを保存します。インストラクションファイル同期先は無効です（空にするとデフォルトに戻ります）"
             : autoUpdateInstruction
               ? `生成される instruction block に表示する説明文を入力してください（同期先: ${instructionTarget}、空にするとデフォルトに戻ります）`
-              : `説明文メタデータを保存します。自動更新は無効です。必要に応じて Update Instruction File で ${instructionTarget} を更新してください（空にするとデフォルトに戻ります）`
+              : `説明文メタデータを保存します。自動更新は無効です。必要に応じて Update Resource Output で ${instructionTarget} を更新してください（空にするとデフォルトに戻ります）`
           : !instructionTargetEnabled
             ? "Save the description metadata. Instruction file sync target is disabled (leave empty to reset to default)"
             : autoUpdateInstruction
               ? `Enter the description shown in the generated instruction block (target: ${instructionTarget}; leave empty to reset to default)`
-              : `Save the description metadata. Automatic instruction updates are disabled; run Update Instruction File to refresh ${instructionTarget} when needed (leave empty to reset to default)`,
+              : `Save the description metadata. Automatic instruction updates are disabled; run Update Resource Output to refresh ${instructionTarget} when needed (leave empty to reset to default)`,
         value: currentValue,
         placeHolder: isJapanese()
           ? "例: エージェントワークフローの設計・レビュー・改善"
@@ -1763,12 +1761,12 @@ export async function activate(
           ? shouldUpdateInstructionIndex
             ? `${skill.name} の説明を更新し、${instructionTarget} を更新しました`
             : instructionTargetEnabled
-              ? `${skill.name} の説明メタデータを保存しました。自動更新は無効です。必要に応じて Update Instruction File を実行してください。`
+              ? `${skill.name} の説明メタデータを保存しました。自動更新は無効です。必要に応じて Update Resource Output を実行してください。`
               : `${skill.name} の説明メタデータを保存しました。インストラクションファイル同期先は無効です。`
           : shouldUpdateInstructionIndex
             ? `Updated description for ${skill.name} and refreshed ${instructionTarget}`
             : instructionTargetEnabled
-              ? `Saved description metadata for ${skill.name}. Automatic instruction updates are disabled; run Update Instruction File when needed.`
+              ? `Saved description metadata for ${skill.name}. Automatic instruction updates are disabled; run Update Resource Output when needed.`
               : `Saved description metadata for ${skill.name}. Instruction file sync target is disabled.`,
       );
 
@@ -4396,9 +4394,9 @@ export async function activate(
 
     targetOptions.push(
       {
-        label: "Global Resource Home",
+        label: isJa ? "グローバル リソース" : "Global Resource Home",
         description: isJa
-          ? "選択中のグローバルリソースホーム"
+          ? "選択中の共有リソースルート"
           : "Selected global resource home",
         detail: getResourceRootUri(
           workspaceFolder.uri,
@@ -4571,7 +4569,7 @@ export async function activate(
     createResourceHandler,
   );
 
-  // Command: Update instruction file manually
+  // Command: Update resource output manually
   const updateInstructionCmd = vscode.commands.registerCommand(
     "resourceNinja.updateInstruction",
     async () => {
@@ -4604,14 +4602,14 @@ export async function activate(
         await updateInstructionFile(workspaceFolder.uri, context);
         vscode.window.showInformationMessage(
           isJapanese()
-            ? `インストラクションファイルを更新しました: ${instructionTarget}`
-            : `Instruction file updated: ${instructionTarget}`,
+            ? `リソース出力を更新しました: ${instructionTarget}`
+            : `Resource output updated: ${instructionTarget}`,
         );
       } catch (error) {
         vscode.window.showErrorMessage(
           isJapanese()
-            ? `インストラクションファイルの更新に失敗しました: ${error}`
-            : `Failed to update instruction file: ${error}`,
+            ? `リソース出力の更新に失敗しました: ${error}`
+            : `Failed to update resource output: ${error}`,
         );
       }
     },
@@ -4661,14 +4659,14 @@ export async function activate(
         );
         vscode.window.showInformationMessage(
           isJapanese()
-            ? `Global のインストラクションファイルを更新しました: ${instructionTarget}`
-            : `Global instruction file updated: ${instructionTarget}`,
+            ? `グローバル リソース出力を更新しました: ${instructionTarget}`
+            : `Global resource output updated: ${instructionTarget}`,
         );
       } catch (error) {
         vscode.window.showErrorMessage(
           isJapanese()
-            ? `Global のインストラクションファイル更新に失敗しました: ${error}`
-            : `Failed to update global instruction file: ${error}`,
+            ? `グローバル リソース出力の更新に失敗しました: ${error}`
+            : `Failed to update global resource output: ${error}`,
         );
       }
     },
@@ -4832,12 +4830,7 @@ export async function activate(
     const { format } = await resolveOutputFormat(workspaceFolder.uri);
     const preferredOutputUri =
       format === "ref"
-        ? resolvePrimaryRefCatalogUri(
-            workspaceFolder.uri,
-            fileUri,
-            scope,
-            config,
-          )
+        ? resolvePrimaryRefCatalogUri(workspaceFolder.uri, scope, config)
         : fileUri;
 
     const tryOpenDocument = async (uri: vscode.Uri): Promise<boolean> => {
@@ -4899,7 +4892,7 @@ export async function activate(
       const cancelLabel = isJa ? "キャンセル" : "Cancel";
       const create = await vscode.window.showInformationMessage(
         isJa
-          ? `${targetLabel} の出力が見つかりません。managed output を再生成しても開けなかったため、同期先ファイルを作成しますか？
+          ? `${targetLabel} の出力が見つかりません。生成リソース出力を再生成しても開けなかったため、同期先ファイルを作成しますか？
 ${fileUri.fsPath}`
           : `${targetLabel} output was not found. Managed output regeneration did not create an openable target. Create the sync target file?
 ${fileUri.fsPath}`,
@@ -5335,12 +5328,12 @@ async function checkVersionAndRefreshMetadata(
       await updateInstructionFile(workspaceUri, context);
       vscode.window.showInformationMessage(
         isJapanese()
-          ? "🥷 出力フォーマット設定が更新されました。インストラクションファイルを新フォーマットで再生成しました。"
-          : "🥷 Output format setting migrated. Regenerated instruction file with new format.",
+          ? "🥷 出力フォーマット設定が更新されました。リソース出力を新フォーマットで再生成しました。"
+          : "🥷 Output format setting migrated. Regenerated resource output with the new format.",
       );
     } catch (error) {
       logger.error(
-        "[Resource Ninja] Failed to update instruction file after format migration:",
+        "[Resource Ninja] Failed to update resource output after format migration:",
         error,
       );
     }

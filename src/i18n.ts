@@ -14,7 +14,7 @@ const jaMessages = {
   installTargetWorkspaceDescription: "このワークスペース: {0}",
   installTargetUserProfileLabel: "ユーザープロファイル",
   installTargetUserProfileDescription: "ユーザー既定領域: {0}",
-  installTargetCopilotHomeLabel: "Global Resource Home",
+  installTargetCopilotHomeLabel: "グローバル リソース",
   installTargetCopilotHomeDescription: "共有リソースルート: {0}",
   installTargetCustomLabel: "カスタム",
   installTargetCustomDescription: "保存先フォルダーを選択",
@@ -128,7 +128,7 @@ const jaMessages = {
   skillCreated: "✅ {0} を作成しました",
   noLocalSkills: "ローカルリソースが見つかりません",
   instructionFileUpdatedOnSettingChange:
-    "✅ 設定変更によりインストラクションファイルを更新しました",
+    "✅ 設定変更によりリソース出力を更新しました",
 } as const;
 
 type MessageKey = keyof typeof jaMessages;
@@ -259,7 +259,7 @@ const enMessages: MessageDictionary = {
   skillCreated: "✅ {0} created",
   noLocalSkills: "No local resources found",
   instructionFileUpdatedOnSettingChange:
-    "✅ Instruction file updated due to setting change",
+    "✅ Resource output updated due to setting change",
 };
 
 /**

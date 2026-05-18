@@ -47,7 +47,7 @@ test("manifest splits Ref mode from inline output format", () => {
     "compact",
     "legacy",
   ]);
-  assert.strictEqual(config["resourceNinja.refCatalogDirectory"].default, "");
+  assert.strictEqual(config["resourceNinja.refCatalogDirectory"], undefined);
   assert.strictEqual(config["resourceNinja.refCatalogFormat"].default, "full");
   assert.deepStrictEqual(config["resourceNinja.refCatalogFormat"].enum, [
     "full",
@@ -81,38 +81,35 @@ test("tool detector prefers ref for always-loaded markdown targets", () => {
   );
 });
 
-test("instruction manager defines scope-aware ref catalog roots", () => {
+test("instruction manager resolves native README indexes and legacy cleanup roots", () => {
   assert.match(
     instructionManagerSource,
     /getConfiguration\([\s\S]*"resourceNinja",[\s\S]*workspaceUri[\s\S]*\)/,
   );
   assert.match(
     instructionManagerSource,
-    /DEFAULT_WORKSPACE_REF_CATALOG_DIRECTORY = "\.github\/resource-catalog"/,
+    /LEGACY_WORKSPACE_REF_CATALOG_DIRECTORY = "\.github\/resource-catalog"/,
   );
   assert.match(
     instructionManagerSource,
-    /DEFAULT_GLOBAL_REF_CATALOG_DIRECTORY = "\.catalog\/resources"/,
+    /LEGACY_GLOBAL_REF_CATALOG_DIRECTORY = "\.catalog\/resources"/,
   );
   assert.match(
     instructionManagerSource,
-    /scope === "workspace"[\s\S]*DEFAULT_WORKSPACE_REF_CATALOG_DIRECTORY/,
+    /function resolveWorkspaceResourceDirectoryUri/,
   );
   assert.match(
     instructionManagerSource,
-    /const instructionDirectoryUri = vscode\.Uri\.file\([\s\S]*path\.dirname\(instructionUri\.fsPath\)/,
+    /function resolveGlobalRefCatalogDirectoryUri/,
   );
+  assert.match(
+    instructionManagerSource,
+    /function resolveRefCatalogFileUri[\s\S]*README\.md/,
+  );
+  assert.match(instructionManagerSource, /function getLegacyRefCatalogRootUri/);
 });
 
-test("instruction manager generates per-kind ref catalogs and skill-only IMPORTANT copy", () => {
-  assert.match(instructionManagerSource, /fileName: "skills\.md"/);
-  assert.match(instructionManagerSource, /fileName: "agents\.md"/);
-  assert.match(instructionManagerSource, /fileName: "instructions\.md"/);
-  assert.match(instructionManagerSource, /fileName: "prompts\.md"/);
-  assert.match(instructionManagerSource, /fileName: "hooks\.md"/);
-  assert.match(instructionManagerSource, /fileName: "mcp\.md"/);
-  assert.match(instructionManagerSource, /fileName: "plugins\.md"/);
-  assert.match(instructionManagerSource, /fileName: "cursor-rules\.md"/);
+test("instruction manager generates per-kind README indexes and preserves manual content", () => {
   assert.match(
     instructionManagerSource,
     /kind === "skill"[\s\S]*Prefer skill-led reasoning/,
@@ -126,9 +123,20 @@ test("instruction manager generates per-kind ref catalogs and skill-only IMPORTA
   assert.match(instructionManagerSource, /getConfiguredRefCatalogFormat/);
   assert.match(instructionManagerSource, /Compressed Index/);
   assert.match(instructionManagerSource, /REF_CATALOG_MARKER_PREFIX/);
+  assert.match(instructionManagerSource, /REF_CATALOG_END_MARKER_PREFIX/);
   assert.match(
     instructionManagerSource,
     /deleteGeneratedRefCatalogFileIfExists/,
+  );
+  assert.match(
+    instructionManagerSource,
+    /async function cleanupLegacyRefCatalogFiles/,
+  );
+  assert.match(instructionManagerSource, /stripCatalogSection/);
+  assert.match(instructionManagerSource, /upsertCatalogSection/);
+  assert.match(
+    instructionManagerSource,
+    /await cleanupLegacyRefCatalogFiles\([\s\S]*skillSource\.scope/,
   );
   assert.match(instructionManagerSource, /Keeping non-generated catalog file/);
   assert.match(
@@ -137,19 +145,17 @@ test("instruction manager generates per-kind ref catalogs and skill-only IMPORTA
   );
 });
 
-test("README documents ref output and catalog directories", () => {
+test("README documents ref output with native README indexes", () => {
   const docs = [readme, readmeJa].join("\n");
   assert.match(docs, /resourceNinja\.useRefOutput/);
-  assert.match(docs, /resourceNinja\.refCatalogDirectory/);
+  assert.doesNotMatch(docs, /resourceNinja\.refCatalogDirectory/);
+  assert.doesNotMatch(docs, /Ref Catalog Output Directory/);
   assert.match(docs, /resourceNinja\.refCatalogFormat/);
-  assert.match(docs, /\.github\/resource-catalog/);
-  assert.match(docs, /\.catalog\/resources/);
+  assert.match(docs, /\.github\/skills\/README\.md/);
+  assert.match(docs, /\.github\/agents\/README\.md/);
+  assert.match(docs, /~\/.copilot\/prompts\/README\.md/);
   assert.match(docs, /resource-ninja-catalog/);
-  assert.match(docs, /manually authored files|手書きファイル/);
-  assert.match(
-    docs,
-    /Leave `resourceNinja\.refCatalogDirectory` empty|`resourceNinja\.refCatalogDirectory` は空欄/,
-  );
+  assert.match(docs, /manually authored README|手書き README/);
   assert.doesNotMatch(docs, /Default `auto` mode|既定の `auto` モード/);
   assert.doesNotMatch(
     docs,
@@ -162,7 +168,7 @@ test("README documents ref output and catalog directories", () => {
   assert.match(docs, /Use Ref Output|Ref 出力/);
   assert.match(
     docs,
-    /catalog file \(`refCatalogFormat`\)|catalog file \(`refCatalogFormat`\)|catalog 内の詳細形式/,
+    /README index \(`refCatalogFormat`\)|README index \(`refCatalogFormat`\)|README index 内の詳細形式|README index の詳細形式/,
   );
   assert.doesNotMatch(
     docs,
@@ -175,16 +181,16 @@ test("settings copy distinguishes coexistence mode from output format", () => {
   assert.match(settingsCopy, /coexistenceMode = auto/);
   assert.match(settingsCopy, /useRefOutput/);
   assert.match(settingsCopy, /refCatalogFormat/);
-  assert.match(settingsCopy, /config\.refCatalogFormat\.full|Full catalog/);
+  assert.match(settingsCopy, /config\.refCatalogFormat\.full|Full index/);
   assert.doesNotMatch(settingsCopy, /default `auto` mode|既定の `auto` モード/);
 });
 
-test("extension watches ref settings and migrates legacy output formats across scopes", () => {
+test("extension watches remaining ref settings and migrates legacy output formats across scopes", () => {
   assert.match(
     extensionSource,
     /affectsConfiguration\("resourceNinja\.useRefOutput"\)/,
   );
-  assert.match(
+  assert.doesNotMatch(
     extensionSource,
     /affectsConfiguration\("resourceNinja\.refCatalogDirectory"\)/,
   );
@@ -204,6 +210,19 @@ test("extension watches ref settings and migrates legacy output formats across s
   assert.match(extensionSource, /markdown: "legacy"/);
   assert.match(extensionSource, /"compressed-index": "compact"/);
   assert.match(extensionSource, /"markdown-with-index": "full"/);
+  assert.match(
+    extensionSource,
+    /resolvePrimaryRefCatalogUri\([\s\S]*scope,[\s\S]*config/,
+  );
+});
+
+test("release notes no longer mention deleted refCatalogDirectory setting", () => {
+  const releaseNotes = fs.readFileSync(
+    path.join(repoRoot, `release-notes-v${packageJson.version}.md`),
+    "utf8",
+  );
+  assert.doesNotMatch(releaseNotes, /refCatalogDirectory/);
+  assert.match(releaseNotes, /refCatalogFormat/);
 });
 
 console.log("RESULT=PASS");

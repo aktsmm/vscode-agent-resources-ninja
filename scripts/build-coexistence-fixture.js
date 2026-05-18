@@ -250,7 +250,7 @@ function buildScenarioB() {
     path.join(scenario, "README.md"),
     renderScenarioReadme("Scenario B - Resource NINJA Solo", [
       "Open this folder with only Resource NINJA installed or enabled.",
-      "Run Resource NINJA: Update Instruction File.",
+      "Run Resource NINJA: Update Resource Output.",
       "Expected result: the shared marker block is created and keeps only the mandatory `skill` row because agents and instructions are opt-in.",
     ]),
   );
@@ -274,14 +274,14 @@ function buildScenarioF() {
     path.join(scenario, "README.md"),
     renderScenarioReadme("Scenario F - Uninstall Skill NINJA", [
       "Open this folder with both extensions initially enabled so the pre-populated AGENTS.md represents a prior shared-block state.",
-      "Disable or uninstall Skill NINJA, then run Resource NINJA: Recompute Coexistence Ownership followed by Resource NINJA: Update Instruction File.",
+      "Disable or uninstall Skill NINJA, then run Resource NINJA: Recompute Coexistence Ownership followed by Resource NINJA: Update Resource Output.",
       "Expected result: Resource NINJA remains owner, but standalone exclusions apply again, so the shared block collapses back to the mandatory `skill` row.",
     ]),
   );
 }
 
 function buildRunbook() {
-  const content = `# Resource NINJA Coexistence Fixture Walkthrough\n\nThis fixture complements the Skill NINJA fixture set with the Resource-only scenarios that cannot be produced from the subset-side repository.\n\n## Included scenarios\n\n- B-resources-solo: Resource NINJA only, shared block generated in standalone mode with the default skill-only policy.\n- F-uninstall-skill: shared block starts in a prior coexistence state, then Resource NINJA refreshes after the skill-only sibling extension is disabled or uninstalled.\n\n## Common setup\n\n1. Build or install the coexistence test VSIX for Resource NINJA.\n2. Open one scenario folder in a fresh VS Code window.\n3. Verify \`.vscode/settings.json\` was loaded for the workspace.\n4. Compare \`AGENTS.md\` against \`expected-after.md\` after the manual command sequence.\n\n## Commands used during manual validation\n\n- Resource NINJA: Show Coexistence Status\n- Resource NINJA: Recompute Coexistence Ownership\n- Resource NINJA: Update Instruction File\n- Resource NINJA: Remove Managed Marker Block (optional reset)\n\n## Notes\n\nThese scenarios reflect the current Resource NINJA implementation semantics: in standalone mode, the generated shared block always keeps \`skill\`. Agents and instructions are opt-in through \`instructionBlock.*\` settings, and legacy \`resourceNinja.kindsExcluded\` is only a compatibility layer for optional kinds. When the skill-only sibling extension is detected and Resource NINJA owns the shared block, those legacy exclusions are ignored at runtime.\n`;
+  const content = `# Resource NINJA Coexistence Fixture Walkthrough\n\nThis fixture complements the Skill NINJA fixture set with the Resource-only scenarios that cannot be produced from the subset-side repository.\n\n## Included scenarios\n\n- B-resources-solo: Resource NINJA only, shared block generated in standalone mode with the default skill-only policy.\n- F-uninstall-skill: shared block starts in a prior coexistence state, then Resource NINJA refreshes after the skill-only sibling extension is disabled or uninstalled.\n\n## Common setup\n\n1. Build or install the coexistence test VSIX for Resource NINJA.\n2. Open one scenario folder in a fresh VS Code window.\n3. Verify \`.vscode/settings.json\` was loaded for the workspace.\n4. Compare \`AGENTS.md\` against \`expected-after.md\` after the manual command sequence.\n\n## Commands used during manual validation\n\n- Resource NINJA: Show Coexistence Status\n- Resource NINJA: Recompute Coexistence Ownership\n- Resource NINJA: Update Resource Output\n- Resource NINJA: Remove Managed Marker Block (optional reset)\n\n## Notes\n\nThese scenarios reflect the current Resource NINJA implementation semantics: in standalone mode, the generated shared block always keeps \`skill\`. Agents and instructions are opt-in through \`instructionBlock.*\` settings, and legacy \`resourceNinja.kindsExcluded\` is only a compatibility layer for optional kinds. When the skill-only sibling extension is detected and Resource NINJA owns the shared block, those legacy exclusions are ignored at runtime.\n`;
   writeFile("run.md", content);
 }
 

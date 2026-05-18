@@ -185,7 +185,7 @@ test("welcome text is resource-oriented and not skill-only", () => {
 
 test("user welcome names Global Resource Home", () => {
   assert.match(localizedContent(userView), /Global Resource Home/);
-  assert.match(localizedContent(userView, "ja"), /Global Resource Home/);
+  assert.match(localizedContent(userView, "ja"), /グローバル リソース/);
 });
 
 test("remote welcome explains bundled or GitHub sources", () => {

@@ -65,7 +65,10 @@ test("user profile target remains hidden for skills and hooks", () => {
 });
 
 test("global resource home target previews the configured root", () => {
-  assert.match(targetOptionsSource, /label: "Global Resource Home"/);
+  assert.match(
+    targetOptionsSource,
+    /label: isJa \? "グローバル リソース" : "Global Resource Home"/,
+  );
   assert.match(targetOptionsSource, /kind,\n\s*"globalHome"/);
 });
 

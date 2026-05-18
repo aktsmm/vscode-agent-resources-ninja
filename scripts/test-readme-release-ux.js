@@ -216,6 +216,29 @@ test("README links Japanese edition through GitHub absolute URL", () => {
   );
 });
 
+test("README introduces the companion Agent Skills Ninja flow", () => {
+  const docs = [readme, readmeJa].join("\n");
+  assert.match(docs, /Companion Extension/);
+  assert.match(docs, /Agent Skills Ninja/);
+  assert.match(
+    docs,
+    /marketplace\.visualstudio\.com\/items\?itemName=yamapan\.agent-skill-ninja/,
+  );
+  assert.match(docs, /coexistenceMode = auto/);
+});
+
+test("README front matter summarizes the ref-first output model", () => {
+  assert.match(readme, /Managed output follows a ref-first model by default/);
+  assert.match(readme, /Use Ref Output/);
+  assert.match(readmeJa, /生成リソース出力は既定で ref-first/);
+  assert.match(readmeJa, /Use Ref Output/);
+});
+
+test("README_ja avoids stale managed-output wording", () => {
+  assert.doesNotMatch(readmeJa, /managed output/);
+  assert.match(readmeJa, /生成リソース出力/);
+});
+
 test("README docs avoid legacy release-facing claims", () => {
   const docs = allDocsText();
   assert.doesNotMatch(docs, /8 Tools|8 ツール/);

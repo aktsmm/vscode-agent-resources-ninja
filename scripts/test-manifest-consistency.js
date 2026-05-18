@@ -562,7 +562,7 @@ test("local views appear before remote resources", () => {
   assert.strictEqual(nls["view.userResources"], "User / Global Resource Home");
   assert.strictEqual(
     nlsJa["view.userResources"],
-    "ユーザー / Global Resource Home",
+    "ユーザー / グローバル リソース",
   );
 });
 
@@ -1062,7 +1062,6 @@ test("settings order keeps install and destination paths first", () => {
     "resourceNinja.autoUpdateResourcesOnUpgrade",
     "resourceNinja.useRefOutput",
     "resourceNinja.outputFormat",
-    "resourceNinja.refCatalogDirectory",
     "resourceNinja.refCatalogFormat",
     "resourceNinja.showBuiltInResources",
     "resourceNinja.remoteResourceViewMode",

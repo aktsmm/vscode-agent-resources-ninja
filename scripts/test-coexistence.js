@@ -107,3 +107,12 @@ test("shared marker strings are wired in source", () => {
   );
   assert.match(instructionManagerSource, /setTimeout\(resolve, 200\)/);
 });
+
+test("coexistence fixture docs use current resource output command names", () => {
+  const fixtureBuilderSource = fs.readFileSync(
+    path.join(repoRoot, "scripts", "build-coexistence-fixture.js"),
+    "utf8",
+  );
+  assert.match(fixtureBuilderSource, /Update Resource Output/);
+  assert.doesNotMatch(fixtureBuilderSource, /Update Instruction File/);
+});

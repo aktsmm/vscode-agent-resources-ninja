@@ -240,7 +240,7 @@ test("Global Resource Home terminology is user-facing", () => {
       "jaMessages",
       "installTargetCopilotHomeLabel",
     ),
-    /Global Resource Home/,
+    /Global Resource Home|共有リソースルート|グローバル リソース/,
   );
   for (const value of packageTextValues) {
     assert.doesNotMatch(value, /Copilot Home/);
@@ -324,14 +324,12 @@ test("settings output format copy stays professional", () => {
     nls["config.outputFormat.full"],
     nls["config.outputFormat.compact"],
     nls["config.outputFormat.legacy"],
-    nls["config.refCatalogDirectory.markdownDescription"],
     nls["config.refCatalogFormat.markdownDescription"],
     nlsJa["config.useRefOutput.markdownDescription"],
     nlsJa["config.outputFormat.markdownDescription"],
     nlsJa["config.outputFormat.full"],
     nlsJa["config.outputFormat.compact"],
     nlsJa["config.outputFormat.legacy"],
-    nlsJa["config.refCatalogDirectory.markdownDescription"],
     nlsJa["config.refCatalogFormat.markdownDescription"],
   ].join("\n");
   assert.doesNotMatch(outputFormatText, /[🌟✅📦🕰️]/u);
@@ -340,6 +338,14 @@ test("settings output format copy stays professional", () => {
   assert.match(
     outputFormatText,
     /generated instruction block|生成される instruction block|kind ごとの catalog 参照/,
+  );
+  assert.doesNotMatch(
+    nlsJa["config.autoUpdateInstruction.markdownDescription"],
+    /managed output/,
+  );
+  assert.match(
+    nlsJa["config.autoUpdateInstruction.markdownDescription"],
+    /生成リソース出力/,
   );
 });
 
@@ -374,20 +380,28 @@ test("open output labels and welcome copy use output terminology", () => {
     nls["command.openResourceOutput"],
     nls["command.openInstructionFile"],
     nls["command.openGlobalInstructionFile"],
+    nls["command.updateInstruction"],
+    nls["command.updateGlobalInstruction"],
     nls["viewsWelcome.workspace"],
     nls["viewsWelcome.userResources"],
     nlsJa["command.openResourceOutput"],
     nlsJa["command.openInstructionFile"],
     nlsJa["command.openGlobalInstructionFile"],
+    nlsJa["command.updateInstruction"],
+    nlsJa["command.updateGlobalInstruction"],
     nlsJa["viewsWelcome.workspace"],
     nlsJa["viewsWelcome.userResources"],
   ].join("\n");
   assert.match(outputCopy, /Open Resource Output\.\.\./);
   assert.match(outputCopy, /Open Resource Output/);
   assert.match(outputCopy, /Open Global Resource Output/);
+  assert.match(outputCopy, /Update Resource Output/);
+  assert.match(outputCopy, /Update Global Resource Output/);
   assert.match(outputCopy, /リソース出力を開く\.\.\./);
   assert.match(outputCopy, /リソース出力を開く/);
-  assert.match(outputCopy, /Global のリソース出力を開く/);
+  assert.match(outputCopy, /グローバル リソース出力を開く/);
+  assert.match(outputCopy, /リソース出力を更新/);
+  assert.match(outputCopy, /グローバル リソース出力を更新/);
   assert.doesNotMatch(outputCopy, /Open Instruction File/);
   assert.doesNotMatch(outputCopy, /Open Global Instruction File/);
   assert.doesNotMatch(outputCopy, /インストラクションファイルを開く/);

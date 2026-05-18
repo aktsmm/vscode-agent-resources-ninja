@@ -18,6 +18,11 @@ import * as path from "path";
 import { SKILL_DESCRIPTION_LIMITS } from "./constants";
 import {
   DISABLED_INSTRUCTION_FILE,
+  DEFAULT_WORKSPACE_AGENTS_DIRECTORY,
+  DEFAULT_WORKSPACE_HOOKS_DIRECTORY,
+  DEFAULT_WORKSPACE_INSTRUCTIONS_DIRECTORY,
+  DEFAULT_WORKSPACE_MCP_DIRECTORY,
+  DEFAULT_WORKSPACE_PROMPTS_DIRECTORY,
   DEFAULT_GLOBAL_HOME_DIRECTORY,
   getConfiguredCoexistenceMode,
   getConfiguredGlobalHomeDirectory,
@@ -26,6 +31,11 @@ import {
   getInstructionBlockKinds,
   InstructionBlockScope,
   getConfiguredSkillsDirectory,
+  getConfiguredWorkspaceAgentsDirectory,
+  getConfiguredWorkspaceHooksDirectory,
+  getConfiguredWorkspaceInstructionsDirectory,
+  getConfiguredWorkspaceMcpDirectory,
+  getConfiguredWorkspacePromptsDirectory,
   isAbsoluteConfiguredPath,
   isHomeRelativePath,
   getRelativeSkillsPathForWorkspace,
@@ -65,7 +75,6 @@ interface SyncResourceItem {
 interface RefCatalogDescriptor {
   sectionTitle: string;
   catalogTitle: string;
-  fileName: string;
 }
 
 type RefCatalogFormat = Exclude<OutputFormat, "ref">;
@@ -94,9 +103,11 @@ const LEGACY_MARKERS: MarkerPair[] = [
 
 const ALL_MARKERS: MarkerPair[] = [SHARED_MARKERS, ...LEGACY_MARKERS];
 
-const DEFAULT_WORKSPACE_REF_CATALOG_DIRECTORY = ".github/resource-catalog";
-const DEFAULT_GLOBAL_REF_CATALOG_DIRECTORY = ".catalog/resources";
+const LEGACY_WORKSPACE_REF_CATALOG_DIRECTORY = ".github/resource-catalog";
+const LEGACY_GLOBAL_REF_CATALOG_DIRECTORY = ".catalog/resources";
 const REF_CATALOG_MARKER_PREFIX = "<!-- resource-ninja-catalog:";
+const REF_CATALOG_MARKER_SUFFIX = " -->";
+const REF_CATALOG_END_MARKER_PREFIX = "<!-- /resource-ninja-catalog:";
 
 const RESOURCE_KIND_ORDER: ResourceKind[] = [
   "skill",
@@ -113,42 +124,34 @@ const REF_CATALOG_DESCRIPTORS: Record<ResourceKind, RefCatalogDescriptor> = {
   skill: {
     sectionTitle: "Skills",
     catalogTitle: "Agent Skills",
-    fileName: "skills.md",
   },
   agent: {
     sectionTitle: "Agents",
     catalogTitle: "Agents",
-    fileName: "agents.md",
   },
   instruction: {
     sectionTitle: "Instructions",
     catalogTitle: "Instructions",
-    fileName: "instructions.md",
   },
   prompt: {
     sectionTitle: "Prompts",
     catalogTitle: "Prompts",
-    fileName: "prompts.md",
   },
   hook: {
     sectionTitle: "Hooks",
     catalogTitle: "Hooks",
-    fileName: "hooks.md",
   },
   mcp: {
     sectionTitle: "MCP Configs",
     catalogTitle: "MCP Configs",
-    fileName: "mcp.md",
   },
   plugin: {
     sectionTitle: "Plugins",
     catalogTitle: "Plugins",
-    fileName: "plugins.md",
   },
   "cursor-rule": {
     sectionTitle: "Cursor Rules",
     catalogTitle: "Cursor Rules",
-    fileName: "cursor-rules.md",
   },
 };
 
@@ -256,49 +259,131 @@ function normalizeRemotePath(
   return normalized || undefined;
 }
 
-function getConfiguredRefCatalogDirectory(
-  config: vscode.WorkspaceConfiguration,
-): string | undefined {
-  const configured = config.get<string>("refCatalogDirectory")?.trim();
-  return configured || undefined;
+function getRefCatalogSectionMarkers(kind: ResourceKind): MarkerPair {
+  return {
+    start: `${REF_CATALOG_MARKER_PREFIX} ${kind}${REF_CATALOG_MARKER_SUFFIX}`,
+    end: `${REF_CATALOG_END_MARKER_PREFIX} ${kind}${REF_CATALOG_MARKER_SUFFIX}`,
+  };
 }
 
-function resolveRefCatalogDirectoryUri(
+function resolveWorkspaceResourceDirectoryUri(
+  workspaceUri: vscode.Uri,
+  config: vscode.WorkspaceConfiguration,
+  kind: ResourceKind,
+): vscode.Uri {
+  switch (kind) {
+    case "skill":
+      return resolveSkillsDirectoryUri(workspaceUri, config);
+    case "agent":
+      return resolveConfiguredUri(
+        workspaceUri,
+        getConfiguredWorkspaceAgentsDirectory(config),
+        DEFAULT_WORKSPACE_AGENTS_DIRECTORY,
+      );
+    case "instruction":
+      return resolveConfiguredUri(
+        workspaceUri,
+        getConfiguredWorkspaceInstructionsDirectory(config),
+        DEFAULT_WORKSPACE_INSTRUCTIONS_DIRECTORY,
+      );
+    case "prompt":
+      return resolveConfiguredUri(
+        workspaceUri,
+        getConfiguredWorkspacePromptsDirectory(config),
+        DEFAULT_WORKSPACE_PROMPTS_DIRECTORY,
+      );
+    case "hook":
+      return resolveConfiguredUri(
+        workspaceUri,
+        getConfiguredWorkspaceHooksDirectory(config),
+        DEFAULT_WORKSPACE_HOOKS_DIRECTORY,
+      );
+    case "mcp":
+      return resolveConfiguredUri(
+        workspaceUri,
+        getConfiguredWorkspaceMcpDirectory(config),
+        DEFAULT_WORKSPACE_MCP_DIRECTORY,
+      );
+    case "plugin":
+      return resolveConfiguredUri(
+        workspaceUri,
+        ".github/plugins",
+        ".github/plugins",
+      );
+    case "cursor-rule":
+      return resolveConfiguredUri(
+        workspaceUri,
+        ".cursor/rules",
+        ".cursor/rules",
+      );
+    default:
+      return resolveSkillsDirectoryUri(workspaceUri, config);
+  }
+}
+
+function resolveGlobalRefCatalogDirectoryUri(
+  workspaceUri: vscode.Uri,
+  config: vscode.WorkspaceConfiguration,
+  kind: ResourceKind,
+): vscode.Uri {
+  const globalHomeUri = resolveConfiguredUri(
+    workspaceUri,
+    getConfiguredGlobalHomeDirectory(config),
+    DEFAULT_GLOBAL_HOME_DIRECTORY,
+  );
+
+  switch (kind) {
+    case "skill":
+      return vscode.Uri.joinPath(globalHomeUri, "skills");
+    case "agent":
+      return vscode.Uri.joinPath(globalHomeUri, "agents");
+    case "instruction":
+      return vscode.Uri.joinPath(globalHomeUri, "instructions");
+    case "prompt":
+      return vscode.Uri.joinPath(globalHomeUri, "prompts");
+    case "hook":
+      return vscode.Uri.joinPath(globalHomeUri, "hooks");
+    case "mcp":
+      return vscode.Uri.joinPath(globalHomeUri, "mcp");
+    case "plugin":
+      return vscode.Uri.joinPath(globalHomeUri, "plugins");
+    case "cursor-rule":
+      return vscode.Uri.joinPath(globalHomeUri, "rules");
+    default:
+      return vscode.Uri.joinPath(globalHomeUri, "skills");
+  }
+}
+
+function resolveRefCatalogFileUri(
+  workspaceUri: vscode.Uri,
+  scope: "workspace" | "globalHome",
+  config: vscode.WorkspaceConfiguration,
+  kind: ResourceKind,
+): vscode.Uri {
+  const directoryUri =
+    scope === "workspace"
+      ? resolveWorkspaceResourceDirectoryUri(workspaceUri, config, kind)
+      : resolveGlobalRefCatalogDirectoryUri(workspaceUri, config, kind);
+  return vscode.Uri.joinPath(directoryUri, "README.md");
+}
+
+function getLegacyRefCatalogRootUri(
   workspaceUri: vscode.Uri,
   instructionUri: vscode.Uri,
   scope: "workspace" | "globalHome",
-  config: vscode.WorkspaceConfiguration,
 ): vscode.Uri {
-  const configuredDirectory = getConfiguredRefCatalogDirectory(config);
-  const fallbackDirectory =
-    scope === "workspace"
-      ? DEFAULT_WORKSPACE_REF_CATALOG_DIRECTORY
-      : DEFAULT_GLOBAL_REF_CATALOG_DIRECTORY;
-  const effectiveDirectory = configuredDirectory || fallbackDirectory;
-
-  if (
-    isHomeRelativePath(effectiveDirectory) ||
-    isAbsoluteConfiguredPath(effectiveDirectory)
-  ) {
-    return resolveConfiguredUri(
-      workspaceUri,
-      effectiveDirectory,
-      fallbackDirectory,
-    );
-  }
-
   if (scope === "workspace") {
     return resolveConfiguredUri(
       workspaceUri,
-      effectiveDirectory,
-      DEFAULT_WORKSPACE_REF_CATALOG_DIRECTORY,
+      LEGACY_WORKSPACE_REF_CATALOG_DIRECTORY,
+      LEGACY_WORKSPACE_REF_CATALOG_DIRECTORY,
     );
   }
 
   const instructionDirectoryUri = vscode.Uri.file(
     path.dirname(instructionUri.fsPath),
   );
-  const segments = normalizePathSeparators(effectiveDirectory)
+  const segments = normalizePathSeparators(LEGACY_GLOBAL_REF_CATALOG_DIRECTORY)
     .replace(/^\.\//, "")
     .split("/")
     .filter(Boolean);
@@ -308,14 +393,22 @@ function resolveRefCatalogDirectoryUri(
     : instructionDirectoryUri;
 }
 
-function getRefCatalogFileUri(
+function getLegacyRefCatalogFileUri(
   catalogRootUri: vscode.Uri,
   kind: ResourceKind,
 ): vscode.Uri {
-  return vscode.Uri.joinPath(
-    catalogRootUri,
-    REF_CATALOG_DESCRIPTORS[kind].fileName,
-  );
+  const fileNameMap: Record<ResourceKind, string> = {
+    skill: "skills.md",
+    agent: "agents.md",
+    instruction: "instructions.md",
+    prompt: "prompts.md",
+    hook: "hooks.md",
+    mcp: "mcp.md",
+    plugin: "plugins.md",
+    "cursor-rule": "cursor-rules.md",
+  };
+
+  return vscode.Uri.joinPath(catalogRootUri, fileNameMap[kind]);
 }
 
 function getConfiguredRefCatalogFormat(
@@ -624,7 +717,7 @@ function createRefCatalogContent(
     format === "compact"
       ? `${descriptor.catalogTitle} (Compressed Index)`
       : descriptor.catalogTitle;
-  const lines = [`${REF_CATALOG_MARKER_PREFIX} ${kind} -->`, "", `# ${title}`];
+  const lines = [`# ${title}`];
 
   if (kind === "skill" && format !== "legacy") {
     lines.push(
@@ -678,11 +771,27 @@ function createRefCatalogContent(
 }
 
 async function deleteGeneratedRefCatalogFileIfExists(
+  kind: ResourceKind,
   catalogFileUri: vscode.Uri,
 ): Promise<void> {
   try {
     const content = await vscode.workspace.fs.readFile(catalogFileUri);
     const text = Buffer.from(content).toString("utf-8");
+    const markers = getRefCatalogSectionMarkers(kind);
+
+    if (text.includes(markers.start) && text.includes(markers.end)) {
+      const stripped = stripCatalogSection(text, kind);
+      if (stripped.trim()) {
+        await vscode.workspace.fs.writeFile(
+          catalogFileUri,
+          Buffer.from(`${stripped}\n`, "utf-8"),
+        );
+      } else {
+        await vscode.workspace.fs.delete(catalogFileUri, { useTrash: false });
+      }
+      return;
+    }
+
     if (!text.includes(REF_CATALOG_MARKER_PREFIX)) {
       logger.info(
         `[Resource Ninja] Keeping non-generated catalog file: ${catalogFileUri.fsPath}`,
@@ -695,9 +804,71 @@ async function deleteGeneratedRefCatalogFileIfExists(
   }
 }
 
+function stripCatalogSection(content: string, kind: ResourceKind): string {
+  const markers = getRefCatalogSectionMarkers(kind);
+  const startIndex = content.indexOf(markers.start);
+  if (startIndex === -1) {
+    return content.replace(/\n{3,}/g, "\n\n").trim();
+  }
+  const endIndex = content.indexOf(markers.end, startIndex);
+  if (endIndex === -1) {
+    return content.replace(/\n{3,}/g, "\n\n").trim();
+  }
+
+  const before = content.slice(0, startIndex).replace(/\s*$/, "");
+  const after = content
+    .slice(endIndex + markers.end.length)
+    .replace(/^\s*/, "");
+
+  if (!before && !after) {
+    return "";
+  }
+  if (!before) {
+    return after.replace(/\n{3,}/g, "\n\n").trim();
+  }
+  if (!after) {
+    return before.replace(/\n{3,}/g, "\n\n").trim();
+  }
+  return `${before}\n\n${after}`.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function upsertCatalogSection(
+  existingContent: string,
+  kind: ResourceKind,
+  body: string,
+): string {
+  const markers = getRefCatalogSectionMarkers(kind);
+  const section = `${markers.start}\n${body.trim()}\n${markers.end}`;
+  const startIndex = existingContent.indexOf(markers.start);
+  const endIndex =
+    startIndex === -1 ? -1 : existingContent.indexOf(markers.end, startIndex);
+
+  if (startIndex !== -1 && endIndex !== -1) {
+    const before = existingContent.slice(0, startIndex).replace(/\s*$/, "");
+    const after = existingContent
+      .slice(endIndex + markers.end.length)
+      .replace(/^\s*/, "");
+
+    if (!before && !after) {
+      return `${section}\n`;
+    }
+    if (!before) {
+      return `${section}\n\n${after}`;
+    }
+    if (!after) {
+      return `${before}\n\n${section}\n`;
+    }
+    return `${before}\n\n${section}\n\n${after}`;
+  }
+
+  const trimmed = existingContent.trim();
+  return trimmed ? `${trimmed}\n\n${section}\n` : `${section}\n`;
+}
+
 async function syncRefCatalogFiles(
   resources: SyncResourceItem[],
-  catalogRootUri: vscode.Uri,
+  workspaceUri: vscode.Uri,
+  scope: "workspace" | "globalHome",
   config: vscode.WorkspaceConfiguration,
 ): Promise<void> {
   const groupedResources = new Map<ResourceKind, SyncResourceItem[]>();
@@ -708,16 +879,23 @@ async function syncRefCatalogFiles(
     groupedResources.set(resource.kind, existing);
   }
 
-  await vscode.workspace.fs.createDirectory(catalogRootUri);
-
   for (const kind of RESOURCE_KIND_ORDER) {
-    const catalogFileUri = getRefCatalogFileUri(catalogRootUri, kind);
+    const catalogFileUri = resolveRefCatalogFileUri(
+      workspaceUri,
+      scope,
+      config,
+      kind,
+    );
     const kindResources = groupedResources.get(kind) || [];
 
     if (kindResources.length === 0) {
-      await deleteGeneratedRefCatalogFileIfExists(catalogFileUri);
+      await deleteGeneratedRefCatalogFileIfExists(kind, catalogFileUri);
       continue;
     }
+
+    await vscode.workspace.fs.createDirectory(
+      vscode.Uri.file(path.dirname(catalogFileUri.fsPath)),
+    );
 
     const content = createRefCatalogContent(
       kind,
@@ -725,19 +903,63 @@ async function syncRefCatalogFiles(
       catalogFileUri.fsPath,
       catalogFormat,
     );
+    let existingContent = "";
+    try {
+      const existing = await vscode.workspace.fs.readFile(catalogFileUri);
+      existingContent = Buffer.from(existing).toString("utf-8");
+    } catch {
+      existingContent = "";
+    }
     await vscode.workspace.fs.writeFile(
       catalogFileUri,
-      Buffer.from(content, "utf-8"),
+      Buffer.from(
+        upsertCatalogSection(existingContent, kind, content),
+        "utf-8",
+      ),
     );
   }
 }
 
 async function cleanupRefCatalogFiles(
-  catalogRootUri: vscode.Uri,
+  workspaceUri: vscode.Uri,
+  instructionUri: vscode.Uri,
+  scope: "workspace" | "globalHome",
+  config: vscode.WorkspaceConfiguration,
 ): Promise<void> {
   for (const kind of RESOURCE_KIND_ORDER) {
     await deleteGeneratedRefCatalogFileIfExists(
-      getRefCatalogFileUri(catalogRootUri, kind),
+      kind,
+      resolveRefCatalogFileUri(workspaceUri, scope, config, kind),
+    );
+  }
+
+  const legacyCatalogRootUri = getLegacyRefCatalogRootUri(
+    workspaceUri,
+    instructionUri,
+    scope,
+  );
+  for (const kind of RESOURCE_KIND_ORDER) {
+    await deleteGeneratedRefCatalogFileIfExists(
+      kind,
+      getLegacyRefCatalogFileUri(legacyCatalogRootUri, kind),
+    );
+  }
+}
+
+async function cleanupLegacyRefCatalogFiles(
+  workspaceUri: vscode.Uri,
+  instructionUri: vscode.Uri,
+  scope: "workspace" | "globalHome",
+): Promise<void> {
+  const legacyCatalogRootUri = getLegacyRefCatalogRootUri(
+    workspaceUri,
+    instructionUri,
+    scope,
+  );
+  for (const kind of RESOURCE_KIND_ORDER) {
+    await deleteGeneratedRefCatalogFileIfExists(
+      kind,
+      getLegacyRefCatalogFileUri(legacyCatalogRootUri, kind),
     );
   }
 }
@@ -745,7 +967,9 @@ async function cleanupRefCatalogFiles(
 function generateSharedRefSection(
   resources: SyncResourceItem[],
   instructionUri: vscode.Uri,
-  catalogRootUri: vscode.Uri,
+  workspaceUri: vscode.Uri,
+  scope: "workspace" | "globalHome",
+  config: vscode.WorkspaceConfiguration,
   markerPair: MarkerPair,
 ): string {
   if (resources.length === 0) {
@@ -773,7 +997,7 @@ function generateSharedRefSection(
     const descriptor = REF_CATALOG_DESCRIPTORS[kind];
     const catalogLink = getRelativeFileLinkPath(
       instructionUri.fsPath,
-      getRefCatalogFileUri(catalogRootUri, kind).fsPath,
+      resolveRefCatalogFileUri(workspaceUri, scope, config, kind).fsPath,
     );
 
     lines.push("", `### ${descriptor.sectionTitle}`, "");
@@ -795,7 +1019,9 @@ function generateSharedRefSection(
 function generateSkillRefSection(
   resources: SyncResourceItem[],
   instructionUri: vscode.Uri,
-  catalogRootUri: vscode.Uri,
+  workspaceUri: vscode.Uri,
+  scope: "workspace" | "globalHome",
+  config: vscode.WorkspaceConfiguration,
   markerPair: MarkerPair,
 ): string {
   if (resources.length === 0) {
@@ -809,7 +1035,7 @@ ${markerPair.end}`;
 
   const catalogLink = getRelativeFileLinkPath(
     instructionUri.fsPath,
-    getRefCatalogFileUri(catalogRootUri, "skill").fsPath,
+    resolveRefCatalogFileUri(workspaceUri, scope, config, "skill").fsPath,
   );
 
   return wrapSection(
@@ -1002,12 +1228,6 @@ export async function updateInstructionFileAtUri(
     owner,
   );
 
-  const refCatalogRootUri = resolveRefCatalogDirectoryUri(
-    workspaceUri,
-    instructionUri,
-    skillSource.scope,
-    config,
-  );
   const skillIndex =
     format === "ref" ? await loadSkillIndex(context) : undefined;
 
@@ -1031,15 +1251,32 @@ export async function updateInstructionFileAtUri(
       const enrichedResources = skillIndex
         ? enrichSyncResourcesWithRemoteMetadata(sharedResources, skillIndex)
         : sharedResources;
-      await syncRefCatalogFiles(enrichedResources, refCatalogRootUri, config);
+      await syncRefCatalogFiles(
+        enrichedResources,
+        workspaceUri,
+        skillSource.scope,
+        config,
+      );
+      await cleanupLegacyRefCatalogFiles(
+        workspaceUri,
+        instructionUri,
+        skillSource.scope,
+      );
       skillSection = generateSharedRefSection(
         enrichedResources,
         instructionUri,
-        refCatalogRootUri,
+        workspaceUri,
+        skillSource.scope,
+        config,
         SHARED_MARKERS,
       );
     } else {
-      await cleanupRefCatalogFiles(refCatalogRootUri);
+      await cleanupRefCatalogFiles(
+        workspaceUri,
+        instructionUri,
+        skillSource.scope,
+        config,
+      );
       skillSection = generateSharedResourceSectionForFormat(
         sharedResources,
         format,
@@ -1062,15 +1299,32 @@ export async function updateInstructionFileAtUri(
       const enrichedResources = skillIndex
         ? enrichSyncResourcesWithRemoteMetadata(skillResources, skillIndex)
         : skillResources;
-      await syncRefCatalogFiles(enrichedResources, refCatalogRootUri, config);
+      await syncRefCatalogFiles(
+        enrichedResources,
+        workspaceUri,
+        skillSource.scope,
+        config,
+      );
+      await cleanupLegacyRefCatalogFiles(
+        workspaceUri,
+        instructionUri,
+        skillSource.scope,
+      );
       skillSection = generateSkillRefSection(
         enrichedResources,
         instructionUri,
-        refCatalogRootUri,
+        workspaceUri,
+        skillSource.scope,
+        config,
         RESOURCE_MARKERS,
       );
     } else {
-      await cleanupRefCatalogFiles(refCatalogRootUri);
+      await cleanupRefCatalogFiles(
+        workspaceUri,
+        instructionUri,
+        skillSource.scope,
+        config,
+      );
       skillSection = generateSkillSectionForFormat(
         installedSkills,
         localSkills,
@@ -1123,17 +1377,10 @@ export async function updateInstructionFileAtUri(
 
 export function resolvePrimaryRefCatalogUri(
   workspaceUri: vscode.Uri,
-  instructionUri: vscode.Uri,
   scope: "workspace" | "globalHome",
   config: vscode.WorkspaceConfiguration,
 ): vscode.Uri {
-  const catalogRootUri = resolveRefCatalogDirectoryUri(
-    workspaceUri,
-    instructionUri,
-    scope,
-    config,
-  );
-  return getRefCatalogFileUri(catalogRootUri, "skill");
+  return resolveRefCatalogFileUri(workspaceUri, scope, config, "skill");
 }
 
 /**
