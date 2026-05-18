@@ -31,6 +31,12 @@ This patch release refines output-opening behavior around managed instruction ta
 - `npm run package`: PASS
 - `node scripts/test-release-hygiene.js`: PASS
 - `code --install-extension .\agent-resources-ninja-0.2.19.vsix --force`: PASS
+- `git push origin master`: PASS
+- `npx --yes vsce publish -i .\agent-resources-ninja-0.2.19.vsix --skip-duplicate`: PASS, version 0.2.19 is already published
+- `git ls-remote --tags origin v0.2.19`: PASS, remote tag now exists at `8698984251d9ff487508ae28f3eaa8c6c72e17bd`
+- `gh release view v0.2.19 --json tagName,name,url,isDraft,isPrerelease`: PASS, release URL is `https://github.com/aktsmm/vscode-agent-resources-ninja/releases/tag/v0.2.19`
+- `npx vsce show yamapan.agent-resources-ninja --json`: STALE after publish, still returned 0.2.18 immediately after release verification
+- Marketplace HTML fetch: STALE after publish, page metadata still showed 0.2.18 while the page timestamp had advanced to 2026-05-18
 
 ## VSIX
 
