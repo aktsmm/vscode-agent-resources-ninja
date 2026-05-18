@@ -443,14 +443,14 @@ test("configured roots override default non-skill targets", () => {
       "/repo",
       {
         kind: "instruction",
-        name: "A11y",
-        path: "instructions/a11y.instructions.md",
+        name: "Release",
+        path: "instructions/release.instructions.md",
       },
       "workspace",
       undefined,
       { workspaceInstructionsDirectory: ".rules/instructions" },
     ),
-    "/repo/.rules/instructions/a11y.instructions.md",
+    "/repo/.rules/instructions/release.instructions.md",
   );
   assert.strictEqual(
     targetPath(

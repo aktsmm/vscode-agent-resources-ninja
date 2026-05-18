@@ -1037,10 +1037,10 @@ test("normalizes windows paths", () => {
 test("resource metadata sidecars sit next to installed resources", () => {
   assert.strictEqual(
     getResourceMetadataPath(
-      ".github/instructions/a11y.instructions.md",
+      ".github/instructions/bicep-code-best-practices.instructions.md",
       "instruction",
     ),
-    ".github/instructions/a11y.instructions.md.resource-ninja.json",
+    ".github/instructions/bicep-code-best-practices.instructions.md.resource-ninja.json",
   );
   assert.strictEqual(
     getResourceMetadataPath(".github/hooks/pre-review/README.md", "hook"),
