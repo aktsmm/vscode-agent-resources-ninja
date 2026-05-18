@@ -1060,6 +1060,7 @@ test("settings order keeps install and destination paths first", () => {
     "resourceNinja.customInstructionPath",
     "resourceNinja.includeLocalResources",
     "resourceNinja.autoUpdateResourcesOnUpgrade",
+    "resourceNinja.useRefOutput",
     "resourceNinja.outputFormat",
     "resourceNinja.refCatalogDirectory",
     "resourceNinja.refCatalogFormat",
@@ -1442,10 +1443,7 @@ test("open output flow supports non-local target discovery and ref fallback", ()
   assert.match(extensionSource, /messages\.openSettings\(\)/);
   assert.match(extensionSource, /resourceNinja\.openSettings/);
   assert.match(extensionSource, /Failed to create output file:/);
-  assert.match(
-    extensionSource,
-    /出力先ファイルを作成できませんでした:/,
-  );
+  assert.match(extensionSource, /出力先ファイルを作成できませんでした:/);
 });
 
 test("plugin grouped resources can be installed as a selectable set", () => {

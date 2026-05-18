@@ -2,7 +2,7 @@
   "name": "agent-resources-ninja",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.19",
+  "version": "0.2.20",
   "publisher": "yamapan",
   "license": "CC-BY-NC-SA-4.0",
   "icon": "resources/icon.png",
@@ -1379,18 +1379,22 @@
           "order": 21,
           "markdownDescription": "%config.useSharedResourceIndex.markdownDescription%"
         },
+        "resourceNinja.useRefOutput": {
+          "type": "boolean",
+          "default": true,
+          "order": 22,
+          "markdownDescription": "%config.useRefOutput.markdownDescription%"
+        },
         "resourceNinja.outputFormat": {
           "type": "string",
-          "default": "ref",
-          "order": 22,
+          "default": "full",
+          "order": 23,
           "enum": [
-            "ref",
             "full",
             "compact",
             "legacy"
           ],
           "enumDescriptions": [
-            "%config.outputFormat.ref%",
             "%config.outputFormat.full%",
             "%config.outputFormat.compact%",
             "%config.outputFormat.legacy%"
@@ -1400,22 +1404,22 @@
         "resourceNinja.refCatalogDirectory": {
           "type": "string",
           "default": "",
-          "order": 23,
+          "order": 24,
           "markdownDescription": "%config.refCatalogDirectory.markdownDescription%"
         },
         "resourceNinja.refCatalogFormat": {
           "type": "string",
           "default": "full",
-          "order": 24,
+          "order": 25,
           "enum": [
             "full",
             "compact",
             "legacy"
           ],
           "enumDescriptions": [
-            "%config.outputFormat.full%",
-            "%config.outputFormat.compact%",
-            "%config.outputFormat.legacy%"
+            "%config.refCatalogFormat.full%",
+            "%config.refCatalogFormat.compact%",
+            "%config.refCatalogFormat.legacy%"
           ],
           "markdownDescription": "%config.refCatalogFormat.markdownDescription%"
         },
@@ -1446,13 +1450,13 @@
         "resourceNinja.showBuiltInResources": {
           "type": "boolean",
           "default": false,
-          "order": 25,
+          "order": 26,
           "markdownDescription": "%config.showBuiltInResources.markdownDescription%"
         },
         "resourceNinja.remoteResourceViewMode": {
           "type": "string",
           "default": "repositoryFirst",
-          "order": 26,
+          "order": 27,
           "enum": [
             "repositoryFirst",
             "resourceTypeFirst"
@@ -1466,7 +1470,7 @@
         "resourceNinja.language": {
           "type": "string",
           "default": "auto",
-          "order": 27,
+          "order": 28,
           "enum": [
             "auto",
             "en",
@@ -1483,25 +1487,25 @@
           "type": "string",
           "default": "",
           "editPresentation": "password",
-          "order": 28,
+          "order": 29,
           "markdownDescription": "%config.githubToken.markdownDescription%"
         },
         "resourceNinja.instructionBlock.includeAgents": {
           "type": "boolean",
           "default": false,
-          "order": 29,
+          "order": 30,
           "markdownDescription": "%config.instructionBlock.includeAgents.markdownDescription%"
         },
         "resourceNinja.instructionBlock.includeInstructions": {
           "type": "boolean",
           "default": false,
-          "order": 30,
+          "order": 31,
           "markdownDescription": "%config.instructionBlock.includeInstructions.markdownDescription%"
         },
         "resourceNinja.instructionBlock.globalHome.includeAgents": {
           "type": "string",
           "default": "inherit",
-          "order": 31,
+          "order": 32,
           "enum": [
             "inherit",
             "on",
@@ -1517,7 +1521,7 @@
         "resourceNinja.instructionBlock.globalHome.includeInstructions": {
           "type": "string",
           "default": "inherit",
-          "order": 32,
+          "order": 33,
           "enum": [
             "inherit",
             "on",

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.20] - 2026-05-18
+
+### Changed
+
+- Split Ref mode from inline output formatting by adding `resourceNinja.useRefOutput`, leaving `resourceNinja.outputFormat` for `full` / `compact` / `legacy`, and updating the settings copy so the two responsibilities are separate / `resourceNinja.useRefOutput` を追加して Ref モードと inline 出力形式を分離し、`resourceNinja.outputFormat` は `full` / `compact` / `legacy` 専用に整理しました。設定文言も責務が混ざらないよう更新しました。
+- Managed output now regenerates immediately when output-related settings change even if `resourceNinja.autoUpdateInstruction` is off; that setting now controls resource-change sync only / 出力関連の設定変更時は `resourceNinja.autoUpdateInstruction` が off でも managed output を即時再生成するようにし、この設定は resource 変更時の自動同期だけを制御する形に整理しました。
+- Added a quick decision guide for Ref output vs inline output, and separated Ref catalog enum descriptions from inline format copy so future settings wording can evolve independently / Ref 出力と inline 出力の選び分けを README に判断表として追加し、Ref catalog の enum 説明を inline 出力の文言から分離して、将来の設定文言変更が相互にずれないようにしました。
+
 ## [0.2.19] - 2026-05-18
 
 ### Added

@@ -319,15 +319,15 @@ test("settings descriptions distinguish skill index from native resource paths",
 
 test("settings output format copy stays professional", () => {
   const outputFormatText = [
+    nls["config.useRefOutput.markdownDescription"],
     nls["config.outputFormat.markdownDescription"],
-    nls["config.outputFormat.ref"],
     nls["config.outputFormat.full"],
     nls["config.outputFormat.compact"],
     nls["config.outputFormat.legacy"],
     nls["config.refCatalogDirectory.markdownDescription"],
     nls["config.refCatalogFormat.markdownDescription"],
+    nlsJa["config.useRefOutput.markdownDescription"],
     nlsJa["config.outputFormat.markdownDescription"],
-    nlsJa["config.outputFormat.ref"],
     nlsJa["config.outputFormat.full"],
     nlsJa["config.outputFormat.compact"],
     nlsJa["config.outputFormat.legacy"],
@@ -339,7 +339,7 @@ test("settings output format copy stays professional", () => {
   assert.match(outputFormatText, /compatibility mode|互換モード/);
   assert.match(
     outputFormatText,
-    /generated instruction block|生成される instruction block/,
+    /generated instruction block|生成される instruction block|kind ごとの catalog 参照/,
   );
 });
 

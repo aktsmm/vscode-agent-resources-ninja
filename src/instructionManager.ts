@@ -11,7 +11,7 @@ import { scanLocalSkills, LocalSkill } from "./localSkillScanner";
 import { scanUserResources, UserResource } from "./userResourceScanner";
 import {
   OutputFormat,
-  normalizeOutputFormat,
+  normalizeInlineOutputFormat,
   resolveOutputFormat,
 } from "./toolDetector";
 import * as path from "path";
@@ -321,7 +321,9 @@ function getRefCatalogFileUri(
 function getConfiguredRefCatalogFormat(
   config: vscode.WorkspaceConfiguration,
 ): RefCatalogFormat {
-  const normalized = normalizeOutputFormat(config.get<string>("refCatalogFormat"));
+  const normalized = normalizeInlineOutputFormat(
+    config.get<string>("refCatalogFormat"),
+  );
   return normalized === "compact" || normalized === "legacy"
     ? normalized
     : "full";
@@ -622,11 +624,7 @@ function createRefCatalogContent(
     format === "compact"
       ? `${descriptor.catalogTitle} (Compressed Index)`
       : descriptor.catalogTitle;
-  const lines = [
-    `${REF_CATALOG_MARKER_PREFIX} ${kind} -->`,
-    "",
-    `# ${title}`,
-  ];
+  const lines = [`${REF_CATALOG_MARKER_PREFIX} ${kind} -->`, "", `# ${title}`];
 
   if (kind === "skill" && format !== "legacy") {
     lines.push(
@@ -907,7 +905,10 @@ export async function updateInstructionFile(
   workspaceUri: vscode.Uri,
   context: vscode.ExtensionContext,
 ): Promise<void> {
-  const config = vscode.workspace.getConfiguration("resourceNinja", workspaceUri);
+  const config = vscode.workspace.getConfiguration(
+    "resourceNinja",
+    workspaceUri,
+  );
   const { instructionFile } = await resolveOutputFormat(workspaceUri);
   if (instructionFile === DISABLED_INSTRUCTION_FILE) {
     return;
@@ -932,7 +933,10 @@ export async function updateInstructionFileAtUri(
   instructionUri: vscode.Uri,
   instructionPath: string,
 ): Promise<void> {
-  const config = vscode.workspace.getConfiguration("resourceNinja", workspaceUri);
+  const config = vscode.workspace.getConfiguration(
+    "resourceNinja",
+    workspaceUri,
+  );
   const { format } = await resolveOutputFormat(workspaceUri);
   const coexistenceMode = getConfiguredCoexistenceMode(config);
   const owner =

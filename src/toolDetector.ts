@@ -21,16 +21,14 @@ export type AITool =
 
 /**
  * 出力フォーマット（スキルリストの表示形式）
- * - ref: 軽量参照ブロック + kind ごとの別 catalog（既定）
+ * - ref: 軽量参照ブロック + kind ごとの別 catalog
  * - full: IMPORTANT + 詳細テーブル
  * - compact: IMPORTANT + 圧縮インデックスのみ
  * - legacy: シンプルテーブルのみ（OLD）
  */
 export type OutputFormat = "ref" | "full" | "compact" | "legacy";
 
-export function normalizeOutputFormat(
-  value: string | undefined,
-): OutputFormat {
+export function normalizeOutputFormat(value: string | undefined): OutputFormat {
   switch ((value || "").trim()) {
     case "ref":
     case "full":
@@ -44,8 +42,58 @@ export function normalizeOutputFormat(
     case "markdown-with-index":
       return "full";
     default:
-      return "ref";
+      return "full";
   }
+}
+
+export function normalizeInlineOutputFormat(
+  value: string | undefined,
+): Exclude<OutputFormat, "ref"> {
+  const normalized = normalizeOutputFormat(value);
+  return normalized === "compact" || normalized === "legacy"
+    ? normalized
+    : "full";
+}
+
+function getExplicitConfigurationValue<T>(
+  inspected:
+    | {
+        workspaceFolderValue?: T;
+        workspaceValue?: T;
+        globalValue?: T;
+      }
+    | undefined,
+): T | undefined {
+  if (inspected?.workspaceFolderValue !== undefined) {
+    return inspected.workspaceFolderValue;
+  }
+  if (inspected?.workspaceValue !== undefined) {
+    return inspected.workspaceValue;
+  }
+  if (inspected?.globalValue !== undefined) {
+    return inspected.globalValue;
+  }
+  return undefined;
+}
+
+function getConfiguredUseRefOutput(
+  config: vscode.WorkspaceConfiguration,
+): boolean {
+  const useRefOutput = getExplicitConfigurationValue(
+    config.inspect<boolean>("useRefOutput"),
+  );
+  if (useRefOutput !== undefined && useRefOutput !== null) {
+    return useRefOutput;
+  }
+
+  const explicitOutputFormat = getExplicitConfigurationValue(
+    config.inspect<string>("outputFormat"),
+  );
+  if (explicitOutputFormat !== undefined && explicitOutputFormat !== null) {
+    return normalizeOutputFormat(explicitOutputFormat) === "ref";
+  }
+
+  return true;
 }
 
 /**
@@ -420,8 +468,13 @@ function getToolDisplayName(tool: AITool): string {
 export async function resolveOutputFormat(
   workspaceUri: vscode.Uri,
 ): Promise<{ format: OutputFormat; instructionFile: string }> {
-  const config = vscode.workspace.getConfiguration("resourceNinja", workspaceUri);
-  const outputFormat = normalizeOutputFormat(config.get<string>("outputFormat"));
+  const config = vscode.workspace.getConfiguration(
+    "resourceNinja",
+    workspaceUri,
+  );
+  const outputFormat = getConfiguredUseRefOutput(config)
+    ? "ref"
+    : normalizeInlineOutputFormat(config.get<string>("outputFormat"));
 
   // instructionFile は常にユーザー設定を使用（自動検出しない）
   const instructionFile = getConfiguredInstructionFilePath(config);

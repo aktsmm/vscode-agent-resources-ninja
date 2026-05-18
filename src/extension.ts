@@ -116,7 +116,10 @@ import {
   resolveInstructionFileUri,
 } from "./customizationPaths";
 import { getVsCodeUserDataPath } from "./userDataPaths";
-import { normalizeOutputFormat, resolveOutputFormat } from "./toolDetector";
+import {
+  normalizeInlineOutputFormat,
+  resolveOutputFormat,
+} from "./toolDetector";
 import {
   getStandaloneSharedModeSummary,
   readSharedResourceIndex,
@@ -244,6 +247,7 @@ const RESETTABLE_RESOURCE_NINJA_SETTINGS = [
   "globalResourceHomePreset",
   "globalHomeDirectory",
   "language",
+  "useRefOutput",
   "outputFormat",
   "refCatalogDirectory",
   "refCatalogFormat",
@@ -851,6 +855,7 @@ export async function activate(
       e.affectsConfiguration("resourceNinja.customInstructionPath") ||
       e.affectsConfiguration("resourceNinja.globalResourceHomePreset") ||
       e.affectsConfiguration("resourceNinja.globalHomeDirectory") ||
+      e.affectsConfiguration("resourceNinja.useRefOutput") ||
       e.affectsConfiguration("resourceNinja.outputFormat") ||
       e.affectsConfiguration("resourceNinja.refCatalogDirectory") ||
       e.affectsConfiguration("resourceNinja.refCatalogFormat") ||
@@ -869,56 +874,49 @@ export async function activate(
     ) {
       const workspaceFolders = vscode.workspace.workspaceFolders;
       if (workspaceFolders && workspaceFolders.length > 0) {
-        const config = vscode.workspace.getConfiguration("resourceNinja");
-        const autoUpdate =
-          config.get<boolean>("autoUpdateInstruction") !== false;
-
-        if (autoUpdate) {
-          // インストラクションファイルが変更された場合は古いファイルから削除
-          if (
-            e.affectsConfiguration("resourceNinja.instructionFile") ||
-            e.affectsConfiguration("resourceNinja.customInstructionPath")
-          ) {
-            // 古いファイルパスを使ってスキルセクションを削除
-            // （変更前の値は取得できないので、全ての候補ファイルから削除を試みる）
-            const candidateFiles = [
-              "AGENTS.md",
-              "~/.copilot/copilot-instructions.md",
-              ".github/copilot-instructions.md",
-              ".github/instructions/SkillList.instructions.md",
-              "CLAUDE.md",
-              ".claude/CLAUDE.md",
-              ".claude/CLAUDE.local.md",
-              ".cursor/rules/skills.mdc",
-              ".windsurfrules",
-              ".clinerules",
-            ];
-            for (const file of candidateFiles) {
-              try {
-                await removeSkillSectionFromFile(
-                  resolveConfiguredUri(workspaceFolders[0].uri, file, file),
-                );
-              } catch {
-                // ファイルが存在しない場合は無視
-              }
+        // インストラクションファイルが変更された場合は古いファイルから削除
+        if (
+          e.affectsConfiguration("resourceNinja.instructionFile") ||
+          e.affectsConfiguration("resourceNinja.customInstructionPath")
+        ) {
+          // （変更前の値は取得できないので、全ての候補ファイルから削除を試みる）
+          const candidateFiles = [
+            "AGENTS.md",
+            "~/.copilot/copilot-instructions.md",
+            ".github/copilot-instructions.md",
+            ".github/instructions/SkillList.instructions.md",
+            "CLAUDE.md",
+            ".claude/CLAUDE.md",
+            ".claude/CLAUDE.local.md",
+            ".cursor/rules/skills.mdc",
+            ".windsurfrules",
+            ".clinerules",
+          ];
+          for (const file of candidateFiles) {
+            try {
+              await removeSkillSectionFromFile(
+                resolveConfiguredUri(workspaceFolders[0].uri, file, file),
+              );
+            } catch {
+              // ファイルが存在しない場合は無視
             }
           }
-
-          // 少し待ってから更新（設定が完全に反映されるのを待つ）
-          setTimeout(async () => {
-            try {
-              await updateInstructionFile(workspaceFolders[0].uri, context);
-              vscode.window.showInformationMessage(
-                messages.instructionFileUpdatedOnSettingChange(),
-              );
-            } catch (err) {
-              logger.error(
-                "Failed to update instruction file on setting change:",
-                err,
-              );
-            }
-          }, 500);
         }
+
+        // 少し待ってから更新（設定が完全に反映されるのを待つ）
+        setTimeout(async () => {
+          try {
+            await updateInstructionFile(workspaceFolders[0].uri, context);
+            vscode.window.showInformationMessage(
+              messages.instructionFileUpdatedOnSettingChange(),
+            );
+          } catch (err) {
+            logger.error(
+              "Failed to update instruction file on setting change:",
+              err,
+            );
+          }
+        }, 500);
       }
     }
   });
@@ -5445,11 +5443,13 @@ async function promptForSkillUpdate(skillCount: number): Promise<boolean> {
 }
 
 /**
- * 出力フォーマット設定のマイグレーション
+ * 出力設定のマイグレーション
  * v0.8.3 で命名を変更:
  *   - markdown → legacy
  *   - compressed-index → compact
  *   - markdown-with-index → full
+ * v0.2.20 で Ref 切り替えを分離:
+ *   - outputFormat = ref → useRefOutput = true + outputFormat = full
  * @returns マイグレーションが行われた場合は true
  */
 async function migrateOutputFormatSetting(
@@ -5457,6 +5457,7 @@ async function migrateOutputFormatSetting(
 ): Promise<boolean> {
   const config = vscode.workspace.getConfiguration("resourceNinja");
   const inspected = config.inspect<string>("outputFormat");
+  const useRefInspected = config.inspect<boolean>("useRefOutput");
 
   // マイグレーションマップ（旧値 → 新値）
   const migrationMap: Record<string, string> = {
@@ -5466,36 +5467,71 @@ async function migrateOutputFormatSetting(
   };
 
   let migrated = false;
-  const targets: Array<
-    [
-      string | undefined,
-      vscode.ConfigurationTarget,
-      vscode.WorkspaceConfiguration,
-    ]
-  > = [
-    [inspected?.globalValue, vscode.ConfigurationTarget.Global, config],
-    [inspected?.workspaceValue, vscode.ConfigurationTarget.Workspace, config],
+  const targets: Array<{
+    outputFormatValue: string | undefined;
+    useRefOutputValue: boolean | undefined;
+    target: vscode.ConfigurationTarget;
+    targetConfig: vscode.WorkspaceConfiguration;
+  }> = [
+    {
+      outputFormatValue: inspected?.globalValue,
+      useRefOutputValue: useRefInspected?.globalValue,
+      target: vscode.ConfigurationTarget.Global,
+      targetConfig: config,
+    },
+    {
+      outputFormatValue: inspected?.workspaceValue,
+      useRefOutputValue: useRefInspected?.workspaceValue,
+      target: vscode.ConfigurationTarget.Workspace,
+      targetConfig: config,
+    },
   ];
 
   if (workspaceUri) {
-    targets.push([
-      inspected?.workspaceFolderValue,
-      vscode.ConfigurationTarget.WorkspaceFolder,
-      vscode.workspace.getConfiguration("resourceNinja", workspaceUri),
-    ]);
+    targets.push({
+      outputFormatValue: inspected?.workspaceFolderValue,
+      useRefOutputValue: useRefInspected?.workspaceFolderValue,
+      target: vscode.ConfigurationTarget.WorkspaceFolder,
+      targetConfig: vscode.workspace.getConfiguration(
+        "resourceNinja",
+        workspaceUri,
+      ),
+    });
   }
 
-  for (const [value, target, targetConfig] of targets) {
-    if (!value || !migrationMap[value]) {
+  for (const {
+    outputFormatValue,
+    useRefOutputValue,
+    target,
+    targetConfig,
+  } of targets) {
+    if (!outputFormatValue) {
       continue;
     }
-    const newValue = normalizeOutputFormat(value);
-    if (newValue === value) {
+
+    if (outputFormatValue === "ref") {
+      if (useRefOutputValue !== true) {
+        await targetConfig.update("useRefOutput", true, target);
+      }
+      await targetConfig.update("outputFormat", "full", target);
+      logger.info(
+        `[Resource Ninja] Migrated output settings (${vscode.ConfigurationTarget[target]}): outputFormat ref → useRefOutput true + outputFormat full`,
+      );
+      migrated = true;
+      continue;
+    }
+
+    if (!migrationMap[outputFormatValue]) {
+      continue;
+    }
+
+    const newValue = normalizeInlineOutputFormat(outputFormatValue);
+    if (newValue === outputFormatValue) {
       continue;
     }
     await targetConfig.update("outputFormat", newValue, target);
     logger.info(
-      `[Resource Ninja] Migrated outputFormat (${vscode.ConfigurationTarget[target]}): ${value} → ${newValue}`,
+      `[Resource Ninja] Migrated outputFormat (${vscode.ConfigurationTarget[target]}): ${outputFormatValue} → ${newValue}`,
     );
     migrated = true;
   }

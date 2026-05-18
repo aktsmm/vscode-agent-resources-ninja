@@ -38,11 +38,11 @@ function test(name, fn) {
   }
 }
 
-test("manifest exposes ref as default output format", () => {
+test("manifest splits Ref mode from inline output format", () => {
   const config = packageJson.contributes.configuration.properties;
-  assert.strictEqual(config["resourceNinja.outputFormat"].default, "ref");
+  assert.strictEqual(config["resourceNinja.useRefOutput"].default, true);
+  assert.strictEqual(config["resourceNinja.outputFormat"].default, "full");
   assert.deepStrictEqual(config["resourceNinja.outputFormat"].enum, [
-    "ref",
     "full",
     "compact",
     "legacy",
@@ -54,6 +54,14 @@ test("manifest exposes ref as default output format", () => {
     "compact",
     "legacy",
   ]);
+  assert.deepStrictEqual(
+    config["resourceNinja.refCatalogFormat"].enumDescriptions,
+    [
+      "%config.refCatalogFormat.full%",
+      "%config.refCatalogFormat.compact%",
+      "%config.refCatalogFormat.legacy%",
+    ],
+  );
 });
 
 test("tool detector prefers ref for always-loaded markdown targets", () => {
@@ -69,14 +77,14 @@ test("tool detector prefers ref for always-loaded markdown targets", () => {
   assert.match(toolDetectorSource, /normalizeOutputFormat\(/);
   assert.match(
     toolDetectorSource,
-    /getConfiguration\("resourceNinja", workspaceUri\)/,
+    /getConfiguration\([\s\S]*"resourceNinja",[\s\S]*workspaceUri[\s\S]*\)/,
   );
 });
 
 test("instruction manager defines scope-aware ref catalog roots", () => {
   assert.match(
     instructionManagerSource,
-    /getConfiguration\("resourceNinja", workspaceUri\)/,
+    /getConfiguration\([\s\S]*"resourceNinja",[\s\S]*workspaceUri[\s\S]*\)/,
   );
   assert.match(
     instructionManagerSource,
@@ -131,6 +139,7 @@ test("instruction manager generates per-kind ref catalogs and skill-only IMPORTA
 
 test("README documents ref output and catalog directories", () => {
   const docs = [readme, readmeJa].join("\n");
+  assert.match(docs, /resourceNinja\.useRefOutput/);
   assert.match(docs, /resourceNinja\.refCatalogDirectory/);
   assert.match(docs, /resourceNinja\.refCatalogFormat/);
   assert.match(docs, /\.github\/resource-catalog/);
@@ -148,12 +157,9 @@ test("README documents ref output and catalog directories", () => {
   );
   assert.match(
     docs,
-    /`ref`, `full`, `compact`, `legacy`|`ref` \/ `full` \/ `compact` \/ `legacy`/,
+    /`full`, `compact`, `legacy`|`full` \/ `compact` \/ `legacy`/,
   );
-  assert.match(
-    docs,
-    /Lightweight references \+ per-kind catalogs|軽量な参照ブロック \+ kind 別 catalog/,
-  );
+  assert.match(docs, /Use Ref Output|Ref 出力/);
   assert.match(
     docs,
     /catalog file \(`refCatalogFormat`\)|catalog file \(`refCatalogFormat`\)|catalog 内の詳細形式/,
@@ -167,11 +173,17 @@ test("README documents ref output and catalog directories", () => {
 test("settings copy distinguishes coexistence mode from output format", () => {
   const settingsCopy = [nls, nlsJa].join("\n");
   assert.match(settingsCopy, /coexistenceMode = auto/);
+  assert.match(settingsCopy, /useRefOutput/);
   assert.match(settingsCopy, /refCatalogFormat/);
+  assert.match(settingsCopy, /config\.refCatalogFormat\.full|Full catalog/);
   assert.doesNotMatch(settingsCopy, /default `auto` mode|既定の `auto` モード/);
 });
 
 test("extension watches ref settings and migrates legacy output formats across scopes", () => {
+  assert.match(
+    extensionSource,
+    /affectsConfiguration\("resourceNinja\.useRefOutput"\)/,
+  );
   assert.match(
     extensionSource,
     /affectsConfiguration\("resourceNinja\.refCatalogDirectory"\)/,
@@ -183,6 +195,12 @@ test("extension watches ref settings and migrates legacy output formats across s
   assert.match(extensionSource, /inspected\?\.globalValue/);
   assert.match(extensionSource, /inspected\?\.workspaceValue/);
   assert.match(extensionSource, /inspected\?\.workspaceFolderValue/);
+  assert.match(extensionSource, /useRefInspected\?\.globalValue/);
+  assert.match(extensionSource, /update\("useRefOutput", true, target\)/);
+  assert.match(
+    extensionSource,
+    /outputFormat ref → useRefOutput true \+ outputFormat full/,
+  );
   assert.match(extensionSource, /markdown: "legacy"/);
   assert.match(extensionSource, /"compressed-index": "compact"/);
   assert.match(extensionSource, /"markdown-with-index": "full"/);

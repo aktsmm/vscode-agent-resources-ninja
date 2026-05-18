@@ -234,6 +234,7 @@ test("README output format table uses professional release copy", () => {
   assert.doesNotMatch(outputFormatText, /[✅📦🕰️❌]/u);
   assert.doesNotMatch(outputFormatText, /\bOLD\b/);
   assert.match(outputFormatText, /compatibility scenarios|互換性が必要な場合/);
+  assert.match(outputFormatText, /Use Ref Output|Ref 出力/);
 });
 
 test("README source tables include every bundled source", () => {
