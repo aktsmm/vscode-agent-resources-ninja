@@ -5,6 +5,17 @@ All notable changes to the "Agent Resources Ninja" extension will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.22] - 2026-05-19
+
+### Fixed
+
+- **Browse View Install Button on Installed Remote Rows** - Replaced the misleading Install button with a Reinstall action for already-installed remote resources in the Browse view, so users can update installed resources without confusion while local-only rows no longer show install/reinstall at all / Browse ビューでインストール済みリモートリソースに表示されていた紛らわしい Install ボタンを Reinstall に置き換えました。ローカルのみの行には install/reinstall を表示しなくなりました。
+- **Reinstall from Browse View** - Reinstall now resolves installed workspace resources by remotePath matching when invoked from Browse view rows, enabling reinstall of resources originally installed by Agent Skills Ninja or earlier versions / Browse ビューからの再インストール時に remotePath マッチングでワークスペース内のインストール済みリソースを解決できるようにし、旧 Agent Skills Ninja やそれ以前のバージョンで入れたリソースの再インストールを可能にしました。
+
+### Tests
+
+- Added regression guards for browse-installed-remote context split, reinstall inline action visibility, and workspace-state-based reinstall resolution / Browse view の installed remote context 分離、reinstall inline action 表示条件、workspace state ベースの reinstall 解決の回帰テストを追加しました。
+
 ## [0.2.21] - 2026-05-19
 
 ### Changed

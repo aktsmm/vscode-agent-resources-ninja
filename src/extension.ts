@@ -2546,18 +2546,50 @@ export async function activate(
 
       const resourceKind = getResourceKind(skill);
       let source = skill.source;
-      let remotePath = skill.remotePath;
+      let remotePath = skill.remotePath || skill.path;
       let resourceName = skill.name;
       let relativePath = skill.relativePath || skill.path;
+      const normalizedRemotePath = normalizeInstalledRemotePath(remotePath);
+      const installedWorkspaceResource = workspaceProvider
+        .getWorkspaceSkills()
+        .find((resource) => {
+          if (resource.kind !== resourceKind || !resource.isInstalled) {
+            return false;
+          }
+          const candidateRemotePath = normalizeInstalledRemotePath(
+            resource.remotePath,
+          );
+          if (
+            normalizedRemotePath &&
+            candidateRemotePath &&
+            normalizedRemotePath === candidateRemotePath
+          ) {
+            return (
+              !source || source === "unknown" || resource.source === source
+            );
+          }
+          return (
+            resource.name === skill.name &&
+            (!source || source === "unknown" || resource.source === source)
+          );
+        });
 
       if (resourceKind === "skill") {
         const installedMeta = await getInstalledSkillsWithMeta(wsFolder.uri);
-        const meta = installedMeta.find(
-          (m) =>
-            m.name === skill.name ||
-            (!!skill.relativePath && m.relativePath === skill.relativePath),
-        );
-        if (!meta) {
+        const meta =
+          installedMeta.find(
+            (m) =>
+              !!normalizedRemotePath &&
+              normalizeInstalledRemotePath(m.remotePath) ===
+                normalizedRemotePath &&
+              (!source || source === "unknown" || m.source === source),
+          ) ||
+          installedMeta.find(
+            (m) =>
+              m.name === skill.name ||
+              (!!skill.relativePath && m.relativePath === skill.relativePath),
+          );
+        if (!meta && !installedWorkspaceResource) {
           vscode.window.showErrorMessage(
             isJapanese()
               ? `${skill.name} のメタデータが見つかりません`
@@ -2565,10 +2597,29 @@ export async function activate(
           );
           return;
         }
-        source = meta.source;
-        remotePath = meta.remotePath;
-        resourceName = meta.name;
-        relativePath = meta.skillFilePath || meta.relativePath || relativePath;
+        if (meta) {
+          source = meta.source;
+          remotePath = meta.remotePath || remotePath;
+          resourceName = meta.name;
+          relativePath =
+            meta.skillFilePath || meta.relativePath || relativePath;
+        } else if (installedWorkspaceResource) {
+          source = installedWorkspaceResource.source || source;
+          remotePath = installedWorkspaceResource.remotePath || remotePath;
+          resourceName = installedWorkspaceResource.name || resourceName;
+          relativePath =
+            installedWorkspaceResource.fullPath ||
+            installedWorkspaceResource.relativePath ||
+            relativePath;
+        }
+      } else if (installedWorkspaceResource) {
+        source = installedWorkspaceResource.source || source;
+        remotePath = installedWorkspaceResource.remotePath || remotePath;
+        resourceName = installedWorkspaceResource.name || resourceName;
+        relativePath =
+          installedWorkspaceResource.fullPath ||
+          installedWorkspaceResource.relativePath ||
+          relativePath;
       }
 
       if (!source || source === "local" || !remotePath) {

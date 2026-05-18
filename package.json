@@ -2,7 +2,7 @@
   "name": "agent-resources-ninja",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.21",
+  "version": "0.2.22",
   "publisher": "yamapan",
   "license": "CC-BY-NC-SA-4.0",
   "icon": "resources/icon.png",
@@ -1059,18 +1059,23 @@
           "group": "inline@1"
         },
         {
+          "command": "resourceNinja.reinstall",
+          "when": "view == resourceNinja.browseView && (viewItem == installedRemoteSkill || viewItem == installedRemoteResource)",
+          "group": "inline@1"
+        },
+        {
           "command": "resourceNinja.preview",
-          "when": "view == resourceNinja.browseView && viewItem == skill",
+          "when": "view == resourceNinja.browseView && (viewItem == skill || viewItem == installedRemoteSkill || viewItem == installedRemoteResource)",
           "group": "inline@2"
         },
         {
           "command": "resourceNinja.toggleFavorite",
-          "when": "view == resourceNinja.browseView && viewItem == skill",
+          "when": "view == resourceNinja.browseView && (viewItem == skill || viewItem == installedRemoteSkill || viewItem == installedRemoteResource)",
           "group": "inline@3"
         },
         {
           "command": "resourceNinja.openOnGitHub",
-          "when": "view == resourceNinja.browseView && (viewItem == skill || viewItem == source || viewItem == remoteKindSource)",
+          "when": "view == resourceNinja.browseView && (viewItem == skill || viewItem == installedRemoteSkill || viewItem == installedRemoteResource || viewItem == source || viewItem == remoteKindSource)",
           "group": "inline@4"
         },
         {
@@ -1140,7 +1145,7 @@
         },
         {
           "command": "resourceNinja.copyUrl",
-          "when": "view == resourceNinja.browseView && (viewItem == skill || viewItem == source || viewItem == remoteKindSource)",
+          "when": "view == resourceNinja.browseView && (viewItem == skill || viewItem == installedRemoteSkill || viewItem == installedRemoteResource || viewItem == source || viewItem == remoteKindSource)",
           "group": "navigation@1"
         },
         {

@@ -1390,6 +1390,11 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
         kind === "plugin"
           ? undefined
           : getPluginPackageLabel(pluginPackageId, pluginPackages);
+      const browseContextValue = isInstalled
+        ? kind === "skill"
+          ? "installedRemoteSkill"
+          : "installedRemoteResource"
+        : "skill";
       const descriptionParts = [
         isRecent
           ? isJa
@@ -1409,7 +1414,7 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
           : `${isRecent ? "🆕 " : ""}${prefix}${skill.name}`,
         descriptionParts.join(" · "),
         vscode.TreeItemCollapsibleState.None,
-        "skill",
+        browseContextValue,
         skill,
         undefined,
         undefined,

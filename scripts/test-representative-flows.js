@@ -369,6 +369,29 @@ test("resource group reinstall delegates to per-resource reinstall", () => {
   );
 });
 
+test("reinstall command resolves browse-installed remote rows through workspace state", () => {
+  assert.match(
+    extensionSource,
+    /let remotePath = skill\.remotePath \|\| skill\.path/,
+  );
+  assert.match(
+    extensionSource,
+    /const installedWorkspaceResource = workspaceProvider[\s\S]*getWorkspaceSkills\(\)[\s\S]*normalizeInstalledRemotePath\(/,
+  );
+  assert.match(
+    extensionSource,
+    /const meta =[\s\S]*installedMeta\.find\(/,
+  );
+  assert.match(
+    extensionSource,
+    /normalizeInstalledRemotePath\(m\.remotePath\)/,
+  );
+  assert.match(
+    extensionSource,
+    /else if \(installedWorkspaceResource\) \{[\s\S]*installedWorkspaceResource\.fullPath[\s\S]*installedWorkspaceResource\.relativePath/,
+  );
+});
+
 test("resource group reinstall explains empty remote-installed groups", () => {
   assert.match(extensionSource, /remoteInstalledItems\.length === 0/);
   assert.match(

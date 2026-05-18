@@ -324,6 +324,56 @@ test("remote resource rows support click installs for every resource kind", () =
   }
 });
 
+test("browse view shows reinstall inline on already installed remote rows", () => {
+  assert.match(
+    treeProviderSource,
+    /const browseContextValue = isInstalled[\s\S]*"installedRemoteSkill"[\s\S]*"installedRemoteResource"[\s\S]*: "skill"/,
+  );
+  assert.match(
+    treeProviderSource,
+    /if \(isInstalled\) \{[\s\S]*\} else \{[\s\S]*item\.command = \{/,
+  );
+  assert.ok(
+    itemMenuHas(
+      "resourceNinja.install",
+      "view == resourceNinja.browseView && viewItem == skill",
+    ),
+  );
+  assert.ok(
+    itemMenuHas(
+      "resourceNinja.reinstall",
+      "view == resourceNinja.browseView && (viewItem == installedRemoteSkill || viewItem == installedRemoteResource)",
+    ),
+  );
+});
+
+test("browse installed remote rows keep preview and metadata actions", () => {
+  assert.ok(
+    itemMenuHas(
+      "resourceNinja.preview",
+      "view == resourceNinja.browseView && (viewItem == skill || viewItem == installedRemoteSkill || viewItem == installedRemoteResource)",
+    ),
+  );
+  assert.ok(
+    itemMenuHas(
+      "resourceNinja.toggleFavorite",
+      "view == resourceNinja.browseView && (viewItem == skill || viewItem == installedRemoteSkill || viewItem == installedRemoteResource)",
+    ),
+  );
+  assert.ok(
+    itemMenuHas(
+      "resourceNinja.openOnGitHub",
+      "view == resourceNinja.browseView && (viewItem == skill || viewItem == installedRemoteSkill || viewItem == installedRemoteResource || viewItem == source || viewItem == remoteKindSource)",
+    ),
+  );
+  assert.ok(
+    itemMenuHas(
+      "resourceNinja.copyUrl",
+      "view == resourceNinja.browseView && (viewItem == skill || viewItem == installedRemoteSkill || viewItem == installedRemoteResource || viewItem == source || viewItem == remoteKindSource)",
+    ),
+  );
+});
+
 test("default click installs mcp configs as copy-only without activation picker", () => {
   assert.match(
     extensionSource,
