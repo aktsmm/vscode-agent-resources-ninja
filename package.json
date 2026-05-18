@@ -2,7 +2,7 @@
   "name": "agent-resources-ninja",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.18",
+  "version": "0.2.19",
   "publisher": "yamapan",
   "license": "CC-BY-NC-SA-4.0",
   "icon": "resources/icon.png",
@@ -691,6 +691,12 @@
         "icon": "$(trash)"
       },
       {
+        "command": "resourceNinja.openResourceOutput",
+        "title": "%command.openResourceOutput%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(file-text)"
+      },
+      {
         "command": "resourceNinja.openInstructionFile",
         "title": "%command.openInstructionFile%",
         "category": "Agent Resources Ninja",
@@ -845,6 +851,10 @@
         },
         {
           "command": "resourceNinja.openUserResource",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.openInstructionFile",
           "when": "false"
         },
         {
@@ -1371,8 +1381,32 @@
         },
         "resourceNinja.outputFormat": {
           "type": "string",
-          "default": "full",
+          "default": "ref",
           "order": 22,
+          "enum": [
+            "ref",
+            "full",
+            "compact",
+            "legacy"
+          ],
+          "enumDescriptions": [
+            "%config.outputFormat.ref%",
+            "%config.outputFormat.full%",
+            "%config.outputFormat.compact%",
+            "%config.outputFormat.legacy%"
+          ],
+          "markdownDescription": "%config.outputFormat.markdownDescription%"
+        },
+        "resourceNinja.refCatalogDirectory": {
+          "type": "string",
+          "default": "",
+          "order": 23,
+          "markdownDescription": "%config.refCatalogDirectory.markdownDescription%"
+        },
+        "resourceNinja.refCatalogFormat": {
+          "type": "string",
+          "default": "full",
+          "order": 24,
           "enum": [
             "full",
             "compact",
@@ -1383,7 +1417,7 @@
             "%config.outputFormat.compact%",
             "%config.outputFormat.legacy%"
           ],
-          "markdownDescription": "%config.outputFormat.markdownDescription%"
+          "markdownDescription": "%config.refCatalogFormat.markdownDescription%"
         },
         "resourceNinja.singleClickInstall": {
           "type": "boolean",
@@ -1412,13 +1446,13 @@
         "resourceNinja.showBuiltInResources": {
           "type": "boolean",
           "default": false,
-          "order": 23,
+          "order": 25,
           "markdownDescription": "%config.showBuiltInResources.markdownDescription%"
         },
         "resourceNinja.remoteResourceViewMode": {
           "type": "string",
           "default": "repositoryFirst",
-          "order": 24,
+          "order": 26,
           "enum": [
             "repositoryFirst",
             "resourceTypeFirst"
@@ -1432,7 +1466,7 @@
         "resourceNinja.language": {
           "type": "string",
           "default": "auto",
-          "order": 25,
+          "order": 27,
           "enum": [
             "auto",
             "en",
@@ -1449,25 +1483,25 @@
           "type": "string",
           "default": "",
           "editPresentation": "password",
-          "order": 26,
+          "order": 28,
           "markdownDescription": "%config.githubToken.markdownDescription%"
         },
         "resourceNinja.instructionBlock.includeAgents": {
           "type": "boolean",
           "default": false,
-          "order": 27,
+          "order": 29,
           "markdownDescription": "%config.instructionBlock.includeAgents.markdownDescription%"
         },
         "resourceNinja.instructionBlock.includeInstructions": {
           "type": "boolean",
           "default": false,
-          "order": 28,
+          "order": 30,
           "markdownDescription": "%config.instructionBlock.includeInstructions.markdownDescription%"
         },
         "resourceNinja.instructionBlock.globalHome.includeAgents": {
           "type": "string",
           "default": "inherit",
-          "order": 29,
+          "order": 31,
           "enum": [
             "inherit",
             "on",
@@ -1483,7 +1517,7 @@
         "resourceNinja.instructionBlock.globalHome.includeInstructions": {
           "type": "string",
           "default": "inherit",
-          "order": 30,
+          "order": 32,
           "enum": [
             "inherit",
             "on",
@@ -1513,7 +1547,7 @@
     "package": "npm run check-types && npm run lint && node esbuild.js --production",
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
-    "test:resources": "node scripts/test-resource-kinds.js && node scripts/test-resource-targets.js && node scripts/test-resource-preview-urls.js && node scripts/test-user-data-paths.js && node scripts/test-global-home-routing.js && node scripts/test-hook-config.js && node scripts/test-mcp-config-merge.js && node scripts/test-skill-search.js && node scripts/test-azure-plugin-source.js && node scripts/test-azure-skills-source.js && node scripts/test-cursor-plugin-source.js && node scripts/test-plugin-manifests.js && node scripts/test-full-plugin-index.js && node scripts/test-plugin-bundles.js && node scripts/test-ux-scope-actions.js && node scripts/test-create-resource-templates.js && node scripts/test-create-resource-flow.js && node scripts/test-create-resource-validation.js && node scripts/test-instruction-target-ux.js && node scripts/test-instruction-block-policy.js && node scripts/test-localization-ux.js && node scripts/test-readme-release-ux.js && node scripts/test-view-welcome-ux.js && node scripts/test-activation-ux.js && node scripts/test-release-hygiene.js && node scripts/test-manifest-consistency.js && node scripts/test-logger.js",
+    "test:resources": "node scripts/test-resource-kinds.js && node scripts/test-resource-targets.js && node scripts/test-resource-preview-urls.js && node scripts/test-user-data-paths.js && node scripts/test-global-home-routing.js && node scripts/test-hook-config.js && node scripts/test-mcp-config-merge.js && node scripts/test-skill-search.js && node scripts/test-azure-plugin-source.js && node scripts/test-azure-skills-source.js && node scripts/test-cursor-plugin-source.js && node scripts/test-plugin-manifests.js && node scripts/test-full-plugin-index.js && node scripts/test-plugin-bundles.js && node scripts/test-ux-scope-actions.js && node scripts/test-create-resource-templates.js && node scripts/test-create-resource-flow.js && node scripts/test-create-resource-validation.js && node scripts/test-instruction-target-ux.js && node scripts/test-instruction-block-policy.js && node scripts/test-ref-resource-catalog.js && node scripts/test-localization-ux.js && node scripts/test-readme-release-ux.js && node scripts/test-view-welcome-ux.js && node scripts/test-activation-ux.js && node scripts/test-release-hygiene.js && node scripts/test-manifest-consistency.js && node scripts/test-logger.js",
     "test": "vscode-test"
   },
   "overrides": {

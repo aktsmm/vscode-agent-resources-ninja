@@ -344,7 +344,10 @@ test("instruction file creation dialog is localized", () => {
     extensionSource,
     /const cancelLabel = isJa \? "キャンセル" : "Cancel"/,
   );
-  assert.match(extensionSource, /was not found\. Create it\?/);
+  assert.match(
+    extensionSource,
+    /output was not found\.[\s\S]*Create the sync target file\?/,
+  );
 });
 
 test("user global skill delete refreshes instruction index", () => {

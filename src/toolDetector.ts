@@ -21,11 +21,32 @@ export type AITool =
 
 /**
  * 出力フォーマット（スキルリストの表示形式）
- * - full: IMPORTANT + 詳細テーブル + 圧縮インデックス（既定）
+ * - ref: 軽量参照ブロック + kind ごとの別 catalog（既定）
+ * - full: IMPORTANT + 詳細テーブル
  * - compact: IMPORTANT + 圧縮インデックスのみ
  * - legacy: シンプルテーブルのみ（OLD）
  */
-export type OutputFormat = "full" | "compact" | "legacy";
+export type OutputFormat = "ref" | "full" | "compact" | "legacy";
+
+export function normalizeOutputFormat(
+  value: string | undefined,
+): OutputFormat {
+  switch ((value || "").trim()) {
+    case "ref":
+    case "full":
+    case "compact":
+    case "legacy":
+      return value as OutputFormat;
+    case "markdown":
+      return "legacy";
+    case "compressed-index":
+      return "compact";
+    case "markdown-with-index":
+      return "full";
+    default:
+      return "ref";
+  }
+}
 
 /**
  * 検出されたツール情報
@@ -120,28 +141,28 @@ export async function detectAITools(
     {
       pattern: "CLAUDE.md",
       tool: "claude-code",
-      format: "full",
+      format: "ref",
       instructionFile: "CLAUDE.md",
       confidence: "high",
     },
     {
       pattern: ".claude/CLAUDE.md",
       tool: "claude-code",
-      format: "full",
+      format: "ref",
       instructionFile: ".claude/CLAUDE.md",
       confidence: "high",
     },
     {
       pattern: ".claude/CLAUDE.local.md",
       tool: "claude-code",
-      format: "full",
+      format: "ref",
       instructionFile: ".claude/CLAUDE.local.md",
       confidence: "medium",
     },
     {
       pattern: ".claude/**",
       tool: "claude-code",
-      format: "full",
+      format: "ref",
       instructionFile: ".claude/CLAUDE.md",
       confidence: "medium",
     },
@@ -149,42 +170,42 @@ export async function detectAITools(
     {
       pattern: ".github/copilot-instructions.md",
       tool: "github-copilot",
-      format: "full",
+      format: "ref",
       instructionFile: ".github/copilot-instructions.md",
       confidence: "high",
     },
     {
       pattern: ".github/instructions/**",
       tool: "github-copilot",
-      format: "full",
+      format: "ref",
       instructionFile: ".github/instructions/SkillList.instructions.md",
       confidence: "high",
     },
     {
       pattern: ".github/agents/**",
       tool: "github-copilot",
-      format: "full",
+      format: "ref",
       instructionFile: "AGENTS.md",
       confidence: "medium",
     },
     {
       pattern: ".github/prompts/**",
       tool: "github-copilot",
-      format: "full",
+      format: "ref",
       instructionFile: ".github/copilot-instructions.md",
       confidence: "medium",
     },
     {
       pattern: ".github/skills/**",
       tool: "github-copilot",
-      format: "full",
+      format: "ref",
       instructionFile: ".github/copilot-instructions.md",
       confidence: "medium",
     },
     {
       pattern: "AGENTS.md",
       tool: "github-copilot",
-      format: "full",
+      format: "ref",
       instructionFile: "AGENTS.md",
       confidence: "medium",
     },
@@ -209,7 +230,7 @@ export async function detectAITools(
     }
   }
 
-  let recommendedFormat: OutputFormat = "full";
+  let recommendedFormat: OutputFormat = "ref";
   let recommendedInstructionFile = DEFAULT_INSTRUCTION_FILE;
 
   // 推奨フォーマットを決定（優先順位: cursor > windsurf > cline > claude-code > github-copilot）
@@ -278,7 +299,7 @@ export async function promptToolSelection(
       return undefined;
     }
 
-    // 選択に基づいてフォーマットを決定（フォーマットは全て full）
+    // 選択に基づいてフォーマットを決定
     if (selected.label.includes("Cursor")) {
       return {
         format: "full",
@@ -289,9 +310,9 @@ export async function promptToolSelection(
     } else if (selected.label.includes("Cline")) {
       return { format: "full", instructionFile: ".clinerules" };
     } else if (selected.label.includes("Claude")) {
-      return { format: "full", instructionFile: "CLAUDE.md" };
+      return { format: "ref", instructionFile: "CLAUDE.md" };
     } else {
-      return { format: "full", instructionFile: DEFAULT_INSTRUCTION_FILE };
+      return { format: "ref", instructionFile: DEFAULT_INSTRUCTION_FILE };
     }
   }
 
@@ -365,7 +386,7 @@ export async function promptToolSelection(
     // 再帰的に選択を促す（空の結果で）
     return promptToolSelection({
       detectedTools: [],
-      recommendedFormat: "full",
+      recommendedFormat: "ref",
       recommendedInstructionFile: DEFAULT_INSTRUCTION_FILE,
     });
   }
@@ -397,16 +418,16 @@ function getToolDisplayName(tool: AITool): string {
  * 設定された出力フォーマットを取得（auto の場合は検出結果を使用）
  */
 export async function resolveOutputFormat(
-  _workspaceUri: vscode.Uri,
+  workspaceUri: vscode.Uri,
 ): Promise<{ format: OutputFormat; instructionFile: string }> {
-  const config = vscode.workspace.getConfiguration("resourceNinja");
-  const outputFormat = config.get<string>("outputFormat") || "full";
+  const config = vscode.workspace.getConfiguration("resourceNinja", workspaceUri);
+  const outputFormat = normalizeOutputFormat(config.get<string>("outputFormat"));
 
   // instructionFile は常にユーザー設定を使用（自動検出しない）
   const instructionFile = getConfiguredInstructionFilePath(config);
 
   return {
-    format: outputFormat as OutputFormat,
+    format: outputFormat,
     instructionFile,
   };
 }

@@ -49,6 +49,10 @@ const updateInstructionSource = sourceBetween(
   /const updateInstructionCmd = vscode\.commands\.registerCommand\(/,
   /\n\s*async function openInstructionFileForScope\(/,
 );
+const openOutputPickerSource = sourceBetween(
+  /async function openInstructionFileWithScopePicker\(/,
+  /\n\s*const openInstructionFileCmd = vscode\.commands\.registerCommand\(/,
+);
 const openInstructionSource = sourceBetween(
   /const openInstructionFileCmd = vscode\.commands\.registerCommand\(/,
   /\n\s*\/\/ Command: Open settings/,
@@ -82,6 +86,10 @@ test("instruction target enabled helper rejects disabled target", () => {
 });
 
 test("edit when-to-use prompt uses instruction target helper", () => {
+  assert.match(
+    editWhenToUseSource,
+    /getConfiguration\(\s*"resourceNinja",\s*workspaceFolder\.uri,?\s*\)/,
+  );
   assert.match(
     editWhenToUseSource,
     /const instructionTarget = getInstructionTargetLabel\(/,
@@ -141,6 +149,10 @@ test("edit when-to-use success distinguishes metadata-only save", () => {
 test("update instruction success includes configured target", () => {
   assert.match(
     updateInstructionSource,
+    /getConfiguration\(\s*"resourceNinja",\s*workspaceFolder\.uri,?\s*\)/,
+  );
+  assert.match(
+    updateInstructionSource,
     /const instructionTarget = getInstructionTargetLabel\(/,
   );
   assert.match(
@@ -176,6 +188,30 @@ test("open instruction file flow still shows resolved path", () => {
     /resolveInstructionFileUri\(workspaceFolder\.uri, config\)/,
   );
   assert.match(openInstructionScopeSource, /fileUri\.fsPath/);
+  assert.match(openInstructionScopeSource, /resolvePrimaryRefCatalogUri/);
+  assert.match(openInstructionScopeSource, /resolveOutputFormat\(workspaceFolder\.uri\)/);
+  assert.match(openInstructionScopeSource, /updateInstructionFileAtUri\(/);
+  assert.match(openInstructionScopeSource, /updateInstructionFile\(workspaceFolder\.uri, context\)/);
+  assert.match(
+    openInstructionScopeSource,
+    /Managed output regeneration did not create an openable target/,
+  );
+});
+
+test("generic open resource output command uses explicit scope picker", () => {
+  assert.match(openOutputPickerSource, /showQuickPick/);
+  assert.match(
+    openOutputPickerSource,
+    /Select the resource output scope to open|開くリソース出力のスコープを選択/,
+  );
+  assert.match(openOutputPickerSource, /scope: "workspace"/);
+  assert.match(openOutputPickerSource, /scope: "globalHome"/);
+  assert.match(
+    openOutputPickerSource,
+    /openInstructionFileForScope\(scopeChoice\.scope\)/,
+  );
+  assert.match(extensionSource, /resourceNinja\.openResourceOutput/);
+  assert.match(extensionSource, /openInstructionFileWithScopePicker\(/);
 });
 
 test("global instruction target helper uses global resolver", () => {
@@ -245,14 +281,16 @@ test("global update instruction command uses global resolver", () => {
   assert.match(updateInstructionSource, /getGlobalInstructionTargetLabel\(\s*workspaceFolder\.uri,\s*config,\s*\)/);
 });
 
-test("global open instruction command is hidden from command palette", () => {
+test("scoped output commands stay hidden from command palette", () => {
   const hiddenCommands = new Set(
     (packageJson.contributes?.menus?.commandPalette || [])
       .filter((item) => item.when === "false")
       .map((item) => item.command),
   );
+  assert.ok(hiddenCommands.has("resourceNinja.openInstructionFile"));
   assert.ok(hiddenCommands.has("resourceNinja.openGlobalInstructionFile"));
   assert.ok(hiddenCommands.has("resourceNinja.updateGlobalInstruction"));
+  assert.ok(!hiddenCommands.has("resourceNinja.openResourceOutput"));
 });
 
 test("global instruction command titles identify global target", () => {
@@ -261,6 +299,10 @@ test("global instruction command titles identify global target", () => {
       command.command,
       command.title,
     ]),
+  );
+  assert.strictEqual(
+    commands["resourceNinja.openResourceOutput"],
+    "%command.openResourceOutput%",
   );
   assert.strictEqual(
     commands["resourceNinja.openInstructionFile"],
@@ -278,9 +320,12 @@ test("global instruction command titles identify global target", () => {
     commands["resourceNinja.updateGlobalInstruction"],
     "%command.updateGlobalInstruction%",
   );
-  assert.match(nls["command.openGlobalInstructionFile"], /Global Instruction File/);
+  assert.match(nls["command.openResourceOutput"], /Open Resource Output\.\.\./);
+  assert.match(nls["command.openInstructionFile"], /Resource Output/);
+  assert.match(nls["command.openGlobalInstructionFile"], /Global Resource Output/);
   assert.match(nls["command.updateGlobalInstruction"], /Global Instruction File/);
-  assert.match(nlsJa["command.openGlobalInstructionFile"], /Global のインストラクションファイル/);
+  assert.match(nlsJa["command.openResourceOutput"], /リソース出力を開く\.\.\./);
+  assert.match(nlsJa["command.openGlobalInstructionFile"], /Global のリソース出力/);
   assert.match(nlsJa["command.updateGlobalInstruction"], /Global のインストラクションファイル/);
 });
 
@@ -305,11 +350,16 @@ test("instruction file setting exposes non-default targets", () => {
   }
 });
 
-test("localized command labels use instruction file terminology", () => {
-  assert.match(nls["command.openInstructionFile"], /Instruction File/);
+test("localized command labels use output terminology for open actions", () => {
+  assert.match(nls["command.openResourceOutput"], /Resource Output/);
+  assert.match(nls["command.openInstructionFile"], /Resource Output/);
+  assert.match(
+    nlsJa["command.openResourceOutput"],
+    /リソース出力/,
+  );
   assert.match(
     nlsJa["command.openInstructionFile"],
-    /インストラクションファイル/,
+    /リソース出力/,
   );
   assert.match(nls["command.updateInstruction"], /Instruction File/);
   assert.match(

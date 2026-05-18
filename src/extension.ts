@@ -38,6 +38,7 @@ import {
   updateMcpConfigForUninstall,
 } from "./mcpConfigManager";
 import {
+  resolvePrimaryRefCatalogUri,
   updateInstructionFile,
   updateInstructionFileAtUri,
   removeSkillSectionFromFile,
@@ -115,6 +116,7 @@ import {
   resolveInstructionFileUri,
 } from "./customizationPaths";
 import { getVsCodeUserDataPath } from "./userDataPaths";
+import { normalizeOutputFormat, resolveOutputFormat } from "./toolDetector";
 import {
   getStandaloneSharedModeSummary,
   readSharedResourceIndex,
@@ -243,6 +245,8 @@ const RESETTABLE_RESOURCE_NINJA_SETTINGS = [
   "globalHomeDirectory",
   "language",
   "outputFormat",
+  "refCatalogDirectory",
+  "refCatalogFormat",
   "singleClickInstall",
   "defaultInstallTarget",
   "showBuiltInResources",
@@ -537,8 +541,10 @@ export async function activate(
     }),
   );
 
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+
   // 設定値のマイグレーション（旧フォーマット名 → 新フォーマット名）
-  const formatMigrated = migrateOutputFormatSetting();
+  const formatMigrated = await migrateOutputFormatSetting(workspaceFolder?.uri);
 
   let skillIndex: SkillIndex | undefined;
 
@@ -568,7 +574,6 @@ export async function activate(
   );
 
   // バージョンアップ時のメタデータ再抽出
-  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   checkVersionAndRefreshMetadata(context, workspaceFolder?.uri, formatMigrated);
 
   loadSkillIndex(context).then(async (index: SkillIndex) => {
@@ -847,6 +852,8 @@ export async function activate(
       e.affectsConfiguration("resourceNinja.globalResourceHomePreset") ||
       e.affectsConfiguration("resourceNinja.globalHomeDirectory") ||
       e.affectsConfiguration("resourceNinja.outputFormat") ||
+      e.affectsConfiguration("resourceNinja.refCatalogDirectory") ||
+      e.affectsConfiguration("resourceNinja.refCatalogFormat") ||
       e.affectsConfiguration("resourceNinja.coexistenceMode") ||
       e.affectsConfiguration("resourceNinja.instructionBlock.includeAgents") ||
       e.affectsConfiguration(
@@ -992,7 +999,10 @@ export async function activate(
   const toggleRemoteResourceViewModeCmd = vscode.commands.registerCommand(
     "resourceNinja.toggleRemoteResourceViewMode",
     async () => {
-      const config = vscode.workspace.getConfiguration("resourceNinja");
+      const config = vscode.workspace.getConfiguration(
+        "resourceNinja",
+        workspaceFolder?.uri,
+      );
       const current = config.get<string>(
         "remoteResourceViewMode",
         "repositoryFirst",
@@ -1120,7 +1130,10 @@ export async function activate(
         }
 
         userResourcesProvider.refresh();
-        const config = vscode.workspace.getConfiguration("resourceNinja");
+        const config = vscode.workspace.getConfiguration(
+          "resourceNinja",
+          wsFolder.uri,
+        );
         if (
           resource.kind === "skill" &&
           config.get<boolean>("autoUpdateInstruction")
@@ -1433,7 +1446,10 @@ export async function activate(
       }
 
       // インストール済みスキル（.github/skills 配下）の場合
-      const config = vscode.workspace.getConfiguration("resourceNinja");
+      const config = vscode.workspace.getConfiguration(
+        "resourceNinja",
+        workspaceFolder.uri,
+      );
       const skillsDir = getConfiguredSkillsDirectory(config);
 
       // ラベルからステータスアイコンを削除してスキル名を取得
@@ -1532,7 +1548,10 @@ export async function activate(
       workspaceProvider.refresh();
       userResourcesProvider.refresh();
       browseProvider.refresh();
-      const config = vscode.workspace.getConfiguration("resourceNinja");
+      const config = vscode.workspace.getConfiguration(
+        "resourceNinja",
+        wsFolder?.uri,
+      );
       if (
         wsFolder &&
         deletedSkills > 0 &&
@@ -1572,7 +1591,10 @@ export async function activate(
       }
 
       // インストール済みスキル（.github/skills 配下）の場合
-      const config = vscode.workspace.getConfiguration("resourceNinja");
+      const config = vscode.workspace.getConfiguration(
+        "resourceNinja",
+        workspaceFolder.uri,
+      );
       const skillsDir = getConfiguredSkillsDirectory(config);
 
       // ラベルからステータスアイコンを削除してスキル名を取得
@@ -1610,7 +1632,10 @@ export async function activate(
         return;
       }
 
-      const config = vscode.workspace.getConfiguration("resourceNinja");
+      const config = vscode.workspace.getConfiguration(
+        "resourceNinja",
+        workspaceFolder.uri,
+      );
       const skillsDir = getConfiguredSkillsDirectory(config);
 
       // メタデータファイルのパス
@@ -3359,7 +3384,10 @@ export async function activate(
       );
 
       if (selected) {
-        const config = vscode.workspace.getConfiguration("resourceNinja");
+        const config = vscode.workspace.getConfiguration(
+          "resourceNinja",
+          wsFolder.uri,
+        );
         const skillsDir = getConfiguredSkillsDirectory(config);
         const skillPath = vscode.Uri.joinPath(
           wsFolder.uri,
@@ -4555,7 +4583,10 @@ export async function activate(
       }
 
       try {
-        const config = vscode.workspace.getConfiguration("resourceNinja");
+        const config = vscode.workspace.getConfiguration(
+          "resourceNinja",
+          workspaceFolder.uri,
+        );
         if (!isInstructionTargetEnabled(config)) {
           const openSettings = await vscode.window.showInformationMessage(
             isJapanese()
@@ -4597,7 +4628,10 @@ export async function activate(
       }
 
       try {
-        const config = vscode.workspace.getConfiguration("resourceNinja");
+        const config = vscode.workspace.getConfiguration(
+          "resourceNinja",
+          workspaceFolder.uri,
+        );
         if (!isInstructionTargetEnabled(config)) {
           const openSettings = await vscode.window.showInformationMessage(
             isJapanese()
@@ -4767,7 +4801,10 @@ export async function activate(
       return;
     }
 
-    const config = vscode.workspace.getConfiguration("resourceNinja");
+    const config = vscode.workspace.getConfiguration(
+      "resourceNinja",
+      workspaceFolder.uri,
+    );
     const filePath = getConfiguredInstructionFilePath(config);
     if (filePath === DISABLED_INSTRUCTION_FILE) {
       const openSettings = await vscode.window.showInformationMessage(
@@ -4794,22 +4831,79 @@ export async function activate(
         ? getGlobalInstructionTargetLabel(workspaceFolder.uri, config)
         : filePath;
 
+    const { format } = await resolveOutputFormat(workspaceFolder.uri);
+    const preferredOutputUri =
+      format === "ref"
+        ? resolvePrimaryRefCatalogUri(
+            workspaceFolder.uri,
+            fileUri,
+            scope,
+            config,
+          )
+        : fileUri;
+
+    const tryOpenDocument = async (uri: vscode.Uri): Promise<boolean> => {
+      try {
+        await vscode.workspace.fs.stat(uri);
+        const doc = await vscode.workspace.openTextDocument(uri);
+        await vscode.window.showTextDocument(doc);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    const regenerateManagedOutput = async (): Promise<void> => {
+      if (scope === "globalHome") {
+        await updateInstructionFileAtUri(
+          workspaceFolder.uri,
+          context,
+          fileUri,
+          targetLabel,
+        );
+        return;
+      }
+      await updateInstructionFile(workspaceFolder.uri, context);
+    };
+
     try {
-      // ファイルが存在するか確認
-      await vscode.workspace.fs.stat(fileUri);
-      const doc = await vscode.workspace.openTextDocument(fileUri);
-      await vscode.window.showTextDocument(doc);
+      if (await tryOpenDocument(preferredOutputUri)) {
+        return;
+      }
+
+      if (format === "ref") {
+        try {
+          await regenerateManagedOutput();
+        } catch (error) {
+          logger.warn(
+            "[Resource Ninja] Failed to regenerate managed output before opening fallback:",
+            error,
+          );
+        }
+
+        if (await tryOpenDocument(preferredOutputUri)) {
+          return;
+        }
+
+        if (await tryOpenDocument(fileUri)) {
+          return;
+        }
+      } else if (await tryOpenDocument(fileUri)) {
+        return;
+      }
+
+      throw new Error("output-not-found");
     } catch {
-      // ファイルがなければ作成するか確認
+      // 出力先がなければ同期先ファイルの作成を提案
       const isJa = isJapanese();
       const createLabel = isJa ? "作成" : "Create";
       const settingsLabel = messages.openSettings();
       const cancelLabel = isJa ? "キャンセル" : "Cancel";
       const create = await vscode.window.showInformationMessage(
         isJa
-          ? `${targetLabel} が見つかりません。作成しますか？
+          ? `${targetLabel} の出力が見つかりません。managed output を再生成しても開けなかったため、同期先ファイルを作成しますか？
 ${fileUri.fsPath}`
-          : `${targetLabel} was not found. Create it?
+          : `${targetLabel} output was not found. Managed output regeneration did not create an openable target. Create the sync target file?
 ${fileUri.fsPath}`,
         createLabel,
         settingsLabel,
@@ -4817,7 +4911,7 @@ ${fileUri.fsPath}`,
       );
       if (create === createLabel) {
         try {
-          // 空のファイルを作成
+          // 空の同期先ファイルを作成
           await vscode.workspace.fs.createDirectory(
             vscode.Uri.file(path.dirname(fileUri.fsPath)),
           );
@@ -4832,8 +4926,8 @@ ${fileUri.fsPath}`,
             error instanceof Error ? error.message : String(error);
           vscode.window.showErrorMessage(
             isJa
-              ? `インストラクションファイルを作成できませんでした: ${errorMessage}`
-              : `Failed to create instruction file: ${errorMessage}`,
+              ? `出力先ファイルを作成できませんでした: ${errorMessage}`
+              : `Failed to create output file: ${errorMessage}`,
           );
         }
       } else if (create === settingsLabel) {
@@ -4842,13 +4936,62 @@ ${fileUri.fsPath}`,
     }
   }
 
-  // Command: Open workspace instruction file (AGENTS.md etc.)
+  async function openInstructionFileWithScopePicker(): Promise<void> {
+    if (!workspaceFolder) {
+      vscode.window.showErrorMessage(messages.noWorkspace());
+      return;
+    }
+
+    const config = vscode.workspace.getConfiguration(
+      "resourceNinja",
+      workspaceFolder.uri,
+    );
+    const scopeChoice = await vscode.window.showQuickPick(
+      [
+        {
+          label: isJapanese()
+            ? "ワークスペースのリソース出力"
+            : "Workspace Resource Output",
+          description: getInstructionTargetLabel(config, isJapanese()),
+          scope: "workspace" as const,
+        },
+        {
+          label: isJapanese()
+            ? "Global のリソース出力"
+            : "Global Resource Output",
+          description: getGlobalInstructionTargetLabel(
+            workspaceFolder.uri,
+            config,
+          ),
+          scope: "globalHome" as const,
+        },
+      ],
+      {
+        placeHolder: isJapanese()
+          ? "開くリソース出力のスコープを選択"
+          : "Select the resource output scope to open",
+      },
+    );
+
+    if (!scopeChoice) {
+      return;
+    }
+
+    await openInstructionFileForScope(scopeChoice.scope);
+  }
+
+  const openResourceOutputCmd = vscode.commands.registerCommand(
+    "resourceNinja.openResourceOutput",
+    async () => openInstructionFileWithScopePicker(),
+  );
+
+  // Command: Open workspace output (instruction file or ref catalog)
   const openInstructionFileCmd = vscode.commands.registerCommand(
     "resourceNinja.openInstructionFile",
     async () => openInstructionFileForScope("workspace"),
   );
 
-  // Command: Open Global Resource Home instruction file
+  // Command: Open Global Resource Home output (instruction file or ref catalog)
   const openGlobalInstructionFileCmd = vscode.commands.registerCommand(
     "resourceNinja.openGlobalInstructionFile",
     async () => openInstructionFileForScope("globalHome"),
@@ -5090,6 +5233,7 @@ ${fileUri.fsPath}`,
     showCoexistenceStatusCmd,
     recomputeOwnershipCmd,
     cleanupOrphanBlockCmd,
+    openResourceOutputCmd,
     openInstructionFileCmd,
     openGlobalInstructionFileCmd,
     openSettingsCmd,
@@ -5308,9 +5452,11 @@ async function promptForSkillUpdate(skillCount: number): Promise<boolean> {
  *   - markdown-with-index → full
  * @returns マイグレーションが行われた場合は true
  */
-function migrateOutputFormatSetting(): boolean {
+async function migrateOutputFormatSetting(
+  workspaceUri: vscode.Uri | undefined,
+): Promise<boolean> {
   const config = vscode.workspace.getConfiguration("resourceNinja");
-  const currentValue = config.get<string>("outputFormat");
+  const inspected = config.inspect<string>("outputFormat");
 
   // マイグレーションマップ（旧値 → 新値）
   const migrationMap: Record<string, string> = {
@@ -5319,15 +5465,42 @@ function migrateOutputFormatSetting(): boolean {
     "markdown-with-index": "full",
   };
 
-  if (currentValue && migrationMap[currentValue]) {
-    const newValue = migrationMap[currentValue];
-    config.update("outputFormat", newValue, vscode.ConfigurationTarget.Global);
-    logger.info(
-      `[Resource Ninja] Migrated outputFormat: ${currentValue} → ${newValue}`,
-    );
-    return true;
+  let migrated = false;
+  const targets: Array<
+    [
+      string | undefined,
+      vscode.ConfigurationTarget,
+      vscode.WorkspaceConfiguration,
+    ]
+  > = [
+    [inspected?.globalValue, vscode.ConfigurationTarget.Global, config],
+    [inspected?.workspaceValue, vscode.ConfigurationTarget.Workspace, config],
+  ];
+
+  if (workspaceUri) {
+    targets.push([
+      inspected?.workspaceFolderValue,
+      vscode.ConfigurationTarget.WorkspaceFolder,
+      vscode.workspace.getConfiguration("resourceNinja", workspaceUri),
+    ]);
   }
-  return false;
+
+  for (const [value, target, targetConfig] of targets) {
+    if (!value || !migrationMap[value]) {
+      continue;
+    }
+    const newValue = normalizeOutputFormat(value);
+    if (newValue === value) {
+      continue;
+    }
+    await targetConfig.update("outputFormat", newValue, target);
+    logger.info(
+      `[Resource Ninja] Migrated outputFormat (${vscode.ConfigurationTarget[target]}): ${value} → ${newValue}`,
+    );
+    migrated = true;
+  }
+
+  return migrated;
 }
 
 export async function deactivate(): Promise<void> {

@@ -1061,6 +1061,8 @@ test("settings order keeps install and destination paths first", () => {
     "resourceNinja.includeLocalResources",
     "resourceNinja.autoUpdateResourcesOnUpgrade",
     "resourceNinja.outputFormat",
+    "resourceNinja.refCatalogDirectory",
+    "resourceNinja.refCatalogFormat",
     "resourceNinja.showBuiltInResources",
     "resourceNinja.remoteResourceViewMode",
     "resourceNinja.language",
@@ -1332,7 +1334,7 @@ test("instruction index actions are reachable from matching workspace and user-g
         item.command === "resourceNinja.openInstructionFile" &&
         item.when === "view == resourceNinja.installedView",
     ),
-    "Workspace view should open the workspace instruction target",
+    "Workspace view should open the workspace output target",
   );
   assert.ok(
     titleMenus.some(
@@ -1340,7 +1342,7 @@ test("instruction index actions are reachable from matching workspace and user-g
         item.command === "resourceNinja.openGlobalInstructionFile" &&
         item.when === "view == resourceNinja.userResourcesView",
     ),
-    "User / Global view should open the global instruction target",
+    "User / Global view should open the global output target",
   );
   assert.ok(
     !titleMenus.some(
@@ -1348,7 +1350,7 @@ test("instruction index actions are reachable from matching workspace and user-g
         item.command === "resourceNinja.openInstructionFile" &&
         item.when === "view == resourceNinja.userResourcesView",
     ),
-    "User / Global view should not open the workspace instruction target",
+    "User / Global view should not open the workspace output target",
   );
   assert.ok(
     titleMenus.some(
@@ -1424,19 +1426,25 @@ test("instruction file setting exposes local and non-local targets", () => {
   );
 });
 
-test("open instruction file flow supports non-local target discovery", () => {
+test("open output flow supports non-local target discovery and ref fallback", () => {
   assert.match(extensionSource, /getConfiguredInstructionFilePath\(config\)/);
   assert.match(
     extensionSource,
     /resolveInstructionFileUri\(workspaceFolder\.uri, config\)/,
   );
+  assert.match(extensionSource, /resolvePrimaryRefCatalogUri/);
+  assert.match(extensionSource, /resolveOutputFormat\(workspaceFolder\.uri\)/);
+  assert.match(
+    extensionSource,
+    /Managed output regeneration did not create an openable target/,
+  );
   assert.match(extensionSource, /fileUri\.fsPath/);
   assert.match(extensionSource, /messages\.openSettings\(\)/);
   assert.match(extensionSource, /resourceNinja\.openSettings/);
-  assert.match(extensionSource, /Failed to create instruction file:/);
+  assert.match(extensionSource, /Failed to create output file:/);
   assert.match(
     extensionSource,
-    /インストラクションファイルを作成できませんでした:/,
+    /出力先ファイルを作成できませんでした:/,
   );
 });
 
@@ -1569,6 +1577,7 @@ test("command palette hides context-only and compatibility commands", () => {
     "resourceNinja.refreshLocal",
     "resourceNinja.refreshUserResources",
     "resourceNinja.openUserResource",
+    "resourceNinja.openInstructionFile",
     "resourceNinja.openGlobalInstructionFile",
     "resourceNinja.revealUserResource",
     "resourceNinja.copyUserResourcePath",
@@ -1613,6 +1622,17 @@ test("visible command palette labels are not duplicated", () => {
       `Duplicate visible Command Palette title "${title}": ${commandIds.join(", ")}`,
     );
   }
+});
+
+test("generic output command stays visible while scoped output commands stay hidden", () => {
+  const hiddenFromPalette = new Set(
+    (packageJson.contributes?.menus?.commandPalette || [])
+      .filter((item) => item.when === "false")
+      .map((item) => item.command),
+  );
+  assert.ok(!hiddenFromPalette.has("resourceNinja.openResourceOutput"));
+  assert.ok(hiddenFromPalette.has("resourceNinja.openInstructionFile"));
+  assert.ok(hiddenFromPalette.has("resourceNinja.openGlobalInstructionFile"));
 });
 
 test("language model tools use resource-oriented public names", () => {

@@ -9,7 +9,11 @@ import {
 } from "./skillInstaller";
 import { scanLocalSkills, LocalSkill } from "./localSkillScanner";
 import { scanUserResources, UserResource } from "./userResourceScanner";
-import { OutputFormat, resolveOutputFormat } from "./toolDetector";
+import {
+  OutputFormat,
+  normalizeOutputFormat,
+  resolveOutputFormat,
+} from "./toolDetector";
 import * as path from "path";
 import { SKILL_DESCRIPTION_LIMITS } from "./constants";
 import {
@@ -30,7 +34,14 @@ import {
   resolveSkillsDirectoryUri,
 } from "./customizationPaths";
 import { getEffectiveOwner, isSiblingActive } from "./coexistence";
-import { ResourceKind, getResourceKindLabel } from "./skillIndex";
+import {
+  loadSkillIndex,
+  ResourceKind,
+  Skill,
+  SkillIndex,
+  Source,
+  getResourceKindLabel,
+} from "./skillIndex";
 import { logger } from "./logger";
 
 interface MarkerPair {
@@ -45,7 +56,19 @@ interface SyncResourceItem {
   source: string;
   relativePath: string;
   linkPath: string;
+  fullPath: string;
+  remotePath?: string;
+  repositoryUrl?: string;
+  remoteUrl?: string;
 }
+
+interface RefCatalogDescriptor {
+  sectionTitle: string;
+  catalogTitle: string;
+  fileName: string;
+}
+
+type RefCatalogFormat = Exclude<OutputFormat, "ref">;
 
 const SHARED_MARKERS: MarkerPair = {
   start: "<!-- agent-ninja-START -->",
@@ -70,6 +93,64 @@ const LEGACY_MARKERS: MarkerPair[] = [
 ];
 
 const ALL_MARKERS: MarkerPair[] = [SHARED_MARKERS, ...LEGACY_MARKERS];
+
+const DEFAULT_WORKSPACE_REF_CATALOG_DIRECTORY = ".github/resource-catalog";
+const DEFAULT_GLOBAL_REF_CATALOG_DIRECTORY = ".catalog/resources";
+const REF_CATALOG_MARKER_PREFIX = "<!-- resource-ninja-catalog:";
+
+const RESOURCE_KIND_ORDER: ResourceKind[] = [
+  "skill",
+  "agent",
+  "instruction",
+  "prompt",
+  "hook",
+  "mcp",
+  "plugin",
+  "cursor-rule",
+];
+
+const REF_CATALOG_DESCRIPTORS: Record<ResourceKind, RefCatalogDescriptor> = {
+  skill: {
+    sectionTitle: "Skills",
+    catalogTitle: "Agent Skills",
+    fileName: "skills.md",
+  },
+  agent: {
+    sectionTitle: "Agents",
+    catalogTitle: "Agents",
+    fileName: "agents.md",
+  },
+  instruction: {
+    sectionTitle: "Instructions",
+    catalogTitle: "Instructions",
+    fileName: "instructions.md",
+  },
+  prompt: {
+    sectionTitle: "Prompts",
+    catalogTitle: "Prompts",
+    fileName: "prompts.md",
+  },
+  hook: {
+    sectionTitle: "Hooks",
+    catalogTitle: "Hooks",
+    fileName: "hooks.md",
+  },
+  mcp: {
+    sectionTitle: "MCP Configs",
+    catalogTitle: "MCP Configs",
+    fileName: "mcp.md",
+  },
+  plugin: {
+    sectionTitle: "Plugins",
+    catalogTitle: "Plugins",
+    fileName: "plugins.md",
+  },
+  "cursor-rule": {
+    sectionTitle: "Cursor Rules",
+    catalogTitle: "Cursor Rules",
+    fileName: "cursor-rules.md",
+  },
+};
 
 /**
  * Description + When to Use を連結する関数（合計最大200文字）
@@ -141,8 +222,12 @@ function calculateRelativePath(
   return relativePath.replace(/\\/g, "/");
 }
 
+function normalizePathSeparators(value: string): string {
+  return value.replace(/\\/g, "/");
+}
+
 function normalizeMarkdownRelativePath(relativePath: string): string {
-  const normalized = relativePath.replace(/\\/g, "/");
+  const normalized = normalizePathSeparators(relativePath);
   return normalized === "" ? "." : normalized;
 }
 
@@ -153,6 +238,196 @@ function getResourceLinkPath(
   return normalizeMarkdownRelativePath(
     path.relative(path.dirname(instructionFilePath), resourceFilePath),
   );
+}
+
+function getRelativeFileLinkPath(
+  fromFilePath: string,
+  targetFilePath: string,
+): string {
+  return normalizeMarkdownRelativePath(
+    path.relative(path.dirname(fromFilePath), targetFilePath),
+  );
+}
+
+function normalizeRemotePath(
+  remotePath: string | undefined,
+): string | undefined {
+  const normalized = remotePath?.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  return normalized || undefined;
+}
+
+function getConfiguredRefCatalogDirectory(
+  config: vscode.WorkspaceConfiguration,
+): string | undefined {
+  const configured = config.get<string>("refCatalogDirectory")?.trim();
+  return configured || undefined;
+}
+
+function resolveRefCatalogDirectoryUri(
+  workspaceUri: vscode.Uri,
+  instructionUri: vscode.Uri,
+  scope: "workspace" | "globalHome",
+  config: vscode.WorkspaceConfiguration,
+): vscode.Uri {
+  const configuredDirectory = getConfiguredRefCatalogDirectory(config);
+  const fallbackDirectory =
+    scope === "workspace"
+      ? DEFAULT_WORKSPACE_REF_CATALOG_DIRECTORY
+      : DEFAULT_GLOBAL_REF_CATALOG_DIRECTORY;
+  const effectiveDirectory = configuredDirectory || fallbackDirectory;
+
+  if (
+    isHomeRelativePath(effectiveDirectory) ||
+    isAbsoluteConfiguredPath(effectiveDirectory)
+  ) {
+    return resolveConfiguredUri(
+      workspaceUri,
+      effectiveDirectory,
+      fallbackDirectory,
+    );
+  }
+
+  if (scope === "workspace") {
+    return resolveConfiguredUri(
+      workspaceUri,
+      effectiveDirectory,
+      DEFAULT_WORKSPACE_REF_CATALOG_DIRECTORY,
+    );
+  }
+
+  const instructionDirectoryUri = vscode.Uri.file(
+    path.dirname(instructionUri.fsPath),
+  );
+  const segments = normalizePathSeparators(effectiveDirectory)
+    .replace(/^\.\//, "")
+    .split("/")
+    .filter(Boolean);
+
+  return segments.length > 0
+    ? vscode.Uri.joinPath(instructionDirectoryUri, ...segments)
+    : instructionDirectoryUri;
+}
+
+function getRefCatalogFileUri(
+  catalogRootUri: vscode.Uri,
+  kind: ResourceKind,
+): vscode.Uri {
+  return vscode.Uri.joinPath(
+    catalogRootUri,
+    REF_CATALOG_DESCRIPTORS[kind].fileName,
+  );
+}
+
+function getConfiguredRefCatalogFormat(
+  config: vscode.WorkspaceConfiguration,
+): RefCatalogFormat {
+  const normalized = normalizeOutputFormat(config.get<string>("refCatalogFormat"));
+  return normalized === "compact" || normalized === "legacy"
+    ? normalized
+    : "full";
+}
+
+function escapeMarkdownTableText(value: string): string {
+  return value.replace(/\|/g, "\\|");
+}
+
+function formatCatalogLinkCell(url: string | undefined, label: string): string {
+  if (!url) {
+    return "";
+  }
+  if (url === "local") {
+    return "local";
+  }
+  return `[${label}](${url})`;
+}
+
+function buildRepositoryFileUrl(
+  repositoryUrl: string | undefined,
+  branch: string | undefined,
+  resourcePath: string | undefined,
+): string | undefined {
+  if (!repositoryUrl || !branch || !resourcePath) {
+    return undefined;
+  }
+
+  const trimmedRepositoryUrl = repositoryUrl.replace(/\/+$/, "");
+  if (!/^https:\/\/github\.com\//i.test(trimmedRepositoryUrl)) {
+    return undefined;
+  }
+
+  return `${trimmedRepositoryUrl}/blob/${branch}/${normalizeRemotePath(resourcePath)}`;
+}
+
+function findIndexedResourceForSyncItem(
+  index: SkillIndex,
+  resource: SyncResourceItem,
+): Skill | undefined {
+  const normalizedRemotePath = normalizeRemotePath(resource.remotePath);
+
+  if (normalizedRemotePath && resource.source && resource.source !== "local") {
+    const byRemotePath = index.skills.find(
+      (candidate) =>
+        candidate.source === resource.source &&
+        (candidate.kind || "skill") === resource.kind &&
+        normalizeRemotePath(candidate.path) === normalizedRemotePath,
+    );
+    if (byRemotePath) {
+      return byRemotePath;
+    }
+  }
+
+  let byName = index.skills.find(
+    (candidate) =>
+      candidate.name === resource.name &&
+      candidate.source === resource.source &&
+      (candidate.kind || "skill") === resource.kind,
+  );
+
+  if (!byName && resource.source === "unknown") {
+    byName = index.skills.find(
+      (candidate) =>
+        candidate.name === resource.name &&
+        (candidate.kind || "skill") === resource.kind,
+    );
+  }
+
+  return byName;
+}
+
+function enrichSyncResourcesWithRemoteMetadata(
+  resources: SyncResourceItem[],
+  index: SkillIndex,
+): SyncResourceItem[] {
+  const sourceById = new Map<string, Source>(
+    index.sources.map((source) => [source.id, source]),
+  );
+
+  return resources.map((resource) => {
+    if (!resource.source || resource.source === "local") {
+      return {
+        ...resource,
+        repositoryUrl: "local",
+      };
+    }
+
+    const source = sourceById.get(resource.source);
+    const indexedResource = findIndexedResourceForSyncItem(index, resource);
+    const repositoryUrl = source?.url;
+    const remoteUrl =
+      indexedResource?.url ||
+      indexedResource?.rawUrl ||
+      buildRepositoryFileUrl(
+        repositoryUrl,
+        source?.branch,
+        indexedResource?.path || resource.remotePath,
+      );
+
+    return {
+      ...resource,
+      repositoryUrl,
+      remoteUrl,
+    };
+  });
 }
 
 function sortSyncResources(resources: SyncResourceItem[]): SyncResourceItem[] {
@@ -258,6 +533,8 @@ function toSyncResourceFromLocal(
     source: resource.source || "local",
     relativePath: resource.relativePath,
     linkPath: getResourceLinkPath(instructionUri.fsPath, resource.fullPath),
+    fullPath: resource.fullPath,
+    remotePath: resource.remotePath,
   };
 }
 
@@ -272,6 +549,34 @@ function toSyncResourceFromUser(
     source: resource.source || resource.scope,
     relativePath: resource.relativePath,
     linkPath: getResourceLinkPath(instructionUri.fsPath, resource.fullPath),
+    fullPath: resource.fullPath,
+    remotePath: resource.remotePath,
+  };
+}
+
+function toSyncResourceFromInstalledMeta(
+  meta: SkillMeta,
+  skillsUri: vscode.Uri,
+  instructionUri: vscode.Uri,
+): SyncResourceItem {
+  const relativePath = meta.relativePath || meta.name;
+  const skillFilePath =
+    meta.skillFilePath ||
+    vscode.Uri.joinPath(skillsUri, ...relativePath.split("/"), "SKILL.md")
+      .fsPath;
+
+  return {
+    kind: "skill",
+    name: meta.name,
+    description: buildDescription(
+      meta.description,
+      meta.customWhenToUse || meta.whenToUse,
+    ),
+    source: meta.source || "local",
+    relativePath,
+    linkPath: getResourceLinkPath(instructionUri.fsPath, skillFilePath),
+    fullPath: skillFilePath,
+    remotePath: meta.remotePath,
   };
 }
 
@@ -304,6 +609,220 @@ async function collectGlobalResourcesForInstruction(
 
 function wrapSection(markerPair: MarkerPair, body: string): string {
   return `${markerPair.start}\n${body.trim()}\n\n${markerPair.end}`;
+}
+
+function createRefCatalogContent(
+  kind: ResourceKind,
+  resources: SyncResourceItem[],
+  catalogFilePath: string,
+  format: RefCatalogFormat,
+): string {
+  const descriptor = REF_CATALOG_DESCRIPTORS[kind];
+  const title =
+    format === "compact"
+      ? `${descriptor.catalogTitle} (Compressed Index)`
+      : descriptor.catalogTitle;
+  const lines = [
+    `${REF_CATALOG_MARKER_PREFIX} ${kind} -->`,
+    "",
+    `# ${title}`,
+  ];
+
+  if (kind === "skill" && format !== "legacy") {
+    lines.push(
+      "",
+      "> **IMPORTANT**: Prefer skill-led reasoning over pre-training-led reasoning.",
+      "> Read the relevant SKILL.md before working on tasks covered by these skills.",
+    );
+  }
+
+  const truncateText = (value: string | undefined, limit?: number): string => {
+    const raw = value || "";
+    if (!limit || raw.length <= limit) {
+      return escapeMarkdownTableText(raw);
+    }
+    return escapeMarkdownTableText(raw.substring(0, limit - 3) + "...");
+  };
+
+  if (format === "legacy") {
+    lines.push("", "| Resource | Description |", "| --- | --- |");
+    for (const resource of resources) {
+      lines.push(
+        `| [${resource.name}](${getRelativeFileLinkPath(catalogFilePath, resource.fullPath)}) | ${truncateText(resource.description)} |`,
+      );
+    }
+    return `${lines.join("\n")}\n`;
+  }
+
+  if (format === "compact") {
+    lines.push("", "| Resource | Path | Description |", "| --- | --- | --- |");
+    for (const resource of resources) {
+      lines.push(
+        `| [${resource.name}](${getRelativeFileLinkPath(catalogFilePath, resource.fullPath)}) | \`${escapeMarkdownTableText(resource.relativePath)}\` | ${truncateText(resource.description, 100)} |`,
+      );
+    }
+    return `${lines.join("\n")}\n`;
+  }
+
+  lines.push(
+    "",
+    "| Resource | Source | Path | Repository | Remote URL | Description |",
+    "| --- | --- | --- | --- | --- | --- |",
+  );
+
+  for (const resource of resources) {
+    lines.push(
+      `| [${resource.name}](${getRelativeFileLinkPath(catalogFilePath, resource.fullPath)}) | ${escapeMarkdownTableText(resource.source || "local")} | \`${escapeMarkdownTableText(resource.relativePath)}\` | ${formatCatalogLinkCell(resource.repositoryUrl, "repository")} | ${formatCatalogLinkCell(resource.remoteUrl, "remote")} | ${truncateText(resource.description)} |`,
+    );
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+async function deleteGeneratedRefCatalogFileIfExists(
+  catalogFileUri: vscode.Uri,
+): Promise<void> {
+  try {
+    const content = await vscode.workspace.fs.readFile(catalogFileUri);
+    const text = Buffer.from(content).toString("utf-8");
+    if (!text.includes(REF_CATALOG_MARKER_PREFIX)) {
+      logger.info(
+        `[Resource Ninja] Keeping non-generated catalog file: ${catalogFileUri.fsPath}`,
+      );
+      return;
+    }
+    await vscode.workspace.fs.delete(catalogFileUri, { useTrash: false });
+  } catch {
+    // ignore missing files or inaccessible stale catalogs
+  }
+}
+
+async function syncRefCatalogFiles(
+  resources: SyncResourceItem[],
+  catalogRootUri: vscode.Uri,
+  config: vscode.WorkspaceConfiguration,
+): Promise<void> {
+  const groupedResources = new Map<ResourceKind, SyncResourceItem[]>();
+  const catalogFormat = getConfiguredRefCatalogFormat(config);
+  for (const resource of resources) {
+    const existing = groupedResources.get(resource.kind) || [];
+    existing.push(resource);
+    groupedResources.set(resource.kind, existing);
+  }
+
+  await vscode.workspace.fs.createDirectory(catalogRootUri);
+
+  for (const kind of RESOURCE_KIND_ORDER) {
+    const catalogFileUri = getRefCatalogFileUri(catalogRootUri, kind);
+    const kindResources = groupedResources.get(kind) || [];
+
+    if (kindResources.length === 0) {
+      await deleteGeneratedRefCatalogFileIfExists(catalogFileUri);
+      continue;
+    }
+
+    const content = createRefCatalogContent(
+      kind,
+      kindResources,
+      catalogFileUri.fsPath,
+      catalogFormat,
+    );
+    await vscode.workspace.fs.writeFile(
+      catalogFileUri,
+      Buffer.from(content, "utf-8"),
+    );
+  }
+}
+
+async function cleanupRefCatalogFiles(
+  catalogRootUri: vscode.Uri,
+): Promise<void> {
+  for (const kind of RESOURCE_KIND_ORDER) {
+    await deleteGeneratedRefCatalogFileIfExists(
+      getRefCatalogFileUri(catalogRootUri, kind),
+    );
+  }
+}
+
+function generateSharedRefSection(
+  resources: SyncResourceItem[],
+  instructionUri: vscode.Uri,
+  catalogRootUri: vscode.Uri,
+  markerPair: MarkerPair,
+): string {
+  if (resources.length === 0) {
+    return wrapSection(
+      markerPair,
+      `## Agent Resources\n\nNo resource entries listed yet. Use "Agent Resources Ninja: Search Resources" to install workspace or global resources.`,
+    );
+  }
+
+  const groupedResources = new Map<ResourceKind, SyncResourceItem[]>();
+  for (const resource of resources) {
+    const existing = groupedResources.get(resource.kind) || [];
+    existing.push(resource);
+    groupedResources.set(resource.kind, existing);
+  }
+
+  const lines = ["## Agent Resources"];
+
+  for (const kind of RESOURCE_KIND_ORDER) {
+    const kindResources = groupedResources.get(kind);
+    if (!kindResources?.length) {
+      continue;
+    }
+
+    const descriptor = REF_CATALOG_DESCRIPTORS[kind];
+    const catalogLink = getRelativeFileLinkPath(
+      instructionUri.fsPath,
+      getRefCatalogFileUri(catalogRootUri, kind).fsPath,
+    );
+
+    lines.push("", `### ${descriptor.sectionTitle}`, "");
+
+    if (kind === "skill") {
+      lines.push(
+        "> **IMPORTANT**: Prefer skill-led reasoning over pre-training-led reasoning.",
+        `> See [${descriptor.sectionTitle}](${catalogLink}) before working on tasks covered by these skills.`,
+      );
+      continue;
+    }
+
+    lines.push(`> See [${descriptor.sectionTitle}](${catalogLink}).`);
+  }
+
+  return wrapSection(markerPair, lines.join("\n"));
+}
+
+function generateSkillRefSection(
+  resources: SyncResourceItem[],
+  instructionUri: vscode.Uri,
+  catalogRootUri: vscode.Uri,
+  markerPair: MarkerPair,
+): string {
+  if (resources.length === 0) {
+    return `${markerPair.start}
+## Agent Skills
+
+No skill entries listed yet. Use "Agent Resources Ninja: Search Resources" to install workspace skills. Agents, prompts, instructions, and hooks stay in their native resource views.
+
+${markerPair.end}`;
+  }
+
+  const catalogLink = getRelativeFileLinkPath(
+    instructionUri.fsPath,
+    getRefCatalogFileUri(catalogRootUri, "skill").fsPath,
+  );
+
+  return wrapSection(
+    markerPair,
+    [
+      "## Agent Skills",
+      "",
+      "> **IMPORTANT**: Prefer skill-led reasoning over pre-training-led reasoning.",
+      `> See [Agent Skills](${catalogLink}) before working on tasks covered by these skills.`,
+    ].join("\n"),
+  );
 }
 
 function normalizeFsPathForCompare(fsPath: string): string {
@@ -388,7 +907,7 @@ export async function updateInstructionFile(
   workspaceUri: vscode.Uri,
   context: vscode.ExtensionContext,
 ): Promise<void> {
-  const config = vscode.workspace.getConfiguration("resourceNinja");
+  const config = vscode.workspace.getConfiguration("resourceNinja", workspaceUri);
   const { instructionFile } = await resolveOutputFormat(workspaceUri);
   if (instructionFile === DISABLED_INSTRUCTION_FILE) {
     return;
@@ -413,7 +932,7 @@ export async function updateInstructionFileAtUri(
   instructionUri: vscode.Uri,
   instructionPath: string,
 ): Promise<void> {
-  const config = vscode.workspace.getConfiguration("resourceNinja");
+  const config = vscode.workspace.getConfiguration("resourceNinja", workspaceUri);
   const { format } = await resolveOutputFormat(workspaceUri);
   const coexistenceMode = getConfiguredCoexistenceMode(config);
   const owner =
@@ -479,31 +998,84 @@ export async function updateInstructionFileAtUri(
     owner,
   );
 
-  // フォーマットに応じてスキルセクションを生成
-  const skillSection =
-    coexistenceMode === "auto"
-      ? generateSharedResourceSectionForFormat(
-          (skillSource.scope === "workspace"
-            ? await collectWorkspaceResourcesForInstruction(
-                workspaceUri,
-                instructionUri,
-                includeLocalResources,
-              )
-            : await collectGlobalResourcesForInstruction(
-                workspaceUri,
-                instructionUri,
-              )
-          ).filter((resource) => instructionBlockKinds.includes(resource.kind)),
-          format,
-          SHARED_MARKERS,
-        )
-      : generateSkillSectionForFormat(
-          installedSkills,
-          localSkills,
-          relativeSkillsDir,
-          format,
-          RESOURCE_MARKERS,
-        );
+  const refCatalogRootUri = resolveRefCatalogDirectoryUri(
+    workspaceUri,
+    instructionUri,
+    skillSource.scope,
+    config,
+  );
+  const skillIndex =
+    format === "ref" ? await loadSkillIndex(context) : undefined;
+
+  let skillSection: string;
+
+  if (coexistenceMode === "auto") {
+    const sharedResources = (
+      skillSource.scope === "workspace"
+        ? await collectWorkspaceResourcesForInstruction(
+            workspaceUri,
+            instructionUri,
+            includeLocalResources,
+          )
+        : await collectGlobalResourcesForInstruction(
+            workspaceUri,
+            instructionUri,
+          )
+    ).filter((resource) => instructionBlockKinds.includes(resource.kind));
+
+    if (format === "ref") {
+      const enrichedResources = skillIndex
+        ? enrichSyncResourcesWithRemoteMetadata(sharedResources, skillIndex)
+        : sharedResources;
+      await syncRefCatalogFiles(enrichedResources, refCatalogRootUri, config);
+      skillSection = generateSharedRefSection(
+        enrichedResources,
+        instructionUri,
+        refCatalogRootUri,
+        SHARED_MARKERS,
+      );
+    } else {
+      await cleanupRefCatalogFiles(refCatalogRootUri);
+      skillSection = generateSharedResourceSectionForFormat(
+        sharedResources,
+        format,
+        SHARED_MARKERS,
+      );
+    }
+  } else {
+    if (format === "ref") {
+      const skillResources = sortSyncResources(
+        installedSkills
+          .map((skill) =>
+            toSyncResourceFromInstalledMeta(skill, skillsUri, instructionUri),
+          )
+          .concat(
+            localSkills.map((skill) =>
+              toSyncResourceFromLocal(skill, instructionUri),
+            ),
+          ),
+      );
+      const enrichedResources = skillIndex
+        ? enrichSyncResourcesWithRemoteMetadata(skillResources, skillIndex)
+        : skillResources;
+      await syncRefCatalogFiles(enrichedResources, refCatalogRootUri, config);
+      skillSection = generateSkillRefSection(
+        enrichedResources,
+        instructionUri,
+        refCatalogRootUri,
+        RESOURCE_MARKERS,
+      );
+    } else {
+      await cleanupRefCatalogFiles(refCatalogRootUri);
+      skillSection = generateSkillSectionForFormat(
+        installedSkills,
+        localSkills,
+        relativeSkillsDir,
+        format,
+        RESOURCE_MARKERS,
+      );
+    }
+  }
 
   // 既存のファイルを読み込む
   let existingContent = "";
@@ -545,6 +1117,21 @@ export async function updateInstructionFileAtUri(
   );
 }
 
+export function resolvePrimaryRefCatalogUri(
+  workspaceUri: vscode.Uri,
+  instructionUri: vscode.Uri,
+  scope: "workspace" | "globalHome",
+  config: vscode.WorkspaceConfiguration,
+): vscode.Uri {
+  const catalogRootUri = resolveRefCatalogDirectoryUri(
+    workspaceUri,
+    instructionUri,
+    scope,
+    config,
+  );
+  return getRefCatalogFileUri(catalogRootUri, "skill");
+}
+
 /**
  * フォーマットに応じたスキルセクションを生成
  */
@@ -556,6 +1143,10 @@ function generateSkillSectionForFormat(
   markerPair: MarkerPair,
 ): string {
   switch (format) {
+    case "ref":
+      throw new Error(
+        "ref format should be handled before generateSkillSectionForFormat",
+      );
     case "compact":
       return generateCompactSection(
         installedSkills,
@@ -607,16 +1198,7 @@ function generateSharedResourceSectionForFormat(
     "> Read the relevant resource file before working on tasks covered by these resources.",
   ];
 
-  for (const kind of [
-    "skill",
-    "agent",
-    "instruction",
-    "prompt",
-    "hook",
-    "mcp",
-    "plugin",
-    "cursor-rule",
-  ] as ResourceKind[]) {
+  for (const kind of RESOURCE_KIND_ORDER) {
     const kindResources = groupedResources.get(kind);
     if (!kindResources?.length) {
       continue;

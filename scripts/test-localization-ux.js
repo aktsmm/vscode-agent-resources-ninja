@@ -320,13 +320,19 @@ test("settings descriptions distinguish skill index from native resource paths",
 test("settings output format copy stays professional", () => {
   const outputFormatText = [
     nls["config.outputFormat.markdownDescription"],
+    nls["config.outputFormat.ref"],
     nls["config.outputFormat.full"],
     nls["config.outputFormat.compact"],
     nls["config.outputFormat.legacy"],
+    nls["config.refCatalogDirectory.markdownDescription"],
+    nls["config.refCatalogFormat.markdownDescription"],
     nlsJa["config.outputFormat.markdownDescription"],
+    nlsJa["config.outputFormat.ref"],
     nlsJa["config.outputFormat.full"],
     nlsJa["config.outputFormat.compact"],
     nlsJa["config.outputFormat.legacy"],
+    nlsJa["config.refCatalogDirectory.markdownDescription"],
+    nlsJa["config.refCatalogFormat.markdownDescription"],
   ].join("\n");
   assert.doesNotMatch(outputFormatText, /[🌟✅📦🕰️]/u);
   assert.doesNotMatch(outputFormatText, /\bOLD\b/);
@@ -361,6 +367,31 @@ test("instruction file enum descriptions match exact targets", () => {
   }
   assert.match(nls["config.instructionFile.agents"], /Copilot CLI/);
   assert.match(nlsJa["config.instructionFile.agents"], /Copilot CLI/);
+});
+
+test("open output labels and welcome copy use output terminology", () => {
+  const outputCopy = [
+    nls["command.openResourceOutput"],
+    nls["command.openInstructionFile"],
+    nls["command.openGlobalInstructionFile"],
+    nls["viewsWelcome.workspace"],
+    nls["viewsWelcome.userResources"],
+    nlsJa["command.openResourceOutput"],
+    nlsJa["command.openInstructionFile"],
+    nlsJa["command.openGlobalInstructionFile"],
+    nlsJa["viewsWelcome.workspace"],
+    nlsJa["viewsWelcome.userResources"],
+  ].join("\n");
+  assert.match(outputCopy, /Open Resource Output\.\.\./);
+  assert.match(outputCopy, /Open Resource Output/);
+  assert.match(outputCopy, /Open Global Resource Output/);
+  assert.match(outputCopy, /リソース出力を開く\.\.\./);
+  assert.match(outputCopy, /リソース出力を開く/);
+  assert.match(outputCopy, /Global のリソース出力を開く/);
+  assert.doesNotMatch(outputCopy, /Open Instruction File/);
+  assert.doesNotMatch(outputCopy, /Open Global Instruction File/);
+  assert.doesNotMatch(outputCopy, /インストラクションファイルを開く/);
+  assert.doesNotMatch(outputCopy, /Global のインストラクションファイルを開く/);
 });
 
 test("docs and package metadata avoid legacy Skill Ninja branding", () => {

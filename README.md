@@ -208,7 +208,7 @@ Generic MCP config file names such as `mcp.json` and `.mcp.json` are installed w
 - Create new skills, agents, instructions, prompts, hooks, or MCP config resources from the toolbar
 - Choose Workspace, User Profile, Global Resource Home, or a custom folder when creating resources
 - Newly installed resources (temporary badge)
-- Toolbar: Instruction File / Create / Refresh / Settings
+- Toolbar: Resource Output / Create / Refresh / Settings
 - Remote-installed resource rows expose per-resource reinstall from the inline action buttons
 - Skill-only bulk commands remain available from Command Palette or overflow actions for maintenance workflows
 - Open resource folder (right-click menu)
@@ -268,7 +268,10 @@ Generic MCP config file names such as `mcp.json` and `.mcp.json` are installed w
 | `Agent Resources Ninja: Uninstall Multiple`        | Select multiple installed skills to uninstall                                  |
 | `Agent Resources Ninja: Reinstall Multiple`        | Select multiple installed skills to reinstall                                  |
 | `Agent Resources Ninja: Update Instruction`        | Update instruction file manually                                               |
+| `Agent Resources Ninja: Open Resource Output...`   | Choose the managed scope to open from Command Palette                          |
 | `Agent Resources Ninja: Open Resource Folder`      | Open installed resource folder in OS                                           |
+
+View toolbars and empty-state links keep their current-scope behavior: the workspace view opens the workspace output directly, and the User / Global Resource Home view opens the configured global output directly. The Command Palette command stays explicit and shows a scope QuickPick.
 
 ### Quick Start
 
@@ -387,43 +390,45 @@ Settings are ordered by the workflow users usually follow:
 | Global Resource Home    | `globalResourceHomePreset`, `globalHomeDirectory`                                                                                                                                                                                                                                                          | Shared resources for Copilot CLI, Claude-compatible tools, or open agents |
 | Instruction sync        | `autoUpdateInstruction`, `instructionFile`, `customInstructionPath`, `includeLocalResources`, `coexistenceMode`, `kindsExcluded`, `instructionBlock.includeAgents`, `instructionBlock.includeInstructions`, `instructionBlock.globalHome.includeAgents`, `instructionBlock.globalHome.includeInstructions` | Optional shared instruction block generation and kind policy              |
 | Shared caches           | `useSharedSourcesManifest`, `useSharedResourceIndex`                                                                                                                                                                                                                                                       | Cross-extension SSOT for sources and scanned resource metadata            |
-| Display and maintenance | `outputFormat`, `showBuiltInResources`, `remoteResourceViewMode`, `language`, `githubToken`                                                                                                                                                                                                                | Presentation, discovery, and GitHub API behavior                          |
+| Display and maintenance | `outputFormat`, `refCatalogDirectory`, `refCatalogFormat`, `showBuiltInResources`, `remoteResourceViewMode`, `language`, `githubToken`                                                                                                                                                                       | Presentation, discovery, and GitHub API behavior                          |
 
 `globalResourceHomePreset` is the common case. `globalHomeDirectory` is an override: when it is not empty, it wins over the preset. Choose `custom` only when you also provide an override path.
 
-| Order | Setting                                                         | Default                | Description                                                                              |
-| :---: | --------------------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------- |
-|   0   | `resourceNinja.defaultInstallTarget`                            | `workspace`            | Default target for click/double-click installs                                           |
-|   1   | `resourceNinja.singleClickInstall`                              | `false`                | Install resources with single click                                                      |
-|   2   | `resourceNinja.resourcesDirectory`                              | `.github/skills`       | Workspace skill directory                                                                |
-|   3   | `resourceNinja.workspaceAgentsDirectory`                        | `.github/agents`       | Workspace agent directory                                                                |
-|   4   | `resourceNinja.workspaceInstructionsDirectory`                  | `.github/instructions` | Workspace instruction directory                                                          |
-|   5   | `resourceNinja.workspacePromptsDirectory`                       | `.github/prompts`      | Workspace prompt directory                                                               |
-|   6   | `resourceNinja.workspaceHooksDirectory`                         | `.github/hooks`        | Workspace hook directory                                                                 |
-|   7   | `resourceNinja.workspaceMcpDirectory`                           | `.github/mcp`          | Safe workspace MCP config staging directory before optional `.vscode/mcp.json` merge     |
-|   8   | `resourceNinja.userAgentsDirectory`                             | `""`                   | Optional User Profile agent override; empty stores `.agent.md` in VS Code User `prompts` |
-|   9   | `resourceNinja.userInstructionsDirectory`                       | `""`                   | Optional User Profile instruction directory override                                     |
-|  10   | `resourceNinja.userPromptsDirectory`                            | `""`                   | Optional User Profile prompt directory override                                          |
-|  11   | `resourceNinja.globalResourceHomePreset`                        | `copilot`              | Known Global Resource Home preset (`~/.copilot`, `~/.claude`, `~/.agents`)               |
-|  12   | `resourceNinja.globalHomeDirectory`                             | `""`                   | Optional custom Global Resource Home override                                            |
-|  13   | `resourceNinja.autoUpdateInstruction`                           | `true`                 | Auto-update the generated instruction block after resource changes                       |
-|  14   | `resourceNinja.instructionFile`                                 | `AGENTS.md`            | Generated instruction block sync target _(requires Auto Update)_                         |
-|  15   | `resourceNinja.customInstructionPath`                           | `""`                   | Custom generated instruction block path _(only when 'custom' selected)_                  |
-|  16   | `resourceNinja.includeLocalResources`                           | `false`                | Include workspace-wide fallback `SKILL.md` files in the generated instruction block      |
-|  17   | `resourceNinja.autoUpdateResourcesOnUpgrade`                    | `prompt`               | Update installed remote skills on extension upgrade                                      |
-|  18   | `resourceNinja.coexistenceMode`                                 | `auto`                 | Shared marker ownership mode (`auto` / `independent`)                                    |
-|  19   | `resourceNinja.kindsExcluded`                                   | `[]`                   | Legacy standalone compatibility exclusions for shared instruction blocks                 |
-|  20   | `resourceNinja.useSharedSourcesManifest`                        | `false`                | Enable shared `sources.json` SSOT for coexistence with the skill-only sibling extension  |
-|  21   | `resourceNinja.useSharedResourceIndex`                          | `false`                | Enable shared `index.json` SSOT for coexistence with the skill-only sibling extension    |
-|  22   | `resourceNinja.outputFormat`                                    | `full`                 | Output format (full / compact / legacy)                                                  |
-|  23   | `resourceNinja.showBuiltInResources`                            | `false`                | Show built-in resources in User / Global Resource Home                                   |
-|  24   | `resourceNinja.remoteResourceViewMode`                          | `repositoryFirst`      | Remote Resources layout (repository-first / resource-type-first)                         |
-|  25   | `resourceNinja.language`                                        | `auto`                 | UI language (auto / en / ja)                                                             |
-|  26   | `resourceNinja.githubToken`                                     | `""`                   | GitHub Token (for API rate limit)                                                        |
-|  27   | `resourceNinja.instructionBlock.includeAgents`                  | `false`                | Include `agent` resources in workspace instruction blocks                                |
-|  28   | `resourceNinja.instructionBlock.includeInstructions`            | `false`                | Include `instruction` resources in workspace instruction blocks                          |
-|  29   | `resourceNinja.instructionBlock.globalHome.includeAgents`       | `inherit`              | Override Global Resource Home agent listing policy (`inherit` / `on` / `off`)            |
-|  30   | `resourceNinja.instructionBlock.globalHome.includeInstructions` | `inherit`              | Override Global Resource Home instruction listing policy (`inherit` / `on` / `off`)      |
+| Order | Setting                                                         | Default                | Description                                                                                                                                                   |
+| :---: | --------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|   0   | `resourceNinja.defaultInstallTarget`                            | `workspace`            | Default target for click/double-click installs                                                                                                                |
+|   1   | `resourceNinja.singleClickInstall`                              | `false`                | Install resources with single click                                                                                                                           |
+|   2   | `resourceNinja.resourcesDirectory`                              | `.github/skills`       | Workspace skill directory                                                                                                                                     |
+|   3   | `resourceNinja.workspaceAgentsDirectory`                        | `.github/agents`       | Workspace agent directory                                                                                                                                     |
+|   4   | `resourceNinja.workspaceInstructionsDirectory`                  | `.github/instructions` | Workspace instruction directory                                                                                                                               |
+|   5   | `resourceNinja.workspacePromptsDirectory`                       | `.github/prompts`      | Workspace prompt directory                                                                                                                                    |
+|   6   | `resourceNinja.workspaceHooksDirectory`                         | `.github/hooks`        | Workspace hook directory                                                                                                                                      |
+|   7   | `resourceNinja.workspaceMcpDirectory`                           | `.github/mcp`          | Safe workspace MCP config staging directory before optional `.vscode/mcp.json` merge                                                                          |
+|   8   | `resourceNinja.userAgentsDirectory`                             | `""`                   | Optional User Profile agent override; empty stores `.agent.md` in VS Code User `prompts`                                                                      |
+|   9   | `resourceNinja.userInstructionsDirectory`                       | `""`                   | Optional User Profile instruction directory override                                                                                                          |
+|  10   | `resourceNinja.userPromptsDirectory`                            | `""`                   | Optional User Profile prompt directory override                                                                                                               |
+|  11   | `resourceNinja.globalResourceHomePreset`                        | `copilot`              | Known Global Resource Home preset (`~/.copilot`, `~/.claude`, `~/.agents`)                                                                                    |
+|  12   | `resourceNinja.globalHomeDirectory`                             | `""`                   | Optional custom Global Resource Home override                                                                                                                 |
+|  13   | `resourceNinja.autoUpdateInstruction`                           | `true`                 | Auto-update the generated instruction block after resource changes                                                                                            |
+|  14   | `resourceNinja.instructionFile`                                 | `AGENTS.md`            | Generated instruction block sync target _(requires Auto Update)_                                                                                              |
+|  15   | `resourceNinja.customInstructionPath`                           | `""`                   | Custom generated instruction block path _(only when 'custom' selected)_                                                                                       |
+|  16   | `resourceNinja.includeLocalResources`                           | `false`                | Include workspace-wide fallback `SKILL.md` files in the generated instruction block                                                                           |
+|  17   | `resourceNinja.autoUpdateResourcesOnUpgrade`                    | `prompt`               | Update installed remote skills on extension upgrade                                                                                                           |
+|  18   | `resourceNinja.coexistenceMode`                                 | `auto`                 | Shared marker ownership mode (`auto` / `independent`)                                                                                                         |
+|  19   | `resourceNinja.kindsExcluded`                                   | `[]`                   | Legacy standalone compatibility exclusions for shared instruction blocks                                                                                      |
+|  20   | `resourceNinja.useSharedSourcesManifest`                        | `false`                | Enable shared `sources.json` SSOT for coexistence with the skill-only sibling extension                                                                       |
+|  21   | `resourceNinja.useSharedResourceIndex`                          | `false`                | Enable shared `index.json` SSOT for coexistence with the skill-only sibling extension                                                                         |
+|  22   | `resourceNinja.outputFormat`                                    | `ref`                  | Output format (`ref` / `full` / `compact` / `legacy`)                                                                                                         |
+|  23   | `resourceNinja.refCatalogDirectory`                             | `""`                   | Auto catalog directory for `ref` output. Empty uses `.github/resource-catalog` for workspace targets and `.catalog/resources` beside global instruction files |
+|  24   | `resourceNinja.refCatalogFormat`                                | `full`                 | Catalog detail format used when `outputFormat = ref` (`full` / `compact` / `legacy`)                                                                         |
+|  25   | `resourceNinja.showBuiltInResources`                            | `false`                | Show built-in resources in User / Global Resource Home                                                                                                        |
+|  26   | `resourceNinja.remoteResourceViewMode`                          | `repositoryFirst`      | Remote Resources layout (repository-first / resource-type-first)                                                                                              |
+|  27   | `resourceNinja.language`                                        | `auto`                 | UI language (auto / en / ja)                                                                                                                                  |
+|  28   | `resourceNinja.githubToken`                                     | `""`                   | GitHub Token (for API rate limit)                                                                                                                             |
+|  29   | `resourceNinja.instructionBlock.includeAgents`                  | `false`                | Include `agent` resources in workspace instruction blocks                                                                                                     |
+|  30   | `resourceNinja.instructionBlock.includeInstructions`            | `false`                | Include `instruction` resources in workspace instruction blocks                                                                                               |
+|  31   | `resourceNinja.instructionBlock.globalHome.includeAgents`       | `inherit`              | Override Global Resource Home agent listing policy (`inherit` / `on` / `off`)                                                                                 |
+|  32   | `resourceNinja.instructionBlock.globalHome.includeInstructions` | `inherit`              | Override Global Resource Home instruction listing policy (`inherit` / `on` / `off`)                                                                           |
 
 > Settings are displayed in the order above
 
@@ -447,79 +452,100 @@ If you uninstall the skill-only sibling extension after running both extensions 
 
 Legacy `resourceNinja.kindsExcluded` still works as a compatibility layer in standalone mode, but it no longer defines the default policy. Use the `instructionBlock.*` settings for the primary behavior. Legacy exclusions never remove `skill`, and they are ignored while the skill-only sibling extension is active.
 
-Generated instruction files contain a managed section. In the default `auto` mode this uses `agent-ninja-START` / `agent-ninja-END`. In `independent` mode it uses the legacy `resource-ninja-START` / `resource-ninja-END` markers. Edit outside that managed section, or disable auto-update if you need full manual control over the file. To reset the generated section safely, use `Resource NINJA: Remove Managed Marker Block` and then regenerate it with `Update Instruction File`.
+Generated instruction files contain a managed section. In `coexistenceMode = auto` this uses `agent-ninja-START` / `agent-ninja-END`. In `independent` mode it uses the legacy `resource-ninja-START` / `resource-ninja-END` markers. Edit outside that managed section, or disable auto-update if you need full manual control over the file. To reset the generated section safely, use `Resource NINJA: Remove Managed Marker Block` and then regenerate it with `Update Instruction File`.
 
-The default `auto` mode writes a shared managed section with **IMPORTANT prompt** and **Description column**:
+With the default `ref` output format, the shared managed section stays lightweight and links to per-kind catalogs:
 
 ```markdown
 <!-- agent-ninja-START -->
 
 ## Agent Resources
 
-> **IMPORTANT**: Prefer resource-led reasoning over pre-training-led reasoning.
-> Read the relevant resource file before working on tasks covered by these resources.
-
 ### Skills
 
-| Resource                                         | Source | Path                        | Description                          |
-| ------------------------------------------------ | ------ | --------------------------- | ------------------------------------ |
-| [skill-name](.github/skills/skill-name/SKILL.md) | local  | `.github/skills/skill-name` | Description text \| When to use text |
+> **IMPORTANT**: Prefer skill-led reasoning over pre-training-led reasoning.
+> See [Skills](.github/resource-catalog/skills.md) before working on tasks covered by these skills.
 
 ### Agents
 
-| Resource                                       | Source | Path                             | Description              |
-| ---------------------------------------------- | ------ | -------------------------------- | ------------------------ |
-| [review-agent](.github/agents/review.agent.md) | local  | `.github/agents/review.agent.md` | Review workflow guidance |
+> See [Agents](.github/resource-catalog/agents.md)
 
 <!-- agent-ninja-END -->
 ```
 
-**Description column format**: `{description:80} | {whenToUse:80}` (max 160 chars total)
+The catalog files hold detailed tables. In `full` and `compact` formats, the inline Description column still uses `{description:80} | {whenToUse:80}` (max 160 chars total).
 
 ## Output Formats
 
 ### Format Options
 
-| Format      | Description                                   | IMPORTANT Prompt | Detailed Table | Compressed Index |
-| ----------- | --------------------------------------------- | ---------------- | -------------- | ---------------- |
-| **Full**    | IMPORTANT prompt + detailed table (default)   | Yes              | Yes, 200 chars | No               |
-| **Compact** | IMPORTANT prompt + compressed index           | Yes              | No             | Yes, 100 chars   |
-| **Legacy**  | Simple table only for compatibility scenarios | No               | Yes, 200 chars | No               |
+| Format      | Instruction file                                                                | Catalog file (`refCatalogFormat`)            |
+| ----------- | -------------------------------------------------------------------------------- | -------------------------------------------- |
+| **Ref**     | Lightweight references + per-kind catalogs *(default for always-loaded files)*   | Separate file: `full` / `compact` / `legacy` |
+| **Full**    | IMPORTANT prompt + detailed table                                               | —                                            |
+| **Compact** | IMPORTANT prompt + compressed index                                             | —                                            |
+| **Legacy**  | Simple table only for compatibility scenarios                                   | —                                            |
 
 ### IMPORTANT Prompt
 
-The `full` and `compact` formats include an **IMPORTANT prompt**. In the default `auto` mode it prioritizes resource files; in `independent` mode the legacy skill-focused wording is kept:
+The `ref` format keeps the instruction file lightweight. In `coexistenceMode = auto`, only the **Skills** reference keeps the IMPORTANT wording. In `independent` mode, the generated block stays skill-only and points to the skill catalog:
 
 ```markdown
-> **IMPORTANT**: Prefer resource-led reasoning over pre-training-led reasoning.
-> Read the relevant resource file before working on tasks covered by these resources.
+## Agent Resources
+
+### Skills
+
+> **IMPORTANT**: Prefer skill-led reasoning over pre-training-led reasoning.
+> See [Skills](.github/resource-catalog/skills.md) before working on tasks covered by these skills.
+
+### Agents
+
+> See [Agents](.github/resource-catalog/agents.md)
 ```
 
-### Example Output - Full Format (Default `auto` mode)
+Leave `resourceNinja.refCatalogDirectory` empty for automatic placement. Workspace instruction targets write catalogs under `.github/resource-catalog` from the workspace root. Global Resource Home instruction targets resolve the catalog directory from the directory containing the instruction file, so a target like `~/.copilot/copilot-instructions.md` uses `.catalog/resources/skills.md` beside that global instruction file tree. Set the directory only when your repo or global resource layout needs a custom catalog folder. Use `resourceNinja.refCatalogFormat` to choose the detail level inside those catalog files: `full` keeps source and remote metadata, `compact` keeps path plus shorter descriptions, and `legacy` uses a simple resource/description table. Generated catalogs include a `resource-ninja-catalog` marker, and cleanup only removes marked generated catalogs so manually authored files in the same directory are preserved.
+
+### Example Output - Ref Format
 
 ```markdown
 <!-- agent-ninja-START -->
 
 ## Agent Resources
 
-> **IMPORTANT**: Prefer resource-led reasoning over pre-training-led reasoning.
-> Read the relevant resource file before working on tasks covered by these resources.
-
 ### Skills
 
-| Resource                             | Source | Path                  | Description                                         |
-| ------------------------------------ | ------ | --------------------- | --------------------------------------------------- |
-| [docx](.github/skills/docx/SKILL.md) | local  | `.github/skills/docx` | Process Word documents (.docx). Use for .docx files |
-| [pdf](.github/skills/pdf/SKILL.md)   | local  | `.github/skills/pdf`  | PDF manipulation toolkit. Extract text, create PDFs |
+> **IMPORTANT**: Prefer skill-led reasoning over pre-training-led reasoning.
+> See [Skills](.github/resource-catalog/skills.md) before working on tasks covered by these skills.
+
+### Agents
+
+> See [Agents](.github/resource-catalog/agents.md)
 
 <!-- agent-ninja-END -->
+```
+
+Example catalog:
+
+```markdown
+<!-- resource-ninja-catalog: skill -->
+
+# Agent Skills
+
+> **IMPORTANT**: Prefer skill-led reasoning over pre-training-led reasoning.
+> Read the relevant SKILL.md before working on tasks covered by these skills.
+
+| Resource                        | Source | Path                  | Repository | Remote URL | Description                                         |
+| ------------------------------- | ------ | --------------------- | ---------- | ---------- | --------------------------------------------------- |
+| [docx](../skills/docx/SKILL.md) | local  | `.github/skills/docx` | local      |            | Process Word documents (.docx). Use for .docx files |
 ```
 
 In `independent` mode, Resource NINJA keeps the legacy `resource-ninja` skill-only block for compatibility.
 
 ### How to Change Format
 
-Settings → **Output Format** → Select `full`, `compact`, or `legacy`
+Settings → **Output Format** → Select `ref`, `full`, `compact`, or `legacy`
+
+When using `ref`, also adjust **Ref Catalog Output Directory** and **Ref Catalog Detail Format** if you want a different catalog path or a lighter/heavier catalog table.
 
 ## Instruction File Options
 

@@ -127,7 +127,7 @@ test("welcome entries provide at least three next actions", () => {
   }
 });
 
-test("workspace welcome links to search create and instruction file", () => {
+test("workspace welcome links to search create and output open action", () => {
   assertHasCommands(workspaceView, [
     "resourceNinja.search",
     "resourceNinja.createResource",
@@ -135,7 +135,7 @@ test("workspace welcome links to search create and instruction file", () => {
   ]);
 });
 
-test("user global welcome links to create built-in toggle and settings", () => {
+test("user global welcome links to create output open action built-in toggle and settings", () => {
   assertHasCommands(userView, [
     "resourceNinja.createResource",
     "resourceNinja.openGlobalInstructionFile",

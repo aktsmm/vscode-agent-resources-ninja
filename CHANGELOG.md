@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.19] - 2026-05-18
+
+### Added
+
+- **Ref Output Format for Managed Instruction Blocks** - Added `resourceNinja.outputFormat = ref` plus per-kind resource catalogs so AGENTS.md / CLAUDE.md / copilot-instructions.md style always-loaded files can stay lightweight while details move into catalog files such as `.github/resource-catalog/skills.md` or `.catalog/resources/skills.md` / `resourceNinja.outputFormat = ref` と kind 別 resource catalog を追加し、AGENTS.md / CLAUDE.md / copilot-instructions.md のような always-loaded file を軽量に保ちつつ、詳細は `.github/resource-catalog/skills.md` や `.catalog/resources/skills.md` へ分離できるようにしました。
+
+### Changed
+
+- **Skill-Only IMPORTANT Wording** - In `ref` mode, only the Skills reference keeps the IMPORTANT wording, while agents / instructions / prompts / hooks / MCP configs / plugins / cursor rules use plain `See ...` references / `ref` モードでは Skills 参照だけに IMPORTANT wording を残し、agents / instructions / prompts / hooks / MCP configs / plugins / cursor rules は単純な `See ...` 参照にしました。
+- **Catalog Metadata Links** - Ref catalogs now include resource file links plus repository / remote URLs when install metadata or bundled index metadata can resolve them, and fall back to `local` when the resource is user-created / ref catalog では resource file link に加え、install metadata や bundled index metadata から解決できる場合は repository / remote URL も表示し、ユーザー作成 resource は `local` へフォールバックするようにしました。
+- **Generated Catalog Safety** - Ref catalogs now carry a generated marker, and cleanup only removes marked Resource NINJA catalogs so manually authored files in the same catalog directory are preserved / ref catalog に generated marker を付与し、cleanup では marker 付きの Resource NINJA catalog だけを削除することで、同じ catalog directory にある手書きファイルを保持するようにしました。
+- **Open Resource Output Flow** - The open-output commands now prefer the ref skills catalog when `outputFormat = ref`, regenerate managed output if the catalog is missing, and only then fall back to the sync target file; toolbar, welcome copy, and command labels now describe this behavior as opening resource output rather than opening the instruction file directly / `outputFormat = ref` のとき、出力を開くコマンドは instruction file ではなく ref skills catalog を優先して開きます。catalog が未生成なら managed output を再生成し、それでも無ければ同期先ファイルへフォールバックします。これに合わせてツールバー、welcome copy、コマンド名も「instruction file を開く」ではなく「resource output を開く」挙動に揃えました。
+- **Scoped Output Command Split** - View toolbar and empty-state open actions now stay scoped to their current view, while the Command Palette adds `Open Resource Output...` as an explicit scope picker for workspace vs global output / view のツールバーと empty state の open action は現在の view 文脈に固定し、Command Palette には workspace と global 出力を明示選択できる `Open Resource Output...` を追加しました。
+
+### Tests
+
+- **Ref Catalog Coverage** - Added regression coverage for `ref` setting exposure, recommended tool defaults, catalog directory resolution rules, documentation sync, generated catalog safety markers, and managed section generation hooks, then revalidated compile and resource-facing regression suites / `ref` 設定公開、推奨ツール既定、catalog directory 解決ルール、ドキュメント同期、generated catalog safety marker、managed section generation hook の回帰テストを追加し、compile と resource 系回帰スイートで再検証しました。
+
 ## [0.2.18] - 2026-05-17
 
 ### Fixed
