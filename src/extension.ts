@@ -776,16 +776,16 @@ export async function activate(
     async (skill: Skill) => {
       if (!skill) return;
 
-      // インストール済みの場合は無視
-      if (browseProvider.isSkillInstalled(skill)) return;
-
       const now = Date.now();
-      const itemId = `${skill.source}/${skill.name}`;
+      const itemId = `${getResourceKind(skill)}:${skill.source}:${skill.path || skill.name}`;
+      const isInstalled = browseProvider.isSkillInstalled(skill);
 
       // 同じアイテムを500ms以内にクリック → ダブルクリック
       if (lastClickedItem === itemId && now - lastClickTime < 500) {
         await vscode.commands.executeCommand(
-          "resourceNinja.installDefault",
+          isInstalled
+            ? "resourceNinja.reinstall"
+            : "resourceNinja.installDefault",
           skill,
         );
         lastClickTime = 0;

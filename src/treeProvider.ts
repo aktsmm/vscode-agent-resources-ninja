@@ -727,7 +727,7 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
   >();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
   private skillIndex: SkillIndex | undefined;
-  private installedSkillNames: Set<string> = new Set();
+  private installedRemoteResourceKeys: Set<string> = new Set();
 
   constructor(
     private context: vscode.ExtensionContext,
@@ -736,7 +736,7 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
 
   refresh(): void {
     this.skillIndex = undefined;
-    this.installedSkillNames.clear();
+    this.installedRemoteResourceKeys.clear();
     this._onDidChangeTreeData.fire();
   }
 
@@ -745,7 +745,7 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
    */
   setIndex(index: SkillIndex): void {
     this.skillIndex = index;
-    this.installedSkillNames.clear();
+    this.installedRemoteResourceKeys.clear();
     this._onDidChangeTreeData.fire();
   }
 
@@ -754,10 +754,12 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
    */
   isSkillInstalled(skill: Skill | string): boolean {
     if (typeof skill === "string") {
-      return this.installedSkillNames.has(`skill:${skill.toLowerCase()}`);
+      return false;
     }
 
-    return this.installedSkillNames.has(getInstalledResourceKey(skill));
+    return getResourceIdentityKeys(skill).some((key) =>
+      this.installedRemoteResourceKeys.has(key),
+    );
   }
 
   getTreeItem(element: SkillTreeItem): vscode.TreeItem {
@@ -771,19 +773,23 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
     }
 
     // インストール済みスキルを取得（メタデータの name を使用）
-    if (this.installedSkillNames.size === 0) {
+    if (this.installedRemoteResourceKeys.size === 0) {
       const wsFolder = vscode.workspace.workspaceFolders?.[0];
       if (wsFolder) {
         const installedMeta = await getInstalledSkillsWithMeta(wsFolder.uri);
-        installedMeta.forEach((meta) =>
-          this.installedSkillNames.add(
-            getInstalledResourceKey({
-              kind: "skill",
-              name: meta.name,
-              relativePath: meta.relativePath,
-            }),
-          ),
-        );
+        installedMeta.forEach((meta) => {
+          if (!meta.source || meta.source === "local" || !meta.remotePath) {
+            return;
+          }
+          for (const key of getResourceIdentityKeys({
+            kind: "skill",
+            name: meta.name,
+            source: meta.source,
+            remotePath: meta.remotePath,
+          })) {
+            this.installedRemoteResourceKeys.add(key);
+          }
+        });
 
         const installedResources = await scanLocalSkills(
           wsFolder.uri,
@@ -791,8 +797,14 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
           true,
         );
         installedResources.forEach((resource) => {
-          if (resource.kind && resource.kind !== "skill") {
-            this.installedSkillNames.add(getInstalledResourceKey(resource));
+          if (
+            resource.source &&
+            resource.source !== "local" &&
+            resource.remotePath
+          ) {
+            for (const key of getResourceIdentityKeys(resource)) {
+              this.installedRemoteResourceKeys.add(key);
+            }
           }
         });
       }
@@ -1426,6 +1438,11 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
           getResourceKindIcon(kind),
           new vscode.ThemeColor("charts.green"),
         );
+        item.command = {
+          command: "resourceNinja.onSkillClick",
+          title: isJa ? "リソースを再インストール" : "Reinstall Resource",
+          arguments: [skill],
+        };
         item.tooltip = `${item.tooltip}\n${isJa ? "状態" : "Status"}: ${
           isRecent
             ? isJa

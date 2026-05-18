@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.22] - 2026-05-19
 
+## [0.2.23] - 2026-05-19
+
+### Fixed
+
+- **Browse View Double-Click Reinstall** - Browse view double-click now mirrors the row action for remote resources: uninstalled rows install with the default target, already-installed remote rows reinstall from recorded source metadata, and local-only rows no longer appear as remotely reinstallable / Browse view のダブルクリックは remote resource の行アクションと一致するようにし、未インストール行は default target で install、インストール済み remote 行は記録済み source metadata から reinstall、local-only 行は remote 再インストール対象に見えないようにしました。
+- **Browse UX Documentation Sync** - Documented the Browse view install/reinstall split in README and README_ja so the Remote Resources behavior is explained where click / double-click install is introduced / README と README_ja に Browse view の install / reinstall 分岐を追記し、click / double-click install の説明箇所で Remote Resources の挙動が分かるようにしました。
+- **Release Hygiene Follow-up** - Restored the missing `release-notes-v0.2.22.md` artifact and synchronized the current release metadata files so release-facing guards keep the version contract intact / 欠落していた `release-notes-v0.2.22.md` を補完し、現行リリース用メタデータを同期して release-facing guard が version 契約を維持できるようにしました。
+
+### Tests
+
+- Revalidated compile, resource regression, README/release-note guards, extension-host smoke, ref catalog guards, and npm audit after the Browse double-click and release-hygiene follow-up / Browse のダブルクリック修正と release hygiene の追補後に、compile、resource 回帰、README/release-note guard、extension-host smoke、ref catalog guard、npm audit を再検証しました。
+
 ### Fixed
 
 - **Browse View Install Button on Installed Remote Rows** - Replaced the misleading Install button with a Reinstall action for already-installed remote resources in the Browse view, so users can update installed resources without confusion while local-only rows no longer show install/reinstall at all / Browse ビューでインストール済みリモートリソースに表示されていた紛らわしい Install ボタンを Reinstall に置き換えました。ローカルのみの行には install/reinstall を表示しなくなりました。

@@ -331,7 +331,7 @@ test("browse view shows reinstall inline on already installed remote rows", () =
   );
   assert.match(
     treeProviderSource,
-    /if \(isInstalled\) \{[\s\S]*\} else \{[\s\S]*item\.command = \{/,
+    /if \(isInstalled\) \{[\s\S]*item\.command = \{[\s\S]*resourceNinja\.onSkillClick[\s\S]*\} else \{[\s\S]*item\.command = \{/,
   );
   assert.ok(
     itemMenuHas(
@@ -371,6 +371,17 @@ test("browse installed remote rows keep preview and metadata actions", () => {
       "resourceNinja.copyUrl",
       "view == resourceNinja.browseView && (viewItem == skill || viewItem == installedRemoteSkill || viewItem == installedRemoteResource || viewItem == source || viewItem == remoteKindSource)",
     ),
+  );
+});
+
+test("browse installed detection skips local-only installs", () => {
+  assert.match(
+    treeProviderSource,
+    /if \(!meta\.source \|\| meta\.source === "local" \|\| !meta\.remotePath\) \{[\s\S]*return;/,
+  );
+  assert.match(
+    treeProviderSource,
+    /resource\.source &&[\s\S]*resource\.source !== "local" &&[\s\S]*resource\.remotePath/,
   );
 });
 

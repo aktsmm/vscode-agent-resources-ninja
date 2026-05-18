@@ -86,6 +86,7 @@ Managed output follows a ref-first model by default: keep **Use Ref Output** on 
 ### 📦 Install & Manage
 
 - One-click default install applies to every resource kind: skills, agents, instructions, prompts, hooks, MCP config, plugin manifests, and Cursor rules. Click and double-click installs use **Default Install Target**; the context menu **Install Resource** still asks for a target and supports Custom.
+- In **Remote Resources**, double-click keeps the same row action as the inline button: uninstalled rows install, already-installed remote rows reinstall from their recorded source metadata, and local-only rows do not present remote install/reinstall actions.
 - Click and double-click installs of MCP config resources copy the file to the Workspace MCP Directory for review without modifying `.vscode/mcp.json`. To merge compatible servers into `.vscode/mcp.json`, use the context-menu **Install Resource** action and pick the merge option; existing server keys always require overwrite confirmation.
 - Uninstalling an MCP config that has been merged into `.vscode/mcp.json` shows an explicit modal to also remove the matching server entries with a backup before deletion.
 - Installed MCP config resources continue to show whether they are only staged for review or already represented in `.vscode/mcp.json`.

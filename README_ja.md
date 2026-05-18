@@ -82,6 +82,7 @@
 ### 📦 インストール・管理
 
 - ワンクリックの default install は skill だけでなく agents、instructions、prompts、hooks、MCP config、plugin manifest、Cursor rules を含むすべての resource kind に適用されます。クリック / ダブルクリックインストールは **Default Install Target** を使い、コンテキストメニューの **Install Resource** は毎回インストール先を選択でき、Custom も選べます。
+- **Remote Resources** では、ダブルクリックの動作は行の inline action に合わせています。未インストール行は install、インストール済みの remote 行は記録済み source metadata を使って reinstall、local-only 行には remote install/reinstall action を出しません。
 - MCP config リソースのクリック / ダブルクリックインストールは Workspace MCP Directory へレビュー用にコピーするのみで、`.vscode/mcp.json` は変更しません。互換 server を `.vscode/mcp.json` にマージしたい場合は、コンテキストメニューの **Install Resource** を使って merge オプションを選択してください。既存 server key の上書きは必ず確認します。
 - `.vscode/mcp.json` にマージ済みの MCP config をアンインストールすると、対応する server entry も削除するか確認する明示モーダルを表示し、削除前に backup を作成します。
 - インストール済み MCP config は、確認用コピーだけの状態か `.vscode/mcp.json` に反映済みかを行の詳細とツールチップで確認できます。

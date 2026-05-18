@@ -378,10 +378,7 @@ test("reinstall command resolves browse-installed remote rows through workspace 
     extensionSource,
     /const installedWorkspaceResource = workspaceProvider[\s\S]*getWorkspaceSkills\(\)[\s\S]*normalizeInstalledRemotePath\(/,
   );
-  assert.match(
-    extensionSource,
-    /const meta =[\s\S]*installedMeta\.find\(/,
-  );
+  assert.match(extensionSource, /const meta =[\s\S]*installedMeta\.find\(/);
   assert.match(
     extensionSource,
     /normalizeInstalledRemotePath\(m\.remotePath\)/,
@@ -389,6 +386,21 @@ test("reinstall command resolves browse-installed remote rows through workspace 
   assert.match(
     extensionSource,
     /else if \(installedWorkspaceResource\) \{[\s\S]*installedWorkspaceResource\.fullPath[\s\S]*installedWorkspaceResource\.relativePath/,
+  );
+});
+
+test("double click command installs uninstalled rows and reinstalls installed remote rows", () => {
+  assert.match(
+    extensionSource,
+    /const isInstalled = browseProvider\.isSkillInstalled\(skill\)/,
+  );
+  assert.match(
+    extensionSource,
+    /isInstalled \? "resourceNinja\.reinstall" : "resourceNinja\.installDefault"/,
+  );
+  assert.match(
+    treeProviderSource,
+    /if \(isInstalled\) \{[\s\S]*item\.command = \{[\s\S]*resourceNinja\.onSkillClick/,
   );
 });
 

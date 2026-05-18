@@ -169,6 +169,29 @@ test("README MCP config safety copy explains explicit merge choice", () => {
   assert.match(readmeJa, /レビュー用にコピーするのみ|確認用にコピー/);
 });
 
+test("README documents browse double-click install and reinstall behavior", () => {
+  assert.match(
+    readme,
+    /double-click keeps the same row action as the inline button: uninstalled rows install, already-installed remote rows reinstall/,
+  );
+  assert.match(
+    readme,
+    /local-only rows do not present remote install\/reinstall actions/,
+  );
+  assert.match(
+    readmeJa,
+    /ダブルクリックの動作は行の inline action に合わせています/,
+  );
+  assert.match(
+    readmeJa,
+    /未インストール行は install、インストール済みの remote 行は.*reinstall/,
+  );
+  assert.match(
+    readmeJa,
+    /local-only 行には remote install\/reinstall action を出しません/,
+  );
+});
+
 test("README documents Copilot CLI Global Resource Home resources", () => {
   assert.match(readme, /copilot-instructions\.md/);
   assert.match(readme, /skills\/\*\/SKILL\.md/);
