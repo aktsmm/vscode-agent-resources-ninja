@@ -2344,24 +2344,18 @@ export async function activate(
             | Awaited<ReturnType<typeof uninstallSkill>>
             | undefined;
           let mcpUninstallSummary: string | undefined;
+          let mcpConfigUri: vscode.Uri | undefined;
+          let detectedKind: ResourceKind | undefined;
           if (relativePath) {
             const normalizedRelativePath = relativePath.replace(/\\/g, "/");
-            const detectedKind = detectResourceKindFromPath(
-              normalizedRelativePath,
-            );
+            detectedKind = detectResourceKindFromPath(normalizedRelativePath);
             if (detectedKind === "mcp") {
-              const mcpConfigUri = path.isAbsolute(relativePath)
+              mcpConfigUri = path.isAbsolute(relativePath)
                 ? vscode.Uri.file(path.normalize(relativePath))
                 : vscode.Uri.joinPath(
                     wsFolder.uri,
                     ...normalizedRelativePath.split("/").filter(Boolean),
                   );
-              const mcpUninstallResult = await maybeRemoveMergedMcpConfig(
-                wsFolder.uri,
-                mcpConfigUri,
-              );
-              mcpUninstallSummary =
-                formatMcpConfigUpdateSummary(mcpUninstallResult);
             }
           }
           // relativePath がある場合はそれを使って削除（より確実）
@@ -2372,6 +2366,15 @@ export async function activate(
             );
           } else {
             uninstallResult = await uninstallSkill(skillName, wsFolder.uri);
+          }
+
+          if (detectedKind === "mcp" && mcpConfigUri) {
+            const mcpUninstallResult = await maybeRemoveMergedMcpConfig(
+              wsFolder.uri,
+              mcpConfigUri,
+            );
+            mcpUninstallSummary =
+              formatMcpConfigUpdateSummary(mcpUninstallResult);
           }
 
           const config = vscode.workspace.getConfiguration("resourceNinja");

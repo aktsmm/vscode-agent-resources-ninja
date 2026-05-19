@@ -5,9 +5,21 @@ All notable changes to the "Agent Resources Ninja" extension will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.22] - 2026-05-19
-
 ## [0.2.23] - 2026-05-19
+
+## [0.2.24] - 2026-05-19
+
+### Fixed
+
+- **MCP Uninstall Recovery Ordering** - Reordered MCP uninstall cleanup so the staged MCP file is deleted before `.vscode/mcp.json` is mutated, preventing partial uninstall failures from leaving orphaned workspace config state / MCP アンインストール時の cleanup 順序を見直し、`.vscode/mcp.json` を変更する前に staged MCP ファイルを削除するようにしました。これにより部分失敗で workspace 設定だけが先に壊れる orphan state を防ぎます。
+- **Shared Skill Metadata Contract Guard** - Fixed `.skill-meta.json` handling so reinstall continues to preserve the shared `registrationDisabled` and `remotePath` fields used by Agent Skills Ninja for coexistence registration state and cross-extension index matching / `.skill-meta.json` の扱いを修正し、Agent Skills Ninja が共存時の登録状態判定と cross-extension index matching に使う共有フィールド `registrationDisabled` と `remotePath` を、再インストール時も保持し続けるようにしました。
+- **PowerShell Helper Task Invocation** - Fixed the tracked `temp-confirm-location-branch` helper task to call `pwsh` with an explicit `-Command`, so the task works in VS Code instead of passing a bare script string as the first argument / tracked helper task `temp-confirm-location-branch` が `pwsh` を裸の script 文字列で呼んでいた問題を修正し、明示的な `-Command` 付きで VS Code 上でも正しく動作するようにしました。
+
+### Tests
+
+- Added regression guards for MCP uninstall sequencing, shared `.skill-meta.json` coexistence fields, and PowerShell task invocation, then revalidated compile, resource regression, extension-host smoke, helper-task execution, targeted metadata contract tests, and npm audit / MCP アンインストール順序、共有 `.skill-meta.json` 共存フィールド、PowerShell task 呼び出し形式の回帰ガードを追加し、compile、resource 回帰、extension-host smoke、helper task 実行、metadata 契約テスト、npm audit を再検証しました。
+
+## [0.2.22] - 2026-05-19
 
 ### Fixed
 

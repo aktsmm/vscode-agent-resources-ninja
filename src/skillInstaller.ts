@@ -118,6 +118,29 @@ function normalizeNewlines(text: string): string {
   return text.replace(/\r\n/g, "\n");
 }
 
+async function readSkillMetaIfExists(
+  metaPath: vscode.Uri,
+): Promise<Partial<SkillMeta> | undefined> {
+  try {
+    const existingContent = await vscode.workspace.fs.readFile(metaPath);
+    return JSON.parse(
+      Buffer.from(existingContent).toString("utf-8"),
+    ) as Partial<SkillMeta>;
+  } catch {
+    return undefined;
+  }
+}
+
+function mergeSkillMeta(
+  existingMeta: Partial<SkillMeta> | undefined,
+  nextMeta: SkillMeta,
+): SkillMeta {
+  return {
+    ...(existingMeta ?? {}),
+    ...nextMeta,
+  };
+}
+
 interface ResourceInstallMeta {
   kind: string;
   name: string;
@@ -995,30 +1018,19 @@ export async function installSkill(
   const skillMdPath = vscode.Uri.joinPath(skillPath, "SKILL.md");
   const whenToUse = await extractWhenToUseFromSkillMd(skillMdPath);
 
-  // 既存のメタデータからカスタム値を保持
   const metaPath = vscode.Uri.joinPath(skillPath, ".skill-meta.json");
-  let existingCustomWhenToUse: string | undefined;
-  try {
-    const existingContent = await vscode.workspace.fs.readFile(metaPath);
-    const existingMeta = JSON.parse(
-      Buffer.from(existingContent).toString("utf-8"),
-    );
-    existingCustomWhenToUse = existingMeta.customWhenToUse;
-  } catch {
-    // 既存のメタデータがない場合は無視
-  }
-
-  const meta: SkillMeta = {
+  const existingMeta = await readSkillMetaIfExists(metaPath);
+  const meta: SkillMeta = mergeSkillMeta(existingMeta, {
     name: skill.name,
     source: skill.source,
     description: description,
     description_ja: skill.description_ja,
     whenToUse: whenToUse || undefined,
-    customWhenToUse: existingCustomWhenToUse, // ユーザーのカスタム値を保持
+    customWhenToUse: existingMeta?.customWhenToUse,
     categories: skill.categories,
     remotePath: skill.path,
     installedAt: new Date().toISOString(),
-  };
+  });
   await vscode.workspace.fs.writeFile(
     metaPath,
     Buffer.from(JSON.stringify(meta, null, 2), "utf-8"),
@@ -1275,15 +1287,17 @@ export interface SkillMeta {
   description_ja?: string;
   whenToUse?: string; // SKILL.md の "When to Use" セクションから抽出
   customWhenToUse?: string; // ユーザーがカスタマイズした説明（最優先）
+  registrationDisabled?: boolean; // skill-only sibling extension と共有する登録状態フラグ
   categories: string[];
   installedAt: string;
   relativePath?: string; // ネストされたスキルのパス（例: "document-skills/docx"）
-  remotePath?: string; // インストール元のリモートパス（例: "plugins/foo/skills/bar"）
+  remotePath?: string; // skill-only sibling extension と共有する配布元相対パス。cross-extension index matching の契約フィールド
   // 公式仕様に基づくメタデータ
   license?: string; // ライセンス（例: MIT, Apache-2.0）
   author?: string; // 作成者
   version?: string; // バージョン
   skillFilePath?: string; // SKILL.md の実パス
+  [key: string]: unknown;
 }
 
 /**

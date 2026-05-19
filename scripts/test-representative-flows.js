@@ -342,6 +342,10 @@ test("uninstall offers cleanup of merged MCP servers", () => {
   assert.match(extensionSource, /updateMcpConfigForUninstall/);
   assert.match(extensionSource, /Remove from \.vscode\/mcp\.json/);
   assert.match(extensionSource, /Delete staged file only/);
+  assert.match(
+    extensionSource,
+    /uninstallResult = await uninstallSkillByPath\([\s\S]*if \(detectedKind === "mcp" && mcpConfigUri\) \{[\s\S]*maybeRemoveMergedMcpConfig\(/,
+  );
 });
 
 test("install summary surfaces hook and MCP results in Output Channel", () => {

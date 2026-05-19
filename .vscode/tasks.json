@@ -34,7 +34,7 @@
       "label": "temp-confirm-location-branch",
       "type": "shell",
       "command": "pwsh",
-      "args": ["Get-Location; git branch --show-current"],
+      "args": ["-Command", "Get-Location; git branch --show-current"],
       "isBackground": false
     },
     {
