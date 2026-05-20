@@ -1867,7 +1867,7 @@ test("built-in resource visibility is configurable", () => {
   const config = packageJson.contributes?.configuration?.properties || {};
   assert.strictEqual(
     config["resourceNinja.showBuiltInResources"]?.default,
-    false,
+    true,
   );
   assert.ok(
     (packageJson.contributes?.commands || []).some(

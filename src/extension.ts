@@ -733,7 +733,7 @@ export async function activate(
   const updateBuiltInResourcesContext = async (): Promise<void> => {
     const visible = vscode.workspace
       .getConfiguration("resourceNinja")
-      .get<boolean>("showBuiltInResources", false);
+      .get<boolean>("showBuiltInResources", true);
     await vscode.commands.executeCommand(
       "setContext",
       "resourceNinja.builtInResourcesVisible",
@@ -939,7 +939,7 @@ export async function activate(
     nextValue: boolean,
   ): Promise<void> => {
     const config = vscode.workspace.getConfiguration("resourceNinja");
-    const currentValue = config.get<boolean>("showBuiltInResources", false);
+    const currentValue = config.get<boolean>("showBuiltInResources", true);
     if (currentValue !== nextValue) {
       await config.update(
         "showBuiltInResources",
@@ -966,7 +966,7 @@ export async function activate(
     async () => {
       const currentValue = vscode.workspace
         .getConfiguration("resourceNinja")
-        .get<boolean>("showBuiltInResources", false);
+        .get<boolean>("showBuiltInResources", true);
       await setBuiltInResourcesVisibility(!currentValue);
     },
   );

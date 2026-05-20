@@ -2,7 +2,7 @@
   "name": "agent-resources-ninja",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.24",
+  "version": "0.2.25",
   "publisher": "yamapan",
   "license": "CC-BY-NC-SA-4.0",
   "icon": "resources/icon.png",
@@ -1448,7 +1448,7 @@
         },
         "resourceNinja.showBuiltInResources": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "order": 25,
           "markdownDescription": "%config.showBuiltInResources.markdownDescription%"
         },

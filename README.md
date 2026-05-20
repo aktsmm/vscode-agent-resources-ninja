@@ -228,7 +228,7 @@ Generic MCP config file names such as `mcp.json` and `.mcp.json` are installed w
 - Global Resource Home resources under the selected preset (`~/.copilot`, `~/.claude`, or `~/.agents`), including product-native instruction files such as `copilot-instructions.md`, skills under `skills/*/SKILL.md`, agents under `agents/`, Copilot hook config files under `hooks/*.json`, and Copilot CLI `mcp-config.json`
 - Read-only installed extension resources scanned from marketplace extension `resources/agents`, `resources/skills`, `resources/prompts`, `resources/instructions`, `resources/hooks`, `resources/mcp`, and manifest-declared `chatAgents` / `chatPromptFiles`
 
-- Built-in VS Code / GitHub Copilot Chat / GitHub Copilot CLI resources are hidden by default and can be toggled into source-specific groups, including Copilot Chat `/create-*` prompt skills bundled under `assets/prompts`
+- Built-in VS Code / GitHub Copilot Chat / GitHub Copilot CLI resources are shown by default and can be hidden with the built-in visibility toggle; they stay grouped by source, including Copilot Chat `/create-*` prompt skills bundled under `assets/prompts`
 - Built-in resources are read-only definitions scanned from known VS Code, GitHub Copilot Chat, and GitHub Copilot CLI locations; they are shown for discovery, not modification.
 - Installed extension resources are also read-only and are shown for discovery, not modification.
 - Copilot CLI runtime logs, session state, OAuth cache, and restart state under `~/.copilot` are skipped so user-authored resources remain visible even when the CLI home contains many session files.
@@ -430,7 +430,7 @@ Settings are ordered by the workflow users usually follow:
 |  22   | `resourceNinja.useRefOutput`                                    | `true`                 | Keep managed output lightweight by linking to per-kind catalogs                          |
 |  23   | `resourceNinja.outputFormat`                                    | `full`                 | Inline output format used when Ref output is off (`full` / `compact` / `legacy`)         |
 |  24   | `resourceNinja.refCatalogFormat`                                | `full`                 | README index detail format used when Ref output is on (`full` / `compact` / `legacy`)    |
-|  25   | `resourceNinja.showBuiltInResources`                            | `false`                | Show built-in resources in User / Global Resource Home                                   |
+|  25   | `resourceNinja.showBuiltInResources`                            | `true`                 | Show built-in resources in User / Global Resource Home                                   |
 |  26   | `resourceNinja.remoteResourceViewMode`                          | `repositoryFirst`      | Remote Resources layout (repository-first / resource-type-first)                         |
 |  27   | `resourceNinja.language`                                        | `auto`                 | UI language (auto / en / ja)                                                             |
 |  28   | `resourceNinja.githubToken`                                     | `""`                   | GitHub Token (for API rate limit)                                                        |

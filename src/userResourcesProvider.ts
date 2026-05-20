@@ -413,7 +413,7 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
   private shouldShowBuiltInResources(): boolean {
     return vscode.workspace
       .getConfiguration("resourceNinja")
-      .get<boolean>("showBuiltInResources", false);
+      .get<boolean>("showBuiltInResources", true);
   }
 
   private getRegularResources(): UserResource[] {

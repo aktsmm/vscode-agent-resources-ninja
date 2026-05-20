@@ -139,7 +139,7 @@ test("user global welcome links to create output open action built-in toggle and
   assertHasCommands(userView, [
     "resourceNinja.createResource",
     "resourceNinja.openGlobalInstructionFile",
-    "resourceNinja.showBuiltInResources",
+    "resourceNinja.toggleBuiltInResources",
     "resourceNinja.openSettings",
   ]);
 });

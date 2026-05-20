@@ -5,6 +5,17 @@ All notable changes to the "Agent Resources Ninja" extension will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.25] - 2026-05-20
+
+### Changed
+
+- **Built-in Resources Default Visibility** - Enabled built-in VS Code / GitHub Copilot Chat / GitHub Copilot CLI resources by default in User / Global Resource Home so built-in discovery no longer depends on a first-run manual toggle / User / Global Resource Home で VS Code / GitHub Copilot Chat / GitHub Copilot CLI の built-in resources を既定で表示するようにし、初回表示で手動 toggle しないと発見できない状態を解消しました。
+- **Welcome Toggle Alignment** - Updated the User / Global Resource Home empty-state welcome links to use a visibility toggle instead of a stale show-only action, and shortened the copy so the empty-state compactness guard still passes / User / Global Resource Home の empty-state welcome を stale な show-only action ではなく visibility toggle に合わせ、compactness guard を満たすよう文言も短縮しました。
+
+### Tests
+
+- Revalidated resource regression, welcome UX, localization, manifest consistency, compile, extension-host smoke, and npm audit before release / リリース前に resource 回帰、welcome UX、localization、manifest consistency、compile、extension-host smoke、npm audit を再検証しました。
+
 ## [0.2.23] - 2026-05-19
 
 ## [0.2.24] - 2026-05-19
