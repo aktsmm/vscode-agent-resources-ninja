@@ -54,6 +54,7 @@ Managed output follows a ref-first model by default: keep **Use Ref Output** on 
 - Browse **Workspace Resources**, **User / Global Resource Home**, and **Remote Resources** from the Activity Bar
 - Manage multiple resource kinds: skills, agents, prompts, instructions, hooks, MCP config resources, plugin manifests, and Cursor rules
 - Browse remote resources by source or by Resource Type
+- Refresh a remote source from either Remote Resources layout when upstream skills change
 - Inspect user/global resources from VS Code User Data and the selected Global Resource Home
 - Discover read-only resources packaged inside installed VS Code extensions, including chat agents and prompts that ship with product extensions
 - Choose explicit install targets: Workspace, User Profile, Global Resource Home, or Custom

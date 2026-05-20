@@ -1651,6 +1651,7 @@ export async function updateIndexFromSingleSource(
   currentIndex: SkillIndex,
   sourceId: string,
   progress?: vscode.Progress<{ message?: string; increment?: number }>,
+  options?: { forceScan?: boolean },
 ): Promise<SkillIndex> {
   const token = await getGitHubToken();
 
@@ -1673,7 +1674,7 @@ export async function updateIndexFromSingleSource(
     increment: 50,
   });
 
-  if (!(await shouldRunSharedScan(context, sourceId))) {
+  if (!options?.forceScan && !(await shouldRunSharedScan(context, sourceId))) {
     logger.info(
       `[Resource Ninja] Skipping shared scan for ${sourceId} because a recent shared scan is available.`,
     );

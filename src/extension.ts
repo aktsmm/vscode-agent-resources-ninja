@@ -3174,6 +3174,7 @@ export async function activate(
                 currentIndex,
                 bundle.source,
                 progress,
+                { forceScan: true },
               );
             },
           );
@@ -3508,7 +3509,10 @@ export async function activate(
   const updateSourceIndexCmd = vscode.commands.registerCommand(
     "resourceNinja.updateSourceIndex",
     async (item?: SkillTreeItem) => {
-      if (!item || item.contextValue !== "source") {
+      const isSourceItem =
+        item?.contextValue === "source" ||
+        item?.contextValue === "remoteKindSource";
+      if (!isSourceItem) {
         vscode.window.showErrorMessage(messages.updateSourceSelectRequired());
         return;
       }
@@ -3540,6 +3544,7 @@ export async function activate(
               skillIndex!,
               sourceId,
               progress,
+              { forceScan: true },
             );
           },
         );

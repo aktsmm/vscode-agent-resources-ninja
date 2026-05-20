@@ -5,6 +5,18 @@ All notable changes to the "Agent Resources Ninja" extension will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.26] - 2026-05-21
+
+### Fixed
+
+- **Remote Source Refresh Across Layouts** - Fixed `Update This Source` so it accepts source nodes from both Remote Resources layouts, including the resource-type-first `remoteKindSource` rows that previously failed with a selection error / `Update This Source` が Remote Resources の両レイアウトで source ノードを受け付けるように修正し、従来は選択エラーで失敗していた resource-type-first の `remoteKindSource` 行からも更新できるようにしました。
+- **Explicit Source Refresh Bypasses Shared Dedup** - Manual single-source refresh now forces a rescan instead of being skipped by the 5-minute shared index dedup window, so upstream additions such as newly published Agent-Skills entries appear immediately after an explicit refresh / 手動の単一ソース更新は 5 分間の shared index dedup によるスキップを迂回して必ず再スキャンするようにし、Agent-Skills の新規追加のような upstream 変更が明示更新直後に反映されるようにしました。
+- **Remote Refresh Regression Guard and Docs Sync** - Added a regression guard for the explicit source refresh contract and documented that source refresh works from either Remote Resources layout in both README editions / 明示ソース更新の契約を固定する回帰ガードを追加し、README / README_ja に Remote Resources のどちらのレイアウトからでも source 更新できることを追記しました。
+
+### Tests
+
+- Revalidated compile, resource regression, manifest consistency, README release UX, browse-view action scope regression, When to Use extraction, search logic, VS Code extension-host smoke, and npm audit before release / リリース前に compile、resource 回帰、manifest consistency、README release UX、browse view action scope 回帰、When to Use 抽出、検索ロジック、VS Code extension-host smoke、npm audit を再検証しました。
+
 ## [0.2.25] - 2026-05-20
 
 ### Changed

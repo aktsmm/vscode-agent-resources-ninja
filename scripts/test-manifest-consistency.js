@@ -702,6 +702,29 @@ test("remote resources support repository-first and resource-type-first layouts"
   assert.match(treeProviderSource, /getPluginIdFromPath/);
 });
 
+test("explicit source refresh works from both remote layouts", () => {
+  assert.match(
+    extensionSource,
+    /item\?\.contextValue === "source"\s*\|\|\s*item\?\.contextValue === "remoteKindSource"/,
+    "Update Source Index should accept source items from both browse layouts",
+  );
+  assert.match(
+    extensionSource,
+    /updateIndexFromSingleSource\([\s\S]*?\{ forceScan: true \}/,
+    "Manual source refresh should bypass shared scan dedup when explicitly requested",
+  );
+  assert.match(
+    indexUpdaterSource,
+    /options\?: \{ forceScan\?: boolean \}/,
+    "Single-source updater should expose a forceScan option for explicit refreshes",
+  );
+  assert.match(
+    indexUpdaterSource,
+    /!options\?\.forceScan && !\(await shouldRunSharedScan\(context, sourceId\)\)/,
+    "Shared scan dedup should only apply when forceScan is not requested",
+  );
+});
+
 test("settings commands are reachable from every resource view toolbar", () => {
   const commands = packageJson.contributes?.commands || [];
   for (const commandId of [

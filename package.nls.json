@@ -112,7 +112,7 @@
   "config.remoteResourceViewMode.markdownDescription": "Choose how Remote Resources are grouped. Repository-first is best for browsing by source; resource-type-first is best when looking for a specific kind such as prompts or hooks.",
   "config.remoteResourceViewMode.repositoryFirst": "Repository first - group by repository, then resource type",
   "config.remoteResourceViewMode.resourceTypeFirst": "Resource type first - group by resource type, then repository",
-  "config.versionInfo.markdownDescription": "---\n\n### Version Info\n\n| Item | Value |\n|------|-------|\n| Extension | **0.2.25** |\n| Resource Index | **v1.22.1** |\n| Last Updated | 2026-05-20 |\n| Resources | 2647 |\n| Sources | 23 |\n\n[Changelog](https://github.com/aktsmm/vscode-agent-resources-ninja/blob/master/CHANGELOG.md) · [Report Bug](https://github.com/aktsmm/vscode-agent-resources-ninja/issues)",
+  "config.versionInfo.markdownDescription": "---\n\n### Version Info\n\n| Item | Value |\n|------|-------|\n| Extension | **0.2.26** |\n| Resource Index | **v1.22.1** |\n| Last Updated | 2026-05-21 |\n| Resources | 2647 |\n| Sources | 23 |\n\n[Changelog](https://github.com/aktsmm/vscode-agent-resources-ninja/blob/master/CHANGELOG.md) · [Report Bug](https://github.com/aktsmm/vscode-agent-resources-ninja/issues)",
   "view.workspace": "Workspace Resources",
   "view.browse": "Remote Resources",
   "view.userResources": "User / Global Resource Home",

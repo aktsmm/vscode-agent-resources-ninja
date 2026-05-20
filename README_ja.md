@@ -50,6 +50,7 @@
 - Activity Bar から **Workspace Resources**、**ユーザー / グローバル リソース**、**Remote Resources** を参照
 - skills、agents、prompts、instructions、hooks、MCP config、plugin manifest、Cursor rule など複数のリソース種別を管理
 - リモートリソースを source 別または Resource Type 別に参照
+- Remote Resources はどちらのレイアウトでも source 単位の更新を実行可能
 - VS Code User Data と選択中の Global Resource Home 配下の user/global リソースを確認
 - インストール済み VS Code 拡張に同梱された chat agent や prompt などの読み取り専用リソースを確認
 - インストール先を Workspace、User Profile、Global Resource Home、Custom から明示選択
