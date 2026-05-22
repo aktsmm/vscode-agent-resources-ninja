@@ -5,6 +5,18 @@ All notable changes to the "Agent Resources Ninja" extension will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.27] - 2026-05-23
+
+### Fixed
+
+- **Metadata-less Personal Skill Source Symmetry** - Normalized metadata-less personal skills under Global Resource Home and related user-managed locations to `local` instead of leaving them as `unknown`, so startup index-mismatch warnings no longer treat those personal skills as remote-source anomalies / Global Resource Home や関連する user-managed location 配下の metadata-less personal skill を `unknown` のまま残さず `local` に正規化するようにし、起動時の index mismatch warning がそれらの personal skill を remote-source 異常として扱わないようにしました。
+- **Skill Metadata Refresh Source Cleanup** - Applied the same source normalization during bulk metadata refresh, single-skill refresh, installed metadata fallback, and manual metadata bootstrap so stale `unknown` values are cleaned up consistently instead of surviving on one code path / bulk metadata refresh、single-skill refresh、installed metadata fallback、manual metadata bootstrap の各経路でも同じ source 正規化を適用し、stale な `unknown` が一部のコードパスだけに残らないようにしました。
+- **Upgrade Remote Skill Count Guard** - Tightened the upgrade prompt's remote-skill count to require both a real remote source and `remotePath`, preventing local personal skills from being counted as remotely reinstallable after the normalization change / アップグレード時の remote skill 件数判定を、実際の remote source と `remotePath` の両方を持つものに限定し、正規化変更後に local personal skill が remote 再インストール対象として誤カウントされないようにしました。
+
+### Tests
+
+- Added regression guards for metadata-less personal skill source normalization and upgrade remote-skill counting, then revalidated compile, resource regression, When to Use extraction, search logic, VS Code extension-host smoke, and npm audit before release / metadata-less personal skill の source 正規化と upgrade remote-skill count の回帰ガードを追加し、リリース前に compile、resource 回帰、When to Use 抽出、検索ロジック、VS Code extension-host smoke、npm audit を再検証しました。
+
 ## [0.2.26] - 2026-05-21
 
 ### Fixed

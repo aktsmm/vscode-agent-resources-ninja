@@ -1300,6 +1300,21 @@ export interface SkillMeta {
   [key: string]: unknown;
 }
 
+export function normalizeSkillMetaSource(
+  meta: Pick<Partial<SkillMeta>, "source" | "remotePath">,
+): string {
+  const source = meta.source?.trim();
+  const remotePath = meta.remotePath
+    ?.replace(/\\/g, "/")
+    .replace(/^\/+|\/+$/g, "");
+
+  if (!remotePath && (!source || source === "unknown")) {
+    return "local";
+  }
+
+  return source || "unknown";
+}
+
 /**
  * ディレクトリ内のスキルを再帰的にスキャン
  * SKILL.md を持つフォルダをスキルとして検出
@@ -1416,6 +1431,7 @@ export async function refreshSkillMetadata(
         // 既存のメタデータを読み込む
         const content = await vscode.workspace.fs.readFile(metaPath);
         const meta = JSON.parse(Buffer.from(content).toString("utf-8"));
+        const normalizedSource = normalizeSkillMetaSource(meta);
 
         // SKILL.md から description と whenToUse を再抽出
         const newDescription = await extractDescriptionFromSkillMd(skillMdPath);
@@ -1433,6 +1449,11 @@ export async function refreshSkillMetadata(
         // （customWhenToUse がある場合は whenToUse のみ更新、ユーザーのカスタム値は保持）
         if (meta.whenToUse !== newWhenToUse) {
           meta.whenToUse = newWhenToUse || undefined;
+          updated = true;
+        }
+
+        if (meta.source !== normalizedSource) {
+          meta.source = normalizedSource;
           updated = true;
         }
 
@@ -1454,7 +1475,7 @@ export async function refreshSkillMetadata(
 
           const newMeta: SkillMeta = {
             name,
-            source: "unknown",
+            source: normalizeSkillMetaSource({}),
             description,
             whenToUse: whenToUse || undefined,
             categories: [],
@@ -1501,6 +1522,7 @@ export async function refreshSingleSkillMetadata(
     // SKILL.md から description と whenToUse を再抽出
     const newDescription = await extractDescriptionFromSkillMd(skillMdUri);
     const newWhenToUse = await extractWhenToUseFromSkillMd(skillMdUri);
+    const normalizedSource = normalizeSkillMetaSource(meta);
 
     let updated = false;
 
@@ -1513,6 +1535,11 @@ export async function refreshSingleSkillMetadata(
     // whenToUse が変更された場合
     if (meta.whenToUse !== newWhenToUse) {
       meta.whenToUse = newWhenToUse || undefined;
+      updated = true;
+    }
+
+    if (meta.source !== normalizedSource) {
+      meta.source = normalizedSource;
       updated = true;
     }
 
@@ -1571,6 +1598,7 @@ export async function getInstalledSkillsWithMetaFromRoot(
       try {
         const content = await vscode.workspace.fs.readFile(entry.metaPath);
         const meta = JSON.parse(Buffer.from(content).toString("utf-8"));
+        meta.source = normalizeSkillMetaSource(meta);
         // relativePath を追加（メタデータにない場合）
         if (!meta.relativePath) {
           meta.relativePath = entry.relativePath;
@@ -1587,7 +1615,7 @@ export async function getInstalledSkillsWithMetaFromRoot(
         const whenToUse = await extractWhenToUseFromSkillMd(entry.skillMdPath);
         metas.push({
           name,
-          source: "unknown", // メタデータがない古い形式
+          source: normalizeSkillMetaSource({}),
           description,
           whenToUse: whenToUse || undefined,
           categories: [],

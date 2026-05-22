@@ -25,6 +25,7 @@ import {
   uninstallSkillByPath,
   getInstalledSkills,
   getInstalledSkillsWithMeta,
+  normalizeSkillMetaSource,
   refreshSkillMetadata,
   refreshSingleSkillMetadata,
 } from "./skillInstaller";
@@ -144,6 +145,17 @@ function isIndexTrackedInstalledSkill(
   meta: Pick<SkillMeta, "remotePath">,
 ): boolean {
   return !!normalizeInstalledRemotePath(meta.remotePath);
+}
+
+function isRemoteInstalledSkillMeta(
+  meta: Pick<SkillMeta, "source" | "remotePath">,
+): boolean {
+  return (
+    !!normalizeInstalledRemotePath(meta.remotePath) &&
+    !!meta.source &&
+    meta.source !== "unknown" &&
+    meta.source !== "local"
+  );
 }
 
 function findIndexedSkillForInstalledMeta(
@@ -1685,7 +1697,7 @@ export async function activate(
 
           meta = {
             name: skill.name,
-            source: "unknown",
+            source: normalizeSkillMetaSource({}),
             description: description,
             categories: [],
             installedAt: new Date().toISOString(),
@@ -5418,8 +5430,8 @@ async function checkVersionAndRefreshMetadata(
 
   // インストール済みスキルを取得
   const installedSkills = await getInstalledSkillsWithMeta(workspaceUri);
-  const remoteSkillCount = installedSkills.filter(
-    (s) => s.source && s.source !== "unknown",
+  const remoteSkillCount = installedSkills.filter((s) =>
+    isRemoteInstalledSkillMeta(s),
   ).length;
 
   // スキル自動更新設定を確認
