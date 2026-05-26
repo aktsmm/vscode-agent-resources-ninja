@@ -186,15 +186,6 @@
       "description_ja": "Cline 公式リポジトリの skills"
     },
     {
-      "id": "goose-official",
-      "name": "Goose Skills (Official / AAIF)",
-      "url": "https://github.com/aaif-goose/goose",
-      "type": "official",
-      "includePaths": [".agents/skills/"],
-      "description": "Official Goose repository skills from the Agentic AI Foundation",
-      "description_ja": "Agentic AI Foundation の Goose 公式リポジトリ skills"
-    },
-    {
       "id": "code-and-sorts-awesome-copilot-agents",
       "name": "Awesome Copilot Agents (Code and Sorts)",
       "url": "https://github.com/Code-and-Sorts/awesome-copilot-agents",
@@ -335,31 +326,6 @@
       "skills": ["CORE", "Agents", "Art", "CreateSkill", "Prompting"],
       "installOrder": ["CORE", "Agents", "Art", "CreateSkill", "Prompting"],
       "coreSkill": "CORE"
-    },
-    {
-      "id": "prp-core",
-      "name": "PRP Core Bundle",
-      "source": "prps-agentic",
-      "description": "Core PRP workflow patterns (create/execute/commit/review/pr)",
-      "description_ja": "PRPコアワークフロー（作成・実行・コミット・レビュー・PR）",
-      "skills": [
-        "prp-core/prp-core-create",
-        "prp-core/prp-core-execute",
-        "prp-core/prp-core-commit",
-        "prp-core/prp-core-review",
-        "prp-core/prp-core-pr",
-        "prp-core/prp-core-new-branch",
-        "prp-core/prp-core-run-all"
-      ],
-      "installOrder": [
-        "prp-core/prp-core-create",
-        "prp-core/prp-core-execute",
-        "prp-core/prp-core-commit",
-        "prp-core/prp-core-review",
-        "prp-core/prp-core-pr",
-        "prp-core/prp-core-new-branch",
-        "prp-core/prp-core-run-all"
-      ]
     },
     {
       "id": "microsoft-copilot-for-azure-plugin-skills",
@@ -2636,14 +2602,6 @@
       "pluginManifestKind": "plugin"
     },
     {
-      "name": "azure-ai-services",
-      "source": "microsoftdocs-agent-skills",
-      "path": "skills/azure-ai-services",
-      "categories": [],
-      "description": "Expert knowledge for Azure AI services development including troubleshooting, best practices, decision making, limits & quotas, security, configuration, integrations & coding patterns, and deployment. Use when building, debugging, or optimizing Azure AI services applications. Not for Azure Machine Learning (use azure-machine-learning), Azure AI Search (use azure-cognitive-search), Azure AI Speech (use azure-speech), Azure AI Custom Vision (use azure-custom-vision).",
-      "description_ja": ""
-    },
-    {
       "name": "azure-ai-vision",
       "source": "microsoftdocs-agent-skills",
       "path": "skills/azure-ai-vision",
@@ -3561,14 +3519,6 @@
       "description_ja": ""
     },
     {
-      "name": "azure-foundry-classic",
-      "source": "microsoftdocs-agent-skills",
-      "path": "skills/azure-foundry-classic",
-      "categories": [],
-      "description": "Expert knowledge for Azure Foundry Classic development including troubleshooting, best practices, decision making, architecture & design patterns, limits & quotas, security, configuration, integrations & coding patterns, and deployment. Use when building, debugging, or optimizing Azure Foundry Classic applications. Not for Azure AI Foundry Local (use azure-ai-foundry-local), Microsoft Foundry (use azure-microsoft-foundry), Azure Machine Learning (use azure-machine-learning).",
-      "description_ja": ""
-    },
-    {
       "name": "azure-front-door",
       "source": "microsoftdocs-agent-skills",
       "path": "skills/azure-front-door",
@@ -3711,14 +3661,6 @@
       "path": "skills/azure-import-export",
       "categories": [],
       "description": "Expert knowledge for Azure Import Export development including troubleshooting, limits & quotas, and security. Use when building, debugging, or optimizing Azure Import Export applications. Not for Azure Data Box (use azure-data-box-family), Azure Blob Storage (use azure-blob-storage), Azure Files (use azure-files).",
-      "description_ja": ""
-    },
-    {
-      "name": "azure-industry",
-      "source": "microsoftdocs-agent-skills",
-      "path": "skills/azure-industry",
-      "categories": [],
-      "description": "Expert knowledge for Azure Industry development including troubleshooting, limits & quotas, security, configuration, integrations & coding patterns, and deployment. Use when building, debugging, or optimizing Azure Industry applications. Not for Azure Health Data Services (use azure-health-data-services), Azure Energy Data Services (use azure-energy-data-services), Azure Data Manager for Agriculture (use azure-data-manager-for-agri), Azure IoT (use azure-iot).",
       "description_ja": ""
     },
     {
@@ -4030,14 +3972,6 @@
       "path": "skills/azure-metrics-advisor",
       "categories": [],
       "description": "Expert knowledge for Azure AI Metrics Advisor development including decision making, security, configuration, and integrations & coding patterns. Use when building, debugging, or optimizing Azure AI Metrics Advisor applications. Not for Azure AI Anomaly Detector (use azure-anomaly-detector), Azure Monitor (use azure-monitor).",
-      "description_ja": ""
-    },
-    {
-      "name": "azure-microsoft-foundry",
-      "source": "microsoftdocs-agent-skills",
-      "path": "skills/azure-microsoft-foundry",
-      "categories": [],
-      "description": "Expert knowledge for Microsoft Foundry development including troubleshooting, best practices, decision making, architecture & design patterns, limits & quotas, security, configuration, integrations & coding patterns, and deployment. Use when building, debugging, or optimizing Microsoft Foundry applications. Not for Azure AI Foundry Local (use azure-ai-foundry-local), Azure Foundry Classic (use azure-foundry-classic), Azure Machine Learning (use azure-machine-learning), Azure Databricks (use azure-databricks).",
       "description_ja": ""
     },
     {
@@ -5799,15 +5733,6 @@
     },
     {
       "kind": "agent",
-      "name": "C# MCP Server Expert",
-      "source": "github-awesome-copilot",
-      "path": "plugins/csharp-mcp-development/agents/csharp-mcp-expert.md",
-      "categories": ["agents"],
-      "description": "Expert assistant for developing Model Context Protocol (MCP) servers in C#",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
       "name": "C#/.NET Janitor",
       "source": "github-awesome-copilot",
       "path": "agents/csharp-dotnet-janitor.agent.md",
@@ -6086,30 +6011,6 @@
       "description_ja": ""
     },
     {
-      "kind": "agent",
-      "name": "ce-adversarial-document-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-adversarial-document-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Conditional document-review persona for high-stakes documents -- those with significant architectural decisions, new abstractions, or more than 5 requirements. Challenges premises, surfaces unstated assumptions, and stress-tests decisions rather than evaluating document quality.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-adversarial-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-adversarial-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Conditional code-review persona, selected when the diff is large (>=50 changed lines) or touches high-risk domains like auth, payments, data mutations, or external APIs. Actively constructs failure scenarios to break the implementation rather than checking against known patterns.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
       "kind": "skill",
       "name": "ce-agent-native-architecture",
       "source": "compound-engineering",
@@ -6128,66 +6029,6 @@
       "path": "plugins/compound-engineering/skills/ce-agent-native-audit",
       "categories": [],
       "description": "Run comprehensive agent-native architecture review with scored principles",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-agent-native-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-agent-native-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Reviews code to ensure agent-native parity -- any action a user can take, an agent can also take. Use after adding UI features, agent tools, or system prompts.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-ankane-readme-writer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-ankane-readme-writer.agent.md",
-      "categories": ["agents"],
-      "description": "Creates or updates README files following Ankane-style template for Ruby gems. Use when writing gem documentation with imperative voice, concise prose, and standard section ordering.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-api-contract-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-api-contract-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Conditional code-review persona, selected when the diff touches API routes, request/response types, serialization, versioning, or exported type signatures. Reviews code for breaking contract changes.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-architecture-strategist",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-architecture-strategist.agent.md",
-      "categories": ["agents"],
-      "description": "Analyzes code changes from an architectural perspective for pattern compliance and design integrity. Use when reviewing PRs, adding services, or evaluating structural refactors.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-best-practices-researcher",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-best-practices-researcher.agent.md",
-      "categories": ["agents"],
-      "description": "Researches and synthesizes external best practices, documentation, and examples for any technology or framework. Use when you need industry standards, community conventions, or implementation guidance.",
       "description_ja": "",
       "pluginRoot": ".",
       "pluginManifestPath": ".claude-plugin/marketplace.json",
@@ -6224,30 +6065,6 @@
       "path": "plugins/compound-engineering/skills/ce-code-review",
       "categories": [],
       "description": "Structured code review using tiered persona agents, confidence-gated findings, and a merge/dedup pipeline. Use when reviewing code changes before creating a PR.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-code-simplicity-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-code-simplicity-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Final review pass to ensure code is as simple and minimal as possible. Use after implementation is complete to identify YAGNI violations and simplification opportunities.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-coherence-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-coherence-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Reviews planning documents for internal consistency -- contradictions between sections, terminology drift, structural issues, and ambiguity where readers would diverge. Spawned by the document-review skill.",
       "description_ja": "",
       "pluginRoot": ".",
       "pluginManifestPath": ".claude-plugin/marketplace.json",
@@ -6302,54 +6119,6 @@
       "pluginManifestKind": "marketplace"
     },
     {
-      "kind": "agent",
-      "name": "ce-correctness-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-correctness-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Always-on code-review persona. Reviews code for logic errors, edge cases, state management bugs, error propagation failures, and intent-vs-implementation mismatches.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-data-integrity-guardian",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-data-integrity-guardian.agent.md",
-      "categories": ["agents"],
-      "description": "Reviews database migrations, data models, and persistent data code for safety. Use when checking migration safety, data constraints, transaction boundaries, or privacy compliance.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-data-migration-expert",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-data-migration-expert.agent.md",
-      "categories": ["agents"],
-      "description": "Validates data migrations, backfills, and production data transformations against reality. Use when PRs involve ID mappings, column renames, enum conversions, or schema changes.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-data-migrations-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-data-migrations-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Conditional code-review persona, selected when the diff touches migration files, schema changes, data transformations, or backfill scripts. Reviews code for data integrity and migration safety.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
       "kind": "skill",
       "name": "ce-debug",
       "source": "compound-engineering",
@@ -6368,66 +6137,6 @@
       "path": "plugins/compound-engineering/skills/ce-demo-reel",
       "categories": [],
       "description": "Capture a visual demo reel (GIF, terminal recording, screenshots) for PR descriptions. Use when shipping UI changes, CLI features, or any work with observable behavior that benefits from visual proof. Also use when asked to add a demo, record a GIF, screenshot a feature, show what changed visually, create a demo reel, capture evidence, add proof to a PR, or create a before/after comparison.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-deployment-verification-agent",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-deployment-verification-agent.agent.md",
-      "categories": ["agents"],
-      "description": "Produces Go/No-Go deployment checklists with SQL verification queries, rollback procedures, and monitoring plans. Use when PRs touch production data, migrations, or risky data changes.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-design-implementation-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-design-implementation-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Visually compares live UI implementation against Figma designs and provides detailed feedback on discrepancies. Use after writing or modifying HTML/CSS/React components to verify design fidelity.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-design-iterator",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-design-iterator.agent.md",
-      "categories": ["agents"],
-      "description": "Iteratively refines UI design through N screenshot-analyze-improve cycles. Use PROACTIVELY when design changes aren't coming together after 1-2 attempts, or when user requests iterative refinement.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-design-lens-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-design-lens-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Reviews planning documents for missing design decisions -- information architecture, interaction states, user flows, and AI slop risk. Uses dimensional rating to identify gaps. Spawned by the document-review skill.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-dhh-rails-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-dhh-rails-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Conditional code-review persona, selected when Rails diffs introduce architectural choices, abstractions, or frontend patterns that may fight the framework. Reviews code from an opinionated DHH perspective.",
       "description_ja": "",
       "pluginRoot": ".",
       "pluginManifestPath": ".claude-plugin/marketplace.json",
@@ -6458,42 +6167,6 @@
       "pluginManifestKind": "marketplace"
     },
     {
-      "kind": "agent",
-      "name": "ce-feasibility-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-feasibility-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Evaluates whether proposed technical approaches in planning documents will survive contact with reality -- architecture conflicts, dependency gaps, migration risks, and implementability. Spawned by the document-review skill.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-figma-design-sync",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-figma-design-sync.agent.md",
-      "categories": ["agents"],
-      "description": "Detects and fixes visual differences between a web implementation and its Figma design. Use iteratively when syncing implementation to match Figma specs.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-framework-docs-researcher",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-framework-docs-researcher.agent.md",
-      "categories": ["agents"],
-      "description": "Gathers comprehensive documentation and best practices for frameworks, libraries, or dependencies. Use when you need official docs, version-specific constraints, or implementation patterns.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
       "kind": "skill",
       "name": "ce-frontend-design",
       "source": "compound-engineering",
@@ -6518,18 +6191,6 @@
       "pluginManifestKind": "marketplace"
     },
     {
-      "kind": "agent",
-      "name": "ce-git-history-analyzer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-git-history-analyzer.agent.md",
-      "categories": ["agents"],
-      "description": "Performs archaeological analysis of git history to trace code evolution, identify contributors, and understand why code patterns exist. Use when you need historical context for code changes.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
       "kind": "skill",
       "name": "ce-ideate",
       "source": "compound-engineering",
@@ -6542,132 +6203,12 @@
       "pluginManifestKind": "marketplace"
     },
     {
-      "kind": "agent",
-      "name": "ce-issue-intelligence-analyst",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-issue-intelligence-analyst.agent.md",
-      "categories": ["agents"],
-      "description": "Fetches and analyzes GitHub issues to surface recurring themes, pain patterns, and severity trends. Use when understanding a project's issue landscape, analyzing bug patterns for ideation, or summarizing what users are reporting.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-julik-frontend-races-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-julik-frontend-races-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Conditional code-review persona, selected when the diff touches async UI code, Stimulus/Turbo lifecycles, or DOM-timing-sensitive frontend behavior. Reviews code for race conditions and janky UI failure modes.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-kieran-python-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-kieran-python-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Conditional code-review persona, selected when the diff touches Python code. Reviews changes with Kieran's strict bar for Pythonic clarity, type hints, and maintainability.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-kieran-rails-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-kieran-rails-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Conditional code-review persona, selected when the diff touches Rails application code. Reviews Rails changes with Kieran's strict bar for clarity, conventions, and maintainability.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-kieran-typescript-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-kieran-typescript-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Conditional code-review persona, selected when the diff touches TypeScript code. Reviews changes with Kieran's strict bar for type safety, clarity, and maintainability.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-learnings-researcher",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-learnings-researcher.agent.md",
-      "categories": ["agents"],
-      "description": "Searches docs/solutions/ for applicable past learnings via frontmatter metadata (bugs, architecture, design patterns, conventions, workflow learnings). Use before implementing features, making decisions, or starting work in a documented area so institutional knowledge carries forward.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-maintainability-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-maintainability-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Always-on code-review persona. Reviews code for premature abstraction, unnecessary indirection, dead code, coupling between unrelated modules, and naming that obscures intent.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
       "kind": "skill",
       "name": "ce-optimize",
       "source": "compound-engineering",
       "path": "plugins/compound-engineering/skills/ce-optimize",
       "categories": [],
       "description": "Run metric-driven iterative optimization loops -- define a measurable goal, run parallel experiments, measure each against hard gates or LLM-as-judge scores, keep improvements, and converge on the best solution. Use when optimizing clustering quality, search relevance, build performance, prompt quality, or any measurable outcome that benefits from systematic experimentation.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-pattern-recognition-specialist",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-pattern-recognition-specialist.agent.md",
-      "categories": ["agents"],
-      "description": "Analyzes code for design patterns, anti-patterns, naming conventions, and duplication. Use when checking codebase consistency or verifying new code follows established patterns.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-performance-oracle",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-performance-oracle.agent.md",
-      "categories": ["agents"],
-      "description": "Analyzes code for performance bottlenecks, algorithmic complexity, database queries, memory usage, and scalability. Use after implementing features or when performance concerns arise.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-performance-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-performance-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Conditional code-review persona, selected when the diff touches database queries, loop-heavy data transforms, caching layers, or I/O-intensive paths. Reviews code for runtime performance and scalability issues.",
       "description_ja": "",
       "pluginRoot": ".",
       "pluginManifestPath": ".claude-plugin/marketplace.json",
@@ -6698,60 +6239,12 @@
       "pluginManifestKind": "marketplace"
     },
     {
-      "kind": "agent",
-      "name": "ce-pr-comment-resolver",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-pr-comment-resolver.agent.md",
-      "categories": ["agents"],
-      "description": "Evaluates and resolves one or more related PR review threads -- assesses validity, implements fixes, and returns structured summaries with reply text. Spawned by the resolve-pr-feedback skill.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-previous-comments-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-previous-comments-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Conditional code-review persona, selected when reviewing a PR that has existing review comments or review threads. Checks whether prior feedback has been addressed in the current diff.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-product-lens-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-product-lens-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Reviews planning documents as a senior product leader -- challenges premise claims, assesses strategic consequences (trajectory, identity, adoption, opportunity cost), and surfaces goal-work misalignment. Spawned by the document-review skill.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
       "kind": "skill",
       "name": "ce-product-pulse",
       "source": "compound-engineering",
       "path": "plugins/compound-engineering/skills/ce-product-pulse",
       "categories": [],
       "description": "Generate a time-windowed pulse report on what users experienced and how the product performed - usage, quality, errors, signals worth investigating. Use when the user says 'run a pulse', 'show me the pulse', 'how are we doing', 'weekly recap', 'launch-day check', or passes a time window like '24h' or '7d'. Configures via .compound-engineering/config.local.yaml and saves reports to docs/pulse-reports/.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-project-standards-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-project-standards-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Always-on code-review persona. Audits changes against the project's own CLAUDE.md and AGENTS.md standards -- frontmatter rules, reference inclusion, naming conventions, cross-platform portability, and tool selection policies.",
       "description_ja": "",
       "pluginRoot": ".",
       "pluginManifestPath": ".claude-plugin/marketplace.json",
@@ -6776,30 +6269,6 @@
       "path": "plugins/compound-engineering/skills/ce-release-notes",
       "categories": [],
       "description": "Summarize recent compound-engineering plugin releases, or answer a specific question about a past release with a version citation. Use when the user types `/ce-release-notes` or asks \"what changed in compound-engineering recently?\" or \"what happened to `<skill-name>`?\".",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-reliability-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-reliability-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Conditional code-review persona, selected when the diff touches error handling, retries, circuit breakers, timeouts, health checks, background jobs, or async handlers. Reviews code for production reliability and failure modes.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-repo-research-analyst",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-repo-research-analyst.agent.md",
-      "categories": ["agents"],
-      "description": "Conducts thorough research on repository structure, documentation, conventions, and implementation patterns. Use when onboarding to a new codebase or understanding project conventions.",
       "description_ja": "",
       "pluginRoot": ".",
       "pluginManifestPath": ".claude-plugin/marketplace.json",
@@ -6836,78 +6305,6 @@
       "path": "plugins/compound-engineering/skills/ce-riffrec-feedback-analysis",
       "categories": [],
       "description": "Riffrec product-feedback workflow. ALWAYS load when the user posts a `riffrec-*.zip`, a bundle with `session.json` + `events.json` + `recording.webm` + `voice.webm`, a video/audio recording for product feedback, or asks how to capture and share Riffrec sessions. Routes between setup, quick bug report, and extensive analysis.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-schema-drift-detector",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-schema-drift-detector.agent.md",
-      "categories": ["agents"],
-      "description": "Detects unrelated schema.rb changes in PRs by cross-referencing against included migrations. Use when reviewing PRs with database schema changes.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-scope-guardian-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-scope-guardian-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Reviews planning documents for scope alignment and unjustified complexity -- challenges unnecessary abstractions, premature frameworks, and scope that exceeds stated goals. Spawned by the document-review skill.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-security-lens-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-security-lens-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Evaluates planning documents for security gaps at the plan level -- auth/authz assumptions, data exposure risks, API surface vulnerabilities, and missing threat model elements. Spawned by the document-review skill.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-security-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-security-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Conditional code-review persona, selected when the diff touches auth middleware, public endpoints, user input handling, or permission checks. Reviews code for exploitable vulnerabilities.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-security-sentinel",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-security-sentinel.agent.md",
-      "categories": ["agents"],
-      "description": "Performs security audits for vulnerabilities, input validation, auth/authz, hardcoded secrets, and OWASP compliance. Use when reviewing code for security issues or before deployment.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-session-historian",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-session-historian.agent.md",
-      "categories": ["agents"],
-      "description": "Synthesizes findings from prior coding-agent sessions about the same problem or topic. Receives pre-extracted skeleton/error file paths from a `ce-sessions` orchestrator and returns prose findings — investigation journey, what didn't work, key decisions, related context. Not intended for direct dispatch — use `/ce-sessions` (or another caller that runs the full discovery + extract pipeline first).",
       "description_ja": "",
       "pluginRoot": ".",
       "pluginManifestPath": ".claude-plugin/marketplace.json",
@@ -6962,48 +6359,12 @@
       "pluginManifestKind": "marketplace"
     },
     {
-      "kind": "agent",
-      "name": "ce-slack-researcher",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-slack-researcher.agent.md",
-      "categories": ["agents"],
-      "description": "Searches Slack for organizational context -- decisions, constraints, and discussions that may not be documented elsewhere. Use when the user explicitly asks to search Slack for context during ideation, planning, or brainstorming.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-spec-flow-analyzer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-spec-flow-analyzer.agent.md",
-      "categories": ["agents"],
-      "description": "Analyzes specifications and feature descriptions for user flow completeness and gap identification. Use when a spec, plan, or feature description needs flow analysis, edge case discovery, or requirements validation.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
       "kind": "skill",
       "name": "ce-strategy",
       "source": "compound-engineering",
       "path": "plugins/compound-engineering/skills/ce-strategy",
       "categories": [],
       "description": "Create or maintain STRATEGY.md - the product's target problem, approach, users, key metrics, and tracks of work. Use when starting a new product, updating direction, or when prompts like 'write our strategy', 'update the roadmap', 'what are we working on', or 'set up the strategy doc' come up. Also triggers when ce-ideate, ce-brainstorm, or ce-plan need upstream grounding and no strategy doc exists yet.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-swift-ios-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-swift-ios-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Conditional code-review persona, selected when the diff touches Swift files, SwiftUI/UIKit views, iOS entitlements, privacy manifests, Core Data models, SPM manifests, storyboards/XIBs, or semantic .pbxproj changes. Reviews for SwiftUI correctness, state management, memory safety, Swift concurrency, Core Data threading, and accessibility.",
       "description_ja": "",
       "pluginRoot": ".",
       "pluginManifestPath": ".claude-plugin/marketplace.json",
@@ -7034,36 +6395,12 @@
       "pluginManifestKind": "marketplace"
     },
     {
-      "kind": "agent",
-      "name": "ce-testing-reviewer",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-testing-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Always-on code-review persona. Reviews code for test coverage gaps, weak assertions, brittle implementation-coupled tests, and missing edge case coverage.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
       "kind": "skill",
       "name": "ce-update",
       "source": "compound-engineering",
       "path": "plugins/compound-engineering/skills/ce-update",
       "categories": [],
       "description": "Check if the compound-engineering plugin is up to date and recommend the\nupdate command if not. Use when the user says \"update compound engineering\",\n\"check compound engineering version\", \"ce update\", \"is compound engineering\nup to date\", \"update ce plugin\", or reports issues that might stem from a\nstale compound-engineering plugin version. This skill only works in Claude\nCode — it relies on the plugin harness cache layout.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": ".claude-plugin/marketplace.json",
-      "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "agent",
-      "name": "ce-web-researcher",
-      "source": "compound-engineering",
-      "path": "plugins/compound-engineering/agents/ce-web-researcher.agent.md",
-      "categories": ["agents"],
-      "description": "Performs iterative web research and returns structured external grounding. Use when ideating outside the codebase, validating prior art, scanning competitor patterns, finding cross-domain analogies, or fetching market signals. Prefer over manual web searches for structured external context.",
       "description_ja": "",
       "pluginRoot": ".",
       "pluginManifestPath": ".claude-plugin/marketplace.json",
@@ -7723,15 +7060,6 @@
       "pluginRoot": "plugins/code-review",
       "pluginManifestPath": "plugins/code-review/.claude-plugin/plugin.json",
       "pluginManifestKind": "claude-plugin"
-    },
-    {
-      "kind": "skill",
-      "name": "code-review",
-      "source": "goose-official",
-      "path": ".agents/skills/code-review",
-      "categories": [],
-      "description": "Senior engineer code review focused on catching issues before they become PR comments. Reviews only changed lines, categorizes issues by priority, and fixes them one by one. Use when the user says \"code review\", \"review my code\", \"review this branch\", or wants pre-PR feedback.",
-      "description_ja": ""
     },
     {
       "kind": "skill",
@@ -8621,15 +7949,6 @@
     },
     {
       "kind": "skill",
-      "name": "create-app-e2e-test",
-      "source": "goose-official",
-      "path": ".agents/skills/create-app-e2e-test",
-      "categories": [],
-      "description": "Create app e2e tests for the Goose desktop app using the Tauri app test driver. Use when the user wants to generate, write, or verify UI tests that run against the live app.",
-      "description_ja": ""
-    },
-    {
-      "kind": "skill",
       "name": "create-architectural-decision-record",
       "source": "github-awesome-copilot",
       "path": "skills/create-architectural-decision-record",
@@ -8680,15 +7999,6 @@
       "path": "skills/create-github-issues-for-unmet-specification-requirements",
       "categories": [],
       "description": "Create GitHub Issues for unimplemented requirements from specification files using feature_request.yml template.",
-      "description_ja": ""
-    },
-    {
-      "kind": "skill",
-      "name": "create-github-pull-request-from-specification",
-      "source": "github-awesome-copilot",
-      "path": "skills/create-github-pull-request-from-specification",
-      "categories": [],
-      "description": "Create GitHub Pull Request for feature request from specification file using pull_request_template.md template.",
       "description_ja": ""
     },
     {
@@ -8785,15 +8095,6 @@
       "path": "create-plugin/skills/create-plugin-scaffold",
       "categories": [],
       "description": "Create a new Cursor plugin scaffold with a valid manifest, component directories, and marketplace wiring. Use when starting a new plugin or adding a plugin to a multi-plugin repository.",
-      "description_ja": ""
-    },
-    {
-      "kind": "skill",
-      "name": "create-pr",
-      "source": "goose-official",
-      "path": ".agents/skills/create-pr",
-      "categories": [],
-      "description": "Create a GitHub PR from the current branch: handle uncommitted changes, generate a summary, and submit via gh CLI. Use when the user says \"create PR\", \"open PR\", \"submit PR\", \"push PR\", or wants to create a pull request.",
       "description_ja": ""
     },
     {
@@ -9069,24 +8370,6 @@
       "path": "instructions/csharp-mcp-server.instructions.md",
       "categories": ["instructions"],
       "description": "Instructions for building Model Context Protocol (MCP) servers using the C# SDK",
-      "description_ja": ""
-    },
-    {
-      "kind": "skill",
-      "name": "csharp-mcp-server-generator",
-      "source": "github-awesome-copilot",
-      "path": "plugins/csharp-mcp-development/skills/csharp-mcp-server-generator",
-      "categories": [],
-      "description": "Generate a complete MCP server project in C# with tools, prompts, and proper configuration",
-      "description_ja": ""
-    },
-    {
-      "kind": "skill",
-      "name": "csharp-mcp-server-generator",
-      "source": "github-awesome-copilot",
-      "path": "skills/csharp-mcp-server-generator",
-      "categories": [],
-      "description": "Generate a complete MCP server project in C# with tools, prompts, and proper configuration",
       "description_ja": ""
     },
     {
@@ -9934,14 +9217,6 @@
       "description_ja": ""
     },
     {
-      "name": "develop-web-game",
-      "source": "openai-skills",
-      "path": "skills/.curated/develop-web-game",
-      "categories": [],
-      "description": "Use when Codex is building or iterating on a web game (HTML/JS) and needs a reliable development + testing loop: implement small changes, run a Playwright-based test script with short input bursts and intentional pauses, inspect screenshots/text, and review console errors with render_game_to_text.",
-      "description_ja": ""
-    },
-    {
       "name": "developer-growth-analysis",
       "source": "composio-awesome",
       "path": "developer-growth-analysis",
@@ -10116,14 +9391,6 @@
       "categories": [],
       "description": "Automate Dnsfilter tasks via Rube MCP (Composio). Always search tools first for current schemas.",
       "description_ja": ""
-    },
-    {
-      "name": "doc",
-      "source": "openai-skills",
-      "path": "skills/.curated/doc",
-      "categories": [],
-      "description": "Use when the task involves reading, creating, or editing `.docx` documents, especially when formatting or layout fidelity matters; prefer `python-docx` plus the bundled `scripts/render_docx.py` for visual checks.",
-      "description_ja": "Doc"
     },
     {
       "name": "doc-coauthoring",
@@ -10672,15 +9939,6 @@
       "path": "composio-skills/echtpost-automation",
       "categories": [],
       "description": "Automate Echtpost tasks via Rube MCP (Composio). Always search tools first for current schemas.",
-      "description_ja": ""
-    },
-    {
-      "kind": "skill",
-      "name": "edge-case-finder",
-      "source": "goose-official",
-      "path": ".agents/skills/edge-case-finder",
-      "categories": [],
-      "description": "Analyzes branch changes to find edge cases, error states, and untested user flow paths in UI code. Use when the user says \"find edge cases\", \"what am I missing\", \"edge cases\", \"test my flows\", \"what could go wrong\", or wants to harden a feature before shipping.",
       "description_ja": ""
     },
     {
@@ -12181,27 +11439,9 @@
     },
     {
       "kind": "agent",
-      "name": "gem-browser-tester",
-      "source": "github-awesome-copilot",
-      "path": "plugins/gem-team/agents/gem-browser-tester.md",
-      "categories": ["agents"],
-      "description": "E2E browser testing, UI/UX validation, visual regression.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
       "name": "gem-code-simplifier",
       "source": "github-awesome-copilot",
       "path": "agents/gem-code-simplifier.agent.md",
-      "categories": ["agents"],
-      "description": "Refactoring specialist — removes dead code, reduces complexity, consolidates duplicates.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
-      "name": "gem-code-simplifier",
-      "source": "github-awesome-copilot",
-      "path": "plugins/gem-team/agents/gem-code-simplifier.md",
       "categories": ["agents"],
       "description": "Refactoring specialist — removes dead code, reduces complexity, consolidates duplicates.",
       "description_ja": ""
@@ -12217,27 +11457,9 @@
     },
     {
       "kind": "agent",
-      "name": "gem-critic",
-      "source": "github-awesome-copilot",
-      "path": "plugins/gem-team/agents/gem-critic.md",
-      "categories": ["agents"],
-      "description": "Challenges assumptions, finds edge cases, spots over-engineering and logic gaps.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
       "name": "gem-debugger",
       "source": "github-awesome-copilot",
       "path": "agents/gem-debugger.agent.md",
-      "categories": ["agents"],
-      "description": "Root-cause analysis, stack trace diagnosis, regression bisection, error reproduction.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
-      "name": "gem-debugger",
-      "source": "github-awesome-copilot",
-      "path": "plugins/gem-team/agents/gem-debugger.md",
       "categories": ["agents"],
       "description": "Root-cause analysis, stack trace diagnosis, regression bisection, error reproduction.",
       "description_ja": ""
@@ -12253,27 +11475,9 @@
     },
     {
       "kind": "agent",
-      "name": "gem-designer",
-      "source": "github-awesome-copilot",
-      "path": "plugins/gem-team/agents/gem-designer.md",
-      "categories": ["agents"],
-      "description": "UI/UX design specialist — layouts, themes, color schemes, design systems, accessibility.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
       "name": "gem-designer-mobile",
       "source": "github-awesome-copilot",
       "path": "agents/gem-designer-mobile.agent.md",
-      "categories": ["agents"],
-      "description": "Mobile UI/UX specialist — HIG, Material Design, safe areas, touch targets.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
-      "name": "gem-designer-mobile",
-      "source": "github-awesome-copilot",
-      "path": "plugins/gem-team/agents/gem-designer-mobile.md",
       "categories": ["agents"],
       "description": "Mobile UI/UX specialist — HIG, Material Design, safe areas, touch targets.",
       "description_ja": ""
@@ -12289,27 +11493,9 @@
     },
     {
       "kind": "agent",
-      "name": "gem-devops",
-      "source": "github-awesome-copilot",
-      "path": "plugins/gem-team/agents/gem-devops.md",
-      "categories": ["agents"],
-      "description": "Infrastructure deployment, CI/CD pipelines, container management.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
       "name": "gem-documentation-writer",
       "source": "github-awesome-copilot",
       "path": "agents/gem-documentation-writer.agent.md",
-      "categories": ["agents"],
-      "description": "Technical documentation, README files, API docs, diagrams, walkthroughs.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
-      "name": "gem-documentation-writer",
-      "source": "github-awesome-copilot",
-      "path": "plugins/gem-team/agents/gem-documentation-writer.md",
       "categories": ["agents"],
       "description": "Technical documentation, README files, API docs, diagrams, walkthroughs.",
       "description_ja": ""
@@ -12325,27 +11511,9 @@
     },
     {
       "kind": "agent",
-      "name": "gem-implementer",
-      "source": "github-awesome-copilot",
-      "path": "plugins/gem-team/agents/gem-implementer.md",
-      "categories": ["agents"],
-      "description": "TDD code implementation — features, bugs, refactoring. Never reviews own work.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
       "name": "gem-implementer-mobile",
       "source": "github-awesome-copilot",
       "path": "agents/gem-implementer-mobile.agent.md",
-      "categories": ["agents"],
-      "description": "Mobile implementation — React Native, Expo, Flutter with TDD.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
-      "name": "gem-implementer-mobile",
-      "source": "github-awesome-copilot",
-      "path": "plugins/gem-team/agents/gem-implementer-mobile.md",
       "categories": ["agents"],
       "description": "Mobile implementation — React Native, Expo, Flutter with TDD.",
       "description_ja": ""
@@ -12361,27 +11529,9 @@
     },
     {
       "kind": "agent",
-      "name": "gem-mobile-tester",
-      "source": "github-awesome-copilot",
-      "path": "plugins/gem-team/agents/gem-mobile-tester.md",
-      "categories": ["agents"],
-      "description": "Mobile E2E testing — Detox, Maestro, iOS/Android simulators.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
       "name": "gem-orchestrator",
       "source": "github-awesome-copilot",
       "path": "agents/gem-orchestrator.agent.md",
-      "categories": ["agents"],
-      "description": "The team lead: Orchestrates research, planning, implementation, and verification.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
-      "name": "gem-orchestrator",
-      "source": "github-awesome-copilot",
-      "path": "plugins/gem-team/agents/gem-orchestrator.md",
       "categories": ["agents"],
       "description": "The team lead: Orchestrates research, planning, implementation, and verification.",
       "description_ja": ""
@@ -12397,15 +11547,6 @@
     },
     {
       "kind": "agent",
-      "name": "gem-planner",
-      "source": "github-awesome-copilot",
-      "path": "plugins/gem-team/agents/gem-planner.md",
-      "categories": ["agents"],
-      "description": "DAG-based execution plans — task decomposition, wave scheduling, risk analysis.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
       "name": "gem-researcher",
       "source": "github-awesome-copilot",
       "path": "agents/gem-researcher.agent.md",
@@ -12415,27 +11556,9 @@
     },
     {
       "kind": "agent",
-      "name": "gem-researcher",
-      "source": "github-awesome-copilot",
-      "path": "plugins/gem-team/agents/gem-researcher.md",
-      "categories": ["agents"],
-      "description": "Codebase exploration — patterns, dependencies, architecture discovery.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
       "name": "gem-reviewer",
       "source": "github-awesome-copilot",
       "path": "agents/gem-reviewer.agent.md",
-      "categories": ["agents"],
-      "description": "Security auditing, code review, OWASP scanning, PRD compliance verification.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
-      "name": "gem-reviewer",
-      "source": "github-awesome-copilot",
-      "path": "plugins/gem-team/agents/gem-reviewer.md",
       "categories": ["agents"],
       "description": "Security auditing, code review, OWASP scanning, PRD compliance verification.",
       "description_ja": ""
@@ -12578,15 +11701,6 @@
       "categories": [],
       "description": "Help address review/issue comments on the open GitHub PR for the current branch using gh CLI; verify gh auth first and prompt the user to authenticate if not logged in.",
       "description_ja": "Gh Address Comments"
-    },
-    {
-      "kind": "skill",
-      "name": "gh-cli",
-      "source": "github-awesome-copilot",
-      "path": "skills/gh-cli",
-      "categories": [],
-      "description": "GitHub CLI (gh) comprehensive reference for repositories, issues, pull requests, Actions, projects, releases, gists, codespaces, organizations, extensions, and all GitHub operations from the command line.",
-      "description_ja": "Gh Cli"
     },
     {
       "name": "gh-fix-ci",
@@ -13789,14 +12903,6 @@
       "categories": [],
       "description": "Process and manipulate images using ImageMagick. Supports resizing, format conversion, batch processing, and retrieving image metadata. Use when working with images, creating thumbnails, resizing wallpapers, or performing batch image operations.",
       "description_ja": "Image Manipulation Image Magick"
-    },
-    {
-      "name": "imagegen",
-      "source": "openai-skills",
-      "path": "skills/.curated/imagegen",
-      "categories": [],
-      "description": "Use when the user asks to generate or edit images via the OpenAI Image API (for example: generate image, edit/inpaint/mask, background removal or replacement, transparent background, product shots, concept art, covers, or batch variants); run the bundled CLI (`scripts/image_gen.py`) and require `OPENAI_API_KEY` for live calls.",
-      "description_ja": "Imagegen"
     },
     {
       "name": "imagekit-io-automation",
@@ -15235,15 +14341,6 @@
       "description_ja": ""
     },
     {
-      "kind": "skill",
-      "name": "make-skill-template",
-      "source": "github-awesome-copilot",
-      "path": "skills/make-skill-template",
-      "categories": [],
-      "description": "Create new Agent Skills for GitHub Copilot from prompts or by duplicating this template. Use when asked to \"create a skill\", \"make a new skill\", \"scaffold a skill\", or when building specialized AI capabilities with bundled resources. Generates SKILL.md files with proper frontmatter, directory structure, and optional scripts/references/assets folders.",
-      "description_ja": "Make Skill Template"
-    },
-    {
       "kind": "instruction",
       "name": "makefile",
       "source": "github-awesome-copilot",
@@ -15910,15 +15007,6 @@
       "pluginManifestKind": "codex-plugin"
     },
     {
-      "kind": "skill",
-      "name": "model-recommendation",
-      "source": "github-awesome-copilot",
-      "path": "skills/model-recommendation",
-      "categories": [],
-      "description": "Analyze chatmode or prompt files and recommend optimal AI models based on task complexity, required capabilities, and cost-efficiency",
-      "description_ja": ""
-    },
-    {
       "name": "modelry-automation",
       "source": "composio-awesome",
       "path": "composio-skills/modelry-automation",
@@ -16156,24 +15244,6 @@
       "path": "composio-skills/mx-toolbox-automation",
       "categories": [],
       "description": "Automate Mx Toolbox tasks via Rube MCP (Composio). Always search tools first for current schemas.",
-      "description_ja": ""
-    },
-    {
-      "kind": "skill",
-      "name": "my-issues",
-      "source": "github-awesome-copilot",
-      "path": "skills/my-issues",
-      "categories": [],
-      "description": "List my issues in the current repository",
-      "description_ja": ""
-    },
-    {
-      "kind": "skill",
-      "name": "my-pull-requests",
-      "source": "github-awesome-copilot",
-      "path": "skills/my-pull-requests",
-      "categories": [],
-      "description": "List my pull requests in the current repository",
       "description_ja": ""
     },
     {
@@ -18058,168 +17128,6 @@
       "description_ja": ""
     },
     {
-      "kind": "agent",
-      "name": "Polyglot Test Builder",
-      "source": "github-awesome-copilot",
-      "path": "agents/polyglot-test-builder.agent.md",
-      "categories": ["agents"],
-      "description": "Runs build/compile commands for any language and reports results. Discovers build command from project files if not specified.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
-      "name": "Polyglot Test Builder",
-      "source": "github-awesome-copilot",
-      "path": "plugins/polyglot-test-agent/agents/polyglot-test-builder.md",
-      "categories": ["agents"],
-      "description": "Runs build/compile commands for any language and reports results. Discovers build command from project files if not specified.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
-      "name": "Polyglot Test Fixer",
-      "source": "github-awesome-copilot",
-      "path": "agents/polyglot-test-fixer.agent.md",
-      "categories": ["agents"],
-      "description": "Fixes compilation errors in source or test files. Analyzes error messages and applies corrections.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
-      "name": "Polyglot Test Fixer",
-      "source": "github-awesome-copilot",
-      "path": "plugins/polyglot-test-agent/agents/polyglot-test-fixer.md",
-      "categories": ["agents"],
-      "description": "Fixes compilation errors in source or test files. Analyzes error messages and applies corrections.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
-      "name": "Polyglot Test Generator",
-      "source": "github-awesome-copilot",
-      "path": "agents/polyglot-test-generator.agent.md",
-      "categories": ["agents"],
-      "description": "Orchestrates comprehensive test generation using Research-Plan-Implement pipeline. Use when asked to generate tests, write unit tests, improve test coverage, or add tests.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
-      "name": "Polyglot Test Generator",
-      "source": "github-awesome-copilot",
-      "path": "plugins/polyglot-test-agent/agents/polyglot-test-generator.md",
-      "categories": ["agents"],
-      "description": "Orchestrates comprehensive test generation using Research-Plan-Implement pipeline. Use when asked to generate tests, write unit tests, improve test coverage, or add tests.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
-      "name": "Polyglot Test Implementer",
-      "source": "github-awesome-copilot",
-      "path": "agents/polyglot-test-implementer.agent.md",
-      "categories": ["agents"],
-      "description": "Implements a single phase from the test plan. Writes test files and verifies they compile and pass. Calls builder, tester, and fixer agents as needed.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
-      "name": "Polyglot Test Implementer",
-      "source": "github-awesome-copilot",
-      "path": "plugins/polyglot-test-agent/agents/polyglot-test-implementer.md",
-      "categories": ["agents"],
-      "description": "Implements a single phase from the test plan. Writes test files and verifies they compile and pass. Calls builder, tester, and fixer agents as needed.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
-      "name": "Polyglot Test Linter",
-      "source": "github-awesome-copilot",
-      "path": "agents/polyglot-test-linter.agent.md",
-      "categories": ["agents"],
-      "description": "Runs code formatting/linting for any language. Discovers lint command from project files if not specified.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
-      "name": "Polyglot Test Linter",
-      "source": "github-awesome-copilot",
-      "path": "plugins/polyglot-test-agent/agents/polyglot-test-linter.md",
-      "categories": ["agents"],
-      "description": "Runs code formatting/linting for any language. Discovers lint command from project files if not specified.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
-      "name": "Polyglot Test Planner",
-      "source": "github-awesome-copilot",
-      "path": "agents/polyglot-test-planner.agent.md",
-      "categories": ["agents"],
-      "description": "Creates structured test implementation plans from research findings. Organizes tests into phases by priority and complexity. Works with any language.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
-      "name": "Polyglot Test Planner",
-      "source": "github-awesome-copilot",
-      "path": "plugins/polyglot-test-agent/agents/polyglot-test-planner.md",
-      "categories": ["agents"],
-      "description": "Creates structured test implementation plans from research findings. Organizes tests into phases by priority and complexity. Works with any language.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
-      "name": "Polyglot Test Researcher",
-      "source": "github-awesome-copilot",
-      "path": "agents/polyglot-test-researcher.agent.md",
-      "categories": ["agents"],
-      "description": "Analyzes codebases to understand structure, testing patterns, and testability. Identifies source files, existing tests, build commands, and testing framework. Works with any language.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
-      "name": "Polyglot Test Researcher",
-      "source": "github-awesome-copilot",
-      "path": "plugins/polyglot-test-agent/agents/polyglot-test-researcher.md",
-      "categories": ["agents"],
-      "description": "Analyzes codebases to understand structure, testing patterns, and testability. Identifies source files, existing tests, build commands, and testing framework. Works with any language.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
-      "name": "Polyglot Test Tester",
-      "source": "github-awesome-copilot",
-      "path": "agents/polyglot-test-tester.agent.md",
-      "categories": ["agents"],
-      "description": "Runs test commands for any language and reports results. Discovers test command from project files if not specified.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
-      "name": "Polyglot Test Tester",
-      "source": "github-awesome-copilot",
-      "path": "plugins/polyglot-test-agent/agents/polyglot-test-tester.md",
-      "categories": ["agents"],
-      "description": "Runs test commands for any language and reports results. Discovers test command from project files if not specified.",
-      "description_ja": ""
-    },
-    {
-      "kind": "skill",
-      "name": "polyglot-test-agent",
-      "source": "github-awesome-copilot",
-      "path": "plugins/polyglot-test-agent/skills/polyglot-test-agent",
-      "categories": [],
-      "description": "Generates comprehensive, workable unit tests for any programming language using a multi-agent pipeline. Use when asked to generate tests, write unit tests, improve test coverage, add test coverage, create test files, or test a codebase. Supports C#, TypeScript, JavaScript, Python, Go, Rust, Java, and more. Orchestrates research, planning, and implementation phases to produce tests that compile, pass, and follow project conventions.",
-      "description_ja": ""
-    },
-    {
-      "kind": "skill",
-      "name": "polyglot-test-agent",
-      "source": "github-awesome-copilot",
-      "path": "skills/polyglot-test-agent",
-      "categories": [],
-      "description": "Generates comprehensive, workable unit tests for any programming language using a multi-agent pipeline. Use when asked to generate tests, write unit tests, improve test coverage, add test coverage, create test files, or test a codebase. Supports C#, TypeScript, JavaScript, Python, Go, Rust, Java, and more. Orchestrates research, planning, and implementation phases to produce tests that compile, pass, and follow project conventions.",
-      "description_ja": ""
-    },
-    {
       "name": "polygon-automation",
       "source": "composio-awesome",
       "path": "composio-skills/polygon-automation",
@@ -18973,15 +17881,6 @@
       "path": "agents/prompt-engineer.agent.md",
       "categories": ["agents"],
       "description": "A specialized chat mode for analyzing and improving prompts. Every user input is treated as a prompt to be improved. It first provides a detailed analysis of the original prompt within a <reasoning> tag, evaluating it against a systematic framework based on OpenAI's prompt engineering best practices. Following the analysis, it generates a new, improved prompt.",
-      "description_ja": ""
-    },
-    {
-      "kind": "skill",
-      "name": "prompt-builder",
-      "source": "github-awesome-copilot",
-      "path": "skills/prompt-builder",
-      "categories": [],
-      "description": "Guide users through creating high-quality GitHub Copilot prompts with proper structure, tools, and best practices.",
       "description_ja": ""
     },
     {
@@ -21844,14 +20743,6 @@
       "description_ja": ""
     },
     {
-      "name": "slides",
-      "source": "openai-skills",
-      "path": "skills/.curated/slides",
-      "categories": [],
-      "description": "Create and edit presentation slide decks (`.pptx`) with PptxGenJS, bundled layout helpers, and render/validation utilities. Use when tasks involve building a new PowerPoint deck, recreating slides from screenshots/PDFs/reference decks, modifying slide content while preserving editable output, adding charts/diagrams/visuals, or diagnosing layout issues such as overflow, overlaps, and font substitution.",
-      "description_ja": ""
-    },
-    {
       "name": "smartproxy-automation",
       "source": "composio-awesome",
       "path": "composio-skills/smartproxy-automation",
@@ -21916,14 +20807,6 @@
       "categories": ["agents"],
       "description": "Expert-level software engineering agent. Deliver production-ready, maintainable code. Execute systematically and specification-driven. Document comprehensively. Operate autonomously and adaptively.",
       "description_ja": ""
-    },
-    {
-      "name": "sora",
-      "source": "openai-skills",
-      "path": "skills/.curated/sora",
-      "categories": [],
-      "description": "Use when the user asks to generate, remix, poll, list, download, or delete Sora videos via OpenAI\\u2019s video API using the bundled CLI (`scripts/sora.py`), including requests like \\u201cgenerate AI video,\\u201d \\u201cSora,\\u201d \\u201cvideo remix,\\u201d \\u201cdownload video/thumbnail/spritesheet,\\u201d and batch video generation; requires `OPENAI_API_KEY` and Sora API access.",
-      "description_ja": "Sora"
     },
     {
       "name": "sourcegraph-automation",
@@ -22016,14 +20899,6 @@
       "categories": [],
       "description": "Automate Spotlightr tasks via Rube MCP (Composio). Always search tools first for current schemas.",
       "description_ja": ""
-    },
-    {
-      "name": "spreadsheet",
-      "source": "openai-skills",
-      "path": "skills/.curated/spreadsheet",
-      "categories": [],
-      "description": "Use when tasks involve creating, editing, analyzing, or formatting spreadsheets (`.xlsx`, `.csv`, `.tsv`) with formula-aware workflows, cached recalculation, and visual review.",
-      "description_ja": "Spreadsheet"
     },
     {
       "kind": "skill",
@@ -23965,15 +22840,6 @@
     },
     {
       "kind": "skill",
-      "name": "web-coder",
-      "source": "github-awesome-copilot",
-      "path": "skills/web-coder",
-      "categories": [],
-      "description": "Expert 10x engineer with comprehensive knowledge of web development, internet protocols, and web standards. Use when working with HTML, CSS, JavaScript, web APIs, HTTP/HTTPS, web security, performance optimization, accessibility, or any web/internet concepts. Specializes in translating web terminology accurately and implementing modern web standards across frontend and backend development.",
-      "description_ja": ""
-    },
-    {
-      "kind": "skill",
       "name": "web-design-reviewer",
       "source": "github-awesome-copilot",
       "path": "skills/web-design-reviewer",
@@ -24101,15 +22967,6 @@
       "description_ja": ""
     },
     {
-      "kind": "skill",
-      "name": "winapp-cli",
-      "source": "github-awesome-copilot",
-      "path": "skills/winapp-cli",
-      "categories": [],
-      "description": "Windows App Development CLI (winapp) for building, packaging, and deploying Windows applications. Use when asked to initialize Windows app projects, create MSIX packages, generate AppxManifest.xml, manage development certificates, add package identity for debugging, sign packages, publish to the Microsoft Store, create external catalogs, or access Windows SDK build tools. Supports .NET (csproj), C++, Electron, Rust, Tauri, and cross-platform frameworks targeting Windows.",
-      "description_ja": ""
-    },
-    {
       "kind": "agent",
       "name": "WinForms Expert",
       "source": "github-awesome-copilot",
@@ -24137,24 +22994,6 @@
       "description_ja": ""
     },
     {
-      "kind": "agent",
-      "name": "WinUI 3 Expert",
-      "source": "github-awesome-copilot",
-      "path": "agents/winui3-expert.agent.md",
-      "categories": ["agents"],
-      "description": "Expert agent for WinUI 3 and Windows App SDK development. Prevents common UWP-to-WinUI 3 API mistakes, guides XAML controls, MVVM patterns, windowing, threading, app lifecycle, dialogs, and deployment for desktop Windows apps.",
-      "description_ja": ""
-    },
-    {
-      "kind": "agent",
-      "name": "WinUI 3 Expert",
-      "source": "github-awesome-copilot",
-      "path": "plugins/winui3-development/agents/winui3-expert.md",
-      "categories": ["agents"],
-      "description": "Expert agent for WinUI 3 and Windows App SDK development. Prevents common UWP-to-WinUI 3 API mistakes, guides XAML controls, MVVM patterns, windowing, threading, app lifecycle, dialogs, and deployment for desktop Windows apps.",
-      "description_ja": ""
-    },
-    {
       "name": "winui-app",
       "source": "openai-skills",
       "path": "skills/.curated/winui-app",
@@ -24169,15 +23008,6 @@
       "path": "instructions/winui3.instructions.md",
       "categories": ["instructions"],
       "description": "WinUI 3 and Windows App SDK coding guidelines. Prevents common UWP API misuse, enforces correct XAML namespaces, threading, windowing, and MVVM patterns for desktop Windows apps.",
-      "description_ja": ""
-    },
-    {
-      "kind": "skill",
-      "name": "winui3-migration-guide",
-      "source": "github-awesome-copilot",
-      "path": "plugins/winui3-development/skills/winui3-migration-guide",
-      "categories": [],
-      "description": "UWP-to-WinUI 3 migration reference. Maps legacy UWP APIs to correct Windows App SDK equivalents with before/after code snippets. Covers namespace changes, threading (CoreDispatcher to DispatcherQueue), windowing (CoreWindow to AppWindow), dialogs, pickers, sharing, printing, background tasks, and the most common Copilot code generation mistakes.",
       "description_ja": ""
     },
     {

@@ -9,6 +9,7 @@ import {
   Bundle,
   ResourceKind,
   getResourceKind,
+  normalizeGitHubRepoUrl,
   saveSkillIndex,
 } from "./skillIndex";
 import {
@@ -542,8 +543,9 @@ export async function scanRepositoryForSkills(
   preferredBranch?: string, // skill-index.json で指定されたブランチ
   sourceOptions?: Pick<Source, "includePaths" | "excludePaths">,
 ): Promise<{ skills: Skill[]; source: Source; bundles?: Bundle[] } | null> {
+  const normalizedRepoUrl = normalizeGitHubRepoUrl(repoUrl);
   // URLからowner/repoを抽出
-  const match = repoUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
+  const match = normalizedRepoUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
   if (!match) {
     throw new Error("Invalid GitHub repository URL");
   }
@@ -600,7 +602,7 @@ export async function scanRepositoryForSkills(
           fallbackData,
           owner,
           repoName,
-          repoUrl,
+          normalizedRepoUrl,
           fallbackBranch,
           token,
           sourceOptions,
@@ -625,7 +627,7 @@ export async function scanRepositoryForSkills(
     responseData,
     owner,
     repoName,
-    repoUrl,
+    normalizedRepoUrl,
     branch,
     token,
     sourceOptions,
@@ -790,7 +792,7 @@ async function processTreeResponse(
     const source: Source = {
       id: `${owner}-${repoName}`,
       name: repoName,
-      url: repoUrl.replace(/\.git$/, ""),
+      url: normalizeGitHubRepoUrl(repoUrl),
       type: "user-added",
       branch, // ブランチを保存
       description: `User added repository: ${owner}/${repoName}`,
@@ -808,7 +810,7 @@ async function processTreeResponse(
     const source: Source = {
       id: `${owner}-${repoName}`,
       name: repoName,
-      url: repoUrl.replace(/\.git$/, ""),
+      url: normalizeGitHubRepoUrl(repoUrl),
       type: "user-added",
       branch, // ブランチを保存
       description: `User added repository: ${owner}/${repoName}`,
@@ -922,7 +924,7 @@ async function processTreeResponse(
   const source: Source = {
     id: `${owner}-${repoName}`,
     name: repoName,
-    url: repoUrl.replace(/\.git$/, ""),
+    url: normalizeGitHubRepoUrl(repoUrl),
     type: "user-added",
     branch, // ブランチを保存
     description: `User added repository: ${owner}/${repoName}`,

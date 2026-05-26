@@ -606,6 +606,10 @@ function insertSectionAt(
   return `${before}\n\n${section}\n\n${after}`;
 }
 
+function stripInstructionManagedSections(content: string): string {
+  return stripSections(content, ALL_MARKERS).content;
+}
+
 function getInstructionBlockKindsForRuntime(
   config: vscode.WorkspaceConfiguration,
   scope: InstructionBlockScope,
@@ -777,10 +781,11 @@ async function deleteGeneratedRefCatalogFileIfExists(
   try {
     const content = await vscode.workspace.fs.readFile(catalogFileUri);
     const text = Buffer.from(content).toString("utf-8");
+    const cleanedText = stripInstructionManagedSections(text);
     const markers = getRefCatalogSectionMarkers(kind);
 
-    if (text.includes(markers.start) && text.includes(markers.end)) {
-      const stripped = stripCatalogSection(text, kind);
+    if (cleanedText.includes(markers.start) && cleanedText.includes(markers.end)) {
+      const stripped = stripCatalogSection(cleanedText, kind);
       if (stripped.trim()) {
         await vscode.workspace.fs.writeFile(
           catalogFileUri,
@@ -792,7 +797,19 @@ async function deleteGeneratedRefCatalogFileIfExists(
       return;
     }
 
-    if (!text.includes(REF_CATALOG_MARKER_PREFIX)) {
+    if (cleanedText !== text) {
+      if (cleanedText.trim()) {
+        await vscode.workspace.fs.writeFile(
+          catalogFileUri,
+          Buffer.from(`${cleanedText.trimEnd()}\n`, "utf-8"),
+        );
+      } else {
+        await vscode.workspace.fs.delete(catalogFileUri, { useTrash: false });
+      }
+      return;
+    }
+
+    if (!cleanedText.includes(REF_CATALOG_MARKER_PREFIX)) {
       logger.info(
         `[Resource Ninja] Keeping non-generated catalog file: ${catalogFileUri.fsPath}`,
       );
@@ -906,7 +923,9 @@ async function syncRefCatalogFiles(
     let existingContent = "";
     try {
       const existing = await vscode.workspace.fs.readFile(catalogFileUri);
-      existingContent = Buffer.from(existing).toString("utf-8");
+      existingContent = stripInstructionManagedSections(
+        Buffer.from(existing).toString("utf-8"),
+      );
     } catch {
       existingContent = "";
     }

@@ -1189,6 +1189,12 @@ class AddSourceTool implements vscode.LanguageModelTool<{ repoUrl: string }> {
         // owner/repo 形式の場合
         normalizedUrl = `https://github.com/${normalizedUrl}`;
       }
+      const normalizedMatch = normalizedUrl.match(
+        /^(https:\/\/github\.com\/[^/]+\/[^/]+)(?:\/(?:tree|blob)\/.*)?\/?$/i,
+      );
+      if (normalizedMatch) {
+        normalizedUrl = normalizedMatch[1];
+      }
 
       // 現在のインデックスを取得
       const currentIndex = await getSkillIndex();

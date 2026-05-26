@@ -176,7 +176,6 @@ ext install yamapan.agent-resources-ninja
 | [openai/codex](https://github.com/openai/codex)                                                                               | Official  | Codex リポジトリの skills                                                 |
 | [anthropics/claude-code](https://github.com/anthropics/claude-code)                                                           | Official  | Claude Code 公式プラグイン skills                                         |
 | [cline/cline](https://github.com/cline/cline)                                                                                 | Official  | Cline リポジトリの skills                                                 |
-| [aaif-goose/goose](https://github.com/aaif-goose/goose)                                                                       | Official  | AAIF の Goose リポジトリ skills                                           |
 | [ComposioHQ/awesome-claude-skills](https://github.com/ComposioHQ/awesome-claude-skills)                                       | Curated   | Claude Skills キュレーションリスト                                        |
 | [Code-and-Sorts/awesome-copilot-agents](https://github.com/Code-and-Sorts/awesome-copilot-agents)                             | Curated   | Copilot agents、instructions、prompts、skills                             |
 | [obra/superpowers](https://github.com/obra/superpowers)                                                                       | Community | Superpowers plugin manifest と plugin 由来 skills                         |
@@ -641,6 +640,9 @@ node scripts/test-resource-targets.js
 node scripts/test-user-data-paths.js
 node scripts/test-manifest-consistency.js
 node scripts/test-logger.js
+node scripts/test-skill-installer-auth-fallback.js
+node scripts/test-audit-resource-installability.js
+node scripts/test-temporary-install-source.js
 node scripts/test-whenToUse.js
 node scripts/test-search-logic.js
 
@@ -650,6 +652,20 @@ npm test
 # 依存関係監査
 npm audit --audit-level=moderate
 ```
+
+### Release 事前確認
+
+パッケージ作成や Marketplace publish の前に、stale な bundled entry と期限切れ publisher credential を先に弾くため、少なくとも次を実行してください。
+
+```powershell
+node scripts/audit-resource-installability.js --raw-only
+npm run test:resources
+npm audit --audit-level=moderate
+npx --yes vsce verify-pat -p "$env:VSCE_PAT"
+```
+
+- `audit-resource-installability.js --raw-only` は bundled remote resource が raw GitHub content path からまだ取得できるかを検証します。
+- `vsce verify-pat` は package / publish 前に PASS している必要があります。失敗した場合は Marketplace publish を試す前に `VSCE_PAT` を更新してください。
 
 ### デバッグ
 

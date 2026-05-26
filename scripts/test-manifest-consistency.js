@@ -1260,6 +1260,26 @@ test("settings distinguish skill index sync from native non-skill resource paths
     /test-mcp-config-merge\.js/,
     "Resource test suite should validate MCP config merge behavior",
   );
+  assert.match(
+    packageJson.scripts?.["test:resources"] || "",
+    /test-coexistence-ref-catalog-cleanup\.js/,
+    "Resource test suite should validate stale sibling coexistence catalog cleanup against a real compressed README fixture",
+  );
+  assert.match(
+    packageJson.scripts?.["test:resources"] || "",
+    /test-skill-installer-auth-fallback\.js/,
+    "Resource test suite should validate installer auth fallback and runtime GitHub resolution behavior",
+  );
+  assert.match(
+    packageJson.scripts?.["test:resources"] || "",
+    /test-audit-resource-installability\.js/,
+    "Resource test suite should validate bundled remote installability audit coverage",
+  );
+  assert.match(
+    packageJson.scripts?.["test:resources"] || "",
+    /test-temporary-install-source\.js/,
+    "Resource test suite should validate temporary preview or web-search installs without a persisted source entry",
+  );
 });
 
 test("README settings tables stay in sync with package.json order", () => {
@@ -2089,7 +2109,6 @@ test("preset source path filters are wired through scripts and runtime", () => {
     "aws-agent-plugins",
     "elastic-agent-skills",
     "cline-official",
-    "goose-official",
   ]) {
     const source = bundledIndex.sources.find((item) => item.id === sourceId);
     assert.ok(source, `Missing filtered source: ${sourceId}`);
@@ -2098,10 +2117,6 @@ test("preset source path filters are wired through scripts and runtime", () => {
       `Expected includePaths for ${sourceId}`,
     );
   }
-  const gooseSource = bundledIndex.sources.find(
-    (item) => item.id === "goose-official",
-  );
-  assert.strictEqual(gooseSource?.url, "https://github.com/aaif-goose/goose");
 });
 
 test("legacy special scanners are fallback-only", () => {

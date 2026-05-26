@@ -3593,9 +3593,10 @@ export async function activate(
         if (!trimmed) return undefined;
 
         if (trimmed.startsWith("http")) {
-          return trimmed.match(/github\.com\/[^/]+\/[^/]+/)
-            ? trimmed
-            : undefined;
+          const match = trimmed.match(
+            /^(https:\/\/github\.com\/[^/]+\/[^/]+)(?:\/(?:tree|blob)\/.*)?\/?$/i,
+          );
+          return match ? match[1] : undefined;
         }
 
         return trimmed.match(/^[^/]+\/[^/]+$/)

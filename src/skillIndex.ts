@@ -195,7 +195,12 @@ function normalizeSkillIndex(index: Partial<SkillIndex>): SkillIndex {
   return {
     version: index.version || "1.0.0",
     lastUpdated: index.lastUpdated || new Date().toISOString().split("T")[0],
-    sources: Array.isArray(index.sources) ? index.sources : [],
+    sources: Array.isArray(index.sources)
+      ? index.sources.map((source) => ({
+          ...source,
+          url: normalizeGitHubRepoUrl(source.url),
+        }))
+      : [],
     skills: Array.isArray(index.skills) ? index.skills : [],
     categories: Array.isArray(index.categories) ? index.categories : [],
     bundles: Array.isArray(index.bundles) ? index.bundles : [],
@@ -564,6 +569,7 @@ export async function saveSkillIndex(
   context: vscode.ExtensionContext,
   index: SkillIndex,
 ): Promise<void> {
+  const normalizedIndex = normalizeSkillIndex(index);
   const localIndexPath = vscode.Uri.joinPath(
     context.globalStorageUri,
     "skill-index.json",
@@ -571,9 +577,9 @@ export async function saveSkillIndex(
   await vscode.workspace.fs.createDirectory(context.globalStorageUri);
   await vscode.workspace.fs.writeFile(
     localIndexPath,
-    Buffer.from(JSON.stringify(index, null, 2), "utf-8"),
+    Buffer.from(JSON.stringify(normalizedIndex, null, 2), "utf-8"),
   );
-  await syncSharedStoresFromSkillIndex(context, index);
+  await syncSharedStoresFromSkillIndex(context, normalizedIndex);
 }
 
 // デフォルトブランチのキャッシュ（リポジトリURL → ブランチ名）
@@ -594,8 +600,10 @@ async function checkUrlExists(url: string, token?: string): Promise<boolean> {
   }
 }
 
-function normalizeGitHubRepoUrl(url: string): string {
-  return url.replace(/\.git$/, "").replace(/\/$/, "");
+export function normalizeGitHubRepoUrl(url: string): string {
+  const trimmed = url.trim().replace(/\.git$/i, "").replace(/\/$/, "");
+  const match = trimmed.match(/^(https:\/\/github\.com\/[^/]+\/[^/]+)(?:\/(?:tree|blob)\/.*)?$/i);
+  return match ? match[1] : trimmed;
 }
 
 function escapeRegExp(value: string): string {

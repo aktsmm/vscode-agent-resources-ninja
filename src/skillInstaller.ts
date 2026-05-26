@@ -118,6 +118,127 @@ function normalizeNewlines(text: string): string {
   return text.replace(/\r\n/g, "\n");
 }
 
+interface GitHubRepositoryRef {
+  owner: string;
+  repo: string;
+  repoUrl: string;
+}
+
+interface GitHubContentRef extends GitHubRepositoryRef {
+  branch: string;
+  remotePath: string;
+}
+
+function normalizeOwnerRepo(value: string): string {
+  return value.trim().replace(/\.git$/i, "").replace(/^\/+|\/+$/g, "");
+}
+
+function extractRepositoryRefFromGitHubUrl(
+  url: string | undefined,
+): GitHubRepositoryRef | undefined {
+  if (!url) {
+    return undefined;
+  }
+
+  const match = url.match(/github\.com\/([^/]+)\/([^/]+)/i);
+  if (!match) {
+    return undefined;
+  }
+
+  const owner = match[1];
+  const repo = match[2].replace(/\.git$/i, "");
+  return {
+    owner,
+    repo,
+    repoUrl: `https://github.com/${owner}/${repo}`,
+  };
+}
+
+function extractContentRefFromRawUrl(
+  rawUrl: string | undefined,
+): GitHubContentRef | undefined {
+  if (!rawUrl) {
+    return undefined;
+  }
+
+  const match = rawUrl.match(
+    /^https:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/i,
+  );
+  if (!match) {
+    return undefined;
+  }
+
+  const [, owner, repo, branch, remotePath] = match;
+  return {
+    owner,
+    repo,
+    branch,
+    remotePath,
+    repoUrl: `https://github.com/${owner}/${repo}`,
+  };
+}
+
+function extractContentRefFromGitHubUrl(
+  url: string | undefined,
+): GitHubContentRef | undefined {
+  if (!url) {
+    return undefined;
+  }
+
+  const match = url.match(
+    /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/(blob|tree)\/([^/]+)\/(.+)$/i,
+  );
+  if (!match) {
+    return undefined;
+  }
+
+  const [, owner, rawRepo, , branch, remotePath] = match;
+  const repo = rawRepo.replace(/\.git$/i, "");
+  return {
+    owner,
+    repo,
+    branch,
+    remotePath,
+    repoUrl: `https://github.com/${owner}/${repo}`,
+  };
+}
+
+function findSourceByRepository(skill: Skill, sources: Source[]): Source | undefined {
+  const directSource = sources.find((candidate) => candidate.id === skill.source);
+  if (directSource) {
+    return directSource;
+  }
+
+  if (!skill.source.includes("/")) {
+    return undefined;
+  }
+
+  const ownerRepo = normalizeOwnerRepo(skill.source).toLowerCase();
+  return sources.find((candidate) => {
+    const repoRef = extractRepositoryRefFromGitHubUrl(candidate.url);
+    if (!repoRef) {
+      return false;
+    }
+    return `${repoRef.owner}/${repoRef.repo}`.toLowerCase() === ownerRepo;
+  });
+}
+
+function createSyntheticSource(
+  skill: Skill,
+  repoRef: GitHubRepositoryRef,
+  branch?: string,
+): Source {
+  return {
+    id: skill.source,
+    name: repoRef.repo,
+    url: repoRef.repoUrl,
+    type: "github",
+    branch,
+    description: skill.description || skill.name,
+    description_ja: skill.description_ja,
+  };
+}
+
 async function readSkillMetaIfExists(
   metaPath: vscode.Uri,
 ): Promise<Partial<SkillMeta> | undefined> {
@@ -691,38 +812,57 @@ export async function installSkill(
 
   // インデックスからソース情報を取得
   const index = await loadSkillIndex(context);
-  const source = index.sources.find((s: Source) => s.id === skill.source);
+  const source = findSourceByRepository(skill, index.sources);
+  const rawUrlRef = extractContentRefFromRawUrl(skill.rawUrl);
+  const githubUrlRef = extractContentRefFromGitHubUrl(skill.url);
+  const repositoryRef =
+    (source && extractRepositoryRefFromGitHubUrl(source.url)) ||
+    rawUrlRef ||
+    githubUrlRef ||
+    (skill.source.includes("/")
+      ? (() => {
+          const normalized = normalizeOwnerRepo(skill.source);
+          const parts = normalized.split("/");
+          if (parts.length !== 2 || !parts[0] || !parts[1]) {
+            return undefined;
+          }
+          return {
+            owner: parts[0],
+            repo: parts[1],
+            repoUrl: `https://github.com/${parts[0]}/${parts[1]}`,
+          } satisfies GitHubRepositoryRef;
+        })()
+      : undefined);
 
   // GitHub Token を取得
   const token = await getGitHubToken();
 
-  if (!source) {
+  if (!repositoryRef) {
     if (resourceKind === "skill") {
       await createFallbackSkillMd(skillPath, skill);
     } else {
       throw new Error(`Source not found for ${resourceKind}: ${skill.source}`);
     }
   } else {
-    // GitHub URL からオーナーとリポジトリを取得
-    const match = source.url.match(/github\.com\/([^/]+)\/([^/]+)/);
-    if (!match) {
-      if (resourceKind === "skill") {
-        await createFallbackSkillMd(skillPath, skill);
-      } else {
-        throw new Error(
-          `Invalid source URL for ${resourceKind}: ${source.url}`,
-        );
-      }
-    } else {
-      const [, owner, repo] = match;
-      // ブランチを取得（HEAD確認 or API でデフォルトブランチを取得）
-      const branch = await getSourceBranch(
-        source,
+    const owner = repositoryRef.owner;
+    const repo = repositoryRef.repo;
+    const sourceForBranch =
+      source ||
+      createSyntheticSource(
+        skill,
+        repositoryRef,
+        rawUrlRef?.branch || githubUrlRef?.branch,
+      );
+    const branch =
+      rawUrlRef?.branch ||
+      githubUrlRef?.branch ||
+      (await getSourceBranch(
+        sourceForBranch,
         token,
         resourceKind === "plugin"
           ? skill.pluginManifestPath || skill.path
           : skill.path,
-      );
+      ));
       const remotePath =
         resourceKind === "plugin"
           ? skill.pluginRoot ||
@@ -736,6 +876,11 @@ export async function installSkill(
       logger.info(
         `[Resource Ninja] Owner: ${owner}, Repo: ${repo}, Branch: ${branch}`,
       );
+      if (!source) {
+        logger.info(
+          `[Resource Ninja] Resolved temporary install source from runtime URL metadata`,
+        );
+      }
       logger.info(`[Resource Ninja] Remote path: ${remotePath}`);
 
       if (resourceKind === "plugin") {
@@ -865,7 +1010,12 @@ export async function installSkill(
                 );
               } else if (choice === reportBug) {
                 // バグレポートを作成
-                await openBugReport(skill, source, rawUrl, "404 Not Found");
+                await openBugReport(
+                  skill,
+                  sourceForBranch,
+                  rawUrl,
+                  "404 Not Found",
+                );
               }
             }
 
@@ -963,7 +1113,7 @@ export async function installSkill(
                 const repoTreeUrl = `https://github.com/${owner}/${repo}/tree/${branch}/${remotePath}`;
                 await openBugReport(
                   skill,
-                  source,
+                  sourceForBranch,
                   repoTreeUrl,
                   "404 Not Found",
                 );
@@ -1000,7 +1150,6 @@ export async function installSkill(
           }
         }
       }
-    }
   }
 
   // メタデータを保存（description などを後で取得できるように）

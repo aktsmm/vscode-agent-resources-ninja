@@ -180,7 +180,6 @@ Preset index includes skills, agents, prompts, instructions, hooks, MCP config r
 | [openai/codex](https://github.com/openai/codex)                                                                               | Official  | Codex repository skills                                                         |
 | [anthropics/claude-code](https://github.com/anthropics/claude-code)                                                           | Official  | Claude Code plugin skills                                                       |
 | [cline/cline](https://github.com/cline/cline)                                                                                 | Official  | Cline repository skills                                                         |
-| [aaif-goose/goose](https://github.com/aaif-goose/goose)                                                                       | Official  | Goose repository skills from AAIF                                               |
 | [ComposioHQ/awesome-claude-skills](https://github.com/ComposioHQ/awesome-claude-skills)                                       | Curated   | Curated Claude Skills list                                                      |
 | [Code-and-Sorts/awesome-copilot-agents](https://github.com/Code-and-Sorts/awesome-copilot-agents)                             | Curated   | Copilot agents, instructions, prompts, and skills                               |
 | [obra/superpowers](https://github.com/obra/superpowers)                                                                       | Community | Superpowers plugin manifests and plugin-derived skills                          |
@@ -646,6 +645,9 @@ node scripts/test-resource-targets.js
 node scripts/test-user-data-paths.js
 node scripts/test-manifest-consistency.js
 node scripts/test-logger.js
+node scripts/test-skill-installer-auth-fallback.js
+node scripts/test-audit-resource-installability.js
+node scripts/test-temporary-install-source.js
 node scripts/test-whenToUse.js
 node scripts/test-search-logic.js
 
@@ -655,6 +657,20 @@ npm test
 # Dependency audit
 npm audit --audit-level=moderate
 ```
+
+### Release Preflight
+
+Use this checklist before packaging or Marketplace publish so stale bundled entries and expired publisher credentials are caught before `vsce publish`:
+
+```powershell
+node scripts/audit-resource-installability.js --raw-only
+npm run test:resources
+npm audit --audit-level=moderate
+npx --yes vsce verify-pat -p "$env:VSCE_PAT"
+```
+
+- `audit-resource-installability.js --raw-only` validates that every bundled remote resource still resolves through its raw GitHub content path.
+- `vsce verify-pat` should pass before packaging or publish; if it fails, refresh `VSCE_PAT` first instead of discovering the expiry during Marketplace publish.
 
 ### Debugging
 

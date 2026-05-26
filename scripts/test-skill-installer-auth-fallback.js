@@ -141,6 +141,9 @@ async function main() {
                 error: () => undefined,
               },
             },
+            "./bugReport": {
+              openBugReport: async () => undefined,
+            },
           },
         );
 
@@ -246,6 +249,10 @@ async function main() {
                 warn: () => undefined,
                 error: () => undefined,
               },
+            },
+            "./sharedResourceIndexStore": {
+              loadSharedStoresIntoSkillIndex: async (index) => index,
+              syncSharedStoresFromSkillIndex: async () => undefined,
             },
           },
         );

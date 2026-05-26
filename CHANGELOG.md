@@ -5,6 +5,19 @@ All notable changes to the "Agent Resources Ninja" extension will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.28] - 2026-05-26
+
+### Fixed
+
+- **Temporary Remote Install Recovery** - Restored remote install behavior for temporary search or preview entries without a persisted source by reconstructing owner or repo or branch or path from raw GitHub URLs, tree URLs, and blob URLs instead of falling back to placeholder content or aborting non-skill installs / 永続 source を持たない検索 or preview 由来の temporary entry でも、raw GitHub URL と tree or blob URL から owner or repo or branch or path を復元して remote install できるようにし、placeholder content へのフォールバックや non-skill install 中断を防ぎました。
+- **GitHub Source URL Normalization** - Normalized saved GitHub source URLs to repository roots across add-source, runtime index persistence, and temporary install fallback flows so tree or blob URLs do not survive as source metadata / add-source、runtime index 保存、temporary install fallback の各経路で GitHub source URL を repository root に正規化し、tree or blob URL が source metadata として残らないようにしました。
+- **Bundled Remote Catalog Hygiene** - Pruned unreachable bundled remote resources, removed the now-empty goose-official preset source, synchronized release-facing resource counts, and tightened coexistence cleanup so stale `agent-ninja` compressed catalog blocks are stripped from shared ref README files while the current `resource-ninja-catalog` block remains / 到達不能な bundled remote resource を prune し、空になった goose-official preset source を削除して release 向け件数表示を同期しました。さらに shared ref README では stale な `agent-ninja` compressed catalog block を除去しつつ、現在の `resource-ninja-catalog` block は維持するよう coexistence cleanup を強化しました。
+- **Release Preflight Guardrails** - Added release preflight guidance and regression coverage for raw-only installability audit and `vsce verify-pat`, reducing the risk of stale presets and expired Marketplace credentials being discovered late in publish / raw-only installability audit と `vsce verify-pat` の release preflight と回帰ガードを追加し、stale preset や期限切れ Marketplace credential の発見が publish 直前まで遅れるリスクを下げました。
+
+### Tests
+
+- Added regression guards for temporary remote install recovery, bundled remote installability audit, compressed coexistence catalog cleanup, and release preflight docs, then revalidated compile, resource regression, manifest consistency, README release UX, raw-only audit, and release hygiene flows before release / temporary remote install recovery、bundled remote installability audit、compressed coexistence catalog cleanup、release preflight docs の回帰ガードを追加し、リリース前に compile、resource 回帰、manifest consistency、README release UX、raw-only audit、release hygiene 系を再検証しました。
+
 ## [0.2.27] - 2026-05-23
 
 ### Fixed

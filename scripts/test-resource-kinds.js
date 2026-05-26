@@ -1084,7 +1084,6 @@ test("bundled official product presets use filtered resource roots", () => {
     "google-gemini-cli": 11,
     "openai-codex": 10,
     "cline-official": 1,
-    "goose-official": 4,
   };
 
   for (const [sourceId, expectedCount] of Object.entries(

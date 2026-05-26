@@ -152,6 +152,21 @@ test("README token guidance follows least privilege", () => {
   assert.match(readmeJa, /scope は未選択/);
 });
 
+test("README documents release preflight for installability audit and VSCE_PAT", () => {
+  assert.match(
+    readme,
+    /node scripts\/audit-resource-installability\.js --raw-only/,
+  );
+  assert.match(readme, /npx --yes vsce verify-pat -p "\$env:VSCE_PAT"/);
+  assert.match(readme, /stale bundled entries/i);
+  assert.match(
+    readmeJa,
+    /node scripts\/audit-resource-installability\.js --raw-only/,
+  );
+  assert.match(readmeJa, /npx --yes vsce verify-pat -p "\$env:VSCE_PAT"/);
+  assert.match(readmeJa, /期限切れ publisher credential|期限切れ publisher/);
+});
+
 test("README MCP config safety copy explains explicit merge choice", () => {
   assert.match(readme, /Workspace MCP Directory/);
   assert.match(readme, /merge compatible servers into `\.vscode\/mcp\.json`/);
