@@ -505,6 +505,10 @@ test("new product metadata is internally consistent", () => {
     "node scripts/run-vscode-smoke.js",
   );
   assert.strictEqual(
+    packageJson.scripts?.["release:vsce"],
+    "pwsh -NoProfile -File ./scripts/Invoke-VsceWithPat.ps1",
+  );
+  assert.strictEqual(
     packageJson.repository?.url,
     "https://github.com/aktsmm/vscode-agent-resources-ninja",
   );

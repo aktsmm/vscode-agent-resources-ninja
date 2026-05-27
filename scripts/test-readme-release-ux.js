@@ -167,13 +167,13 @@ test("README documents release preflight for installability audit and VSCE_PAT",
     readme,
     /node scripts\/audit-resource-installability\.js --raw-only/,
   );
-  assert.match(readme, /npx --yes vsce verify-pat -p "\$env:VSCE_PAT"/);
+  assert.match(readme, /npm run release:vsce -- verify-pat/);
   assert.match(readme, /stale bundled entries/i);
   assert.match(
     readmeJa,
     /node scripts\/audit-resource-installability\.js --raw-only/,
   );
-  assert.match(readmeJa, /npx --yes vsce verify-pat -p "\$env:VSCE_PAT"/);
+  assert.match(readmeJa, /npm run release:vsce -- verify-pat/);
   assert.match(readmeJa, /期限切れ publisher credential|期限切れ publisher/);
 });
 

@@ -669,11 +669,11 @@ Use this checklist before packaging or Marketplace publish so stale bundled entr
 node scripts/audit-resource-installability.js --raw-only
 npm run test:resources
 npm audit --audit-level=moderate
-npx --yes vsce verify-pat -p "$env:VSCE_PAT"
+npm run release:vsce -- verify-pat
 ```
 
 - `audit-resource-installability.js --raw-only` validates that every bundled remote resource still resolves through its raw GitHub content path.
-- `vsce verify-pat` should pass before packaging or publish; if it fails, refresh `VSCE_PAT` first instead of discovering the expiry during Marketplace publish.
+- `npm run release:vsce -- verify-pat` first validates the current process `VSCE_PAT`, then automatically falls back to the User-scoped `VSCE_PAT` when VS Code is still holding an expired process value.
 
 ### Debugging
 

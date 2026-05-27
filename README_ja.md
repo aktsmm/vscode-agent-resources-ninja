@@ -664,11 +664,11 @@ npm audit --audit-level=moderate
 node scripts/audit-resource-installability.js --raw-only
 npm run test:resources
 npm audit --audit-level=moderate
-npx --yes vsce verify-pat -p "$env:VSCE_PAT"
+npm run release:vsce -- verify-pat
 ```
 
 - `audit-resource-installability.js --raw-only` は bundled remote resource が raw GitHub content path からまだ取得できるかを検証します。
-- `vsce verify-pat` は package / publish 前に PASS している必要があります。失敗した場合は Marketplace publish を試す前に `VSCE_PAT` を更新してください。
+- `npm run release:vsce -- verify-pat` は現在の process `VSCE_PAT` を先に検証し、VS Code が古い値を保持している場合は User 環境変数の `VSCE_PAT` へ自動で fallback します。
 
 ### デバッグ
 
