@@ -135,6 +135,17 @@ async function main() {
     },
   };
 
+  const i18nStub = {
+    messages: {
+      commandPaletteSearchTitle: () =>
+        "Agent Resources Ninja: Search Resources",
+      emptyResourceEntries: (commandTitle) =>
+        `No resource entries listed yet. Use "${commandTitle}" to install workspace or global resources.`,
+      emptySkillEntries: (commandTitle) =>
+        `No skill entries listed yet. Use "${commandTitle}" to install workspace skills. Agents, prompts, instructions, and hooks stay in their native resource views.`,
+    },
+  };
+
   const { updateInstructionFileAtUri } = requireTypeScriptModule(
     path.join(repoRoot, "src", "instructionManager.ts"),
     {
@@ -218,6 +229,7 @@ async function main() {
         loadSkillIndex: async () => undefined,
         getResourceKindLabel: (kind) => kind,
       },
+      "./i18n": i18nStub,
       "./logger": {
         logger: {
           info: () => undefined,

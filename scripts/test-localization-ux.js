@@ -408,6 +408,33 @@ test("open output labels and welcome copy use output terminology", () => {
   assert.doesNotMatch(outputCopy, /Global のインストラクションファイルを開く/);
 });
 
+test("runtime search command labels stay aligned with package localization", () => {
+  assert.match(
+    extractObjectEntry(i18nSource, "enMessages", "searchCommandTitle"),
+    new RegExp(
+      `"${nls["command.search"].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`,
+    ),
+  );
+  assert.match(
+    extractObjectEntry(i18nSource, "jaMessages", "searchCommandTitle"),
+    new RegExp(
+      `"${nlsJa["command.search"].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`,
+    ),
+  );
+  assert.match(
+    extractObjectEntry(i18nSource, "enMessages", "commandPaletteSearchTitle"),
+    new RegExp(
+      `"Agent Resources Ninja: ${nls["command.search"].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`,
+    ),
+  );
+  assert.match(
+    extractObjectEntry(i18nSource, "jaMessages", "commandPaletteSearchTitle"),
+    new RegExp(
+      `"Agent Resources Ninja: ${nlsJa["command.search"].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`,
+    ),
+  );
+});
+
 test("docs and package metadata avoid legacy Skill Ninja branding", () => {
   const combinedText = [
     JSON.stringify(packageJson),

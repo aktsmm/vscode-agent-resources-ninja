@@ -5,6 +5,18 @@ All notable changes to the "Agent Resources Ninja" extension will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.29] - 2026-05-28
+
+### Fixed
+
+- **Localized Search CTA Parity** - Replaced hardcoded `Agent Resources Ninja: Search Resources` literals in generated instruction output and Workspace Resources empty-state hints with runtime-localized copy so package NLS, runtime i18n, README, and TreeView guidance stay aligned across English and Japanese / 生成される instruction output と Workspace Resources の empty-state hint に残っていた `Agent Resources Ninja: Search Resources` 直書きを runtime-localized copy に置き換え、package NLS、runtime i18n、README、TreeView 導線が英日でずれないようにしました。
+- **Smoke Launch Guard for Windows Update Mutex** - Added a Windows preflight wrapper for `npm test` that detects the `vscode-updating` mutex and aborts with a clear message instead of launching the known popup/EPIPE path while update activity is still in progress / `npm test` に Windows 向け preflight wrapper を追加し、`vscode-updating` mutex を検出した場合は更新処理中の既知 popup/EPIPE 経路を起動せず、明示メッセージで中断するようにしました。
+- **Isolated Extension Host Smoke Sandbox** - Pointed `.vscode-test.mjs` at the machine-installed VS Code executable and isolated `.vscode-test/manual-local-launch` user-data and extensions paths so successful smoke runs are less likely to inherit stale shared test state / `.vscode-test.mjs` を machine-installed な VS Code executable と `.vscode-test/manual-local-launch` 配下の分離 user-data / extensions path に向け、smoke 実行が stale な共有 test state を引き継ぎにくいようにしました。
+
+### Tests
+
+- Added regression guards for the Windows smoke mutex preflight and isolated sandbox contract, then revalidated compile, manifest consistency, README release UX, localization UX, and scope-action UX. `npm test` now exits early with a guarded status while the local `vscode-updating` mutex is held instead of launching the known popup path / Windows smoke mutex preflight と isolated sandbox 契約の回帰ガードを追加し、compile、manifest consistency、README release UX、localization UX、scope-action UX を再検証しました。`npm test` はローカルの `vscode-updating` mutex 保持中、既知 popup 経路を起動せず guard status で早期終了するようになりました。
+
 ## [0.2.28] - 2026-05-26
 
 ### Fixed

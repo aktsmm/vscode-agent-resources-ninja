@@ -93,6 +93,14 @@ const userResourcesProviderSource = fs.readFileSync(
   path.join(repoRoot, "src", "userResourcesProvider.ts"),
   "utf8",
 );
+const vscodeTestConfigSource = fs.readFileSync(
+  path.join(repoRoot, ".vscode-test.mjs"),
+  "utf8",
+);
+const vscodeSmokeRunnerSource = fs.readFileSync(
+  path.join(repoRoot, "scripts", "run-vscode-smoke.js"),
+  "utf8",
+);
 const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
 const readmeJa = fs.readFileSync(path.join(repoRoot, "README_ja.md"), "utf8");
 const gitignore = fs.readFileSync(path.join(repoRoot, ".gitignore"), "utf8");
@@ -493,6 +501,10 @@ test("new product metadata is internally consistent", () => {
   assert.strictEqual(packageJson.name, "agent-resources-ninja");
   assert.match(packageJson.version, /^\d+\.\d+\.\d+$/);
   assert.strictEqual(
+    packageJson.scripts?.test,
+    "node scripts/run-vscode-smoke.js",
+  );
+  assert.strictEqual(
     packageJson.repository?.url,
     "https://github.com/aktsmm/vscode-agent-resources-ninja",
   );
@@ -506,6 +518,24 @@ test("new product metadata is internally consistent", () => {
     !activityContainers.some((container) => container.id === "skill-ninja"),
     "Activity bar container should not use old skill-ninja id",
   );
+});
+
+test("extension-host smoke runner guards windows update mutex and uses isolated test paths", () => {
+  assert.match(
+    vscodeSmokeRunnerSource,
+    /Mutex\]::OpenExisting\('vscode-updating'\)/,
+  );
+  assert.match(vscodeSmokeRunnerSource, /Skipping Extension Host smoke launch/);
+  assert.match(vscodeSmokeRunnerSource, /process\.exit\(2\)/);
+  assert.match(
+    vscodeSmokeRunnerSource,
+    /"@vscode",\s*\r?\n\s*"test-cli",\s*\r?\n\s*"out",\s*\r?\n\s*"bin\.mjs"/,
+  );
+  assert.match(vscodeTestConfigSource, /fromPath: vscodeExecutablePath/);
+  assert.match(vscodeTestConfigSource, /manual-local-launch/);
+  assert.match(vscodeTestConfigSource, /--disable-updates/);
+  assert.match(vscodeTestConfigSource, /--user-data-dir/);
+  assert.match(vscodeTestConfigSource, /--extensions-dir/);
 });
 
 test("commands, views, and settings use resourceNinja namespace", () => {
@@ -2040,10 +2070,17 @@ test("built-in resource visibility is configurable", () => {
 });
 
 test("generated instruction empty states explain skill index scope", () => {
-  assert.match(instructionManagerSource, /No skill entries listed yet/);
   assert.match(
     instructionManagerSource,
-    /Agents, prompts, instructions, and hooks stay in their native resource views/,
+    /messages\.emptySkillEntries\(getSearchCommandTitle\(\)\)/,
+  );
+  assert.match(
+    instructionManagerSource,
+    /messages\.emptyResourceEntries\(getSearchCommandTitle\(\)\)/,
+  );
+  assert.doesNotMatch(
+    instructionManagerSource,
+    /Agent Resources Ninja: Search Resources/,
   );
   assert.doesNotMatch(instructionManagerSource, /No skills listed yet/);
 });

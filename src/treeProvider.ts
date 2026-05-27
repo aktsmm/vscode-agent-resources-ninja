@@ -17,7 +17,7 @@ import {
 } from "./skillIndex";
 import { getInstalledSkillsWithMeta } from "./skillInstaller";
 import { LocalSkill, scanLocalSkills } from "./localSkillScanner";
-import { isJapanese } from "./i18n";
+import { isJapanese, messages } from "./i18n";
 import { getSkillId } from "./skillPreview";
 import {
   formatMcpLifecycleLabel,
@@ -254,10 +254,8 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
       if (this.workspaceSkills.length === 0) {
         return [
           new SkillTreeItem(
-            isJapanese() ? "リソースが見つかりません" : "No resources found",
-            isJapanese()
-              ? "「リソースを検索」でインストールしてください"
-              : "Use 'Search Resources' to install resources",
+            messages.noResourcesFound(),
+            messages.installResourcesHint(messages.searchCommandTitle()),
             vscode.TreeItemCollapsibleState.None,
             "placeholder",
           ),

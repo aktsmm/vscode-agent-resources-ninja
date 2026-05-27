@@ -23,6 +23,8 @@ const jaMessages = {
   uninstallFailed: "アンインストール失敗: {0}",
   selectSkillToUninstall: "アンインストールする skill を選択",
   searchPlaceholder: "リソース名またはキーワードを入力...",
+  searchCommandTitle: "リソースを検索",
+  commandPaletteSearchTitle: "Agent Resources Ninja: リソースを検索",
   installConfirm: '"{0}" をインストールしますか？',
   noInstalledSkills: "インストール済み skill はありません",
   installedSkillsPlaceholder: "インストール済み skill",
@@ -127,6 +129,12 @@ const jaMessages = {
   createSkillPlaceholder: "my-awesome-skill",
   skillCreated: "✅ {0} を作成しました",
   noLocalSkills: "ローカルリソースが見つかりません",
+  emptyResourceEntries:
+    'リソース項目はまだありません。"{0}" を使って workspace または global のリソースをインストールしてください。',
+  emptySkillEntries:
+    'skill 項目はまだありません。"{0}" を使って workspace skill をインストールしてください。agents、prompts、instructions、hooks はそれぞれのネイティブ view に表示されます。',
+  noResourcesFound: "リソースが見つかりません",
+  installResourcesHint: "「{0}」でインストールしてください",
   instructionFileUpdatedOnSettingChange:
     "✅ 設定変更によりリソース出力を更新しました",
 } as const;
@@ -154,6 +162,8 @@ const enMessages: MessageDictionary = {
   uninstallFailed: "Uninstall failed: {0}",
   selectSkillToUninstall: "Select skill to uninstall",
   searchPlaceholder: "Enter resource name or keyword...",
+  searchCommandTitle: "Search Resources",
+  commandPaletteSearchTitle: "Agent Resources Ninja: Search Resources",
   installConfirm: 'Install "{0}"?',
   noInstalledSkills: "No installed skills found",
   installedSkillsPlaceholder: "Installed Skills",
@@ -258,6 +268,12 @@ const enMessages: MessageDictionary = {
   createSkillPlaceholder: "my-awesome-skill",
   skillCreated: "✅ {0} created",
   noLocalSkills: "No local resources found",
+  emptyResourceEntries:
+    'No resource entries listed yet. Use "{0}" to install workspace or global resources.',
+  emptySkillEntries:
+    'No skill entries listed yet. Use "{0}" to install workspace skills. Agents, prompts, instructions, and hooks stay in their native resource views.',
+  noResourcesFound: "No resources found",
+  installResourcesHint: "Use '{0}' to install resources",
   instructionFileUpdatedOnSettingChange:
     "✅ Resource output updated due to setting change",
 };
@@ -339,6 +355,8 @@ export const messages = {
 
   // 検索関連
   searchPlaceholder: () => localize("searchPlaceholder"),
+  searchCommandTitle: () => localize("searchCommandTitle"),
+  commandPaletteSearchTitle: () => localize("commandPaletteSearchTitle"),
   installConfirm: (name: string) => localize("installConfirm", name),
   noInstalledSkills: () => localize("noInstalledSkills"),
   installedSkillsPlaceholder: () => localize("installedSkillsPlaceholder"),
@@ -470,6 +488,13 @@ export const messages = {
   createSkillPlaceholder: () => localize("createSkillPlaceholder"),
   skillCreated: (name: string) => localize("skillCreated", name),
   noLocalSkills: () => localize("noLocalSkills"),
+  emptyResourceEntries: (commandTitle: string) =>
+    localize("emptyResourceEntries", commandTitle),
+  emptySkillEntries: (commandTitle: string) =>
+    localize("emptySkillEntries", commandTitle),
+  noResourcesFound: () => localize("noResourcesFound"),
+  installResourcesHint: (commandTitle: string) =>
+    localize("installResourcesHint", commandTitle),
 
   // 設定変更時の自動更新
   instructionFileUpdatedOnSettingChange: () =>

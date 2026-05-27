@@ -50,6 +50,16 @@ function getLanguageModelToolReferences() {
     .sort();
 }
 
+function getCommandPaletteLabels(text) {
+  const section = text.split(/### Command Palette|### コマンドパレット/)[1];
+  assert.ok(section, "README should include the command palette section");
+  const table = section.split(/\n\nView toolbars|\n\nview のツールバー/)[0];
+  return table
+    .split(/\r?\n/)
+    .filter((line) => /^\| `Agent Resources Ninja: /.test(line))
+    .map((line) => line.split("|")[1].trim().replace(/`/g, ""));
+}
+
 function assertIncludesAllLmTools(text, docName) {
   for (const toolName of getLanguageModelToolReferences()) {
     assert.match(
@@ -207,6 +217,19 @@ test("README documents browse double-click install and reinstall behavior", () =
   );
 });
 
+test("README documents smoke mutex guard and isolated sandbox", () => {
+  assert.match(
+    readme,
+    /`npm test` now preflights the Windows `vscode-updating` mutex/,
+  );
+  assert.match(readme, /`\.vscode-test\/manual-local-launch`/);
+  assert.match(
+    readmeJa,
+    /`npm test` は Windows の `vscode-updating` mutex を先に確認/,
+  );
+  assert.match(readmeJa, /`\.vscode-test\/manual-local-launch`/);
+});
+
 test("README documents Copilot CLI Global Resource Home resources", () => {
   assert.match(readme, /copilot-instructions\.md/);
   assert.match(readme, /skills\/\*\/SKILL\.md/);
@@ -245,6 +268,37 @@ test("README marketplace identity matches package metadata", () => {
     readmeJa,
     new RegExp(`ext install ${packageJson.publisher}\\.${packageJson.name}`),
   );
+});
+
+test("README command palette labels stay in sync with localized command titles", () => {
+  const commandKeys = [
+    "command.search",
+    "command.updateIndex",
+    "command.webSearch",
+    "command.addSource",
+    "command.removeSource",
+    "command.uninstall",
+    "command.showInstalled",
+    "command.createResource",
+    "command.registerLocalResource",
+    "command.unregisterLocalResource",
+    "command.reinstallAll",
+    "command.uninstallAll",
+    "command.uninstallMultiple",
+    "command.reinstallMultiple",
+    "command.updateInstruction",
+    "command.openResourceOutput",
+    "command.openResourceFolder",
+  ];
+  const expectedEn = commandKeys.map(
+    (key) => `Agent Resources Ninja: ${nls[key]}`,
+  );
+  const expectedJa = commandKeys.map(
+    (key) => `Agent Resources Ninja: ${nlsJa[key]}`,
+  );
+
+  assert.deepStrictEqual(getCommandPaletteLabels(readme), expectedEn);
+  assert.deepStrictEqual(getCommandPaletteLabels(readmeJa), expectedJa);
 });
 
 test("README links Japanese edition through GitHub absolute URL", () => {

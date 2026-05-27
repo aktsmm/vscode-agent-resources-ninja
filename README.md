@@ -217,7 +217,7 @@ Generic MCP config file names such as `mcp.json` and `.mcp.json` are installed w
 - Create new skills, agents, instructions, prompts, hooks, or MCP config resources from the toolbar
 - Choose Workspace, User Profile, Global Resource Home, or a custom folder when creating resources
 - Newly installed resources (temporary badge)
-- Toolbar: Resource Output / Create / Refresh / Settings
+- Toolbar: Resource Output / Create / Refresh View / Settings
 - Remote-installed resource rows expose per-resource reinstall from the inline action buttons
 - Skill-only bulk commands remain available from Command Palette or overflow actions for maintenance workflows
 - Open resource folder (right-click menu)
@@ -260,25 +260,25 @@ Generic MCP config file names such as `mcp.json` and `.mcp.json` are installed w
 
 ### Command Palette
 
-| Command                                            | Description                                                                    |
-| -------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `Agent Resources Ninja: Search Resources`          | Search and install resources                                                   |
-| `Agent Resources Ninja: Update Index`              | Update index from all sources                                                  |
-| `Agent Resources Ninja: Search on GitHub`          | Search resources on GitHub                                                     |
-| `Agent Resources Ninja: Add Source Repository`     | Add new source repository                                                      |
-| `Agent Resources Ninja: Remove Source Repository`  | Remove source repository                                                       |
-| `Agent Resources Ninja: Uninstall Resource`        | Uninstall a resource                                                           |
-| `Agent Resources Ninja: Show Workspace Resources`  | Show workspace resources                                                       |
-| `Agent Resources Ninja: Create New Resource`       | Create a local skill, agent, prompt, instruction, hook, or MCP config resource |
-| `Agent Resources Ninja: Register Local Resource`   | Register a local skill in the instruction file                                 |
-| `Agent Resources Ninja: Unregister Local Resource` | Unregister a local skill from the instruction file                             |
-| `Agent Resources Ninja: Reinstall All`             | Reinstall installed skills from latest source metadata                         |
-| `Agent Resources Ninja: Uninstall All`             | Uninstall all installed workspace skills (with confirmation)                   |
-| `Agent Resources Ninja: Uninstall Multiple`        | Select multiple installed skills to uninstall                                  |
-| `Agent Resources Ninja: Reinstall Multiple`        | Select multiple installed skills to reinstall                                  |
-| `Agent Resources Ninja: Update Resource Output`    | Regenerate the current scope's managed output manually                         |
-| `Agent Resources Ninja: Open Resource Output...`   | Choose the managed scope to open from Command Palette                          |
-| `Agent Resources Ninja: Open Resource Folder`      | Open installed resource folder in OS                                           |
+| Command                                                               | Description                                                                    |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `Agent Resources Ninja: Search Resources`                             | Search and install resources                                                   |
+| `Agent Resources Ninja: Update Index`                                 | Update index from all sources                                                  |
+| `Agent Resources Ninja: Search on GitHub`                             | Search resources on GitHub                                                     |
+| `Agent Resources Ninja: Add Source Repository`                        | Add new source repository                                                      |
+| `Agent Resources Ninja: Remove Source Repository`                     | Remove source repository                                                       |
+| `Agent Resources Ninja: Uninstall Resource`                           | Uninstall a resource                                                           |
+| `Agent Resources Ninja: Show Workspace Resources`                     | Show workspace resources                                                       |
+| `Agent Resources Ninja: Create New Resource`                          | Create a local skill, agent, prompt, instruction, hook, or MCP config resource |
+| `Agent Resources Ninja: Register Local Skill in Instruction File`     | Register a local skill in the instruction file                                 |
+| `Agent Resources Ninja: Unregister Local Skill from Instruction File` | Unregister a local skill from the instruction file                             |
+| `Agent Resources Ninja: Reinstall All Workspace Skills`               | Reinstall installed skills from latest source metadata                         |
+| `Agent Resources Ninja: Uninstall All Workspace Skills`               | Uninstall all installed workspace skills (with confirmation)                   |
+| `Agent Resources Ninja: Uninstall Selected Skills`                    | Select multiple installed skills to uninstall                                  |
+| `Agent Resources Ninja: Reinstall Selected Skills`                    | Select multiple installed skills to reinstall                                  |
+| `Agent Resources Ninja: Update Resource Output`                       | Regenerate the current scope's managed output manually                         |
+| `Agent Resources Ninja: Open Resource Output...`                      | Choose the managed scope to open from Command Palette                          |
+| `Agent Resources Ninja: Open Resource Folder`                         | Open installed resource folder in OS                                           |
 
 View toolbars and empty-state links keep their current-scope behavior: the workspace view opens the workspace output directly, and the User / Global Resource Home view opens the configured global output directly. The Command Palette command stays explicit and shows a scope QuickPick.
 
@@ -654,6 +654,9 @@ node scripts/test-search-logic.js
 # Extension Host smoke test
 npm test
 
+- `npm test` now preflights the Windows `vscode-updating` mutex and aborts early with a clear message when VS Code update activity is still in progress, instead of launching the known popup/EPIPE path.
+- When the mutex is clear, the smoke run uses the machine-installed VS Code executable with isolated `.vscode-test/manual-local-launch` user-data and extensions directories.
+
 # Dependency audit
 npm audit --audit-level=moderate
 ```
@@ -682,7 +685,8 @@ npx --yes vsce verify-pat -p "$env:VSCE_PAT"
 
 - Extension diagnostics are written to **Output → Agent Resources Ninja**.
 - Runtime code does not write diagnostic logs to the process console; this keeps local Extension Host and `vscode-test` runs less prone to pipe-related failures.
-- If a VS Code/Electron `EPIPE` dialog appears while testing, rerun `npm test` from a normal terminal first, then check **Output → Agent Resources Ninja** for extension-level diagnostics.
+- If `npm test` reports that the Windows `vscode-updating` mutex is held, wait for VS Code update activity to finish and rerun the smoke test.
+- If a VS Code/Electron `EPIPE` dialog still appears after the mutex guard passes, rerun `npm test` from a normal terminal first, then check **Output → Agent Resources Ninja** for extension-level diagnostics.
 
 ## 🤝 Contributing
 

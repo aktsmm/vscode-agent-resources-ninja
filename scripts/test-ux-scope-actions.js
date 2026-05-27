@@ -594,6 +594,18 @@ test("user global resource empty state gives next action", () => {
   assert.match(userResourcesProviderSource, /Global Resource Home location/);
 });
 
+test("workspace empty state search hint uses localized runtime copy", () => {
+  assert.match(treeProviderSource, /messages\.noResourcesFound\(\)/);
+  assert.match(
+    treeProviderSource,
+    /messages\.installResourcesHint\(messages\.searchCommandTitle\(\)\)/,
+  );
+  assert.doesNotMatch(
+    treeProviderSource,
+    /Use 'Search Resources' to install resources/,
+  );
+});
+
 test("global resource home tree description is not repetitive", () => {
   assert.match(userResourcesProviderSource, /function formatScopeDescription/);
   assert.match(userResourcesProviderSource, /formatRootPathForDisplay/);

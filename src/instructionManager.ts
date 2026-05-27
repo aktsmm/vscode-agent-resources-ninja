@@ -52,6 +52,7 @@ import {
   Source,
   getResourceKindLabel,
 } from "./skillIndex";
+import { messages } from "./i18n";
 import { logger } from "./logger";
 
 interface MarkerPair {
@@ -78,6 +79,10 @@ interface RefCatalogDescriptor {
 }
 
 type RefCatalogFormat = Exclude<OutputFormat, "ref">;
+
+function getSearchCommandTitle(): string {
+  return messages.commandPaletteSearchTitle();
+}
 
 const SHARED_MARKERS: MarkerPair = {
   start: "<!-- agent-ninja-START -->",
@@ -784,7 +789,10 @@ async function deleteGeneratedRefCatalogFileIfExists(
     const cleanedText = stripInstructionManagedSections(text);
     const markers = getRefCatalogSectionMarkers(kind);
 
-    if (cleanedText.includes(markers.start) && cleanedText.includes(markers.end)) {
+    if (
+      cleanedText.includes(markers.start) &&
+      cleanedText.includes(markers.end)
+    ) {
       const stripped = stripCatalogSection(cleanedText, kind);
       if (stripped.trim()) {
         await vscode.workspace.fs.writeFile(
@@ -994,7 +1002,7 @@ function generateSharedRefSection(
   if (resources.length === 0) {
     return wrapSection(
       markerPair,
-      `## Agent Resources\n\nNo resource entries listed yet. Use "Agent Resources Ninja: Search Resources" to install workspace or global resources.`,
+      `## Agent Resources\n\n${messages.emptyResourceEntries(getSearchCommandTitle())}`,
     );
   }
 
@@ -1047,7 +1055,7 @@ function generateSkillRefSection(
     return `${markerPair.start}
 ## Agent Skills
 
-No skill entries listed yet. Use "Agent Resources Ninja: Search Resources" to install workspace skills. Agents, prompts, instructions, and hooks stay in their native resource views.
+${messages.emptySkillEntries(getSearchCommandTitle())}
 
 ${markerPair.end}`;
   }
@@ -1450,7 +1458,7 @@ function generateSharedResourceSectionForFormat(
   if (resources.length === 0) {
     return wrapSection(
       markerPair,
-      `## Agent Resources\n\nNo resource entries listed yet. Use "Agent Resources Ninja: Search Resources" to install workspace or global resources.`,
+      `## Agent Resources\n\n${messages.emptyResourceEntries(getSearchCommandTitle())}`,
     );
   }
 
@@ -1530,7 +1538,7 @@ function generateLegacySection(
     return `${markerPair.start}
 ## Agent Skills
 
-No skill entries listed yet. Use "Agent Resources Ninja: Search Resources" to install workspace skills. Agents, prompts, instructions, and hooks stay in their native resource views.
+${messages.emptySkillEntries(getSearchCommandTitle())}
 
 ${markerPair.end}`;
   }
@@ -1723,7 +1731,7 @@ function generateCompactSection(
     return `${markerPair.start}
 ## Agent Skills (Compressed Index)
 
-No skill entries listed yet. Use "Agent Resources Ninja: Search Resources" to install workspace skills. Agents, prompts, instructions, and hooks stay in their native resource views.
+${messages.emptySkillEntries(getSearchCommandTitle())}
 
 ${markerPair.end}`;
   }
@@ -1786,7 +1794,7 @@ function generateFullSection(
     return `${markerPair.start}
 ## Agent Skills
 
-No skill entries listed yet. Use "Agent Resources Ninja: Search Resources" to install workspace skills. Agents, prompts, instructions, and hooks stay in their native resource views.
+${messages.emptySkillEntries(getSearchCommandTitle())}
 
 ${markerPair.end}`;
   }
