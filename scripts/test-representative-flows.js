@@ -331,10 +331,12 @@ test("uninstall by path supports every non-skill resource kind", () => {
 
 test("uninstall removes hook config entries and orphan metadata sidecar", () => {
   assert.match(skillInstallerSource, /updateHookConfigForUninstall/);
+  assert.match(skillInstallerSource, /restoreHookConfigFromBackup/);
   assert.match(
     skillInstallerSource,
     /deleteResourceInstallMetadata\(resourceUri, kind\)/,
   );
+  assert.match(extensionSource, /restoreHookConfigFromBackup/);
 });
 
 test("uninstall offers cleanup of merged MCP servers", () => {
@@ -393,6 +395,30 @@ test("reinstall command resolves browse-installed remote rows through workspace 
   );
 });
 
+test("reinstall updates only affected known sources when index entries are missing", () => {
+  assert.match(
+    extensionSource,
+    /async function refreshIndexForKnownSources\([\s\S]*updateIndexFromSingleSource\(/,
+  );
+  assert.match(extensionSource, /function getSourceRefreshSummary\(/);
+  assert.match(
+    extensionSource,
+    /refreshIndexForKnownSources\([\s\S]*\[resource\.source\],[\s\S]*resource\.name/,
+  );
+  assert.match(
+    extensionSource,
+    /refreshIndexForKnownSources\([\s\S]*\[source\],[\s\S]*skill\.name/,
+  );
+  assert.match(
+    extensionSource,
+    /const missingSources = collectMissingIndexedInstalledSkillSources\([\s\S]*refreshIndexForKnownSources\(index, missingSources\)/,
+  );
+  assert.match(
+    extensionSource,
+    /not found in index\. Update \$\{sourceSummary\} now\?/,
+  );
+});
+
 test("double click command installs uninstalled rows and reinstalls installed remote rows", () => {
   assert.match(
     extensionSource,
@@ -400,7 +426,7 @@ test("double click command installs uninstalled rows and reinstalls installed re
   );
   assert.match(
     extensionSource,
-    /isInstalled \? "resourceNinja\.reinstall" : "resourceNinja\.installDefault"/,
+    /isInstalled\s*\?\s*"resourceNinja\.reinstall"\s*:\s*"resourceNinja\.installDefault"/,
   );
   assert.match(
     treeProviderSource,
@@ -415,6 +441,15 @@ test("resource group reinstall explains empty remote-installed groups", () => {
     /This group has no remote-installed resources to reinstall/,
   );
   assert.match(extensionSource, /showInformationMessage/);
+});
+
+test("batch reinstall paths report partial failures instead of false success", () => {
+  assert.match(extensionSource, /const failedResources: string\[\] = \[\];/);
+  assert.match(extensionSource, /const failedSkills: string\[\] = \[\];/);
+  assert.match(extensionSource, /if \(failedResources\.length > 0\) \{/);
+  assert.match(extensionSource, /if \(failedSkills\.length > 0\) \{/);
+  assert.match(extensionSource, /getBatchFailureMessage\(/);
+  assert.match(extensionSource, /showWarningMessage\(/);
 });
 
 console.log("RESULT=PASS");

@@ -326,6 +326,16 @@ test("README front matter summarizes the ref-first output model", () => {
   assert.match(readmeJa, /Use Ref Output/);
 });
 
+test("README documents reinstall metadata preservation and source-scoped index refresh", () => {
+  assert.match(readme, /Reinstall preserves the recorded source metadata/);
+  assert.match(
+    readme,
+    /refreshes only the affected source indexes when possible/,
+  );
+  assert.match(readmeJa, /記録済み source metadata/);
+  assert.match(readmeJa, /可能なら該当 source だけを更新/);
+});
+
 test("README_ja avoids stale managed-output wording", () => {
   assert.doesNotMatch(readmeJa, /managed output/);
   assert.match(readmeJa, /生成リソース出力/);

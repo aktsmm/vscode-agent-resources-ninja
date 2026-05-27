@@ -200,12 +200,14 @@ function toUpdateResult(
   mutation: HookConfigMutationResult,
   source: "hooks.json" | "readme" | "known" | "none",
   options: HookConfigUpdateOptions,
+  backupUri?: vscode.Uri,
 ): HookConfigUpdateResult {
   return {
     operation,
     changed: mutation.changed,
     skipped: false,
     configUri,
+    backupUri,
     source,
     addedByEvent: mutation.addedByEvent,
     removedByEvent: mutation.removedByEvent,
@@ -267,7 +269,7 @@ async function updateHookConfig(
     };
   }
 
-  const { config: existingConfig } =
+  const { config: existingConfig, backupUri: parseBackupUri } =
     await readRootHooksConfigOrBackup(configUri);
   if (operation === "uninstall" && existingConfig === undefined) {
     return {
@@ -282,6 +284,8 @@ async function updateHookConfig(
       dryRun: options.dryRun,
     };
   }
+
+  let backupUri = parseBackupUri;
 
   const installedHookDirectory = toWorkspaceRelativePath(
     configRootUri,
@@ -303,6 +307,9 @@ async function updateHookConfig(
         );
 
   if (mutation.changed && !options.dryRun) {
+    if (operation === "uninstall" && existingConfig !== undefined) {
+      backupUri = backupUri || (await createHooksJsonBackup(configUri));
+    }
     await vscode.workspace.fs.writeFile(
       configUri,
       Buffer.from(`${JSON.stringify(mutation.config, null, 2)}\n`, "utf-8"),
@@ -315,6 +322,7 @@ async function updateHookConfig(
     mutation.changed ? mutation : createEmptyMutationResult(mutation.config),
     recommended.source,
     options,
+    backupUri,
   );
 }
 
@@ -332,6 +340,18 @@ export async function updateHookConfigForUninstall(
   options: HookConfigUpdateOptions = {},
 ): Promise<HookConfigUpdateResult> {
   return updateHookConfig("uninstall", configRootUri, hookReadmeUri, options);
+}
+
+export async function restoreHookConfigFromBackup(
+  result: HookConfigUpdateResult | undefined,
+): Promise<boolean> {
+  if (!result?.backupUri) {
+    return false;
+  }
+
+  const content = await vscode.workspace.fs.readFile(result.backupUri);
+  await vscode.workspace.fs.writeFile(result.configUri, content);
+  return true;
 }
 
 export async function getHookConfigDiagnostics(

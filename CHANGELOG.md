@@ -5,6 +5,20 @@ All notable changes to the "Agent Resources Ninja" extension will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.30] - 2026-05-28
+
+### Fixed
+
+- **Source-Aware Missing Index Recovery** - Reinstall flows now tell users which source index will be refreshed when an installed resource is missing from the current index, and they refresh only the affected source whenever that upstream repository is known instead of presenting a generic full-index update path / 再インストール対象が現在のインデックスに見つからない場合、どの source を更新するかをユーザーへ明示し、upstream repository が分かるときは generic な全体更新ではなく該当 source だけを更新するようにしました。
+- **Install-Time Metadata Normalization** - Normalized `source` when writing `.skill-meta.json` and non-skill install sidecars so freshly installed local resources do not keep stale `unknown` metadata until a later refresh path happens to clean them up / `.skill-meta.json` と non-skill sidecar metadata の書き込み時に `source` を正規化し、あとから refresh が走るまで stale な `unknown` が残る経路をなくしました。
+- **Plugin Sidecar Preservation in Local Scans** - Local resource scanning now preserves plugin root and manifest metadata from install sidecars, so plugin-derived resources can reconnect to their original package context during reinstall and grouping flows / ローカルリソースのスキャン時に install sidecar 由来の plugin root / manifest metadata を保持するようにし、plugin 由来リソースが再インストールや grouping で元の package context を失わないようにしました。
+- **Hook Uninstall Rollback Safety** - Hook uninstall now keeps a `hooks.json` backup and restores it automatically when the hook directory delete fails after config mutation, preventing partial uninstall state where configuration is removed but the installed hook files remain / hook のアンインストールでは `hooks.json` のバックアップを保持し、設定更新後に hook directory の削除が失敗した場合は自動で復元するようにして、設定だけが先に消えてファイルが残る partial uninstall 状態を防ぎました。
+- **Batch Reinstall Failure Guards** - Added explicit regression guards for partial-failure reporting in batch reinstall paths so mixed success and failure cases keep warning summaries instead of silently regressing to false-success notifications / batch reinstall で success と failure が混在した場合の warning 集計を回帰テストで固定し、誤って false-success 通知へ戻らないようにしました。
+
+### Tests
+
+- Revalidated compile, resource regression, hook config rollback coverage, README/release UX, manifest consistency, search logic, When to Use extraction, extension-host smoke, npm audit, and one-shot packaging build before release / リリース前に compile、resource 回帰、hook config rollback の動的テスト、README/release UX、manifest consistency、search logic、When to Use 抽出、extension-host smoke、npm audit、one-shot packaging build を再検証しました。
+
 ## [0.2.29] - 2026-05-28
 
 ### Fixed

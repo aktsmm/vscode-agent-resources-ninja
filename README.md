@@ -88,6 +88,7 @@ Managed output follows a ref-first model by default: keep **Use Ref Output** on 
 
 - One-click default install applies to every resource kind: skills, agents, instructions, prompts, hooks, MCP config, plugin manifests, and Cursor rules. Click and double-click installs use **Default Install Target**; the context menu **Install Resource** still asks for a target and supports Custom.
 - In **Remote Resources**, double-click keeps the same row action as the inline button: uninstalled rows install, already-installed remote rows reinstall from their recorded source metadata, and local-only rows do not present remote install/reinstall actions.
+- Reinstall preserves the recorded source metadata (`remotePath`, plugin sidecar fields, and coexistence flags already stored in `.skill-meta.json` when present) so installed rows reconnect to the same upstream resource instead of degrading to a name-only match.
 - Click and double-click installs of MCP config resources copy the file to the Workspace MCP Directory for review without modifying `.vscode/mcp.json`. To merge compatible servers into `.vscode/mcp.json`, use the context-menu **Install Resource** action and pick the merge option; existing server keys always require overwrite confirmation.
 - Uninstalling an MCP config that has been merged into `.vscode/mcp.json` shows an explicit modal to also remove the matching server entries with a backup before deletion.
 - Installed MCP config resources continue to show whether they are only staged for review or already represented in `.vscode/mcp.json`.
@@ -98,12 +99,12 @@ Managed output follows a ref-first model by default: keep **Use Ref Output** on 
 - **Auto-extract "When to Use"** - Extracted from SKILL.md `## When to Use` section
 - **Edit Description** - Right-click installed skills to customize the instruction-file description
 - Uninstall workspace and user/global resources from the relevant resource view
-- **Reinstall All Workspace Skills** - Batch reinstall installed workspace skills from latest source metadata (with auto index update)
+- **Reinstall All Workspace Skills** - Batch reinstall installed workspace skills from latest source metadata. When indexed entries are missing, Agent Resources Ninja refreshes only the affected source indexes when possible and falls back to a full index update only when the source cannot be determined.
 - **Reinstall Resource Groups** - Right-click a Workspace Resources kind group, such as Skills or Agents, to reinstall all installed resources in that group that were downloaded from remote sources
 - **User / Global Reinstall** - User / Global Resource Home also exposes per-resource reinstall for remote-installed rows and group reinstall for kind and plugin groups, so plugin-managed resources can be refreshed from either installed view
 - **Install Feedback** - NEW badge, status bar notification, auto-select in tree view
 - **Open Folder** - Quick access to installed resource folder
-- **Index Integrity Check** - Auto-detect missing resources and prompt for index update
+- **Index Integrity Check** - Auto-detect missing resources and refresh the affected source index when the upstream repository is known, with full index refresh only as a fallback
 
 ### 🔧 Multi-Tool Support
 

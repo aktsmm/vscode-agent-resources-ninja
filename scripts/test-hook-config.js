@@ -101,7 +101,12 @@ const {
     removeHookConfig,
     extractRecommendedHookConfigFromReadme,
   },
-  hookConfigManager: { getHookConfigDiagnostics, updateHookConfigForInstall },
+  hookConfigManager: {
+    getHookConfigDiagnostics,
+    restoreHookConfigFromBackup,
+    updateHookConfigForInstall,
+    updateHookConfigForUninstall,
+  },
 } = loadModules();
 
 test("first hook install creates hooks config from known fallback", () => {
@@ -309,6 +314,38 @@ test("invalid root hooks.json is backed up and not overwritten", async () => {
   assert.strictEqual(
     await fs.promises.readFile(path.join(tempRoot, "hooks.json"), "utf8"),
     "{ bad json",
+  );
+});
+
+test("uninstall writes backup and can restore hooks.json after later failures", async () => {
+  const tempRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), "ninja-hooks-restore-"),
+  );
+  const rootUri = vscode.Uri.file(tempRoot);
+  const hookDir = path.join(tempRoot, ".github", "hooks", "session-logger");
+  const readmePath = path.join(hookDir, "README.md");
+  await fs.promises.mkdir(hookDir, { recursive: true });
+  await fs.promises.writeFile(readmePath, "# Session Logger\n");
+
+  await updateHookConfigForInstall(rootUri, vscode.Uri.file(readmePath));
+  const beforeUninstall = await fs.promises.readFile(
+    path.join(tempRoot, "hooks.json"),
+    "utf8",
+  );
+
+  const result = await updateHookConfigForUninstall(
+    rootUri,
+    vscode.Uri.file(readmePath),
+  );
+  assert.ok(result.changed);
+  assert.ok(result.backupUri, "uninstall should keep a backup for rollback");
+  assert.ok(fs.existsSync(result.backupUri.fsPath));
+
+  const restored = await restoreHookConfigFromBackup(result);
+  assert.strictEqual(restored, true);
+  assert.strictEqual(
+    await fs.promises.readFile(path.join(tempRoot, "hooks.json"), "utf8"),
+    beforeUninstall,
   );
 });
 

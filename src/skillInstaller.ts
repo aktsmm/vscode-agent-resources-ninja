@@ -48,6 +48,7 @@ import { logger } from "./logger";
 import { openBugReport as openBugReportIssue } from "./bugReport";
 import {
   HookConfigUpdateResult,
+  restoreHookConfigFromBackup,
   updateHookConfigForInstall,
   updateHookConfigForUninstall,
 } from "./hookConfigManager";
@@ -130,7 +131,10 @@ interface GitHubContentRef extends GitHubRepositoryRef {
 }
 
 function normalizeOwnerRepo(value: string): string {
-  return value.trim().replace(/\.git$/i, "").replace(/^\/+|\/+$/g, "");
+  return value
+    .trim()
+    .replace(/\.git$/i, "")
+    .replace(/^\/+|\/+$/g, "");
 }
 
 function extractRepositoryRefFromGitHubUrl(
@@ -203,8 +207,13 @@ function extractContentRefFromGitHubUrl(
   };
 }
 
-function findSourceByRepository(skill: Skill, sources: Source[]): Source | undefined {
-  const directSource = sources.find((candidate) => candidate.id === skill.source);
+function findSourceByRepository(
+  skill: Skill,
+  sources: Source[],
+): Source | undefined {
+  const directSource = sources.find(
+    (candidate) => candidate.id === skill.source,
+  );
   if (directSource) {
     return directSource;
   }
@@ -297,7 +306,10 @@ async function writeResourceInstallMetadata(
   const meta: ResourceInstallMeta = {
     kind,
     name: skill.name,
-    source: skill.source,
+    source: normalizeSkillMetaSource({
+      source: skill.source,
+      remotePath: skill.path,
+    }),
     description: skill.description,
     description_ja: skill.description_ja,
     categories: skill.categories,
@@ -863,28 +875,175 @@ export async function installSkill(
           ? skill.pluginManifestPath || skill.path
           : skill.path,
       ));
-      const remotePath =
-        resourceKind === "plugin"
-          ? skill.pluginRoot ||
-            getPluginRootFromManifestPath(
-              skill.pluginManifestPath || skill.path,
-            ) ||
-            skill.path
-          : skill.path;
+    const remotePath =
+      resourceKind === "plugin"
+        ? skill.pluginRoot ||
+          getPluginRootFromManifestPath(
+            skill.pluginManifestPath || skill.path,
+          ) ||
+          skill.path
+        : skill.path;
 
-      logger.info(`[Resource Ninja] Installing ${resourceKind}: ${skill.name}`);
+    logger.info(`[Resource Ninja] Installing ${resourceKind}: ${skill.name}`);
+    logger.info(
+      `[Resource Ninja] Owner: ${owner}, Repo: ${repo}, Branch: ${branch}`,
+    );
+    if (!source) {
       logger.info(
-        `[Resource Ninja] Owner: ${owner}, Repo: ${repo}, Branch: ${branch}`,
+        `[Resource Ninja] Resolved temporary install source from runtime URL metadata`,
       );
-      if (!source) {
-        logger.info(
-          `[Resource Ninja] Resolved temporary install source from runtime URL metadata`,
+    }
+    logger.info(`[Resource Ninja] Remote path: ${remotePath}`);
+
+    if (resourceKind === "plugin") {
+      await vscode.workspace.fs.createDirectory(skillPath);
+      const result = await downloadDirectory(
+        owner,
+        repo,
+        remotePath,
+        skillPath,
+        branch,
+        token,
+      );
+      await writeResourceInstallMetadata(skillPath, skill);
+      if (result.errors.length > 0 && !options.suppressRecoveryPrompt) {
+        vscode.window.showWarningMessage(
+          isJapanese()
+            ? `プラグイン "${skill.name}" の一部のファイルがダウンロードできませんでした。コピーされた内容を確認してください。`
+            : `Some files for plugin "${skill.name}" could not be downloaded. Review the copied contents before activation.`,
         );
       }
-      logger.info(`[Resource Ninja] Remote path: ${remotePath}`);
+      return {};
+    }
 
-      if (resourceKind === "plugin") {
-        await vscode.workspace.fs.createDirectory(skillPath);
+    if (resourceKind !== "skill") {
+      if (resourceKind === "hook") {
+        const remoteDir = remotePath.split("/").slice(0, -1).join("/");
+        await vscode.workspace.fs.createDirectory(
+          getParentDirectoryUri(skillPath),
+        );
+        await downloadDirectory(
+          owner,
+          repo,
+          remoteDir,
+          getParentDirectoryUri(skillPath),
+          branch,
+          token,
+        );
+      } else {
+        const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${remotePath}`;
+        await vscode.workspace.fs.createDirectory(
+          getParentDirectoryUri(skillPath),
+        );
+        const content = await fetchFileContent(rawUrl, token);
+        await vscode.workspace.fs.writeFile(
+          skillPath,
+          Buffer.from(content, "utf-8"),
+        );
+      }
+      await writeResourceInstallMetadata(skillPath, skill);
+      if (resourceKind === "hook") {
+        const hookConfigRootUri = getHookConfigRootUri(
+          workspaceUri,
+          config,
+          skillPath,
+          options,
+        );
+        const hookConfigUpdate = await updateHookConfigForInstall(
+          hookConfigRootUri,
+          skillPath,
+        );
+        return { hookConfigUpdate };
+      }
+      if (
+        resourceKind === "mcp" &&
+        options.mcpInstallMode === "mergeIntoWorkspace"
+      ) {
+        const mcpConfigUpdate = await updateMcpConfigForInstall(
+          workspaceUri,
+          skillPath,
+          {
+            confirmOverwrite: options.confirmMcpServerOverwrite,
+          },
+        );
+        return { mcpConfigUpdate };
+      }
+      return {};
+    }
+
+    // パスが .md で終わる場合は単独ファイル
+    if (remotePath.endsWith(".md")) {
+      const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${remotePath}`;
+      logger.info(`[Resource Ninja] Downloading single file: ${rawUrl}`);
+      try {
+        const content = await fetchFileContent(rawUrl, token);
+        logger.info(`[Resource Ninja] Downloaded ${content.length} bytes`);
+
+        // SKILL.md として保存（メインファイル）
+        const skillMdPath = vscode.Uri.joinPath(skillPath, "SKILL.md");
+        await vscode.workspace.fs.writeFile(
+          skillMdPath,
+          Buffer.from(content, "utf-8"),
+        );
+        logger.info(`[Resource Ninja] Saved as SKILL.md`);
+      } catch (error) {
+        logger.error(`[Resource Ninja] Failed to download ${rawUrl}:`, error);
+        const errorMsg = error instanceof Error ? error.message : String(error);
+
+        // 404エラーの場合はインストールをキャンセル（フォールバック作らない）
+        if (errorMsg.includes("404")) {
+          // 作成したフォルダを削除
+          try {
+            await vscode.workspace.fs.delete(skillPath, { recursive: true });
+          } catch {
+            // 削除失敗は無視
+          }
+
+          // バグレポートオプションを提供
+          const updateIndex = isJapanese()
+            ? "インデックス更新"
+            : "Update Index";
+          const reportBug = isJapanese() ? "バグ報告" : "Report Bug";
+
+          if (!options.suppressRecoveryPrompt) {
+            const choice = await vscode.window.showErrorMessage(
+              isJapanese()
+                ? `スキル "${skill.name}" が見つかりません。\nスキルインデックスの情報が古い可能性があります。`
+                : `Skill "${skill.name}" not found.\nThe skill index may be outdated.`,
+              updateIndex,
+              reportBug,
+            );
+
+            if (choice === updateIndex) {
+              // Update Index コマンドを実行
+              await vscode.commands.executeCommand("resourceNinja.updateIndex");
+            } else if (choice === reportBug) {
+              // バグレポートを作成
+              await openBugReport(
+                skill,
+                sourceForBranch,
+                rawUrl,
+                "404 Not Found",
+              );
+            }
+          }
+
+          throw new Error(`Skill not found: ${skill.name}`);
+        }
+
+        // その他のエラーはフォールバック版を作成
+        if (!options.suppressRecoveryPrompt) {
+          vscode.window.showWarningMessage(
+            isJapanese()
+              ? `スキル "${skill.name}" のダウンロードに失敗しました。フォールバック版を作成します。\nエラー: ${errorMsg}`
+              : `Failed to download skill "${skill.name}". Creating fallback version.\nError: ${errorMsg}`,
+          );
+        }
+        await createFallbackSkillMd(skillPath, skill);
+      }
+    } else {
+      // フォルダ全体をダウンロード
+      try {
         const result = await downloadDirectory(
           owner,
           repo,
@@ -893,263 +1052,110 @@ export async function installSkill(
           branch,
           token,
         );
-        await writeResourceInstallMetadata(skillPath, skill);
-        if (result.errors.length > 0 && !options.suppressRecoveryPrompt) {
-          vscode.window.showWarningMessage(
-            isJapanese()
-              ? `プラグイン "${skill.name}" の一部のファイルがダウンロードできませんでした。コピーされた内容を確認してください。`
-              : `Some files for plugin "${skill.name}" could not be downloaded. Review the copied contents before activation.`,
-          );
-        }
-        return {};
-      }
 
-      if (resourceKind !== "skill") {
-        if (resourceKind === "hook") {
-          const remoteDir = remotePath.split("/").slice(0, -1).join("/");
-          await vscode.workspace.fs.createDirectory(
-            getParentDirectoryUri(skillPath),
-          );
-          await downloadDirectory(
-            owner,
-            repo,
-            remoteDir,
-            getParentDirectoryUri(skillPath),
-            branch,
-            token,
-          );
-        } else {
-          const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${remotePath}`;
-          await vscode.workspace.fs.createDirectory(
-            getParentDirectoryUri(skillPath),
-          );
-          const content = await fetchFileContent(rawUrl, token);
-          await vscode.workspace.fs.writeFile(
-            skillPath,
-            Buffer.from(content, "utf-8"),
-          );
-        }
-        await writeResourceInstallMetadata(skillPath, skill);
-        if (resourceKind === "hook") {
-          const hookConfigRootUri = getHookConfigRootUri(
-            workspaceUri,
-            config,
-            skillPath,
-            options,
-          );
-          const hookConfigUpdate = await updateHookConfigForInstall(
-            hookConfigRootUri,
-            skillPath,
-          );
-          return { hookConfigUpdate };
-        }
-        if (
-          resourceKind === "mcp" &&
-          options.mcpInstallMode === "mergeIntoWorkspace"
-        ) {
-          const mcpConfigUpdate = await updateMcpConfigForInstall(
-            workspaceUri,
-            skillPath,
-            {
-              confirmOverwrite: options.confirmMcpServerOverwrite,
-            },
-          );
-          return { mcpConfigUpdate };
-        }
-        return {};
-      }
-
-      // パスが .md で終わる場合は単独ファイル
-      if (remotePath.endsWith(".md")) {
-        const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${remotePath}`;
-        logger.info(`[Resource Ninja] Downloading single file: ${rawUrl}`);
+        // SKILL.md がなければ作成
         try {
-          const content = await fetchFileContent(rawUrl, token);
-          logger.info(`[Resource Ninja] Downloaded ${content.length} bytes`);
-
-          // SKILL.md として保存（メインファイル）
-          const skillMdPath = vscode.Uri.joinPath(skillPath, "SKILL.md");
-          await vscode.workspace.fs.writeFile(
-            skillMdPath,
-            Buffer.from(content, "utf-8"),
+          await vscode.workspace.fs.stat(
+            vscode.Uri.joinPath(skillPath, "SKILL.md"),
           );
-          logger.info(`[Resource Ninja] Saved as SKILL.md`);
-        } catch (error) {
-          logger.error(`[Resource Ninja] Failed to download ${rawUrl}:`, error);
-          const errorMsg =
-            error instanceof Error ? error.message : String(error);
+        } catch {
+          await createFallbackSkillMd(skillPath, skill);
+        }
 
-          // 404エラーの場合はインストールをキャンセル（フォールバック作らない）
-          if (errorMsg.includes("404")) {
-            // 作成したフォルダを削除
-            try {
-              await vscode.workspace.fs.delete(skillPath, { recursive: true });
-            } catch {
-              // 削除失敗は無視
-            }
-
-            // バグレポートオプションを提供
-            const updateIndex = isJapanese()
-              ? "インデックス更新"
-              : "Update Index";
-            const reportBug = isJapanese() ? "バグ報告" : "Report Bug";
-
-            if (!options.suppressRecoveryPrompt) {
-              const choice = await vscode.window.showErrorMessage(
-                isJapanese()
-                  ? `スキル "${skill.name}" が見つかりません。\nスキルインデックスの情報が古い可能性があります。`
-                  : `Skill "${skill.name}" not found.\nThe skill index may be outdated.`,
-                updateIndex,
-                reportBug,
-              );
-
-              if (choice === updateIndex) {
-                // Update Index コマンドを実行
-                await vscode.commands.executeCommand(
-                  "resourceNinja.updateIndex",
-                );
-              } else if (choice === reportBug) {
-                // バグレポートを作成
-                await openBugReport(
-                  skill,
-                  sourceForBranch,
-                  rawUrl,
-                  "404 Not Found",
+        // サブディレクトリで部分的なエラーがあった場合は通知
+        if (result.errors.length > 0) {
+          logger.warn(
+            `[Resource Ninja] Partial errors during download:`,
+            result.errors,
+          );
+          // SKILL.md が正常にダウンロードされていれば警告のみ
+          const skillMdPath = vscode.Uri.joinPath(skillPath, "SKILL.md");
+          try {
+            const stat = await vscode.workspace.fs.stat(skillMdPath);
+            if (stat.size > 100) {
+              if (!options.suppressRecoveryPrompt) {
+                vscode.window.showWarningMessage(
+                  isJapanese()
+                    ? `スキル "${skill.name}" の一部のファイルがダウンロードできませんでした。SKILL.md は正常にインストールされています。`
+                    : `Some files for skill "${skill.name}" could not be downloaded. SKILL.md was installed successfully.`,
                 );
               }
             }
+          } catch {
+            // SKILL.md 自体がない場合はフォールバック（上で処理済み）
+          }
+        }
+      } catch (error) {
+        logger.error(`[Resource Ninja] Failed to download directory:`, error);
+        const errorMsg = error instanceof Error ? error.message : String(error);
 
-            throw new Error(`Skill not found: ${skill.name}`);
+        // 404エラーの場合はインストールをキャンセル（フォールバック作らない）
+        if (errorMsg.includes("404")) {
+          // 作成したフォルダを削除
+          try {
+            await vscode.workspace.fs.delete(skillPath, { recursive: true });
+          } catch {
+            // 削除失敗は無視
           }
 
-          // その他のエラーはフォールバック版を作成
+          // バグレポートオプションを提供
+          const updateIndex = isJapanese()
+            ? "インデックス更新"
+            : "Update Index";
+          const reportBug = isJapanese() ? "バグ報告" : "Report Bug";
+
+          if (!options.suppressRecoveryPrompt) {
+            const choice = await vscode.window.showErrorMessage(
+              isJapanese()
+                ? `スキル "${skill.name}" が見つかりません。\nスキルインデックスの情報が古い可能性があります。`
+                : `Skill "${skill.name}" not found.\nThe skill index may be outdated.`,
+              updateIndex,
+              reportBug,
+            );
+
+            if (choice === updateIndex) {
+              await vscode.commands.executeCommand("resourceNinja.updateIndex");
+            } else if (choice === reportBug) {
+              const repoTreeUrl = `https://github.com/${owner}/${repo}/tree/${branch}/${remotePath}`;
+              await openBugReport(
+                skill,
+                sourceForBranch,
+                repoTreeUrl,
+                "404 Not Found",
+              );
+            }
+          }
+
+          throw new Error(`Skill not found: ${skill.name}`);
+        }
+
+        // Don't overwrite SKILL.md with fallback if it was already downloaded
+        const skillMdPath = vscode.Uri.joinPath(skillPath, "SKILL.md");
+        let skillMdExists = false;
+        try {
+          const stat = await vscode.workspace.fs.stat(skillMdPath);
+          // Consider valid if > 100 bytes
+          skillMdExists = stat.size > 100;
+        } catch {
+          // File does not exist
+        }
+        if (!skillMdExists) {
+          await createFallbackSkillMd(skillPath, skill);
+        } else {
+          logger.info(
+            `[Resource Ninja] SKILL.md already exists, skipping fallback creation`,
+          );
+          // Notify user that some subdirectory files may be missing
           if (!options.suppressRecoveryPrompt) {
             vscode.window.showWarningMessage(
               isJapanese()
-                ? `スキル "${skill.name}" のダウンロードに失敗しました。フォールバック版を作成します。\nエラー: ${errorMsg}`
-                : `Failed to download skill "${skill.name}". Creating fallback version.\nError: ${errorMsg}`,
+                ? `スキル "${skill.name}" の一部のファイルがダウンロードできませんでした。SKILL.md は正常にインストールされています。`
+                : `Some files for skill "${skill.name}" could not be downloaded. SKILL.md was installed successfully.`,
             );
-          }
-          await createFallbackSkillMd(skillPath, skill);
-        }
-      } else {
-        // フォルダ全体をダウンロード
-        try {
-          const result = await downloadDirectory(
-            owner,
-            repo,
-            remotePath,
-            skillPath,
-            branch,
-            token,
-          );
-
-          // SKILL.md がなければ作成
-          try {
-            await vscode.workspace.fs.stat(
-              vscode.Uri.joinPath(skillPath, "SKILL.md"),
-            );
-          } catch {
-            await createFallbackSkillMd(skillPath, skill);
-          }
-
-          // サブディレクトリで部分的なエラーがあった場合は通知
-          if (result.errors.length > 0) {
-            logger.warn(
-              `[Resource Ninja] Partial errors during download:`,
-              result.errors,
-            );
-            // SKILL.md が正常にダウンロードされていれば警告のみ
-            const skillMdPath = vscode.Uri.joinPath(skillPath, "SKILL.md");
-            try {
-              const stat = await vscode.workspace.fs.stat(skillMdPath);
-              if (stat.size > 100) {
-                if (!options.suppressRecoveryPrompt) {
-                  vscode.window.showWarningMessage(
-                    isJapanese()
-                      ? `スキル "${skill.name}" の一部のファイルがダウンロードできませんでした。SKILL.md は正常にインストールされています。`
-                      : `Some files for skill "${skill.name}" could not be downloaded. SKILL.md was installed successfully.`,
-                  );
-                }
-              }
-            } catch {
-              // SKILL.md 自体がない場合はフォールバック（上で処理済み）
-            }
-          }
-        } catch (error) {
-          logger.error(`[Resource Ninja] Failed to download directory:`, error);
-          const errorMsg =
-            error instanceof Error ? error.message : String(error);
-
-          // 404エラーの場合はインストールをキャンセル（フォールバック作らない）
-          if (errorMsg.includes("404")) {
-            // 作成したフォルダを削除
-            try {
-              await vscode.workspace.fs.delete(skillPath, { recursive: true });
-            } catch {
-              // 削除失敗は無視
-            }
-
-            // バグレポートオプションを提供
-            const updateIndex = isJapanese()
-              ? "インデックス更新"
-              : "Update Index";
-            const reportBug = isJapanese() ? "バグ報告" : "Report Bug";
-
-            if (!options.suppressRecoveryPrompt) {
-              const choice = await vscode.window.showErrorMessage(
-                isJapanese()
-                  ? `スキル "${skill.name}" が見つかりません。\nスキルインデックスの情報が古い可能性があります。`
-                  : `Skill "${skill.name}" not found.\nThe skill index may be outdated.`,
-                updateIndex,
-                reportBug,
-              );
-
-              if (choice === updateIndex) {
-                await vscode.commands.executeCommand(
-                  "resourceNinja.updateIndex",
-                );
-              } else if (choice === reportBug) {
-                const repoTreeUrl = `https://github.com/${owner}/${repo}/tree/${branch}/${remotePath}`;
-                await openBugReport(
-                  skill,
-                  sourceForBranch,
-                  repoTreeUrl,
-                  "404 Not Found",
-                );
-              }
-            }
-
-            throw new Error(`Skill not found: ${skill.name}`);
-          }
-
-          // Don't overwrite SKILL.md with fallback if it was already downloaded
-          const skillMdPath = vscode.Uri.joinPath(skillPath, "SKILL.md");
-          let skillMdExists = false;
-          try {
-            const stat = await vscode.workspace.fs.stat(skillMdPath);
-            // Consider valid if > 100 bytes
-            skillMdExists = stat.size > 100;
-          } catch {
-            // File does not exist
-          }
-          if (!skillMdExists) {
-            await createFallbackSkillMd(skillPath, skill);
-          } else {
-            logger.info(
-              `[Resource Ninja] SKILL.md already exists, skipping fallback creation`,
-            );
-            // Notify user that some subdirectory files may be missing
-            if (!options.suppressRecoveryPrompt) {
-              vscode.window.showWarningMessage(
-                isJapanese()
-                  ? `スキル "${skill.name}" の一部のファイルがダウンロードできませんでした。SKILL.md は正常にインストールされています。`
-                  : `Some files for skill "${skill.name}" could not be downloaded. SKILL.md was installed successfully.`,
-              );
-            }
           }
         }
       }
+    }
   }
 
   // メタデータを保存（description などを後で取得できるように）
@@ -1171,7 +1177,10 @@ export async function installSkill(
   const existingMeta = await readSkillMetaIfExists(metaPath);
   const meta: SkillMeta = mergeSkillMeta(existingMeta, {
     name: skill.name,
-    source: skill.source,
+    source: normalizeSkillMetaSource({
+      source: skill.source,
+      remotePath: skill.path,
+    }),
     description: description,
     description_ja: skill.description_ja,
     whenToUse: whenToUse || undefined,
@@ -1368,8 +1377,8 @@ export async function uninstallSkillByPath(
     );
   }
 
+  let hookConfigUpdate: HookConfigUpdateResult | undefined;
   try {
-    let hookConfigUpdate: HookConfigUpdateResult | undefined;
     if (kind === "hook" && !isHookConfigFile) {
       const hookReadmeUri = isAbsoluteResourcePath
         ? vscode.Uri.file(path.normalize(relativePath))
@@ -1395,7 +1404,14 @@ export async function uninstallSkillByPath(
     }
     return { hookConfigUpdate };
   } catch (error) {
-    throw new Error(`Failed to delete installed resource: ${error}`);
+    let errorMessage = String(error);
+    if (hookConfigUpdate?.changed) {
+      const restored = await restoreHookConfigFromBackup(hookConfigUpdate);
+      if (restored) {
+        errorMessage = `${errorMessage} hooks.json was restored from backup.`;
+      }
+    }
+    throw new Error(`Failed to delete installed resource: ${errorMessage}`);
   }
 }
 

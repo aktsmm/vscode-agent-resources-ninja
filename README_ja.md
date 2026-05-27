@@ -84,6 +84,7 @@
 
 - ワンクリックの default install は skill だけでなく agents、instructions、prompts、hooks、MCP config、plugin manifest、Cursor rules を含むすべての resource kind に適用されます。クリック / ダブルクリックインストールは **Default Install Target** を使い、コンテキストメニューの **Install Resource** は毎回インストール先を選択でき、Custom も選べます。
 - **Remote Resources** では、ダブルクリックの動作は行の inline action に合わせています。未インストール行は install、インストール済みの remote 行は記録済み source metadata を使って reinstall、local-only 行には remote install/reinstall action を出しません。
+- 再インストールでは、記録済み source metadata（`remotePath`、plugin sidecar の項目、`.skill-meta.json` に保持済みの coexistence フラグ）を維持し、name だけの曖昧一致に落とさず同じ upstream resource へ再接続します。
 - MCP config リソースのクリック / ダブルクリックインストールは Workspace MCP Directory へレビュー用にコピーするのみで、`.vscode/mcp.json` は変更しません。互換 server を `.vscode/mcp.json` にマージしたい場合は、コンテキストメニューの **Install Resource** を使って merge オプションを選択してください。既存 server key の上書きは必ず確認します。
 - `.vscode/mcp.json` にマージ済みの MCP config をアンインストールすると、対応する server entry も削除するか確認する明示モーダルを表示し、削除前に backup を作成します。
 - インストール済み MCP config は、確認用コピーだけの状態か `.vscode/mcp.json` に反映済みかを行の詳細とツールチップで確認できます。
@@ -94,12 +95,12 @@
 - **「When to Use」自動抽出** - SKILL.md の `## When to Use` セクションから自動取得
 - **説明を編集** - インストール済み skill の instruction file 向け説明を右クリックでカスタマイズ
 - 対象ビューから workspace / user / global リソースをアンインストール
-- **ワークスペース skill の一括再インストール** - インストール済み skill をソースメタデータから一括再インストール（インデックス自動更新付き）
+- **ワークスペース skill の一括再インストール** - インストール済み skill をソースメタデータから一括再インストール。インデックス項目が見つからない場合は、可能なら該当 source だけを更新し、source を特定できない場合だけ全体更新へフォールバックします。
 - **リソースグループの再インストール** - Workspace Resources の Skills や Agents などの種別グループを右クリックし、そのグループ内のリモートソースからインストールされたリソースを一括再インストール
 - **User / Global 側の再インストール** - ユーザー / グローバル リソース view でも、リモート由来の個別行の再インストールと、種別グループ・プラグイングループ単位の再インストールを行えます
 - **インストール通知** - NEW バッジ、ステータスバー表示、ツリービューで自動選択
 - **フォルダを開く** - インストール済みリソースのフォルダにクイックアクセス
-- **インデックス整合性チェック** - 未登録リソースを自動検出し、インデックス更新を提案
+- **インデックス整合性チェック** - 未登録リソースを自動検出し、upstream repository が分かる場合は該当 source のインデックス更新を提案。source 不明時のみ全体更新へフォールバック
 
 ### 🔧 マルチツール対応
 

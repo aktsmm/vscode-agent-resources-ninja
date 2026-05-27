@@ -31,6 +31,7 @@ import {
 } from "./skillInstaller";
 import {
   formatHookConfigUpdateSummary,
+  restoreHookConfigFromBackup,
   updateHookConfigForUninstall,
 } from "./hookConfigManager";
 import {
@@ -200,6 +201,27 @@ function collectMissingIndexedInstalledSkills(
     .filter((meta) => isIndexTrackedInstalledSkill(meta))
     .filter((meta) => !findIndexedSkillForInstalledMeta(index, meta))
     .map((meta) => meta.name);
+}
+
+function isKnownIndexedSourceId(
+  sourceId: string | undefined,
+): sourceId is string {
+  return !!sourceId && sourceId !== "unknown" && sourceId !== "local";
+}
+
+function collectMissingIndexedInstalledSkillSources(
+  index: SkillIndex,
+  installedMeta: SkillMeta[],
+): string[] {
+  return Array.from(
+    new Set(
+      installedMeta
+        .filter((meta) => isIndexTrackedInstalledSkill(meta))
+        .filter((meta) => !findIndexedSkillForInstalledMeta(index, meta))
+        .map((meta) => meta.source)
+        .filter(isKnownIndexedSourceId),
+    ),
+  );
 }
 
 async function deleteInstalledResourceByPath(
@@ -730,6 +752,128 @@ export async function activate(
     );
   }
 
+  function getSourceDisplayName(index: SkillIndex, sourceId: string): string {
+    return (
+      index.sources.find((source: Source) => source.id === sourceId)?.name ||
+      sourceId
+    );
+  }
+
+  function getSourceRefreshSummary(
+    index: SkillIndex,
+    sourceIds: Array<string | undefined>,
+  ): string {
+    const knownSourceIds = Array.from(
+      new Set(sourceIds.filter(isKnownIndexedSourceId)),
+    );
+    if (knownSourceIds.length === 0) {
+      return isJapanese() ? "全インデックス" : "the full index";
+    }
+    if (knownSourceIds.length === 1) {
+      return getSourceDisplayName(index, knownSourceIds[0]);
+    }
+    return isJapanese()
+      ? `${knownSourceIds.length} 個の該当ソース`
+      : `${knownSourceIds.length} affected sources`;
+  }
+
+  async function refreshIndexForKnownSources(
+    index: SkillIndex,
+    sourceIds: Array<string | undefined>,
+    reasonLabel?: string,
+  ): Promise<SkillIndex> {
+    const knownSourceIds = Array.from(
+      new Set(sourceIds.filter(isKnownIndexedSourceId)),
+    );
+
+    if (knownSourceIds.length === 0) {
+      return vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: isJapanese() ? "インデックスを更新中..." : "Updating index...",
+          cancellable: false,
+        },
+        async (progress) => updateIndexFromSources(context, index, progress),
+      );
+    }
+
+    if (knownSourceIds.length === 1) {
+      const sourceId = knownSourceIds[0];
+      const sourceLabel = getSourceDisplayName(index, sourceId);
+      return vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: reasonLabel
+            ? isJapanese()
+              ? `${reasonLabel} のため ${sourceLabel} を更新中...`
+              : `Updating ${sourceLabel} for ${reasonLabel}...`
+            : messages.updatingSource(sourceLabel),
+          cancellable: false,
+        },
+        async (progress) =>
+          updateIndexFromSingleSource(context, index, sourceId, progress, {
+            forceScan: true,
+          }),
+      );
+    }
+
+    return vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: isJapanese()
+          ? "該当ソースのインデックスを更新中..."
+          : "Updating affected source indexes...",
+        cancellable: false,
+      },
+      async (progress) => {
+        let nextIndex = index;
+        let completed = 0;
+        for (const sourceId of knownSourceIds) {
+          progress.report({
+            message: `${getSourceDisplayName(nextIndex, sourceId)} (${completed + 1}/${knownSourceIds.length})`,
+            increment: 100 / knownSourceIds.length,
+          });
+          nextIndex = await updateIndexFromSingleSource(
+            context,
+            nextIndex,
+            sourceId,
+            progress,
+            { forceScan: true },
+          );
+          completed++;
+        }
+        return nextIndex;
+      },
+    );
+  }
+
+  type ReinstallCommandOptions = {
+    suppressSuccessMessage?: boolean;
+    suppressRecoveryPrompt?: boolean;
+  };
+
+  function normalizeReinstallCommandOptions(
+    value?: boolean | ReinstallCommandOptions,
+  ): ReinstallCommandOptions {
+    if (typeof value === "boolean") {
+      return { suppressSuccessMessage: value };
+    }
+    return value ?? {};
+  }
+
+  function getBatchFailureMessage(
+    scopeLabel: string,
+    success: number,
+    total: number,
+    failedNames: string[],
+  ): string {
+    const failed = total - success;
+    const summary = failedNames.slice(0, 3).join(", ");
+    return isJapanese()
+      ? `${scopeLabel}: ${success}/${total} 件成功、${failed} 件失敗${summary ? ` (${summary}${failedNames.length > 3 ? "..." : ""})` : ""}`
+      : `${scopeLabel}: ${success}/${total} succeeded, ${failed} failed${summary ? ` (${summary}${failedNames.length > 3 ? "..." : ""})` : ""}`;
+  }
+
   function isRemoteInstalledUserResource(resource: UserResource): boolean {
     return (
       !resource.isBuiltIn &&
@@ -1107,10 +1251,13 @@ export async function activate(
           ? vscode.Uri.file(path.dirname(resource.fullPath))
           : resourceUri;
 
+      let hookConfigUpdate:
+        | import("./hookConfigManager").HookConfigUpdateResult
+        | undefined;
+      let hookConfigSummary: string | undefined;
       try {
-        let hookConfigSummary: string | undefined;
         if (isDirectoryBackedHook) {
-          const hookConfigUpdate = await updateHookConfigForUninstall(
+          hookConfigUpdate = await updateHookConfigForUninstall(
             wsFolder.uri,
             resourceUri,
           );
@@ -1154,10 +1301,19 @@ export async function activate(
             : `Deleted "${resource.name}"${hookConfigSummary ? ` (${hookConfigSummary})` : ""}`,
         );
       } catch (error) {
+        let errorMessage = String(error);
+        if (isDirectoryBackedHook && hookConfigUpdate?.changed) {
+          const restored = await restoreHookConfigFromBackup(hookConfigUpdate);
+          if (restored) {
+            errorMessage = isJapanese()
+              ? `${errorMessage} hooks.json はバックアップから復元しました。`
+              : `${errorMessage} hooks.json was restored from backup.`;
+          }
+        }
         vscode.window.showErrorMessage(
           isJapanese()
-            ? `削除に失敗しました: ${error}`
-            : `Failed to delete resource: ${error}`,
+            ? `削除に失敗しました: ${errorMessage}`
+            : `Failed to delete resource: ${errorMessage}`,
         );
       }
     },
@@ -1165,7 +1321,12 @@ export async function activate(
 
   const reinstallUserResourceCmd = vscode.commands.registerCommand(
     "resourceNinja.reinstallUserResource",
-    async (item: UserResourceTreeItem, suppressSuccessMessage?: boolean) => {
+    async (
+      item: UserResourceTreeItem,
+      optionsOrSuppressSuccessMessage?: boolean | ReinstallCommandOptions,
+    ) => {
+      const { suppressSuccessMessage = false, suppressRecoveryPrompt = false } =
+        normalizeReinstallCommandOptions(optionsOrSuppressSuccessMessage);
       const resource = item?.resource;
       if (!resource || resource.isBuiltIn || resource.isReadOnly) {
         return false;
@@ -1205,25 +1366,20 @@ export async function activate(
         );
       }
       if (!fullSkill) {
+        const sourceSummary = getSourceRefreshSummary(index, [resource.source]);
         const tryUpdate = await vscode.window.showWarningMessage(
           isJapanese()
-            ? `${resource.name} がインデックスに見つかりません。インデックスを更新しますか？`
-            : `${resource.name} not found in index. Update index now?`,
+            ? `${resource.name} がインデックスに見つかりません。${sourceSummary} を更新しますか？`
+            : `${resource.name} not found in index. Update ${sourceSummary} now?`,
           isJapanese() ? "更新する" : "Update",
           isJapanese() ? "キャンセル" : "Cancel",
         );
 
         if (tryUpdate === (isJapanese() ? "更新する" : "Update")) {
-          await vscode.window.withProgress(
-            {
-              location: vscode.ProgressLocation.Notification,
-              title: isJapanese()
-                ? "インデックスを更新中..."
-                : "Updating index...",
-            },
-            async (progress) => {
-              index = await updateIndexFromSources(context, index, progress);
-            },
+          index = await refreshIndexForKnownSources(
+            index,
+            [resource.source],
+            resource.name,
           );
 
           fullSkill = index.skills.find(
@@ -1269,6 +1425,7 @@ export async function activate(
             );
             await installSkill(fullSkill, wsFolder.uri, context, {
               targetScope,
+              suppressRecoveryPrompt,
             });
 
             const config = vscode.workspace.getConfiguration("resourceNinja");
@@ -1374,6 +1531,7 @@ export async function activate(
       }
 
       let success = 0;
+      const failedResources: string[] = [];
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
@@ -1401,10 +1559,15 @@ export async function activate(
                 resource.kind,
                 resource.scopeLabel,
               ),
-              true,
+              {
+                suppressSuccessMessage: true,
+                suppressRecoveryPrompt: true,
+              },
             );
             if (ok) {
               success++;
+            } else {
+              failedResources.push(resource.name);
             }
             completed++;
           }
@@ -1414,11 +1577,22 @@ export async function activate(
       userResourcesProvider.refresh();
       browseProvider.refresh();
       workspaceProvider.refresh();
-      vscode.window.showInformationMessage(
-        isJapanese()
-          ? `${groupLabel} の ${success}/${remoteTargets.length} 個を再インストールしました`
-          : `Reinstalled ${success}/${remoteTargets.length} resources in ${groupLabel}`,
-      );
+      if (failedResources.length > 0) {
+        vscode.window.showWarningMessage(
+          getBatchFailureMessage(
+            groupLabel,
+            success,
+            remoteTargets.length,
+            failedResources,
+          ),
+        );
+      } else {
+        vscode.window.showInformationMessage(
+          isJapanese()
+            ? `${groupLabel} の ${success}/${remoteTargets.length} 個を再インストールしました`
+            : `Reinstalled ${success}/${remoteTargets.length} resources in ${groupLabel}`,
+        );
+      }
     },
   );
 
@@ -2454,9 +2628,14 @@ export async function activate(
         index,
         installedMeta,
       );
+      const missingSources = collectMissingIndexedInstalledSkillSources(
+        index,
+        installedMeta,
+      );
 
       // 見つからないスキルがある場合、インデックス更新を提案
       if (missingSkills.length > 0) {
+        const sourceSummary = getSourceRefreshSummary(index, missingSources);
         const tryUpdate = await vscode.window.showWarningMessage(
           isJapanese()
             ? `${
@@ -2465,32 +2644,25 @@ export async function activate(
                 .slice(0, 3)
                 .join(", ")}${
                 missingSkills.length > 3 ? "..." : ""
-              }）。インデックスを更新しますか？`
+              }）。${sourceSummary} を更新しますか？`
             : `${
                 missingSkills.length
               } skill(s) not found in index (${missingSkills
                 .slice(0, 3)
                 .join(", ")}${
                 missingSkills.length > 3 ? "..." : ""
-              }). Update index now?`,
+              }). Update ${sourceSummary} now?`,
           isJapanese() ? "更新する" : "Update",
           isJapanese() ? "スキップ" : "Skip",
         );
 
         if (tryUpdate === (isJapanese() ? "更新する" : "Update")) {
-          await vscode.window.withProgress(
-            {
-              location: vscode.ProgressLocation.Notification,
-              title: isJapanese()
-                ? "インデックスを更新中..."
-                : "Updating index...",
-            },
-            async (progress) => {
-              index = await updateIndexFromSources(context, index, progress);
-            },
-          );
+          index = await refreshIndexForKnownSources(index, missingSources);
         }
       }
+
+      let success = 0;
+      const failedSkills: string[] = [];
 
       await vscode.window.withProgress(
         {
@@ -2517,10 +2689,17 @@ export async function activate(
               try {
                 // 既存を削除して再インストール
                 await uninstallSkill(meta.name, wsFolder.uri);
-                await installSkill(skill, wsFolder.uri, context);
+                await installSkill(skill, wsFolder.uri, context, {
+                  suppressRecoveryPrompt: true,
+                });
+                markRecentlyInstalled(skill);
+                success++;
               } catch (error) {
                 logger.error(`Failed to reinstall ${meta.name}:`, error);
+                failedSkills.push(meta.name);
               }
+            } else {
+              failedSkills.push(meta.name);
             }
             completed++;
           }
@@ -2535,28 +2714,46 @@ export async function activate(
 
       installedProvider.refresh();
       browseProvider.refresh();
-      vscode.window.showInformationMessage(
-        isJapanese()
-          ? `${installedMeta.length} 個のスキルを再インストールしました`
-          : `Reinstalled ${installedMeta.length} skills`,
-      );
+      if (failedSkills.length > 0) {
+        vscode.window.showWarningMessage(
+          getBatchFailureMessage(
+            isJapanese() ? "スキル再インストール" : "Skill reinstall",
+            success,
+            installedMeta.length,
+            failedSkills,
+          ),
+        );
+      } else {
+        vscode.window.showInformationMessage(
+          isJapanese()
+            ? `${installedMeta.length} 個のスキルを再インストールしました`
+            : `Reinstalled ${installedMeta.length} skills`,
+        );
+      }
     },
   );
 
   // Command: Reinstall single remote-installed resource
   const reinstallCmd = vscode.commands.registerCommand(
     "resourceNinja.reinstall",
-    async (item?: SkillTreeItem) => {
+    async (
+      item?: SkillTreeItem,
+      optionsOrSuppressSuccessMessage?: boolean | ReinstallCommandOptions,
+    ) => {
+      const { suppressSuccessMessage = false, suppressRecoveryPrompt = false } =
+        normalizeReinstallCommandOptions(optionsOrSuppressSuccessMessage);
       const wsFolder = vscode.workspace.workspaceFolders?.[0];
       if (!wsFolder) {
         vscode.window.showErrorMessage(messages.noWorkspace());
-        return;
+        return false;
       }
 
       const skill = item?.skill as (Skill & Partial<LocalSkill>) | undefined;
       if (!skill?.name) {
-        vscode.window.showErrorMessage(messages.invalidSkillInfo());
-        return;
+        if (!suppressSuccessMessage) {
+          vscode.window.showErrorMessage(messages.invalidSkillInfo());
+        }
+        return false;
       }
 
       const resourceKind = getResourceKind(skill);
@@ -2605,12 +2802,14 @@ export async function activate(
               (!!skill.relativePath && m.relativePath === skill.relativePath),
           );
         if (!meta && !installedWorkspaceResource) {
-          vscode.window.showErrorMessage(
-            isJapanese()
-              ? `${skill.name} のメタデータが見つかりません`
-              : `Metadata not found for ${skill.name}`,
-          );
-          return;
+          if (!suppressSuccessMessage) {
+            vscode.window.showErrorMessage(
+              isJapanese()
+                ? `${skill.name} のメタデータが見つかりません`
+                : `Metadata not found for ${skill.name}`,
+            );
+          }
+          return false;
         }
         if (meta) {
           source = meta.source;
@@ -2638,12 +2837,14 @@ export async function activate(
       }
 
       if (!source || source === "local" || !remotePath) {
-        vscode.window.showWarningMessage(
-          isJapanese()
-            ? `${skill.name} はリモートインストール元のメタデータがないため再インストールできません`
-            : `${skill.name} cannot be reinstalled because remote install metadata is missing`,
-        );
-        return;
+        if (!suppressSuccessMessage) {
+          vscode.window.showWarningMessage(
+            isJapanese()
+              ? `${skill.name} はリモートインストール元のメタデータがないため再インストールできません`
+              : `${skill.name} cannot be reinstalled because remote install metadata is missing`,
+          );
+        }
+        return false;
       }
 
       let index = await loadSkillIndex(context);
@@ -2670,25 +2871,20 @@ export async function activate(
 
       // インデックスに見つからない場合は自動で更新を試みる
       if (!fullSkill) {
+        const sourceSummary = getSourceRefreshSummary(index, [source]);
         const tryUpdate = await vscode.window.showWarningMessage(
           isJapanese()
-            ? `${skill.name} がインデックスに見つかりません。インデックスを更新しますか？`
-            : `${skill.name} not found in index. Update index now?`,
+            ? `${skill.name} がインデックスに見つかりません。${sourceSummary} を更新しますか？`
+            : `${skill.name} not found in index. Update ${sourceSummary} now?`,
           isJapanese() ? "更新する" : "Update",
           isJapanese() ? "キャンセル" : "Cancel",
         );
 
         if (tryUpdate === (isJapanese() ? "更新する" : "Update")) {
-          await vscode.window.withProgress(
-            {
-              location: vscode.ProgressLocation.Notification,
-              title: isJapanese()
-                ? "インデックスを更新中..."
-                : "Updating index...",
-            },
-            async (progress) => {
-              index = await updateIndexFromSources(context, index, progress);
-            },
+          index = await refreshIndexForKnownSources(
+            index,
+            [source],
+            skill.name,
           );
 
           fullSkill = index.skills.find(
@@ -2706,12 +2902,14 @@ export async function activate(
         }
 
         if (!fullSkill) {
-          vscode.window.showErrorMessage(
-            isJapanese()
-              ? `${skill.name} がインデックスに見つかりません。ソースリポジトリを確認してください。`
-              : `${skill.name} not found in index. Please check source repositories.`,
-          );
-          return;
+          if (!suppressSuccessMessage) {
+            vscode.window.showErrorMessage(
+              isJapanese()
+                ? `${skill.name} がインデックスに見つかりません。ソースリポジトリを確認してください。`
+                : `${skill.name} not found in index. Please check source repositories.`,
+            );
+          }
+          return false;
         }
       }
 
@@ -2736,7 +2934,9 @@ export async function activate(
             } else {
               uninstallResult = await uninstallSkill(skill.name, wsFolder.uri);
             }
-            await installSkill(fullSkill, wsFolder.uri, context);
+            await installSkill(fullSkill, wsFolder.uri, context, {
+              suppressRecoveryPrompt,
+            });
 
             const config = vscode.workspace.getConfiguration("resourceNinja");
             if (
@@ -2748,7 +2948,7 @@ export async function activate(
             const hookConfigSummary = formatHookConfigUpdateSummary(
               uninstallResult?.hookConfigUpdate,
             );
-            if (hookConfigSummary) {
+            if (hookConfigSummary && !suppressSuccessMessage) {
               vscode.window.showInformationMessage(hookConfigSummary);
             }
           },
@@ -2763,19 +2963,25 @@ export async function activate(
         statusBarItem.show();
         setTimeout(() => statusBarItem.hide(), 4000);
 
-        vscode.window.showInformationMessage(
-          isJapanese()
-            ? `${skill.name} を再インストールしました`
-            : `Reinstalled ${skill.name}`,
-        );
+        if (!suppressSuccessMessage) {
+          vscode.window.showInformationMessage(
+            isJapanese()
+              ? `${skill.name} を再インストールしました`
+              : `Reinstalled ${skill.name}`,
+          );
+        }
         workspaceProvider.refresh();
         browseProvider.refresh();
+        return true;
       } catch (error) {
-        vscode.window.showErrorMessage(
-          isJapanese()
-            ? `再インストール失敗: ${String(error)}`
-            : `Reinstall failed: ${String(error)}`,
-        );
+        if (!suppressSuccessMessage) {
+          vscode.window.showErrorMessage(
+            isJapanese()
+              ? `再インストール失敗: ${String(error)}`
+              : `Reinstall failed: ${String(error)}`,
+          );
+        }
+        return false;
       }
     },
   );
@@ -2821,6 +3027,9 @@ export async function activate(
         return;
       }
 
+      let success = 0;
+      const failedResources: string[] = [];
+
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
@@ -2836,10 +3045,19 @@ export async function activate(
               message: `${child.skill?.name || child.label} (${completed + 1}/${remoteInstalledItems.length})`,
               increment: 100 / remoteInstalledItems.length,
             });
-            await vscode.commands.executeCommand(
+            const ok = await vscode.commands.executeCommand<boolean>(
               "resourceNinja.reinstall",
               child,
+              {
+                suppressSuccessMessage: true,
+                suppressRecoveryPrompt: true,
+              },
             );
+            if (ok) {
+              success++;
+            } else {
+              failedResources.push(String(child.skill?.name || child.label));
+            }
             completed++;
           }
         },
@@ -2847,11 +3065,22 @@ export async function activate(
 
       workspaceProvider.refresh();
       browseProvider.refresh();
-      vscode.window.showInformationMessage(
-        isJapanese()
-          ? `${kindLabel} グループの ${remoteInstalledItems.length} 個のリソースを再インストールしました`
-          : `Reinstalled ${remoteInstalledItems.length} resource(s) in ${kindLabel}`,
-      );
+      if (failedResources.length > 0) {
+        vscode.window.showWarningMessage(
+          getBatchFailureMessage(
+            kindLabel,
+            success,
+            remoteInstalledItems.length,
+            failedResources,
+          ),
+        );
+      } else {
+        vscode.window.showInformationMessage(
+          isJapanese()
+            ? `${kindLabel} グループの ${remoteInstalledItems.length} 個のリソースを再インストールしました`
+            : `Reinstalled ${remoteInstalledItems.length} resource(s) in ${kindLabel}`,
+        );
+      }
     },
   );
 
@@ -3362,6 +3591,8 @@ export async function activate(
       }
 
       const index = await loadSkillIndex(context);
+      let success = 0;
+      const failedSkills: string[] = [];
 
       await vscode.window.withProgress(
         {
@@ -3393,11 +3624,17 @@ export async function activate(
             if (skill) {
               try {
                 await uninstallSkill(item.meta.name, wsFolder.uri);
-                await installSkill(skill, wsFolder.uri, context);
+                await installSkill(skill, wsFolder.uri, context, {
+                  suppressRecoveryPrompt: true,
+                });
                 markRecentlyInstalled(skill);
+                success++;
               } catch (error) {
                 logger.error(`Failed to reinstall ${item.meta.name}:`, error);
+                failedSkills.push(item.meta.name);
               }
+            } else {
+              failedSkills.push(item.meta.name);
             }
             completed++;
           }
@@ -3411,11 +3648,22 @@ export async function activate(
 
       workspaceProvider.refresh();
       browseProvider.refresh();
-      vscode.window.showInformationMessage(
-        isJapanese()
-          ? `${selected.length} 個のスキルを再インストールしました`
-          : `Reinstalled ${selected.length} skills`,
-      );
+      if (failedSkills.length > 0) {
+        vscode.window.showWarningMessage(
+          getBatchFailureMessage(
+            isJapanese() ? "スキル再インストール" : "Skill reinstall",
+            success,
+            selected.length,
+            failedSkills,
+          ),
+        );
+      } else {
+        vscode.window.showInformationMessage(
+          isJapanese()
+            ? `${selected.length} 個のスキルを再インストールしました`
+            : `Reinstalled ${selected.length} skills`,
+        );
+      }
     },
   );
 

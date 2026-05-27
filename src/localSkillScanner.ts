@@ -44,6 +44,9 @@ interface ResourceInstallMeta {
   description_ja?: string;
   categories?: string[];
   remotePath?: string;
+  pluginRoot?: string;
+  pluginManifestPath?: string;
+  pluginManifestKind?: string;
 }
 
 interface ScanCandidate {
@@ -607,6 +610,9 @@ async function parseLocalSkillFile(
       : installMeta?.source || "local",
     path: skillDir,
     remotePath: installMeta?.remotePath,
+    pluginRoot: installMeta?.pluginRoot,
+    pluginManifestPath: installMeta?.pluginManifestPath,
+    pluginManifestKind: installMeta?.pluginManifestKind,
     isLocal: true,
     fullPath: fileUri.fsPath,
     relativePath: skillDir,

@@ -9,6 +9,10 @@ const skillInstallerSource = fs.readFileSync(
   path.join(repoRoot, "src", "skillInstaller.ts"),
   "utf8",
 );
+const localSkillScannerSource = fs.readFileSync(
+  path.join(repoRoot, "src", "localSkillScanner.ts"),
+  "utf8",
+);
 
 function test(name, fn) {
   try {
@@ -49,8 +53,29 @@ test("installSkill preserves existing skill metadata fields on rewrite", () => {
   );
   assert.match(
     skillInstallerSource,
+    /source: normalizeSkillMetaSource\(\{[\s\S]*source: skill\.source,[\s\S]*remotePath: skill\.path,[\s\S]*\}\),/,
+    "installSkill must normalize source when rewriting .skill-meta.json",
+  );
+  assert.match(
+    skillInstallerSource,
     /remotePath: skill\.path,/,
     "installSkill must continue writing remotePath from the indexed skill path",
+  );
+});
+
+test("resource install sidecar metadata normalizes source and carries plugin fields", () => {
+  assert.match(
+    skillInstallerSource,
+    /const meta: ResourceInstallMeta = \{[\s\S]*source: normalizeSkillMetaSource\(\{[\s\S]*source: skill\.source,[\s\S]*remotePath: skill\.path,[\s\S]*\}\),/,
+    "resource sidecar metadata should normalize source consistently",
+  );
+  assert.match(localSkillScannerSource, /pluginRoot\?: string;/);
+  assert.match(localSkillScannerSource, /pluginManifestPath\?: string;/);
+  assert.match(localSkillScannerSource, /pluginManifestKind\?: string;/);
+  assert.match(
+    localSkillScannerSource,
+    /pluginRoot: installMeta\?\.pluginRoot,[\s\S]*pluginManifestPath: installMeta\?\.pluginManifestPath,[\s\S]*pluginManifestKind: installMeta\?\.pluginManifestKind,/,
+    "local scanner must preserve plugin metadata from install sidecars",
   );
 });
 
