@@ -1,3 +1,20 @@
+<#
+.SYNOPSIS
+Runs vsce with a validated VSCE_PAT from Process or User environment.
+
+.DESCRIPTION
+Prefer `npm run release:vsce -- <args>` from a repo terminal. If you need to
+invoke this wrapper directly from PowerShell, pass vsce arguments via
+`-VsceArgs @(...)` so short options such as `-i` are not parsed as PowerShell
+script parameters.
+
+.EXAMPLE
+npm run release:vsce -- publish -i .\agent-resources-ninja-X.Y.Z.vsix --skip-duplicate
+
+.EXAMPLE
+& .\scripts\Invoke-VsceWithPat.ps1 -VsceArgs @('publish', '-i', '.\agent-resources-ninja-X.Y.Z.vsix', '--skip-duplicate')
+#>
+
 param(
   [Parameter(ValueFromRemainingArguments = $true)]
   [string[]]$VsceArgs
@@ -31,7 +48,7 @@ function Get-ResolvedVscePat {
 }
 
 if (-not $VsceArgs -or $VsceArgs.Count -eq 0) {
-  throw 'Usage: npm run release:vsce -- <vsce arguments>'
+  throw 'Usage: npm run release:vsce -- <vsce arguments> | direct PowerShell: & .\scripts\Invoke-VsceWithPat.ps1 -VsceArgs @(''publish'', ''-i'', ''.\agent-resources-ninja-X.Y.Z.vsix'', ''--skip-duplicate'')'
 }
 
 $patInfo = Get-ResolvedVscePat
