@@ -5,6 +5,20 @@ All notable changes to the "Agent Resources Ninja" extension will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.31] - 2026-06-14
+
+### Added
+
+- **Google Skills Bundled Source** - Added the official `google/skills` repository as a bundled preset source (31 Google Cloud / Google product skills such as `gemini-api`, `gcloud`, `bigquery-basics`, `cloud-run-basics`, `firebase-basics`), bumping the preset index to `v1.23.0` and updating README source tables, Related Projects, and the skill-index instruction Official basis / 公式 `google/skills` リポジトリを bundled preset source として追加し（`gemini-api`、`gcloud`、`bigquery-basics`、`cloud-run-basics`、`firebase-basics` など Google Cloud / Google プロダクト向け skill 31 件）、preset index を `v1.23.0` に更新し、README の source 表 / Related Projects / skill-index instruction の Official 基準を同期しました。
+
+### Fixed
+
+- **Directory Listing Failure Recovery for Skills** - When the GitHub Contents API directory listing fails with a non-404 error (e.g. SAML / classic PAT 403) and no `SKILL.md` was written, the installer now tries to recover the real `SKILL.md` directly from its raw URL before falling back to the generated template, and never attaches a token to `raw.githubusercontent.com` so public raw fetches are not blocked by org token policies / GitHub Contents API の directory listing が 404 以外（SAML / classic PAT 403 など）で失敗し `SKILL.md` が取得できなかった場合に、template fallback に進む前に raw URL から実体の `SKILL.md` を直接復旧するようにし、`raw.githubusercontent.com` には token を付けず組織 token policy で public raw 取得が落ちないようにしました。
+
+### Tests
+
+- Added `test-skill-installer-remote-fallback.js` covering raw `SKILL.md` recovery, no-token-on-raw enforcement, HTTP-error and short-content rejection, and `remotePath` slash normalization, and wired it into `test:resources` / raw `SKILL.md` 復旧、raw への token 非付与、HTTP エラー / 短すぎる内容の拒否、`remotePath` のスラッシュ正規化を検証する `test-skill-installer-remote-fallback.js` を追加し、`test:resources` に組み込みました。
+
 ## [0.2.30] - 2026-05-28
 
 ### Fixed

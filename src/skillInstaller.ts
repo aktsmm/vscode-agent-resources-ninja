@@ -1059,7 +1059,19 @@ export async function installSkill(
             vscode.Uri.joinPath(skillPath, "SKILL.md"),
           );
         } catch {
-          await createFallbackSkillMd(skillPath, skill);
+          // directory listing は成功したが SKILL.md が取れていない場合、
+          // template で上書きする前に raw URL から実体の復旧を試みる。
+          const recovered = await recoverPrimarySkillMdFromRaw(
+            skillPath,
+            owner,
+            repo,
+            branch,
+            remotePath,
+            token,
+          );
+          if (!recovered) {
+            await createFallbackSkillMd(skillPath, skill);
+          }
         }
 
         // サブディレクトリで部分的なエラーがあった場合は通知
@@ -1140,7 +1152,19 @@ export async function installSkill(
           // File does not exist
         }
         if (!skillMdExists) {
-          await createFallbackSkillMd(skillPath, skill);
+          // listing が失敗（403 等の非 404）で SKILL.md が無い場合、
+          // template で上書きする前に raw URL から実体の復旧を試みる。
+          const recovered = await recoverPrimarySkillMdFromRaw(
+            skillPath,
+            owner,
+            repo,
+            branch,
+            remotePath,
+            token,
+          );
+          if (!recovered) {
+            await createFallbackSkillMd(skillPath, skill);
+          }
         } else {
           logger.info(
             `[Resource Ninja] SKILL.md already exists, skipping fallback creation`,
@@ -2234,6 +2258,52 @@ Source: ${skill.source}
     skillMdPath,
     Buffer.from(content, "utf-8"),
   );
+}
+
+/**
+ * GitHub Contents API の directory listing が 403 などで失敗しても、
+ * `<remotePath>/SKILL.md` を raw URL から直接取得して復旧を試みる。
+ *
+ * - raw.githubusercontent.com には token を付けない（createGitHubHeaders 側で除去）。
+ *   public raw に token を付けると、組織 SAML / classic PAT policy で逆に 403 になるため。
+ * - 取得できた SKILL.md が実体（>100 bytes）のときだけ書き込み、true を返す。
+ * - 失敗時は false を返し、呼び出し側で template fallback に委ねる。
+ */
+export async function recoverPrimarySkillMdFromRaw(
+  skillPath: vscode.Uri,
+  owner: string,
+  repo: string,
+  branch: string,
+  remotePath: string,
+  token?: string,
+): Promise<boolean> {
+  const cleanPath = (remotePath || "").replace(/^\/+|\/+$/g, "");
+  const rawBase = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}`;
+  const rawUrl = cleanPath
+    ? `${rawBase}/${cleanPath}/SKILL.md`
+    : `${rawBase}/SKILL.md`;
+  try {
+    const content = await fetchFileContent(rawUrl, token);
+    if (!content || content.trim().length <= 100) {
+      return false;
+    }
+    const skillMdPath = vscode.Uri.joinPath(skillPath, "SKILL.md");
+    await vscode.workspace.fs.writeFile(
+      skillMdPath,
+      Buffer.from(content, "utf-8"),
+    );
+    logger.info(
+      `Recovered SKILL.md from raw URL after directory listing failure: ${rawUrl}`,
+    );
+    return true;
+  } catch (rawError) {
+    logger.warn(
+      `Raw SKILL.md recovery failed (${rawUrl}): ${
+        rawError instanceof Error ? rawError.message : String(rawError)
+      }`,
+    );
+    return false;
+  }
 }
 
 /**

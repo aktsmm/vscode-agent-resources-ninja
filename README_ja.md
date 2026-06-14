@@ -174,6 +174,7 @@ ext install yamapan.agent-resources-ninja
 | [awslabs/agent-plugins](https://github.com/awslabs/agent-plugins)                                                             | Official  | AWS Labs の Agent Plugins skills                                          |
 | [elastic/agent-skills](https://github.com/elastic/agent-skills)                                                               | Official  | Elastic 公式 Agent Skills                                                 |
 | [google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli)                                                       | Official  | Gemini CLI 公式 skills                                                    |
+| [google/skills](https://github.com/google/skills)                                                                             | Official  | Google Cloud / Google プロダクト向けの Google 公式 Agent Skills           |
 | [openai/codex](https://github.com/openai/codex)                                                                               | Official  | Codex リポジトリの skills                                                 |
 | [anthropics/claude-code](https://github.com/anthropics/claude-code)                                                           | Official  | Claude Code 公式プラグイン skills                                         |
 | [cline/cline](https://github.com/cline/cline)                                                                                 | Official  | Cline リポジトリの skills                                                 |
@@ -705,6 +706,7 @@ npm run release:vsce -- verify-pat
 ## 🔗 Related Projects
 
 - [anthropics/skills](https://github.com/anthropics/skills) - Official Claude Skills
+- [google/skills](https://github.com/google/skills) - Official Google Agent Skills（プリセット同梱）
 - [github/awesome-copilot](https://github.com/github/awesome-copilot) - Official Copilot Resources
 - [microsoft/skills](https://github.com/microsoft/skills) - 参考: Official Microsoft Skills（プリセット未同梱）
 - [MicrosoftDocs/Agent-Skills](https://github.com/MicrosoftDocs/Agent-Skills) - Official Azure Agent Skills（プリセット同梱）
