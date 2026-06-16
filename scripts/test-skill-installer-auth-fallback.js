@@ -122,6 +122,9 @@ async function main() {
               getConfiguredWorkspaceMcpDirectory: () => ".github/mcp",
               getConfiguredWorkspacePromptsDirectory: () => ".github/prompts",
               getRelativeSkillsPathForWorkspace: () => ".github/skills",
+              isSameOrChildWorkspacePath: (candidatePath, rootPath) =>
+                candidatePath === rootPath ||
+                candidatePath.startsWith(`${rootPath}/`),
               resolveConfiguredUri: () => ({ fsPath: "/tmp/resource" }),
               resolveSkillsDirectoryUri: () => ({
                 fsPath: "/tmp/.github/skills",

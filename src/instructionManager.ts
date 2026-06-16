@@ -39,6 +39,7 @@ import {
   isAbsoluteConfiguredPath,
   isHomeRelativePath,
   getRelativeSkillsPathForWorkspace,
+  isSameOrChildWorkspacePath,
   resolveInstructionFileUri,
   resolveConfiguredUri,
   resolveSkillsDirectoryUri,
@@ -1235,7 +1236,11 @@ export async function updateInstructionFileAtUri(
 
     localSkills = workspaceRelativeSkillsDir
       ? allLocalSkills.filter(
-          (ls) => !ls.relativePath.startsWith(workspaceRelativeSkillsDir),
+          (ls) =>
+            !isSameOrChildWorkspacePath(
+              ls.relativePath,
+              workspaceRelativeSkillsDir,
+            ),
         )
       : allLocalSkills;
     logger.info(`[Resource Ninja] Found ${localSkills.length} local skills`);

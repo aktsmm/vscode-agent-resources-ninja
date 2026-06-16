@@ -11,6 +11,14 @@ const instructionManagerSource = fs.readFileSync(
   path.join(repoRoot, "src", "instructionManager.ts"),
   "utf8",
 );
+const extensionSource = fs.readFileSync(
+  path.join(repoRoot, "src", "extension.ts"),
+  "utf8",
+);
+const treeProviderSource = fs.readFileSync(
+  path.join(repoRoot, "src", "treeProvider.ts"),
+  "utf8",
+);
 const customizationPathsSource = fs.readFileSync(
   path.join(repoRoot, "src", "customizationPaths.ts"),
   "utf8",
@@ -65,6 +73,7 @@ test("workspace fallback is automatic only when configured roots are empty", () 
 
 test("configured roots include skill and non-skill workspace directories", () => {
   assert.match(scannerSource, /getConfiguredSkillsDirectory\(config\)/);
+  assert.match(scannerSource, /getConfiguredAdditionalSkillRoots\(config\)/);
   assert.match(
     scannerSource,
     /getConfiguredWorkspaceAgentsDirectory\(config\)/,
@@ -79,6 +88,48 @@ test("configured roots include skill and non-skill workspace directories", () =>
   );
   assert.match(scannerSource, /getConfiguredWorkspaceHooksDirectory\(config\)/);
   assert.match(scannerSource, /getConfiguredWorkspaceMcpDirectory\(config\)/);
+});
+
+test("additional skill roots are contributed and scanned as skill roots", () => {
+  assert.match(customizationPathsSource, /getConfiguredAdditionalSkillRoots/);
+  assert.match(customizationPathsSource, /isSameOrChildWorkspacePath/);
+  assert.match(customizationPathsSource, /getConfiguration\("skillNinja"\)/);
+  assert.match(
+    scannerSource,
+    /\.\.\.getConfiguredAdditionalSkillRoots\(config\)/,
+  );
+  assert.match(scannerSource, /detectionBase: "skills"/);
+  assert.match(extensionSource, /resourceNinja\.additionalSkillRoots/);
+  assert.deepStrictEqual(
+    packageJson.contributes.configuration.properties[
+      "resourceNinja.additionalSkillRoots"
+    ].default,
+    [],
+  );
+});
+
+test("configured skill root checks are path-boundary aware", () => {
+  assert.match(
+    customizationPathsSource,
+    /normalizedCandidate === normalizedRoot \|\|[\s\S]*normalizedCandidate\.startsWith\(`\$\{normalizedRoot\}\/`\)/,
+  );
+  assert.match(
+    scannerSource,
+    /isSameOrChildWorkspacePath\(relativePath, skillsDir\)/,
+  );
+  assert.match(
+    instructionManagerSource,
+    /isSameOrChildWorkspacePath\([\s\S]*ls\.relativePath,[\s\S]*workspaceRelativeSkillsDir/,
+  );
+  assert.match(
+    treeProviderSource,
+    /isSameOrChildWorkspacePath\(local\.relativePath, skillsDir\)/,
+  );
+  assert.doesNotMatch(scannerSource, /relativePath\.startsWith\(skillsDir\)/);
+  assert.doesNotMatch(
+    treeProviderSource,
+    /local\.relativePath\.startsWith\(skillsDir\)/,
+  );
 });
 
 test("instruction fallback is explicit and disabled by default", () => {

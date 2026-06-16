@@ -5,6 +5,25 @@ All notable changes to the "Agent Resources Ninja" extension will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.32] - 2026-06-16
+
+### Added
+
+- **Additional Skill Roots** - Added `resourceNinja.additionalSkillRoots` so workspace skill discovery can include separate roots such as `copilot-skills/skills` and `copilot-skills/m-skills` without changing the default install directory / `resourceNinja.additionalSkillRoots` を追加し、既定のインストール先を変えずに `copilot-skills/skills` や `copilot-skills/m-skills` など別 root の workspace skill を discovery 対象にできるようにしました。
+
+### Fixed
+
+- **Skill Root Boundary Checks** - Replaced raw prefix checks with path-boundary-aware workspace root matching so sibling folders such as `.github/skills-old` are not treated as installed skill roots / 生の prefix 判定を path boundary aware な workspace root 判定へ置き換え、`.github/skills-old` のような sibling folder を installed skill root と誤判定しないようにしました。
+- **Additional Root Documentation** - Clarified that additional skill roots are root directories, not glob patterns, affect discovery and generated instruction output only, and also honor `skillNinja.additionalSkillRoots` for sibling-extension compatibility / additional skill roots は glob ではなく root directory であり、discovery と生成 instruction output のみに影響し、sibling extension 互換として `skillNinja.additionalSkillRoots` も尊重することを明記しました。
+
+### Security
+
+- **Dependency Audit Cleanup** - Updated development dependencies so `npm audit --audit-level=moderate` reports zero vulnerabilities before packaging / packaging 前の `npm audit --audit-level=moderate` が 0 vulnerabilities になるよう development dependencies を更新しました。
+
+### Tests
+
+- Added regression guards for additional skill root discovery, boundary-aware root matching, README/settings consistency, and mocked path helper consumers, then revalidated compile, resource regression, extension-host smoke, and npm audit before release prep / additional skill root discovery、boundary-aware root matching、README/settings consistency、path helper 利用側 mock の回帰ガードを追加し、release prep 前に compile、resource 回帰、extension-host smoke、npm audit を再検証しました。
+
 ## [0.2.31] - 2026-06-14
 
 ### Added

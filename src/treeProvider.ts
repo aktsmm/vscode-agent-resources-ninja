@@ -41,6 +41,7 @@ import {
 import {
   getConfiguredSkillsDirectory,
   getRelativeSkillsPathForWorkspace,
+  isSameOrChildWorkspacePath,
 } from "./customizationPaths";
 
 const RESOURCE_KIND_ORDER: ResourceKind[] = [
@@ -580,7 +581,7 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
         local.kind && local.kind !== "skill"
           ? true
           : skillsDir
-            ? local.relativePath.startsWith(skillsDir)
+            ? isSameOrChildWorkspacePath(local.relativePath, skillsDir)
             : false;
       const resourceKey = getInstalledResourceKey(local);
       skillMap.set(resourceKey, {

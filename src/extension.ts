@@ -270,6 +270,7 @@ const RESETTABLE_RESOURCE_NINJA_SETTINGS = [
   "instructionBlock.globalHome.includeInstructions",
   "kindsExcluded",
   "resourcesDirectory",
+  "additionalSkillRoots",
   "workspaceAgentsDirectory",
   "workspaceInstructionsDirectory",
   "workspacePromptsDirectory",
@@ -985,6 +986,7 @@ export async function activate(
 
     const resourcePathSettings = [
       "resourceNinja.resourcesDirectory",
+      "resourceNinja.additionalSkillRoots",
       "resourceNinja.workspaceAgentsDirectory",
       "resourceNinja.workspaceInstructionsDirectory",
       "resourceNinja.workspacePromptsDirectory",

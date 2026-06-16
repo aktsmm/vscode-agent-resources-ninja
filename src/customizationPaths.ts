@@ -28,6 +28,26 @@ function normalizeSeparators(value: string): string {
   return value.replace(/\\/g, "/");
 }
 
+export function isSameOrChildWorkspacePath(
+  candidatePath: string,
+  rootPath: string | undefined,
+): boolean {
+  const normalizedRoot = normalizeSeparators(rootPath || "")
+    .replace(/\/+$/g, "")
+    .trim();
+  if (!normalizedRoot) {
+    return false;
+  }
+
+  const normalizedCandidate = normalizeSeparators(candidatePath)
+    .replace(/\/+$/g, "")
+    .trim();
+  return (
+    normalizedCandidate === normalizedRoot ||
+    normalizedCandidate.startsWith(`${normalizedRoot}/`)
+  );
+}
+
 function getWorkspaceRelativeUri(
   workspaceUri: vscode.Uri,
   relativePath: string,
@@ -130,6 +150,36 @@ export function getConfiguredSkillsDirectory(
   }
 
   return DEFAULT_SKILLS_DIRECTORY;
+}
+
+export function getConfiguredAdditionalSkillRoots(
+  config: vscode.WorkspaceConfiguration,
+): string[] {
+  const configuredRoots = config.get<string[]>("additionalSkillRoots") || [];
+  const siblingConfiguredRoots =
+    vscode.workspace
+      .getConfiguration("skillNinja")
+      .get<string[]>("additionalSkillRoots") || [];
+  const seenRoots = new Set<string>();
+  const roots: string[] = [];
+
+  for (const root of [...configuredRoots, ...siblingConfiguredRoots]) {
+    if (typeof root !== "string") {
+      continue;
+    }
+    const trimmed = root.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const normalized = normalizeSeparators(trimmed);
+    if (seenRoots.has(normalized)) {
+      continue;
+    }
+    seenRoots.add(normalized);
+    roots.push(trimmed);
+  }
+
+  return roots;
 }
 
 export function getConfiguredCoexistenceMode(

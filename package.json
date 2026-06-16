@@ -2,7 +2,7 @@
   "name": "agent-resources-ninja",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.31",
+  "version": "0.2.32",
   "publisher": "yamapan",
   "license": "CC-BY-NC-SA-4.0",
   "icon": "resources/icon.png",
@@ -1196,13 +1196,13 @@
         "resourceNinja.autoUpdateInstruction": {
           "type": "boolean",
           "default": true,
-          "order": 13,
+          "order": 14,
           "markdownDescription": "%config.autoUpdateInstruction.markdownDescription%"
         },
         "resourceNinja.autoUpdateResourcesOnUpgrade": {
           "type": "string",
           "default": "prompt",
-          "order": 17,
+          "order": 18,
           "enum": [
             "always",
             "prompt",
@@ -1218,7 +1218,7 @@
         "resourceNinja.instructionFile": {
           "type": "string",
           "default": "AGENTS.md",
-          "order": 14,
+          "order": 15,
           "enum": [
             "none",
             "AGENTS.md",
@@ -1252,13 +1252,13 @@
         "resourceNinja.customInstructionPath": {
           "type": "string",
           "default": "",
-          "order": 15,
+          "order": 16,
           "markdownDescription": "%config.customInstructionPath.markdownDescription%"
         },
         "resourceNinja.includeLocalResources": {
           "type": "boolean",
           "default": false,
-          "order": 16,
+          "order": 17,
           "markdownDescription": "%config.includeLocalResources.markdownDescription%"
         },
         "resourceNinja.resourcesDirectory": {
@@ -1267,58 +1267,67 @@
           "order": 2,
           "markdownDescription": "%config.resourcesDirectory.markdownDescription%"
         },
+        "resourceNinja.additionalSkillRoots": {
+          "type": "array",
+          "default": [],
+          "order": 3,
+          "items": {
+            "type": "string"
+          },
+          "markdownDescription": "%config.additionalSkillRoots.markdownDescription%"
+        },
         "resourceNinja.workspaceAgentsDirectory": {
           "type": "string",
           "default": ".github/agents",
-          "order": 3,
+          "order": 4,
           "markdownDescription": "%config.workspaceAgentsDirectory.markdownDescription%"
         },
         "resourceNinja.workspaceInstructionsDirectory": {
           "type": "string",
           "default": ".github/instructions",
-          "order": 4,
+          "order": 5,
           "markdownDescription": "%config.workspaceInstructionsDirectory.markdownDescription%"
         },
         "resourceNinja.workspacePromptsDirectory": {
           "type": "string",
           "default": ".github/prompts",
-          "order": 5,
+          "order": 6,
           "markdownDescription": "%config.workspacePromptsDirectory.markdownDescription%"
         },
         "resourceNinja.workspaceHooksDirectory": {
           "type": "string",
           "default": ".github/hooks",
-          "order": 6,
+          "order": 7,
           "markdownDescription": "%config.workspaceHooksDirectory.markdownDescription%"
         },
         "resourceNinja.workspaceMcpDirectory": {
           "type": "string",
           "default": ".github/mcp",
-          "order": 7,
+          "order": 8,
           "markdownDescription": "%config.workspaceMcpDirectory.markdownDescription%"
         },
         "resourceNinja.userAgentsDirectory": {
           "type": "string",
           "default": "",
-          "order": 8,
+          "order": 9,
           "markdownDescription": "%config.userAgentsDirectory.markdownDescription%"
         },
         "resourceNinja.userInstructionsDirectory": {
           "type": "string",
           "default": "",
-          "order": 9,
+          "order": 10,
           "markdownDescription": "%config.userInstructionsDirectory.markdownDescription%"
         },
         "resourceNinja.userPromptsDirectory": {
           "type": "string",
           "default": "",
-          "order": 10,
+          "order": 11,
           "markdownDescription": "%config.userPromptsDirectory.markdownDescription%"
         },
         "resourceNinja.globalResourceHomePreset": {
           "type": "string",
           "default": "copilot",
-          "order": 11,
+          "order": 12,
           "enum": [
             "copilot",
             "claude",
@@ -1336,13 +1345,13 @@
         "resourceNinja.globalHomeDirectory": {
           "type": "string",
           "default": "",
-          "order": 12,
+          "order": 13,
           "markdownDescription": "%config.globalHomeDirectory.markdownDescription%"
         },
         "resourceNinja.coexistenceMode": {
           "type": "string",
           "default": "auto",
-          "order": 18,
+          "order": 19,
           "enum": [
             "auto",
             "independent"
@@ -1356,7 +1365,7 @@
         "resourceNinja.kindsExcluded": {
           "type": "array",
           "default": [],
-          "order": 19,
+          "order": 20,
           "items": {
             "type": "string",
             "enum": [
@@ -1375,25 +1384,25 @@
         "resourceNinja.useSharedSourcesManifest": {
           "type": "boolean",
           "default": false,
-          "order": 20,
+          "order": 21,
           "markdownDescription": "%config.useSharedSourcesManifest.markdownDescription%"
         },
         "resourceNinja.useSharedResourceIndex": {
           "type": "boolean",
           "default": false,
-          "order": 21,
+          "order": 22,
           "markdownDescription": "%config.useSharedResourceIndex.markdownDescription%"
         },
         "resourceNinja.useRefOutput": {
           "type": "boolean",
           "default": true,
-          "order": 22,
+          "order": 23,
           "markdownDescription": "%config.useRefOutput.markdownDescription%"
         },
         "resourceNinja.outputFormat": {
           "type": "string",
           "default": "full",
-          "order": 23,
+          "order": 24,
           "enum": [
             "full",
             "compact",
@@ -1409,7 +1418,7 @@
         "resourceNinja.refCatalogFormat": {
           "type": "string",
           "default": "full",
-          "order": 24,
+          "order": 25,
           "enum": [
             "full",
             "compact",
@@ -1449,13 +1458,13 @@
         "resourceNinja.showBuiltInResources": {
           "type": "boolean",
           "default": true,
-          "order": 25,
+          "order": 26,
           "markdownDescription": "%config.showBuiltInResources.markdownDescription%"
         },
         "resourceNinja.remoteResourceViewMode": {
           "type": "string",
           "default": "repositoryFirst",
-          "order": 26,
+          "order": 27,
           "enum": [
             "repositoryFirst",
             "resourceTypeFirst"
@@ -1469,7 +1478,7 @@
         "resourceNinja.language": {
           "type": "string",
           "default": "auto",
-          "order": 27,
+          "order": 28,
           "enum": [
             "auto",
             "en",
@@ -1486,25 +1495,25 @@
           "type": "string",
           "default": "",
           "editPresentation": "password",
-          "order": 28,
+          "order": 29,
           "markdownDescription": "%config.githubToken.markdownDescription%"
         },
         "resourceNinja.instructionBlock.includeAgents": {
           "type": "boolean",
           "default": false,
-          "order": 29,
+          "order": 30,
           "markdownDescription": "%config.instructionBlock.includeAgents.markdownDescription%"
         },
         "resourceNinja.instructionBlock.includeInstructions": {
           "type": "boolean",
           "default": false,
-          "order": 30,
+          "order": 31,
           "markdownDescription": "%config.instructionBlock.includeInstructions.markdownDescription%"
         },
         "resourceNinja.instructionBlock.globalHome.includeAgents": {
           "type": "string",
           "default": "inherit",
-          "order": 31,
+          "order": 32,
           "enum": [
             "inherit",
             "on",
@@ -1520,7 +1529,7 @@
         "resourceNinja.instructionBlock.globalHome.includeInstructions": {
           "type": "string",
           "default": "inherit",
-          "order": 32,
+          "order": 33,
           "enum": [
             "inherit",
             "on",
@@ -1570,7 +1579,7 @@
     "@typescript-eslint/parser": "^8.18.0",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.4.1",
-    "esbuild": "^0.25.12",
+    "esbuild": "^0.28.1",
     "eslint": "^9.17.0",
     "npm-run-all": "^4.1.5",
     "typescript": "^5.7.2"

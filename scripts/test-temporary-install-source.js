@@ -90,7 +90,8 @@ async function main() {
     },
   };
 
-  const skillContent = "---\nname: temp-skill\ndescription: temp\n---\n# temp\n";
+  const skillContent =
+    "---\nname: temp-skill\ndescription: temp\n---\n# temp\n";
   const directoryApiUrl =
     "https://api.github.com/repos/octo/demo/contents/skills/temp-skill?ref=main";
   const rawUrl =
@@ -130,7 +131,9 @@ async function main() {
         getResourceKind: (resource) => resource.kind || "skill",
         loadSkillIndex: async () => ({ sources: [] }),
         getSourceBranch: async () => {
-          throw new Error("Temporary rawUrl install should not need getSourceBranch");
+          throw new Error(
+            "Temporary rawUrl install should not need getSourceBranch",
+          );
         },
       },
       "./i18n": {
@@ -150,10 +153,14 @@ async function main() {
         getConfiguredUserPromptsDirectory: () => ".github/prompts",
         getConfiguredWorkspaceAgentsDirectory: () => ".github/agents",
         getConfiguredWorkspaceHooksDirectory: () => ".github/hooks",
-        getConfiguredWorkspaceInstructionsDirectory: () => ".github/instructions",
+        getConfiguredWorkspaceInstructionsDirectory: () =>
+          ".github/instructions",
         getConfiguredWorkspaceMcpDirectory: () => ".github/mcp",
         getConfiguredWorkspacePromptsDirectory: () => ".github/prompts",
         getRelativeSkillsPathForWorkspace: () => ".github/skills",
+        isSameOrChildWorkspacePath: (candidatePath, rootPath) =>
+          candidatePath === rootPath ||
+          candidatePath.startsWith(`${rootPath}/`),
         resolveConfiguredUri: (_workspaceUri, configuredPath) => ({
           fsPath: path.join(workspaceRoot, configuredPath || ".github/skills"),
         }),
@@ -208,14 +215,17 @@ async function main() {
   assert.deepStrictEqual(result, {});
   assert.deepStrictEqual(deleted, []);
   assert.ok(
-    directories.some((entry) => entry.endsWith(path.join(".github", "skills", "temp-skill"))),
+    directories.some((entry) =>
+      entry.endsWith(path.join(".github", "skills", "temp-skill")),
+    ),
     "Expected skill install directory creation",
   );
   assert.ok(
     writes.some(
       (entry) =>
-        entry.path.endsWith(path.join(".github", "skills", "temp-skill", "SKILL.md")) &&
-        entry.content === skillContent,
+        entry.path.endsWith(
+          path.join(".github", "skills", "temp-skill", "SKILL.md"),
+        ) && entry.content === skillContent,
     ),
     "Expected downloaded SKILL.md to be written instead of fallback placeholder",
   );

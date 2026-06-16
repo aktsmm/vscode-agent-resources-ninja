@@ -21,6 +21,7 @@ import {
   DEFAULT_WORKSPACE_MCP_DIRECTORY,
   DEFAULT_WORKSPACE_PROMPTS_DIRECTORY,
   DEFAULT_SKILLS_DIRECTORY,
+  getConfiguredAdditionalSkillRoots,
   getConfiguredInstructionFilePath,
   getConfiguredIncludeLocalResources,
   getConfiguredSkillsDirectory,
@@ -30,6 +31,7 @@ import {
   getConfiguredWorkspaceMcpDirectory,
   getConfiguredWorkspacePromptsDirectory,
   getRelativeSkillsPathForWorkspace,
+  isSameOrChildWorkspacePath,
   resolveConfiguredUri,
   resolveInstructionFileUri,
 } from "./customizationPaths";
@@ -86,16 +88,21 @@ function getConfiguredWorkspaceResourceRoots(
   workspaceUri: vscode.Uri,
   config: vscode.WorkspaceConfiguration,
 ): ConfiguredResourceRoot[] {
+  const skillRoots: ConfiguredResourceRoot[] = [
+    getConfiguredSkillsDirectory(config),
+    ...getConfiguredAdditionalSkillRoots(config),
+  ].map((configuredPath) => ({
+    rootUri: resolveConfiguredUri(
+      workspaceUri,
+      configuredPath,
+      DEFAULT_SKILLS_DIRECTORY,
+    ),
+    glob: "**/SKILL.md",
+    detectionBase: "skills",
+  }));
+
   return [
-    {
-      rootUri: resolveConfiguredUri(
-        workspaceUri,
-        getConfiguredSkillsDirectory(config),
-        DEFAULT_SKILLS_DIRECTORY,
-      ),
-      glob: "**/SKILL.md",
-      detectionBase: "skills",
-    },
+    ...skillRoots,
     {
       rootUri: resolveConfiguredUri(
         workspaceUri,
@@ -489,7 +496,7 @@ export async function scanLocalSkills(
           kind === "skill" &&
           !includeInstalled &&
           skillsDir &&
-          relativePath.startsWith(skillsDir)
+          isSameOrChildWorkspacePath(relativePath, skillsDir)
         ) {
           continue;
         }

@@ -1102,6 +1102,7 @@ test("settings order keeps install and destination paths first", () => {
     "resourceNinja.defaultInstallTarget",
     "resourceNinja.singleClickInstall",
     "resourceNinja.resourcesDirectory",
+    "resourceNinja.additionalSkillRoots",
     "resourceNinja.workspaceAgentsDirectory",
     "resourceNinja.workspaceInstructionsDirectory",
     "resourceNinja.workspacePromptsDirectory",

@@ -126,6 +126,8 @@ function loadInstaller(writes) {
       getConfiguredWorkspaceMcpDirectory: () => ".github/mcp",
       getConfiguredWorkspacePromptsDirectory: () => ".github/prompts",
       getRelativeSkillsPathForWorkspace: () => ".github/skills",
+      isSameOrChildWorkspacePath: (candidatePath, rootPath) =>
+        candidatePath === rootPath || candidatePath.startsWith(`${rootPath}/`),
       resolveConfiguredUri: () => makeUri("/tmp/resource"),
       resolveSkillsDirectoryUri: () => makeUri("/tmp/.github/skills"),
     },

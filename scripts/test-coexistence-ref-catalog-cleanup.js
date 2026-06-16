@@ -210,6 +210,9 @@ async function main() {
         isAbsoluteConfiguredPath: () => false,
         isHomeRelativePath: () => false,
         getRelativeSkillsPathForWorkspace: () => ".github/skills",
+        isSameOrChildWorkspacePath: (candidatePath, rootPath) =>
+          candidatePath === rootPath ||
+          candidatePath.startsWith(`${rootPath}/`),
         resolveInstructionFileUri: () => ({ fsPath: instructionPath }),
         resolveConfiguredUri: (workspaceUri, configuredPath, fallbackPath) => ({
           fsPath: path.join(
