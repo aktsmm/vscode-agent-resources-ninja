@@ -126,7 +126,7 @@ Managed output follows a ref-first model by default: keep **Use Ref Output** on 
 ### 🤖 MCP Tools Integration
 
 - Automatically available as tools in **Agent Mode**
-- **9 Tools**: `#searchResources`, `#installResource`, `#uninstallResource`, `#listResources`, `#recommendResources`, `#updateResourceIndex`, `#webSearchResources`, `#addResourceSource`, `#localizeResource`
+- **10 Tools**: `#searchResources`, `#installResource`, `#uninstallResource`, `#listResources`, `#recommendResources`, `#updateResourceIndex`, `#webSearchResources`, `#addResourceSource`, `#removeResourceSource`, `#localizeResource`
 - Trust badges (Official / Curated / Community)
 - Auto-update resource output for skill installs where applicable
 
@@ -347,17 +347,18 @@ In GitHub Copilot's **Agent Mode**, tools are automatically available.
 
 ### Tool List
 
-| Tool Reference         | Description                       |
-| ---------------------- | --------------------------------- |
-| `#searchResources`     | Search resources by keyword       |
-| `#installResource`     | Install a resource                |
-| `#uninstallResource`   | Uninstall a resource              |
-| `#listResources`       | List workspace resources          |
-| `#recommendResources`  | Get project-based recommendations |
-| `#updateResourceIndex` | Update resource index             |
-| `#webSearchResources`  | Web search resources on GitHub    |
-| `#addResourceSource`   | Add new resource source           |
-| `#localizeResource`    | Localize resource descriptions    |
+| Tool Reference          | Description                             |
+| ----------------------- | --------------------------------------- |
+| `#searchResources`      | Search resources by keyword             |
+| `#installResource`      | Install a resource                      |
+| `#uninstallResource`    | Uninstall a resource                    |
+| `#listResources`        | List workspace resources                |
+| `#recommendResources`   | Get project-based recommendations       |
+| `#updateResourceIndex`  | Update resource index                   |
+| `#webSearchResources`   | Web search resources on GitHub          |
+| `#addResourceSource`    | Add new resource source                 |
+| `#removeResourceSource` | Remove a resource source from the index |
+| `#localizeResource`     | Localize resource descriptions          |
 
 ### Usage Examples
 
@@ -439,7 +440,7 @@ Use `additionalSkillRoots` when workspace skills are stored outside the primary 
 |  26   | `resourceNinja.showBuiltInResources`                            | `true`                 | Show built-in resources in User / Global Resource Home                                   |
 |  27   | `resourceNinja.remoteResourceViewMode`                          | `repositoryFirst`      | Remote Resources layout (repository-first / resource-type-first)                         |
 |  28   | `resourceNinja.language`                                        | `auto`                 | UI language (auto / en / ja)                                                             |
-|  29   | `resourceNinja.githubToken`                                     | `""`                   | GitHub Token (for API rate limit)                                                        |
+|  29   | `resourceNinja.githubToken`                                     | `""`                   | GitHub Token (API rate limits and private source repositories)                           |
 |  30   | `resourceNinja.instructionBlock.includeAgents`                  | `false`                | Include `agent` resources in workspace instruction blocks                                |
 |  31   | `resourceNinja.instructionBlock.includeInstructions`            | `false`                | Include `instruction` resources in workspace instruction blocks                          |
 |  32   | `resourceNinja.instructionBlock.globalHome.includeAgents`       | `inherit`              | Override Global Resource Home agent listing policy (`inherit` / `on` / `off`)            |
@@ -601,9 +602,9 @@ When Ref output is on, adjust **Ref Catalog Detail Format** if you want a lighte
 
 ## 🔑 GitHub Token Setup
 
-> **Recommended**: A GitHub Token raises API limits from 60 to 5000 requests/hour. Without it, GitHub Search may hit rate limits quickly.
+> **Recommended**: A GitHub Token raises API limits from 60 to 5000 requests/hour. It is also required when you intentionally add private repositories as resource sources.
 
-Set up a GitHub Token for more reliable search:
+Set up a GitHub Token for more reliable search and private source indexing:
 
 ### Option 1: VS Code Settings
 
@@ -617,7 +618,7 @@ Find `Agent Resources Ninja: GitHub Token` in settings and enter your token:
 
 👉 [Create a GitHub Token](https://github.com/settings/tokens/new?description=Agent%20Resources%20Ninja)
 
-For public resources, leave scopes unchecked. Add private repository scopes only if you intentionally index private repositories.
+For public resources, leave scopes unchecked. To index a private repository, use a fine-grained PAT scoped to the selected repository with **Contents: Read** permission, or a classic PAT with the broader `repo` scope when that is the only viable option. If the repository belongs to an organization, the token may also need SSO or organization approval.
 
 ### Option 2: GitHub CLI (Recommended)
 

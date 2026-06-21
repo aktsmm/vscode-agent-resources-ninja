@@ -24,7 +24,7 @@ import {
 import { formatHookConfigUpdateSummary } from "./hookConfigManager";
 import { updateInstructionFile } from "./instructionManager";
 import { getConfiguredInstructionFilePath } from "./customizationPaths";
-import { searchGitHub, addSource } from "./indexUpdater";
+import { searchGitHub, addSource, removeSource } from "./indexUpdater";
 import { isJapanese } from "./i18n";
 import { getGitHubToken } from "./githubAuth";
 import { logger } from "./logger";
@@ -250,6 +250,11 @@ export function registerMcpTools(context: vscode.ExtensionContext): void {
     // ソース追加ツール
     registerLanguageModelTool(context, "resourceNinja_addSource", () => {
       return new AddSourceTool();
+    });
+
+    // ソース削除ツール
+    registerLanguageModelTool(context, "resourceNinja_removeSource", () => {
+      return new RemoveSourceTool();
     });
 
     // リソース説明ローカライズツール
@@ -1243,9 +1248,145 @@ class AddSourceTool implements vscode.LanguageModelTool<{ repoUrl: string }> {
 ---
 **📋 Troubleshooting:**
 1. Check the repository URL format (https://github.com/owner/repo or owner/repo)
-2. Repository must be public
-3. Repository should contain SKILL.md files
+2. Private repositories require a GitHub token with repository Contents: Read access
+3. Repository should contain supported resource files such as SKILL.md, .agent.md, .prompt.md, .instructions.md, hook README files, MCP configs, or plugin manifests
 4. GitHub API rate limit may be exceeded`,
+        ),
+      ]);
+    }
+  }
+}
+
+function normalizeSourceLookupValue(value: string): string {
+  return value
+    .trim()
+    .replace(/\.git$/i, "")
+    .replace(/\/+$/, "")
+    .toLowerCase();
+}
+
+function normalizeSourceLookupUrl(value: string): string {
+  const trimmed = value
+    .trim()
+    .replace(/\.git$/i, "")
+    .replace(/\/+$/, "");
+  if (/^[^/\s]+\/[^/\s]+$/.test(trimmed)) {
+    return `https://github.com/${trimmed}`.toLowerCase();
+  }
+  const match = trimmed.match(
+    /^(https:\/\/github\.com\/[^/]+\/[^/]+)(?:\/(?:tree|blob)\/.*)?$/i,
+  );
+  return (match ? match[1] : trimmed).toLowerCase();
+}
+
+function formatSourceCandidates(
+  index: SkillIndex,
+  sourceIds: string[],
+): string {
+  return sourceIds
+    .map((sourceId) => {
+      const source = index.sources.find(
+        (candidate) => candidate.id === sourceId,
+      );
+      if (!source) {
+        return undefined;
+      }
+      const count = index.skills.filter(
+        (skill) => skill.source === source.id,
+      ).length;
+      return `| ${escapeMarkdownCell(source.id)} | ${escapeMarkdownCell(source.name)} | ${escapeMarkdownCell(source.url)} | ${count} |`;
+    })
+    .filter((line): line is string => !!line)
+    .join("\n");
+}
+
+class RemoveSourceTool implements vscode.LanguageModelTool<{
+  sourceIdOrName: string;
+}> {
+  async invoke(
+    options: vscode.LanguageModelToolInvocationOptions<{
+      sourceIdOrName: string;
+    }>,
+    _token: vscode.CancellationToken,
+  ): Promise<vscode.LanguageModelToolResult> {
+    if (!extContext) {
+      return new vscode.LanguageModelToolResult([
+        new vscode.LanguageModelTextPart(`❌ Extension context not available.`),
+      ]);
+    }
+
+    const query = options.input.sourceIdOrName?.trim() || "";
+    if (!query) {
+      return new vscode.LanguageModelToolResult([
+        new vscode.LanguageModelTextPart(
+          `❌ sourceIdOrName is required. Provide a source id, source name, GitHub repository URL, or owner/repo.`,
+        ),
+      ]);
+    }
+
+    try {
+      const currentIndex = await getSkillIndex();
+      const normalizedQuery = normalizeSourceLookupValue(query);
+      const normalizedUrl = normalizeSourceLookupUrl(query);
+
+      const exactId = currentIndex.sources.find(
+        (source) => normalizeSourceLookupValue(source.id) === normalizedQuery,
+      );
+      const exactNameMatches = currentIndex.sources.filter(
+        (source) => normalizeSourceLookupValue(source.name) === normalizedQuery,
+      );
+      const exactUrlMatches = currentIndex.sources.filter(
+        (source) => normalizeSourceLookupUrl(source.url) === normalizedUrl,
+      );
+
+      const candidateIds = Array.from(
+        new Set(
+          [
+            exactId?.id,
+            ...exactNameMatches.map((source) => source.id),
+            ...exactUrlMatches.map((source) => source.id),
+          ].filter((sourceId): sourceId is string => !!sourceId),
+        ),
+      );
+
+      if (candidateIds.length === 0) {
+        const visibleSources = currentIndex.sources
+          .slice(0, 20)
+          .map((source) => source.id);
+        const table = formatSourceCandidates(currentIndex, visibleSources);
+        return new vscode.LanguageModelToolResult([
+          new vscode.LanguageModelTextPart(
+            `❌ Source not found: ${query}\n\n| Source ID | Name | URL | Resources |\n|---|---|---|---|\n${table}`,
+          ),
+        ]);
+      }
+
+      if (candidateIds.length > 1) {
+        const table = formatSourceCandidates(currentIndex, candidateIds);
+        return new vscode.LanguageModelToolResult([
+          new vscode.LanguageModelTextPart(
+            `⚠️ Multiple sources match "${query}". Use an exact source id.\n\n| Source ID | Name | URL | Resources |\n|---|---|---|---|\n${table}`,
+          ),
+        ]);
+      }
+
+      const sourceId = candidateIds[0];
+      const source = currentIndex.sources.find(
+        (candidate) => candidate.id === sourceId,
+      );
+      const result = await removeSource(extContext, currentIndex, sourceId);
+      cachedIndex = result.index;
+      await vscode.commands.executeCommand("resourceNinja.refresh");
+
+      return new vscode.LanguageModelToolResult([
+        new vscode.LanguageModelTextPart(
+          `✅ リソースソースを削除しました。\n\n| 項目 | 内容 |\n|---|---|\n| Source | ${escapeMarkdownCell(source?.name || sourceId)} |\n| Source ID | ${escapeMarkdownCell(sourceId)} |\n| 削除したインデックス項目 | ${result.removedSkills} |\n| Installed files | 削除していません |\n\nインストール済みの workspace / user / global ファイルは残っています。`,
+        ),
+      ]);
+    } catch (error) {
+      return new vscode.LanguageModelToolResult([
+        new vscode.LanguageModelTextPart(
+          `❌ Failed to remove source: ${error}`,
         ),
       ]);
     }

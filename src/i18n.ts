@@ -49,7 +49,7 @@ const jaMessages = {
   noSkillsInRepo: "このリポジトリにはリソースが見つかりませんでした",
   selectSourceToRemove: "削除するソースを選択",
   confirmRemoveSource:
-    '"{0}" を削除しますか？このソースのすべてのリソースがインデックスから削除されます。',
+    '"{0}" を削除しますか？このソースのすべてのリソースがインデックスから削除されます。インストール済みファイルは削除されません。',
   actionRemove: "削除",
   sourceRemoved: "✅ ソースを削除しました ({0} リソース)",
   removeSourceFailed: "ソース削除失敗: {0}",
@@ -188,7 +188,7 @@ const enMessages: MessageDictionary = {
   noSkillsInRepo: "No resources found in this repository",
   selectSourceToRemove: "Select source to remove",
   confirmRemoveSource:
-    'Remove "{0}"? All resources from this source will be removed from the index.',
+    'Remove "{0}"? All resources from this source will be removed from the index. Installed files will not be deleted.',
   actionRemove: "Remove",
   sourceRemoved: "✅ Source removed ({0} resources)",
   removeSourceFailed: "Failed to remove source: {0}",

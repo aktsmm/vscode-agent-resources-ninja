@@ -2,7 +2,7 @@
   "name": "agent-resources-ninja",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.33",
+  "version": "0.2.34",
   "publisher": "yamapan",
   "license": "CC-BY-NC-SA-4.0",
   "icon": "resources/icon.png",
@@ -42,6 +42,7 @@
     "onLanguageModelTool:resourceNinja_updateIndex",
     "onLanguageModelTool:resourceNinja_webSearch",
     "onLanguageModelTool:resourceNinja_addSource",
+    "onLanguageModelTool:resourceNinja_removeSource",
     "onLanguageModelTool:resourceNinja_localize"
   ],
   "main": "./dist/extension.js",
@@ -318,7 +319,7 @@
         "toolReferenceName": "addResourceSource",
         "displayName": "Add Resource Source",
         "icon": "$(repo)",
-        "modelDescription": "Add a new GitHub repository as a resource source / 新しいリポジトリをリソースソースとして追加 / NINJA. Repository may contain SKILL.md, .agent.md, .prompt.md, .instructions.md, or hook README files.",
+        "modelDescription": "Add a GitHub repository as a resource source / リポジトリをリソースソースとして追加 / NINJA. Supports public repositories and private repositories when GitHub authentication has repository Contents: Read access. Repository may contain SKILL.md, .agent.md, .prompt.md, .instructions.md, hook README files, MCP configs, or plugin manifests.",
         "canBeReferencedInPrompt": true,
         "inputSchema": {
           "type": "object",
@@ -330,6 +331,38 @@
           },
           "required": [
             "repoUrl"
+          ]
+        }
+      },
+      {
+        "name": "resourceNinja_removeSource",
+        "tags": [
+          "skills",
+          "agent",
+          "resource-ninja",
+          "source",
+          "repository",
+          "remove",
+          "delete",
+          "ソース",
+          "リポジトリ",
+          "削除"
+        ],
+        "toolReferenceName": "removeResourceSource",
+        "displayName": "Remove Resource Source",
+        "icon": "$(trash)",
+        "modelDescription": "Remove a GitHub repository from resource sources / リソースソースからリポジトリを削除 / NINJA. Removes the source and its indexed resources from the resource index without deleting installed workspace, user, or global files.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sourceIdOrName": {
+              "type": "string",
+              "description": "Source id, source name, GitHub repository URL, or owner/repo to remove"
+            }
+          },
+          "required": [
+            "sourceIdOrName"
           ]
         }
       },
@@ -1110,7 +1143,7 @@
         },
         {
           "command": "resourceNinja.removeSource",
-          "when": "view == resourceNinja.browseView && viewItem == source",
+          "when": "view == resourceNinja.browseView && (viewItem == source || viewItem == remoteKindSource)",
           "group": "inline"
         },
         {

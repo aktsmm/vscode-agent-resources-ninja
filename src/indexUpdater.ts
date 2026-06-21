@@ -198,6 +198,66 @@ async function fetchWithTimeout(
   }
 }
 
+function buildRawContentUrl(
+  owner: string,
+  repo: string,
+  branch: string,
+  filePath: string,
+): string {
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${normalizeGitHubContentPath(filePath)}`;
+}
+
+function normalizeGitHubContentPath(filePath: string): string {
+  return filePath.replace(/\\/g, "/").replace(/^\/+/, "");
+}
+
+function encodeGitHubContentPath(filePath: string): string {
+  return normalizeGitHubContentPath(filePath)
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
+function joinGitHubContentPath(...parts: string[]): string {
+  return parts.map(normalizeGitHubContentPath).filter(Boolean).join("/");
+}
+
+async function fetchGitHubTextContent(
+  owner: string,
+  repo: string,
+  branch: string,
+  filePath: string,
+  token?: string,
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
+): Promise<string | undefined> {
+  const rawUrl = buildRawContentUrl(owner, repo, branch, filePath);
+  try {
+    const rawResponse = await fetchWithTimeout(rawUrl, undefined, timeoutMs);
+    if (rawResponse.ok) {
+      return await rawResponse.text();
+    }
+    if (!token || ![401, 403, 404].includes(rawResponse.status)) {
+      return undefined;
+    }
+  } catch {
+    if (!token) {
+      return undefined;
+    }
+  }
+
+  const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeGitHubContentPath(filePath)}?ref=${encodeURIComponent(branch)}`;
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github.raw+json",
+    Authorization: `token ${token}`,
+    "User-Agent": "VSCode-AgentResourcesNinja",
+  };
+  const apiResponse = await fetchWithTimeout(apiUrl, { headers }, timeoutMs);
+  if (apiResponse.ok) {
+    return await apiResponse.text();
+  }
+  return undefined;
+}
+
 async function mapWithConcurrency<T, R>(
   items: T[],
   limit: number,
@@ -280,16 +340,21 @@ async function fetchAndExtractLicense(
   repo: string,
   skillDir: string,
   branch: string,
+  token?: string,
 ): Promise<string | null> {
   // 試すファイル名のリスト
   const licenseFiles = LICENSE_EXTRACTION.FILE_NAMES;
 
   for (const filename of licenseFiles) {
     try {
-      const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${skillDir}/${filename}`;
-      const response = await fetchWithTimeout(rawUrl);
-      if (response.ok) {
-        const content = await response.text();
+      const content = await fetchGitHubTextContent(
+        owner,
+        repo,
+        branch,
+        joinGitHubContentPath(skillDir, filename),
+        token,
+      );
+      if (content) {
         const license = extractLicenseFromContent(content);
         if (license) {
           return license;
@@ -402,6 +467,28 @@ async function githubFetch(url: string, token?: string): Promise<Response> {
   }
 
   return response;
+}
+
+function createPrivateRepositoryAccessError(
+  owner: string,
+  repo: string,
+): Error {
+  return new Error(
+    `Repository not found or private: ${owner}/${repo}. Configure a GitHub token with repository Contents: Read access, or authenticate with gh CLI for this repository.`,
+  );
+}
+
+function throwIfTreeResponseTruncated(
+  data: { truncated?: boolean },
+  owner: string,
+  repo: string,
+  branch: string,
+): void {
+  if (data.truncated) {
+    throw new Error(
+      `GitHub tree response was truncated for ${owner}/${repo} (${branch}). Narrow this source with includePaths/excludePaths or split it into smaller sources before indexing.`,
+    );
+  }
 }
 
 function unquoteYamlValue(value: string): string {
@@ -596,8 +683,15 @@ export async function scanRepositoryForSkills(
       const fallbackResponse = await githubFetch(fallbackUrl, token);
       if (fallbackResponse.ok) {
         const fallbackData = (await fallbackResponse.json()) as {
+          truncated?: boolean;
           tree: Array<{ path: string; type: string }>;
         };
+        throwIfTreeResponseTruncated(
+          fallbackData,
+          owner,
+          repoName,
+          fallbackBranch,
+        );
         return processTreeResponse(
           fallbackData,
           owner,
@@ -608,21 +702,31 @@ export async function scanRepositoryForSkills(
           sourceOptions,
         );
       }
+      if (!token) {
+        throw createPrivateRepositoryAccessError(owner, repoName);
+      }
       throw new Error(
         `Repository or branch not found: ${owner}/${repoName} (branch: ${branch})`,
       );
     }
+    if (response.status === 401 || (response.status === 404 && !token)) {
+      throw createPrivateRepositoryAccessError(owner, repoName);
+    }
     if (response.status === 403) {
       throw new Error(
-        "GitHub API rate limit exceeded. Please authenticate with a GitHub token.",
+        token
+          ? "GitHub token cannot access this repository. Check repository access, Contents: Read permission, and SSO approval if required."
+          : "GitHub API rate limit exceeded or repository is private. Please authenticate with a GitHub token.",
       );
     }
     throw new Error(`GitHub API error: ${response.status}`);
   }
 
   const responseData = (await response.json()) as {
+    truncated?: boolean;
     tree: Array<{ path: string; type: string }>;
   };
+  throwIfTreeResponseTruncated(responseData, owner, repoName, branch);
   return processTreeResponse(
     responseData,
     owner,
@@ -754,7 +858,7 @@ async function processTreeResponse(
   repoName: string,
   repoUrl: string,
   branch: string,
-  _token?: string,
+  token?: string,
   sourceOptions?: Pick<Source, "includePaths" | "excludePaths">,
 ): Promise<{ skills: Skill[]; source: Source; bundles?: Bundle[] }> {
   const allowedBlobFiles = data.tree.filter(
@@ -788,6 +892,7 @@ async function processTreeResponse(
       owner,
       repoName,
       branch,
+      token,
     );
     const source: Source = {
       id: `${owner}-${repoName}`,
@@ -828,13 +933,16 @@ async function processTreeResponse(
           return undefined;
         }
 
-        const rawUrl = `https://raw.githubusercontent.com/${owner}/${repoName}/${branch}/${file.path}`;
-        const contentResponse = await fetchWithTimeout(rawUrl);
-        if (!contentResponse.ok) {
+        const content = await fetchGitHubTextContent(
+          owner,
+          repoName,
+          branch,
+          file.path,
+          token,
+        );
+        if (!content) {
           return undefined;
         }
-
-        const content = await contentResponse.text();
         const skillInfo = parseSkillFrontmatter(content, file.path, kind);
         if (!skillInfo) {
           return undefined;
@@ -879,6 +987,7 @@ async function processTreeResponse(
             repoName,
             resourceDir,
             branch,
+            token,
           );
           if (extractedLicense) {
             license = extractedLicense;
@@ -907,7 +1016,7 @@ async function processTreeResponse(
   );
 
   // bundle.json を検出してBundle定義を取得
-  const bundles = await scanBundleJson(data, owner, repoName, branch);
+  const bundles = await scanBundleJson(data, owner, repoName, branch, token);
 
   // UI上も同一に見える同名・同説明リソースは、配布向けの短いパスを優先して重複除去する。
   // 説明が空のものは従来通り種別+パスで区別する。
@@ -942,6 +1051,7 @@ async function scanBundleJson(
   owner: string,
   repoName: string,
   branch: string,
+  token?: string,
 ): Promise<Bundle[]> {
   // bundle.json ファイルを探す（ルートまたはどこでも）
   const bundleFiles = data.tree.filter(
@@ -955,10 +1065,14 @@ async function scanBundleJson(
 
   for (const file of bundleFiles) {
     try {
-      const rawUrl = `https://raw.githubusercontent.com/${owner}/${repoName}/${branch}/${file.path}`;
-      const contentResponse = await fetchWithTimeout(rawUrl);
-      if (contentResponse.ok) {
-        const content = await contentResponse.text();
+      const content = await fetchGitHubTextContent(
+        owner,
+        repoName,
+        branch,
+        file.path,
+        token,
+      );
+      if (content) {
         const bundleData = JSON.parse(content);
 
         // 単一のBundle定義の場合
@@ -1010,6 +1124,7 @@ async function scanClaudeCommands(
   owner: string,
   repoName: string,
   branch: string,
+  token?: string,
 ): Promise<Skill[]> {
   logger.info(
     `[Resource Ninja] scanClaudeCommands: ${owner}/${repoName} branch=${branch}`,
@@ -1032,13 +1147,16 @@ async function scanClaudeCommands(
     async (file): Promise<Skill | undefined> => {
       try {
         // コマンドの内容を取得
-        const rawUrl = `https://raw.githubusercontent.com/${owner}/${repoName}/${branch}/${file.path}`;
-        const contentResponse = await fetchWithTimeout(rawUrl);
-        if (!contentResponse.ok) {
+        const content = await fetchGitHubTextContent(
+          owner,
+          repoName,
+          branch,
+          file.path,
+          token,
+        );
+        if (!content) {
           return undefined;
         }
-
-        const content = await contentResponse.text();
 
         // パスからスキル名を抽出: .claude/commands/category/command-name.md -> category/command-name
         const pathWithoutPrefix = file.path.replace(".claude/commands/", "");
@@ -1133,7 +1251,7 @@ async function scanSkillRegistryJson(
   owner: string,
   repoName: string,
   branch: string,
-  _token?: string,
+  token?: string,
 ): Promise<{ skills: Skill[]; source: Source } | null> {
   logger.info(
     `[Resource Ninja] scanSkillRegistryJson: ${owner}/${repoName} branch=${branch}`,
@@ -1141,32 +1259,39 @@ async function scanSkillRegistryJson(
 
   // registry.json または search-index.json を取得
   // search-index.json は軽量（~1MB）なのでこちらを優先
-  const searchIndexUrl = `https://raw.githubusercontent.com/${owner}/${repoName}/${branch}/docs/search-index.json`;
-
   try {
-    const response = await fetchWithTimeout(searchIndexUrl, undefined, 30000);
-    if (!response.ok) {
+    const searchIndexContent = await fetchGitHubTextContent(
+      owner,
+      repoName,
+      branch,
+      "docs/search-index.json",
+      token,
+      30000,
+    );
+    if (!searchIndexContent) {
       logger.info(
         `[Resource Ninja] search-index.json not found, trying registry.json`,
       );
       // registry.json にフォールバック（大きいので注意）
-      const registryUrl = `https://raw.githubusercontent.com/${owner}/${repoName}/${branch}/registry.json`;
-      const registryResponse = await fetchWithTimeout(
-        registryUrl,
-        undefined,
+      const registryContent = await fetchGitHubTextContent(
+        owner,
+        repoName,
+        branch,
+        "registry.json",
+        token,
         60000,
       );
-      if (!registryResponse.ok) {
+      if (!registryContent) {
         return null;
       }
-      const registryData = (await registryResponse.json()) as {
+      const registryData = JSON.parse(registryContent) as {
         skills?: RegistrySkill[];
         total?: number;
       };
       return parseRegistryJson(registryData, owner, repoName, branch);
     }
 
-    const searchIndex = (await response.json()) as {
+    const searchIndex = JSON.parse(searchIndexContent) as {
       v?: string;
       t?: number;
       s?: SearchIndexSkill[];

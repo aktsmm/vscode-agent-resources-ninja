@@ -5,6 +5,21 @@ All notable changes to the "Agent Resources Ninja" extension will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.34] - 2026-06-21
+
+### Added
+
+- **Private Source Repository Support** - Added private GitHub repository indexing for user-added resource sources by falling back from unauthenticated raw file reads to authenticated GitHub Contents API reads for `SKILL.md`, resource files, `bundle.json`, `LICENSE*`, `registry.json`, `docs/search-index.json`, and `.claude/commands/**/*.md` / user-added source repository で private GitHub repository を index できるよう、`SKILL.md`、resource files、`bundle.json`、`LICENSE*`、`registry.json`、`docs/search-index.json`、`.claude/commands/**/*.md` の取得を未認証 raw 読み取りから認証付き GitHub Contents API へ fallback するようにしました。
+- **Source Removal Tool** - Added the Agent Mode tool `#removeResourceSource` so agents can remove a source repository by source ID, source name, repository URL, or `owner/repo` without deleting installed workspace, user, or global resource files / Agent Mode tool `#removeResourceSource` を追加し、source ID、source name、repository URL、`owner/repo` から source repository を index から削除できるようにしました。インストール済みの workspace / user / global resource files は削除しません。
+
+### Fixed
+
+- **Source Scan Safety** - Added explicit Git Trees API truncation detection to avoid partial indexes, improved private repository authentication errors, and normalized root-level resource content paths so root `LICENSE` files are fetched correctly / Git Trees API の truncated response を明示エラーにして partial index を避け、private repository authentication error を分かりやすくし、root-level resource の content path を正規化して root `LICENSE` を正しく取得できるようにしました。
+
+### Tests
+
+- Added regression coverage for private source Contents API fallback, public raw fetch behavior, source removal persistence, shared-store synchronization, Git tree truncation failures, and root-level license path normalization / private source の Contents API fallback、public raw fetch、source removal persistence、shared-store synchronization、Git tree truncation failure、root-level license path normalization の回帰テストを追加しました。
+
 ## [0.2.33] - 2026-06-21
 
 ### Added
