@@ -5,6 +5,12 @@ All notable changes to the "Agent Resources Ninja" extension will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.33] - 2026-06-21
+
+### Added
+
+- **Oh My Codex Bundled Source** - Added `Yeachan-Heo/oh-my-codex` as a community bundled preset source, path-filtered to the `plugins/oh-my-codex/` distribution plugin so OMX skills, prompts, hooks, and Codex plugin metadata can be discovered without indexing repository internals / `Yeachan-Heo/oh-my-codex` を community bundled preset source として追加し、`plugins/oh-my-codex/` の配布 plugin に path filter することで、repo 内部実装を index せず OMX skills、prompts、hooks、Codex plugin metadata を discovery できるようにしました。
+
 ## [0.2.32] - 2026-06-16
 
 ### Added
