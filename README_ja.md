@@ -12,23 +12,11 @@
 
 > **ライセンス注意**: 本拡張機能は CC BY-NC-SA 4.0 で配布されています。非商用利用は可能ですが、商用利用には許諾が必要です。詳細は [LICENSE](LICENSE) を確認してください。
 
-<p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=yamapan.agent-resources-ninja">
-    <img src="https://img.shields.io/badge/VS%20Code-Marketplace-007ACC?style=for-the-badge&logo=visual-studio-code&logoColor=white" alt="VS Code Marketplace">
-  </a>
-  <a href="https://github.com/aktsmm/vscode-agent-resources-ninja/blob/master/LICENSE">
-    <img src="https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey?style=for-the-badge" alt="License CC BY-NC-SA 4.0">
-  </a>
-  <a href="https://github.com/aktsmm/vscode-agent-resources-ninja">
-    <img src="https://img.shields.io/badge/GitHub-Source-181717?style=for-the-badge&logo=github&logoColor=white" alt="GitHub">
-  </a>
-</p>
-
-<p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=yamapan.agent-resources-ninja">
-    <img src="https://img.shields.io/badge/%E4%BB%8A%E3%81%99%E3%81%90%E3%82%A4%E3%83%B3%E3%82%B9%E3%83%88%E3%83%BC%E3%83%AB-VS%20Code%20Marketplace-007ACC?style=for-the-badge&logo=visual-studio-code&logoColor=white" alt="VS Code Marketplace からインストール">
-  </a>
-</p>
+[![Status](https://badgen.net/badge/Status/Stable/green)](https://marketplace.visualstudio.com/items?itemName=yamapan.agent-resources-ninja)
+[![VS Marketplace](https://badgen.net/vs-marketplace/v/yamapan.agent-resources-ninja)](https://marketplace.visualstudio.com/items?itemName=yamapan.agent-resources-ninja)
+[![Installs](https://badgen.net/vs-marketplace/i/yamapan.agent-resources-ninja)](https://marketplace.visualstudio.com/items?itemName=yamapan.agent-resources-ninja)
+[![License](https://badgen.net/badge/License/CC%20BY-NC-SA%204.0/gray)](LICENSE)
+[![GitHub](https://badgen.net/badge/GitHub/Source/black)](https://github.com/aktsmm/vscode-agent-resources-ninja)
 
 <p align="center">
   <b>GitHub Copilot • Claude Code • Cursor • Windsurf • Cline</b>
