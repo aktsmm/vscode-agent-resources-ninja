@@ -5,6 +5,22 @@ All notable changes to the "Agent Resources Ninja" extension will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.35] - 2026-06-24
+
+### Added
+
+- **Stale Source Index Freshness** - Added per-source `lastIndexedAt` metadata, 30-day stale source detection, and startup handling with `resourceNinja.staleSourceIndexUpdateMode` (`always` / `prompt` / `never`) so stale source repositories can be refreshed without reinstalling local files / source ごとの `lastIndexedAt` metadata、30日超の stale source 検出、`resourceNinja.staleSourceIndexUpdateMode`（`always` / `prompt` / `never`）による起動時処理を追加し、ローカルファイルを再インストールせず source repository index を更新できるようにしました。
+- **Chat and MCP Runtime i18n Guards** - Localized short Chat Participant and MCP tool responses through runtime helpers, and added guards for source freshness, shared manifest round-trip, startup flow coordination, and i18n helper usage / Chat Participant と MCP tool の短い応答を runtime helper 経由でローカライズし、source freshness、shared manifest round-trip、startup flow coordination、i18n helper 利用の guard を追加しました。
+
+### Fixed
+
+- **Source Refresh Retry Safety** - Stale source prompts now record the daily prompt state only after the user defers or prompt-driven refreshes succeed, keeping failed sources retryable, and MCP tool errors now return sanitized error messages / stale source prompt はユーザーが延期した場合または prompt 経由更新が成功した場合だけ日次状態を記録するようにし、失敗 source を retry 対象に残します。MCP tool error もサニタイズした error message を返すようにしました。
+- **Release Script Reliability** - Simplified the package/prepublish scripts to run the production build directly, keeping typecheck and lint as explicit release gates so VSIX packaging is less sensitive to nested npm wrapper behavior on Windows / package/prepublish script を production build 直接実行に簡素化し、typecheck と lint は明示的な release gate として扱うことで、Windows の nested npm wrapper 挙動に VSIX packaging が影響されにくくしました。
+
+### Tests
+
+- Revalidated typecheck, lint, bundle build, resource regression, manifest consistency, localization guards, source freshness tests, shared source manifest tests, When to Use extraction, search logic, npm audit, and VS Code Extension Host smoke before release / リリース前に typecheck、lint、bundle build、resource 回帰、manifest consistency、localization guard、source freshness test、shared source manifest test、When to Use 抽出、検索ロジック、npm audit、VS Code Extension Host smoke を再検証しました。
+
 ## [0.2.34] - 2026-06-21
 
 ### Added

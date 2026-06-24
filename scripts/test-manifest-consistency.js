@@ -82,6 +82,18 @@ const customizationPathsSource = fs.readFileSync(
   path.join(repoRoot, "src", "customizationPaths.ts"),
   "utf8",
 );
+const sourceFreshnessSource = fs.readFileSync(
+  path.join(repoRoot, "src", "sourceFreshness.ts"),
+  "utf8",
+);
+const sharedManifestSource = fs.readFileSync(
+  path.join(repoRoot, "src", "sharedManifest.ts"),
+  "utf8",
+);
+const sharedSourcesManifestStoreSource = fs.readFileSync(
+  path.join(repoRoot, "src", "sharedSourcesManifestStore.ts"),
+  "utf8",
+);
 const bundledIndex = JSON.parse(
   fs.readFileSync(path.join(repoRoot, "resources", "skill-index.json"), "utf8"),
 );
@@ -1155,6 +1167,102 @@ test("workspace installed non-skill resources preserve source metadata", () => {
     treeProviderSource,
     /source: isInstalled \? undefined : "local"/,
     "Old source-dropping expression should not return",
+  );
+});
+
+test("stale source index freshness setting is wired through manifest docs and code", () => {
+  const config = packageJson.contributes?.configuration?.properties || {};
+  const setting = config["resourceNinja.staleSourceIndexUpdateMode"];
+  assert.ok(setting, "Missing stale source index update mode setting");
+  assert.strictEqual(setting.default, "prompt");
+  assert.deepStrictEqual(setting.enum, ["always", "prompt", "never"]);
+  assert.strictEqual(setting.order, 23);
+  for (const key of [
+    "config.staleSourceIndexUpdateMode.markdownDescription",
+    "config.staleSourceIndexUpdateMode.always",
+    "config.staleSourceIndexUpdateMode.prompt",
+    "config.staleSourceIndexUpdateMode.never",
+  ]) {
+    assert.ok(nls[key], `Missing English NLS key: ${key}`);
+    assert.ok(nlsJa[key], `Missing Japanese NLS key: ${key}`);
+  }
+  assert.match(readme, /staleSourceIndexUpdateMode/);
+  assert.match(readmeJa, /staleSourceIndexUpdateMode/);
+  assert.match(
+    customizationPathsSource,
+    /getConfiguredStaleSourceIndexUpdateMode/,
+  );
+  assert.match(sourceFreshnessSource, /STALE_SOURCE_INDEX_DAYS\s*=\s*30/);
+});
+
+test("source freshness metadata is preserved and stamped only on successful scans", () => {
+  assert.match(skillIndexSource, /lastIndexedAt\?: string/);
+  assert.match(sharedManifestSource, /\| "lastIndexedAt"/);
+  assert.match(
+    sharedSourcesManifestStoreSource,
+    /lastIndexedAt: source\.lastIndexedAt/,
+  );
+  assert.match(indexUpdaterSource, /stampIndexedSources/);
+  assert.match(indexUpdaterSource, /scannedSourceIds/);
+  assert.match(
+    indexUpdaterSource,
+    /updateSharedScanMetadata\([\s\S]*indexedAt/,
+  );
+  assert.match(
+    packageJson.scripts?.["test:resources"] || "",
+    /test-source-index-freshness\.js/,
+  );
+  assert.match(
+    packageJson.scripts?.["test:resources"] || "",
+    /test-shared-sources-manifest\.js/,
+  );
+});
+
+test("startup stale update flow avoids duplicate missing-index prompts", () => {
+  assert.match(extensionSource, /runStartupIndexMaintenance/);
+  assert.match(extensionSource, /startupIndexMaintenanceStarted/);
+  assert.match(extensionSource, /STALE_SOURCE_PROMPT_DATE_KEY/);
+  assert.match(extensionSource, /resourceNinja\.staleSourceLastPromptDate/);
+  assert.match(extensionSource, /collectMissingIndexedInstalledSkills/);
+  assert.match(extensionSource, /collectStaleSources/);
+  assert.match(
+    extensionSource,
+    /return;[\s\S]*const config = vscode\.workspace\.getConfiguration\("resourceNinja"\)/,
+  );
+  assert.match(
+    extensionSource,
+    /updateIndexFromSingleSource\([\s\S]*forceScan: true/,
+  );
+  assert.match(
+    extensionSource,
+    /if \(choice !== updateAction\) \{\s*await context\.globalState\.update\(STALE_SOURCE_PROMPT_DATE_KEY, today\);/,
+    "Deferring stale source updates should record the daily prompt only after the user defers",
+  );
+  assert.match(
+    extensionSource,
+    /if \(failedSources\.length > 0\) \{[\s\S]*\} else if \(staleUpdateMode === "always"\) \{[\s\S]*\} else \{\s*await context\.globalState\.update\(/,
+    "Successful prompt-driven stale source updates should record the daily prompt after updates finish",
+  );
+});
+
+test("chat participant and MCP short responses use runtime localization helpers", () => {
+  assert.match(chatParticipantSource, /function chatText/);
+  assert.match(chatParticipantSource, /isJapanese\(\)/);
+  assert.match(chatParticipantSource, /getLocalizedDescription/);
+  assert.match(mcpToolsSource, /export function localizeMcpText/);
+  assert.match(mcpToolsSource, /export function formatMcpError/);
+  assert.match(
+    mcpToolsSource,
+    /error instanceof Error \? error\.message : String\(error\)/,
+  );
+  assert.match(mcpToolsSource, /mcpContextUnavailableMessage/);
+  assert.doesNotMatch(
+    chatParticipantSource,
+    /label: "\$\(search\) Search Resources"/,
+  );
+  assert.doesNotMatch(
+    mcpToolsSource,
+    /new vscode\.LanguageModelTextPart\(`❌ Extension context not available\.`\)/,
   );
 });
 

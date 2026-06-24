@@ -15,6 +15,7 @@ export const DEFAULT_INSTRUCTION_FILE = "AGENTS.md";
 export const DISABLED_INSTRUCTION_FILE = "none";
 
 export type CoexistenceMode = "auto" | "independent";
+export type StaleSourceIndexUpdateMode = "always" | "prompt" | "never";
 export type InstructionBlockScope = "workspace" | "globalHome";
 export type InstructionBlockScopeOverride = "inherit" | "on" | "off";
 
@@ -302,6 +303,17 @@ export function getConfiguredUseSharedResourceIndex(
   config: vscode.WorkspaceConfiguration,
 ): boolean {
   return config.get<boolean>("useSharedResourceIndex") ?? false;
+}
+
+export function getConfiguredStaleSourceIndexUpdateMode(
+  config: vscode.WorkspaceConfiguration,
+): StaleSourceIndexUpdateMode {
+  const value = config.get<StaleSourceIndexUpdateMode>(
+    "staleSourceIndexUpdateMode",
+  );
+  return value === "always" || value === "never" || value === "prompt"
+    ? value
+    : "prompt";
 }
 
 export function getConfiguredWorkspaceAgentsDirectory(

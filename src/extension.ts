@@ -103,6 +103,7 @@ import {
   getConfiguredGlobalHomeDirectory,
   getConfiguredInstructionFilePath,
   getInstructionBlockKinds,
+  getConfiguredStaleSourceIndexUpdateMode,
   getConfiguredSkillsDirectory,
   getConfiguredUserAgentsDirectory,
   getConfiguredUserInstructionsDirectory,
@@ -127,11 +128,13 @@ import {
   readSharedResourceIndex,
 } from "./sharedResourceIndexStore";
 import { readSharedSourcesManifest } from "./sharedSourcesManifestStore";
+import { collectStaleSources } from "./sourceFreshness";
 
 // 現在の拡張機能バージョン
 const EXTENSION_VERSION =
   vscode.extensions.getExtension("yamapan.agent-resources-ninja")?.packageJSON
     ?.version || "0.0.0";
+const STALE_SOURCE_PROMPT_DATE_KEY = "resourceNinja.staleSourceLastPromptDate";
 
 let activeExtensionContext: vscode.ExtensionContext | undefined;
 
@@ -207,6 +210,14 @@ function isKnownIndexedSourceId(
   sourceId: string | undefined,
 ): sourceId is string {
   return !!sourceId && sourceId !== "unknown" && sourceId !== "local";
+}
+
+function getLocalDateString(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function collectMissingIndexedInstalledSkillSources(
@@ -291,6 +302,7 @@ const RESETTABLE_RESOURCE_NINJA_SETTINGS = [
   "remoteResourceViewMode",
   "useSharedSourcesManifest",
   "useSharedResourceIndex",
+  "staleSourceIndexUpdateMode",
 ] as const;
 
 function getInstructionTargetLabel(
@@ -614,47 +626,6 @@ export async function activate(
   // バージョンアップ時のメタデータ再抽出
   checkVersionAndRefreshMetadata(context, workspaceFolder?.uri, formatMigrated);
 
-  loadSkillIndex(context).then(async (index: SkillIndex) => {
-    skillIndex = index;
-    logger.info(`Loaded ${index.skills.length} resources from index`);
-
-    // インストール済みスキルのインデックス整合性チェック
-    if (workspaceFolder) {
-      const installedMeta = await getInstalledSkillsWithMeta(
-        workspaceFolder.uri,
-      );
-      const missingSkills = collectMissingIndexedInstalledSkills(
-        index,
-        installedMeta,
-      );
-
-      if (missingSkills.length > 0) {
-        const message = isJapanese()
-          ? `⚠️ ${
-              missingSkills.length
-            } 個のスキルがインデックスに見つかりません: ${missingSkills
-              .slice(0, 3)
-              .join(", ")}${missingSkills.length > 3 ? "..." : ""}`
-          : `⚠️ ${
-              missingSkills.length
-            } skill(s) not found in index: ${missingSkills
-              .slice(0, 3)
-              .join(", ")}${missingSkills.length > 3 ? "..." : ""}`;
-
-        const action = await vscode.window.showWarningMessage(
-          message,
-          isJapanese() ? "インデックスを更新" : "Update Index",
-          isJapanese() ? "無視" : "Ignore",
-        );
-
-        if (action === (isJapanese() ? "インデックスを更新" : "Update Index")) {
-          skillIndex = await updateIndexFromSources(context, index);
-          browseProvider.refresh();
-        }
-      }
-    }
-  });
-
   // 統合ワークスペーススキルビュー
   const workspaceProvider = new WorkspaceSkillsProvider(
     workspaceFolder?.uri,
@@ -847,6 +818,186 @@ export async function activate(
       },
     );
   }
+
+  let startupIndexMaintenanceStarted = false;
+
+  async function runStartupIndexMaintenance(): Promise<void> {
+    if (startupIndexMaintenanceStarted) {
+      return;
+    }
+    startupIndexMaintenanceStarted = true;
+
+    try {
+      let index = skillIndex || (await loadSkillIndex(context));
+      skillIndex = index;
+      logger.info(`Loaded ${index.skills.length} resources from index`);
+
+      if (workspaceFolder) {
+        const installedMeta = await getInstalledSkillsWithMeta(
+          workspaceFolder.uri,
+        );
+        const missingSkills = collectMissingIndexedInstalledSkills(
+          index,
+          installedMeta,
+        );
+
+        if (missingSkills.length > 0) {
+          const message = isJapanese()
+            ? `⚠️ ${
+                missingSkills.length
+              } 個のスキルがインデックスに見つかりません: ${missingSkills
+                .slice(0, 3)
+                .join(", ")}${missingSkills.length > 3 ? "..." : ""}`
+            : `⚠️ ${
+                missingSkills.length
+              } skill(s) not found in index: ${missingSkills
+                .slice(0, 3)
+                .join(", ")}${missingSkills.length > 3 ? "..." : ""}`;
+
+          const updateIndexAction = isJapanese()
+            ? "インデックスを更新"
+            : "Update Index";
+          const action = await vscode.window.showWarningMessage(
+            message,
+            updateIndexAction,
+            isJapanese() ? "無視" : "Ignore",
+          );
+
+          if (action === updateIndexAction) {
+            const sourceIds = collectMissingIndexedInstalledSkillSources(
+              index,
+              installedMeta,
+            );
+            skillIndex = await refreshIndexForKnownSources(
+              index,
+              sourceIds,
+              isJapanese()
+                ? "見つからないインストール済みリソース"
+                : "missing installed resources",
+            );
+            browseProvider.refresh();
+          }
+          return;
+        }
+      }
+
+      const config = vscode.workspace.getConfiguration("resourceNinja");
+      const staleUpdateMode = getConfiguredStaleSourceIndexUpdateMode(config);
+      if (staleUpdateMode === "never") {
+        return;
+      }
+
+      const sharedIndex = await readSharedResourceIndex();
+      const staleSources = collectStaleSources(
+        index,
+        sharedIndex?.scanMeta,
+      ).map((entry) => entry.source);
+      if (staleSources.length === 0) {
+        return;
+      }
+
+      if (staleUpdateMode === "prompt") {
+        const today = getLocalDateString();
+        if (
+          context.globalState.get<string>(STALE_SOURCE_PROMPT_DATE_KEY) ===
+          today
+        ) {
+          return;
+        }
+        const examples = staleSources
+          .slice(0, 3)
+          .map((source) => source.name || source.id)
+          .join(", ");
+        const updateAction = isJapanese()
+          ? "古いソースを更新"
+          : "Update Stale Sources";
+        const neverAction = isJapanese() ? "今後確認しない" : "Never Ask";
+        const choice = await vscode.window.showWarningMessage(
+          isJapanese()
+            ? `${staleSources.length} 件のソースインデックスが30日以上更新されていません: ${examples}${staleSources.length > 3 ? "..." : ""}`
+            : `${staleSources.length} source index(es) have not been updated in over 30 days: ${examples}${staleSources.length > 3 ? "..." : ""}`,
+          updateAction,
+          isJapanese() ? "今日はしない" : "Not Today",
+          neverAction,
+        );
+
+        if (choice === neverAction) {
+          await config.update(
+            "staleSourceIndexUpdateMode",
+            "never",
+            vscode.ConfigurationTarget.Global,
+          );
+          return;
+        }
+        if (choice !== updateAction) {
+          await context.globalState.update(STALE_SOURCE_PROMPT_DATE_KEY, today);
+          return;
+        }
+      }
+
+      const failedSources: string[] = [];
+      index = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: isJapanese()
+            ? "古いソースインデックスを更新中..."
+            : "Updating stale source indexes...",
+          cancellable: false,
+        },
+        async (progress) => {
+          let nextIndex = index;
+          let completed = 0;
+          for (const source of staleSources) {
+            progress.report({
+              message: `${source.name || source.id} (${completed + 1}/${staleSources.length})`,
+              increment: 100 / staleSources.length,
+            });
+            try {
+              nextIndex = await updateIndexFromSingleSource(
+                context,
+                nextIndex,
+                source.id,
+                progress,
+                { forceScan: true },
+              );
+            } catch (error) {
+              failedSources.push(source.name || source.id);
+              logger.warn(
+                `[Resource Ninja] Failed to update stale source ${source.id}:`,
+                error,
+              );
+            }
+            completed++;
+          }
+          return nextIndex;
+        },
+      );
+      skillIndex = index;
+      browseProvider.refresh();
+
+      if (failedSources.length > 0) {
+        vscode.window.showWarningMessage(
+          isJapanese()
+            ? `古いソースインデックスの一部を更新できませんでした: ${failedSources.slice(0, 3).join(", ")}${failedSources.length > 3 ? "..." : ""}`
+            : `Some stale source indexes could not be updated: ${failedSources.slice(0, 3).join(", ")}${failedSources.length > 3 ? "..." : ""}`,
+        );
+      } else if (staleUpdateMode === "always") {
+        logger.info("[Resource Ninja] Stale source indexes updated.");
+      } else {
+        await context.globalState.update(
+          STALE_SOURCE_PROMPT_DATE_KEY,
+          getLocalDateString(),
+        );
+      }
+    } catch (error) {
+      logger.warn(
+        "[Resource Ninja] Startup source index maintenance failed:",
+        error,
+      );
+    }
+  }
+
+  void runStartupIndexMaintenance();
 
   type ReinstallCommandOptions = {
     suppressSuccessMessage?: boolean;

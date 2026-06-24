@@ -41,6 +41,29 @@ function requireExtContext(): vscode.ExtensionContext {
   return extContext;
 }
 
+export function localizeMcpText(en: string, ja: string): string {
+  return isJapanese() ? ja : en;
+}
+
+export function formatMcpError(en: string, ja: string, error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return `${localizeMcpText(en, ja)}: ${message}`;
+}
+
+export function mcpContextUnavailableMessage(): string {
+  return localizeMcpText(
+    "❌ Extension context not available.",
+    "❌ 拡張機能 context を利用できません。",
+  );
+}
+
+function mcpWorkspaceUnavailableMessage(): string {
+  return localizeMcpText(
+    "❌ No workspace folder open. Please open a folder first.",
+    "❌ ワークスペースフォルダーが開かれていません。先にフォルダーを開いてください。",
+  );
+}
+
 /** スキルインデックスを取得 */
 async function getSkillIndex(): Promise<SkillIndex> {
   const context = requireExtContext();
@@ -287,7 +310,10 @@ class SkillSearchTool implements vscode.LanguageModelTool<{
     if (!query) {
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          `❌ Search query is required. Provide a resource name, category, or kind keyword.`,
+          localizeMcpText(
+            "❌ Search query is required. Provide a resource name, category, or kind keyword.",
+            "❌ 検索キーワードが必要です。リソース名、カテゴリ、種別キーワードを指定してください。",
+          ),
         ),
       ]);
     }
@@ -442,7 +468,10 @@ class SkillInstallTool implements vscode.LanguageModelTool<{
     if (!skillName) {
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          `❌ resourceName is required. Search first, then install an exact resource name.`,
+          localizeMcpText(
+            "❌ resourceName is required. Search first, then install an exact resource name.",
+            "❌ resourceName が必要です。先に検索し、正確なリソース名を指定してインストールしてください。",
+          ),
         ),
       ]);
     }
@@ -481,9 +510,7 @@ class SkillInstallTool implements vscode.LanguageModelTool<{
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) {
       return new vscode.LanguageModelToolResult([
-        new vscode.LanguageModelTextPart(
-          `❌ No workspace folder open. Please open a folder first.`,
-        ),
+        new vscode.LanguageModelTextPart(mcpWorkspaceUnavailableMessage()),
       ]);
     }
 
@@ -554,7 +581,11 @@ ${hookConfigSummary ? `| hooks.json | ${hookConfigSummary} |` : ""}
     } catch (error) {
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          `❌ Failed to install "${skill.name}": ${error}`,
+          formatMcpError(
+            `❌ Failed to install "${skill.name}"`,
+            `❌ "${skill.name}" のインストールに失敗しました`,
+            error,
+          ),
         ),
       ]);
     }
@@ -576,7 +607,7 @@ class SkillListTool implements vscode.LanguageModelTool<Record<string, never>> {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) {
       return new vscode.LanguageModelToolResult([
-        new vscode.LanguageModelTextPart("❌ No workspace folder open."),
+        new vscode.LanguageModelTextPart(mcpWorkspaceUnavailableMessage()),
       ]);
     }
 
@@ -665,7 +696,10 @@ class SkillRecommendTool implements vscode.LanguageModelTool<
     if (!workspaceFolders) {
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          "❌ No workspace open. Cannot analyze project.",
+          localizeMcpText(
+            "❌ No workspace open. Cannot analyze project.",
+            "❌ ワークスペースが開かれていないため、プロジェクトを分析できません。",
+          ),
         ),
       ]);
     }
@@ -859,7 +893,10 @@ class SkillUninstallTool implements vscode.LanguageModelTool<{
     if (!skillName) {
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          `❌ resourceName is required. List workspace resources first, then uninstall an exact resource name.`,
+          localizeMcpText(
+            "❌ resourceName is required. List workspace resources first, then uninstall an exact resource name.",
+            "❌ resourceName が必要です。先にワークスペースリソースを一覧し、正確なリソース名を指定してアンインストールしてください。",
+          ),
         ),
       ]);
     }
@@ -867,9 +904,7 @@ class SkillUninstallTool implements vscode.LanguageModelTool<{
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) {
       return new vscode.LanguageModelToolResult([
-        new vscode.LanguageModelTextPart(
-          `❌ No workspace folder open. Please open a folder first.`,
-        ),
+        new vscode.LanguageModelTextPart(mcpWorkspaceUnavailableMessage()),
       ]);
     }
 
@@ -993,7 +1028,11 @@ ${hookConfigSummary ? `| hooks.json | ${hookConfigSummary} |` : ""}
     } catch (error) {
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          `❌ Failed to uninstall "${matchedResource?.name || skillName}": ${error}`,
+          formatMcpError(
+            `❌ Failed to uninstall "${matchedResource?.name || skillName}"`,
+            `❌ "${matchedResource?.name || skillName}" のアンインストールに失敗しました`,
+            error,
+          ),
         ),
       ]);
     }
@@ -1012,7 +1051,7 @@ class UpdateIndexTool implements vscode.LanguageModelTool<
   ): Promise<vscode.LanguageModelToolResult> {
     if (!extContext) {
       return new vscode.LanguageModelToolResult([
-        new vscode.LanguageModelTextPart(`❌ Extension context not available.`),
+        new vscode.LanguageModelTextPart(mcpContextUnavailableMessage()),
       ]);
     }
 
@@ -1071,7 +1110,11 @@ class UpdateIndexTool implements vscode.LanguageModelTool<
     } catch (error) {
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          `❌ Failed to update index: ${error}
+          `${formatMcpError(
+            "❌ Failed to update index",
+            "❌ インデックス更新に失敗しました",
+            error,
+          )}
 
 ---
 **📋 Troubleshooting:**
@@ -1183,7 +1226,7 @@ class AddSourceTool implements vscode.LanguageModelTool<{ repoUrl: string }> {
 
     if (!extContext) {
       return new vscode.LanguageModelToolResult([
-        new vscode.LanguageModelTextPart(`❌ Extension context not available.`),
+        new vscode.LanguageModelTextPart(mcpContextUnavailableMessage()),
       ]);
     }
 
@@ -1243,7 +1286,11 @@ class AddSourceTool implements vscode.LanguageModelTool<{ repoUrl: string }> {
     } catch (error) {
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          `❌ Failed to add source: ${error}
+          `${formatMcpError(
+            "❌ Failed to add source",
+            "❌ ソース追加に失敗しました",
+            error,
+          )}
 
 ---
 **📋 Troubleshooting:**
@@ -1311,7 +1358,7 @@ class RemoveSourceTool implements vscode.LanguageModelTool<{
   ): Promise<vscode.LanguageModelToolResult> {
     if (!extContext) {
       return new vscode.LanguageModelToolResult([
-        new vscode.LanguageModelTextPart(`❌ Extension context not available.`),
+        new vscode.LanguageModelTextPart(mcpContextUnavailableMessage()),
       ]);
     }
 
@@ -1319,7 +1366,10 @@ class RemoveSourceTool implements vscode.LanguageModelTool<{
     if (!query) {
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          `❌ sourceIdOrName is required. Provide a source id, source name, GitHub repository URL, or owner/repo.`,
+          localizeMcpText(
+            "❌ sourceIdOrName is required. Provide a source id, source name, GitHub repository URL, or owner/repo.",
+            "❌ sourceIdOrName が必要です。source id、source name、GitHub リポジトリ URL、または owner/repo を指定してください。",
+          ),
         ),
       ]);
     }
@@ -1356,7 +1406,7 @@ class RemoveSourceTool implements vscode.LanguageModelTool<{
         const table = formatSourceCandidates(currentIndex, visibleSources);
         return new vscode.LanguageModelToolResult([
           new vscode.LanguageModelTextPart(
-            `❌ Source not found: ${query}\n\n| Source ID | Name | URL | Resources |\n|---|---|---|---|\n${table}`,
+            `${localizeMcpText(`❌ Source not found: ${query}`, `❌ ソースが見つかりません: ${query}`)}\n\n| Source ID | Name | URL | Resources |\n|---|---|---|---|\n${table}`,
           ),
         ]);
       }
@@ -1365,7 +1415,7 @@ class RemoveSourceTool implements vscode.LanguageModelTool<{
         const table = formatSourceCandidates(currentIndex, candidateIds);
         return new vscode.LanguageModelToolResult([
           new vscode.LanguageModelTextPart(
-            `⚠️ Multiple sources match "${query}". Use an exact source id.\n\n| Source ID | Name | URL | Resources |\n|---|---|---|---|\n${table}`,
+            `${localizeMcpText(`⚠️ Multiple sources match "${query}". Use an exact source id.`, `⚠️ "${query}" に一致するソースが複数あります。正確な source id を指定してください。`)}\n\n| Source ID | Name | URL | Resources |\n|---|---|---|---|\n${table}`,
           ),
         ]);
       }
@@ -1386,7 +1436,11 @@ class RemoveSourceTool implements vscode.LanguageModelTool<{
     } catch (error) {
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          `❌ Failed to remove source: ${error}`,
+          formatMcpError(
+            "❌ Failed to remove source",
+            "❌ ソース削除に失敗しました",
+            error,
+          ),
         ),
       ]);
     }
@@ -1416,7 +1470,10 @@ class LocalizeSkillsTool implements vscode.LanguageModelTool<LocalizeInput> {
     if (!skillName) {
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          `❌ resourceName is required.
+          `${localizeMcpText(
+            "❌ resourceName is required.",
+            "❌ resourceName が必要です。",
+          )}
 
 Usage: Provide resourceName and at least one of description_en or description_ja.`,
         ),
@@ -1426,7 +1483,10 @@ Usage: Provide resourceName and at least one of description_en or description_ja
     if (!description_en && !description_ja) {
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          `❌ At least one of description_en or description_ja is required.`,
+          localizeMcpText(
+            "❌ At least one of description_en or description_ja is required.",
+            "❌ description_en または description_ja の少なくとも一方が必要です。",
+          ),
         ),
       ]);
     }
@@ -1483,7 +1543,11 @@ Try searching for the resource first with #searchResources.`,
     } catch (error) {
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          `❌ Failed to localize skill: ${error}`,
+          formatMcpError(
+            "❌ Failed to localize resource",
+            "❌ リソース説明のローカライズに失敗しました",
+            error,
+          ),
         ),
       ]);
     }

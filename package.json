@@ -2,7 +2,7 @@
   "name": "agent-resources-ninja",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.34",
+  "version": "0.2.35",
   "publisher": "yamapan",
   "license": "CC-BY-NC-SA-4.0",
   "icon": "resources/icon.png",
@@ -1426,16 +1426,32 @@
           "order": 22,
           "markdownDescription": "%config.useSharedResourceIndex.markdownDescription%"
         },
+        "resourceNinja.staleSourceIndexUpdateMode": {
+          "type": "string",
+          "default": "prompt",
+          "order": 23,
+          "enum": [
+            "always",
+            "prompt",
+            "never"
+          ],
+          "enumDescriptions": [
+            "%config.staleSourceIndexUpdateMode.always%",
+            "%config.staleSourceIndexUpdateMode.prompt%",
+            "%config.staleSourceIndexUpdateMode.never%"
+          ],
+          "markdownDescription": "%config.staleSourceIndexUpdateMode.markdownDescription%"
+        },
         "resourceNinja.useRefOutput": {
           "type": "boolean",
           "default": true,
-          "order": 23,
+          "order": 24,
           "markdownDescription": "%config.useRefOutput.markdownDescription%"
         },
         "resourceNinja.outputFormat": {
           "type": "string",
           "default": "full",
-          "order": 24,
+          "order": 25,
           "enum": [
             "full",
             "compact",
@@ -1451,7 +1467,7 @@
         "resourceNinja.refCatalogFormat": {
           "type": "string",
           "default": "full",
-          "order": 25,
+          "order": 26,
           "enum": [
             "full",
             "compact",
@@ -1491,13 +1507,13 @@
         "resourceNinja.showBuiltInResources": {
           "type": "boolean",
           "default": true,
-          "order": 26,
+          "order": 27,
           "markdownDescription": "%config.showBuiltInResources.markdownDescription%"
         },
         "resourceNinja.remoteResourceViewMode": {
           "type": "string",
           "default": "repositoryFirst",
-          "order": 27,
+          "order": 28,
           "enum": [
             "repositoryFirst",
             "resourceTypeFirst"
@@ -1511,7 +1527,7 @@
         "resourceNinja.language": {
           "type": "string",
           "default": "auto",
-          "order": 28,
+          "order": 29,
           "enum": [
             "auto",
             "en",
@@ -1528,25 +1544,25 @@
           "type": "string",
           "default": "",
           "editPresentation": "password",
-          "order": 29,
+          "order": 30,
           "markdownDescription": "%config.githubToken.markdownDescription%"
         },
         "resourceNinja.instructionBlock.includeAgents": {
           "type": "boolean",
           "default": false,
-          "order": 30,
+          "order": 31,
           "markdownDescription": "%config.instructionBlock.includeAgents.markdownDescription%"
         },
         "resourceNinja.instructionBlock.includeInstructions": {
           "type": "boolean",
           "default": false,
-          "order": 31,
+          "order": 32,
           "markdownDescription": "%config.instructionBlock.includeInstructions.markdownDescription%"
         },
         "resourceNinja.instructionBlock.globalHome.includeAgents": {
           "type": "string",
           "default": "inherit",
-          "order": 32,
+          "order": 33,
           "enum": [
             "inherit",
             "on",
@@ -1562,7 +1578,7 @@
         "resourceNinja.instructionBlock.globalHome.includeInstructions": {
           "type": "string",
           "default": "inherit",
-          "order": 33,
+          "order": 34,
           "enum": [
             "inherit",
             "on",
@@ -1584,15 +1600,15 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run package",
+    "vscode:prepublish": "node esbuild.js --production",
     "compile": "npm run check-types && npm run lint && node esbuild.js",
     "watch": "npm-run-all -p watch:*",
     "watch:esbuild": "node esbuild.js --watch",
     "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
-    "package": "npm run check-types && npm run lint && node esbuild.js --production",
+    "package": "node esbuild.js --production",
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
-    "test:resources": "node scripts/test-resource-kinds.js && node scripts/test-resource-targets.js && node scripts/test-resource-preview-urls.js && node scripts/test-user-data-paths.js && node scripts/test-global-home-routing.js && node scripts/test-hook-config.js && node scripts/test-mcp-config-merge.js && node scripts/test-skill-search.js && node scripts/test-skill-meta-contract.js && node scripts/test-tasks-json.js && node scripts/test-azure-plugin-source.js && node scripts/test-azure-skills-source.js && node scripts/test-cursor-plugin-source.js && node scripts/test-plugin-manifests.js && node scripts/test-full-plugin-index.js && node scripts/test-plugin-bundles.js && node scripts/test-ux-scope-actions.js && node scripts/test-create-resource-templates.js && node scripts/test-create-resource-flow.js && node scripts/test-create-resource-validation.js && node scripts/test-instruction-target-ux.js && node scripts/test-instruction-block-policy.js && node scripts/test-ref-resource-catalog.js && node scripts/test-coexistence-ref-catalog-cleanup.js && node scripts/test-localization-ux.js && node scripts/test-readme-release-ux.js && node scripts/test-view-welcome-ux.js && node scripts/test-activation-ux.js && node scripts/test-release-hygiene.js && node scripts/test-manifest-consistency.js && node scripts/test-logger.js && node scripts/test-skill-installer-auth-fallback.js && node scripts/test-skill-installer-remote-fallback.js && node scripts/test-audit-resource-installability.js && node scripts/test-temporary-install-source.js",
+    "test:resources": "node scripts/test-resource-kinds.js && node scripts/test-resource-targets.js && node scripts/test-resource-preview-urls.js && node scripts/test-user-data-paths.js && node scripts/test-global-home-routing.js && node scripts/test-hook-config.js && node scripts/test-mcp-config-merge.js && node scripts/test-skill-search.js && node scripts/test-skill-meta-contract.js && node scripts/test-source-index-freshness.js && node scripts/test-shared-sources-manifest.js && node scripts/test-tasks-json.js && node scripts/test-azure-plugin-source.js && node scripts/test-azure-skills-source.js && node scripts/test-cursor-plugin-source.js && node scripts/test-plugin-manifests.js && node scripts/test-full-plugin-index.js && node scripts/test-plugin-bundles.js && node scripts/test-ux-scope-actions.js && node scripts/test-create-resource-templates.js && node scripts/test-create-resource-flow.js && node scripts/test-create-resource-validation.js && node scripts/test-instruction-target-ux.js && node scripts/test-instruction-block-policy.js && node scripts/test-ref-resource-catalog.js && node scripts/test-coexistence-ref-catalog-cleanup.js && node scripts/test-localization-ux.js && node scripts/test-readme-release-ux.js && node scripts/test-view-welcome-ux.js && node scripts/test-activation-ux.js && node scripts/test-release-hygiene.js && node scripts/test-manifest-consistency.js && node scripts/test-logger.js && node scripts/test-skill-installer-auth-fallback.js && node scripts/test-skill-installer-remote-fallback.js && node scripts/test-audit-resource-installability.js && node scripts/test-temporary-install-source.js",
     "test": "node scripts/run-vscode-smoke.js",
     "release:vsce": "pwsh -NoProfile -File ./scripts/Invoke-VsceWithPat.ps1"
   },

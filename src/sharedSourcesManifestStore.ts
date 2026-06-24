@@ -25,6 +25,7 @@ function normalizeSourceEntry(source: SourceEntry): SourceEntry {
     url: source.url,
     type: source.type,
     branch: source.branch,
+    lastIndexedAt: source.lastIndexedAt,
     description: source.description,
     description_ja: source.description_ja,
     includePaths: source.includePaths,

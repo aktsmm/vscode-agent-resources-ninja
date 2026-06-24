@@ -16,6 +16,7 @@ AGENTS.md
 *.bak-*
 *.bak
 *.tmp
+tmp-*
 vsce-ls.txt
 .vscode/mcp.json.bak-*
 scripts/debug-*.js

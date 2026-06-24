@@ -43,6 +43,7 @@ test/**
 
 # Temp / scratch files that may appear during local builds and reviews
 vsce-ls.txt
+tmp-*
 *.tmp
 *.bak
 *.bak-*

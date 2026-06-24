@@ -93,7 +93,9 @@ function readZipEntries(filePath) {
 
 function assertVsixPayloadMinimal(vsixPath, label) {
   if (!fs.existsSync(vsixPath)) {
-    console.log(`SKIP ${label} payload stays release-minimal (VSIX not generated yet)`);
+    console.log(
+      `SKIP ${label} payload stays release-minimal (VSIX not generated yet)`,
+    );
     return;
   }
 
@@ -132,7 +134,10 @@ function assertVsixPayloadMinimal(vsixPath, label) {
       !forbiddenPrefixes.some((prefix) => entry.startsWith(prefix)),
       `Unexpected ${label} VSIX path: ${entry}`,
     );
-    assert.ok(!entry.endsWith(".map"), `Unexpected ${label} VSIX sourcemap: ${entry}`);
+    assert.ok(
+      !entry.endsWith(".map"),
+      `Unexpected ${label} VSIX sourcemap: ${entry}`,
+    );
     assert.ok(
       !entry.endsWith("-output.txt"),
       `Unexpected ${label} VSIX output artifact: ${entry}`,
@@ -154,6 +159,7 @@ test("gitignore covers local release and validation artifacts", () => {
     "audit-output.json",
     "hooks.json",
     "compile-output.txt",
+    "tmp-*",
     "AGENTS.md.backup",
     "AGENTS.md",
     "*.bak-*",
@@ -189,6 +195,7 @@ test("vscodeignore excludes development and validation artifacts", () => {
     "docs/**",
     "output/**",
     "compile-output.txt",
+    "tmp-*",
     "*-exit.txt",
     "*-output.txt",
     "audit-output.json",

@@ -8,10 +8,12 @@ import {
   Skill,
   loadSkillIndex,
   SkillIndex,
+  getLocalizedDescription,
   getResourceKind,
   getResourceKindLabel,
 } from "./skillIndex";
 import { scanLocalSkills } from "./localSkillScanner";
+import { isJapanese } from "./i18n";
 
 /** Resource index cache. */
 let cachedIndex: SkillIndex | undefined;
@@ -35,6 +37,10 @@ async function getSkillIndex(): Promise<SkillIndex> {
 
 function escapeMarkdownCell(value: string): string {
   return value.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+}
+
+function chatText(en: string, ja: string): string {
+  return isJapanese() ? ja : en;
 }
 
 function findChatInstallCandidates(
@@ -72,15 +78,18 @@ function findChatInstallCandidates(
   };
 }
 
-function renderResourceCandidateTable(resources: Skill[]): string {
+function renderResourceCandidateTable(
+  resources: Skill[],
+  isJa: boolean,
+): string {
   const rows = resources
     .slice(0, 20)
     .map((resource) => {
       const kind = getResourceKind(resource);
-      return `| ${getResourceKindLabel(kind, false)} | ${escapeMarkdownCell(resource.name)} | ${escapeMarkdownCell(resource.source || "")} | \`${escapeMarkdownCell(resource.path || "")}\` |`;
+      return `| ${getResourceKindLabel(kind, isJa)} | ${escapeMarkdownCell(resource.name)} | ${escapeMarkdownCell(resource.source || "")} | \`${escapeMarkdownCell(resource.path || "")}\` |`;
     })
     .join("\n");
-  return `| Kind | Resource | Source | Path |\n|---|---|---|---|\n${rows}`;
+  return `${chatText("| Kind | Resource | Source | Path |", "| 種別 | リソース | ソース | パス |")}\n|---|---|---|---|\n${rows}`;
 }
 
 /** Chat Participant request handler. */
@@ -99,9 +108,18 @@ export function createChatParticipant(
   participant.followupProvider = {
     provideFollowups: () => {
       return [
-        { prompt: "/search MCP server", label: "$(search) Search Resources" },
-        { prompt: "/list", label: "$(list-tree) List Workspace" },
-        { prompt: "/recommend", label: "$(lightbulb) Recommend" },
+        {
+          prompt: "/search MCP server",
+          label: `$(search) ${chatText("Search Resources", "リソースを検索")}`,
+        },
+        {
+          prompt: "/list",
+          label: `$(list-tree) ${chatText("List Workspace", "ワークスペース一覧")}`,
+        },
+        {
+          prompt: "/recommend",
+          label: `$(lightbulb) ${chatText("Recommend", "おすすめ")}`,
+        },
       ];
     },
   };
@@ -134,7 +152,7 @@ async function handleChatRequest(
     }
   } catch (error) {
     stream.markdown(
-      `Error: ${error instanceof Error ? error.message : String(error)}`,
+      `${chatText("Error", "エラー")}: ${error instanceof Error ? error.message : String(error)}`,
     );
     return { errorDetails: { message: String(error) } };
   }
@@ -147,7 +165,10 @@ async function handleSearch(
 ): Promise<vscode.ChatResult> {
   if (!query) {
     stream.markdown(
-      "**Please provide a search query**\n\nExample: `/search MCP server` or `/search github tools`",
+      chatText(
+        "**Please provide a search query**\n\nExample: `/search MCP server` or `/search github tools`",
+        "**検索キーワードを入力してください**\n\n例: `/search MCP server` または `/search github tools`",
+      ),
     );
     return {};
   }
@@ -170,12 +191,21 @@ async function handleSearch(
 
   if (results.length === 0) {
     stream.markdown(
-      `No resources found for "${query}"\n\nTry a different search term.`,
+      chatText(
+        `No resources found for "${query}"\n\nTry a different search term.`,
+        `"${query}" に一致するリソースは見つかりませんでした。\n\n別のキーワードを試してください。`,
+      ),
     );
     return {};
   }
 
-  stream.markdown(`## Found ${results.length} resource(s) for "${query}"\n\n`);
+  const isJa = isJapanese();
+  stream.markdown(
+    chatText(
+      `## Found ${results.length} resource(s) for "${query}"\n\n`,
+      `## "${query}" の検索結果: ${results.length} 件\n\n`,
+    ),
+  );
 
   for (const resource of results) {
     const kind = getResourceKind(resource);
@@ -186,10 +216,14 @@ async function handleSearch(
         .join(" ") || "";
 
     stream.markdown(
-      `### $(package) ${getResourceKindLabel(kind, false)}: ${resource.name}${stars}\n`,
+      `### $(package) ${getResourceKindLabel(kind, isJa)}: ${resource.name}${stars}\n`,
     );
-    stream.markdown(`${resource.description || "No description"}\n`);
-    stream.markdown(`**Source:** ${resource.source} | ${categories}\n`);
+    stream.markdown(
+      `${getLocalizedDescription(resource, isJa) || chatText("No description", "説明なし")}\n`,
+    );
+    stream.markdown(
+      `**${chatText("Source", "ソース")}:** ${resource.source} | ${categories}\n`,
+    );
     if (resource.url) {
       stream.markdown(`[GitHub](${resource.url})\n\n`);
     }
@@ -197,7 +231,7 @@ async function handleSearch(
     stream.button({
       command: "resourceNinja.install",
       arguments: [resource],
-      title: `$(cloud-download) Install ${resource.name}`,
+      title: `$(cloud-download) ${chatText("Install", "インストール")} ${resource.name}`,
     });
     stream.markdown("\n\n---\n\n");
   }
@@ -212,7 +246,10 @@ async function handleInstall(
 ): Promise<vscode.ChatResult> {
   if (!query) {
     stream.markdown(
-      "**Please provide a resource name to install**\n\nExample: `/install github-mcp`",
+      chatText(
+        "**Please provide a resource name to install**\n\nExample: `/install github-mcp`",
+        "**インストールするリソース名を入力してください**\n\n例: `/install github-mcp`",
+      ),
     );
     return {};
   }
@@ -222,33 +259,55 @@ async function handleInstall(
   const resource = matchResult.match;
 
   if (!resource) {
+    const isJa = isJapanese();
     if (matchResult.candidates.length > 1) {
       stream.markdown(
-        `Multiple resources match "${query}". Please install with a more specific name.\n\n${renderResourceCandidateTable(matchResult.candidates)}`,
+        `${chatText(
+          `Multiple resources match "${query}". Please install with a more specific name.`,
+          `"${query}" に一致するリソースが複数あります。より具体的な名前で指定してください。`,
+        )}\n\n${renderResourceCandidateTable(matchResult.candidates, isJa)}`,
       );
       return {};
     }
     stream.markdown(
-      `Resource "${query}" not found.\n\nUse \`/search ${query}\` to find available resources.`,
+      chatText(
+        `Resource "${query}" not found.\n\nUse \`/search ${query}\` to find available resources.`,
+        `リソース "${query}" が見つかりません。\n\n\`/search ${query}\` で利用可能なリソースを探してください。`,
+      ),
     );
     return {};
   }
 
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   if (!workspaceFolder) {
-    stream.markdown("No workspace folder open. Please open a folder first.");
+    stream.markdown(
+      chatText(
+        "No workspace folder open. Please open a folder first.",
+        "ワークスペースフォルダーが開かれていません。先にフォルダーを開いてください。",
+      ),
+    );
     return {};
   }
 
   const kind = getResourceKind(resource);
-  stream.markdown(`## Installing ${resource.name}\n\n`);
-  stream.markdown(`- **Kind:** ${getResourceKindLabel(kind, false)}\n`);
-  stream.markdown(`- **Source:** ${resource.source}\n`);
+  const isJa = isJapanese();
+  stream.markdown(
+    chatText(
+      `## Installing ${resource.name}\n\n`,
+      `## ${resource.name} をインストール中\n\n`,
+    ),
+  );
+  stream.markdown(
+    `- **${chatText("Kind", "種別")}:** ${getResourceKindLabel(kind, isJa)}\n`,
+  );
+  stream.markdown(
+    `- **${chatText("Source", "ソース")}:** ${resource.source}\n`,
+  );
   if (resource.url) {
     stream.markdown(`- **URL:** ${resource.url}\n\n`);
   }
 
-  stream.progress("Installing...");
+  stream.progress(chatText("Installing...", "インストール中..."));
 
   const installed = await vscode.commands.executeCommand<boolean>(
     "resourceNinja.install",
@@ -256,7 +315,12 @@ async function handleInstall(
   );
 
   if (!installed) {
-    stream.markdown("Install was cancelled or did not complete.");
+    stream.markdown(
+      chatText(
+        "Install was cancelled or did not complete.",
+        "インストールはキャンセルされたか、完了しませんでした。",
+      ),
+    );
     return {
       metadata: {
         command: "install",
@@ -266,9 +330,17 @@ async function handleInstall(
     };
   }
 
-  stream.markdown(`**${resource.name}** has been installed successfully.\n\n`);
   stream.markdown(
-    "Check the Workspace Resources or User / Global Resource Home view for the installed files.",
+    chatText(
+      `**${resource.name}** has been installed successfully.\n\n`,
+      `**${resource.name}** をインストールしました。\n\n`,
+    ),
+  );
+  stream.markdown(
+    chatText(
+      "Check the Workspace Resources or User / Global Resource Home view for the installed files.",
+      "インストール済みファイルは Workspace Resources または User / Global Resource Home ビューで確認できます。",
+    ),
   );
 
   return { metadata: { command: "install", resource: resource.name } };
@@ -279,7 +351,12 @@ async function handleList(
 ): Promise<vscode.ChatResult> {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   if (!workspaceFolder) {
-    stream.markdown("No workspace folder open. Please open a folder first.");
+    stream.markdown(
+      chatText(
+        "No workspace folder open. Please open a folder first.",
+        "ワークスペースフォルダーが開かれていません。先にフォルダーを開いてください。",
+      ),
+    );
     return {};
   }
 
@@ -293,18 +370,26 @@ async function handleList(
 
   if (resources.length === 0) {
     stream.markdown(
-      "**No workspace resources found yet**\n\nUse `/search` to find resources or `/recommend` for suggestions.",
+      chatText(
+        "**No workspace resources found yet**\n\nUse `/search` to find resources or `/recommend` for suggestions.",
+        "**ワークスペースリソースはまだありません**\n\n`/search` で探すか、`/recommend` でおすすめを確認してください。",
+      ),
     );
     return {};
   }
 
-  stream.markdown(`## Workspace Resources (${resources.length})\n\n`);
-  stream.markdown("| Kind | Name | Path |\n|---|---|---|\n");
+  const isJa = isJapanese();
+  stream.markdown(
+    `## ${chatText("Workspace Resources", "ワークスペースリソース")} (${resources.length})\n\n`,
+  );
+  stream.markdown(
+    `${chatText("| Kind | Name | Path |", "| 種別 | 名前 | パス |")}\n|---|---|---|\n`,
+  );
 
   for (const resource of resources.slice(0, 100)) {
     const kind = resource.kind || "skill";
     stream.markdown(
-      `| ${getResourceKindLabel(kind, false)} | ${escapeMarkdownCell(resource.name)} | \`${escapeMarkdownCell(resource.relativePath)}\` |\n`,
+      `| ${getResourceKindLabel(kind, isJa)} | ${escapeMarkdownCell(resource.name)} | \`${escapeMarkdownCell(resource.relativePath)}\` |\n`,
     );
   }
 
@@ -321,11 +406,18 @@ async function handleRecommend(
   stream: vscode.ChatResponseStream,
   _token: vscode.CancellationToken,
 ): Promise<vscode.ChatResult> {
-  stream.markdown("## Recommended Resources\n\n");
+  stream.markdown(
+    `## ${chatText("Recommended Resources", "おすすめリソース")}\n\n`,
+  );
 
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) {
-    stream.markdown("No workspace open. Here are some popular resources:\n\n");
+    stream.markdown(
+      chatText(
+        "No workspace open. Here are some popular resources:\n\n",
+        "ワークスペースが開かれていません。人気リソースを表示します。\n\n",
+      ),
+    );
     return await showPopularResources(stream);
   }
 
@@ -384,7 +476,12 @@ async function handleRecommend(
   }
 
   if (recommendations.length === 0) {
-    stream.markdown("No specific recommendations based on your project.\n\n");
+    stream.markdown(
+      chatText(
+        "No specific recommendations based on your project.\n\n",
+        "プロジェクト固有のおすすめは見つかりませんでした。\n\n",
+      ),
+    );
     return await showPopularResources(stream);
   }
 
@@ -392,15 +489,17 @@ async function handleRecommend(
     const resource = recommendation.resource;
     const kind = getResourceKind(resource);
     stream.markdown(
-      `### $(lightbulb) ${getResourceKindLabel(kind, false)}: ${resource.name}\n`,
+      `### $(lightbulb) ${getResourceKindLabel(kind, isJapanese())}: ${resource.name}\n`,
     );
     stream.markdown(`*${recommendation.reason}*\n\n`);
-    stream.markdown(`${resource.description || "No description"}\n\n`);
+    stream.markdown(
+      `${getLocalizedDescription(resource, isJapanese()) || chatText("No description", "説明なし")}\n\n`,
+    );
 
     stream.button({
       command: "resourceNinja.install",
       arguments: [resource],
-      title: "$(cloud-download) Install",
+      title: `$(cloud-download) ${chatText("Install", "インストール")}`,
     });
     stream.markdown("\n\n");
   }
@@ -417,12 +516,13 @@ async function showPopularResources(
     .sort((a: Skill, b: Skill) => (b.stars || 0) - (a.stars || 0))
     .slice(0, 5);
 
-  stream.markdown("### Popular Resources\n\n");
+  const isJa = isJapanese();
+  stream.markdown(`### ${chatText("Popular Resources", "人気リソース")}\n\n`);
 
   for (const resource of popular) {
     const kind = getResourceKind(resource);
     stream.markdown(
-      `- **${getResourceKindLabel(kind, false)}: ${resource.name}** Star ${resource.stars} - ${resource.description || "No description"}\n`,
+      `- **${getResourceKindLabel(kind, isJa)}: ${resource.name}** ${chatText("Star", "スター")} ${resource.stars} - ${getLocalizedDescription(resource, isJa) || chatText("No description", "説明なし")}\n`,
     );
   }
 
@@ -437,15 +537,29 @@ async function handleSmartQuery(
   if (!query) {
     stream.markdown("# Agent Resources Ninja\n\n");
     stream.markdown(
-      "I can help you find and manage agent resources for GitHub Copilot.\n\n",
+      chatText(
+        "I can help you find and manage agent resources for GitHub Copilot.\n\n",
+        "GitHub Copilot 向けのエージェントリソースを探したり管理したりできます。\n\n",
+      ),
     );
-    stream.markdown("## Commands\n\n");
-    stream.markdown("- `/search <query>` - Search for resources\n");
-    stream.markdown("- `/install <name>` - Install a resource\n");
-    stream.markdown("- `/list` - List workspace resources\n");
-    stream.markdown("- `/recommend` - Get resource recommendations\n\n");
+    stream.markdown(`## ${chatText("Commands", "コマンド")}\n\n`);
     stream.markdown(
-      "Or just describe what you need, and I'll find relevant resources.\n",
+      `- \`/search <query>\` - ${chatText("Search for resources", "リソースを検索")}\n`,
+    );
+    stream.markdown(
+      `- \`/install <name>\` - ${chatText("Install a resource", "リソースをインストール")}\n`,
+    );
+    stream.markdown(
+      `- \`/list\` - ${chatText("List workspace resources", "ワークスペースリソースを一覧表示")}\n`,
+    );
+    stream.markdown(
+      `- \`/recommend\` - ${chatText("Get resource recommendations", "おすすめリソースを表示")}\n\n`,
+    );
+    stream.markdown(
+      chatText(
+        "Or just describe what you need, and I'll find relevant resources.\n",
+        "必要なものを自然文で説明しても、関連リソースを探します。\n",
+      ),
     );
     return {};
   }

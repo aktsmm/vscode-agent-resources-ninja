@@ -141,6 +141,7 @@ export interface Source {
   url: string;
   type: string;
   branch?: string; // 明示的なデフォルトブランチ（省略時は runtime で解決）
+  lastIndexedAt?: string; // ソース単位の最終 index 更新日時
   includePaths?: string[]; // Only index resources under these path prefixes
   excludePaths?: string[]; // Exclude resources under these path prefixes
   description: string;
@@ -474,6 +475,7 @@ function shouldPersistMergedIndex(
       localSource.url !== mergedSource.url ||
       localSource.type !== mergedSource.type ||
       localSource.branch !== mergedSource.branch ||
+      localSource.lastIndexedAt !== mergedSource.lastIndexedAt ||
       localSource.description !== mergedSource.description ||
       localSource.description_ja !== mergedSource.description_ja
     ) {
@@ -601,8 +603,13 @@ async function checkUrlExists(url: string, token?: string): Promise<boolean> {
 }
 
 export function normalizeGitHubRepoUrl(url: string): string {
-  const trimmed = url.trim().replace(/\.git$/i, "").replace(/\/$/, "");
-  const match = trimmed.match(/^(https:\/\/github\.com\/[^/]+\/[^/]+)(?:\/(?:tree|blob)\/.*)?$/i);
+  const trimmed = url
+    .trim()
+    .replace(/\.git$/i, "")
+    .replace(/\/$/, "");
+  const match = trimmed.match(
+    /^(https:\/\/github\.com\/[^/]+\/[^/]+)(?:\/(?:tree|blob)\/.*)?$/i,
+  );
   return match ? match[1] : trimmed;
 }
 

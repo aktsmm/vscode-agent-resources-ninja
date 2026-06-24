@@ -338,6 +338,7 @@ export async function updateSharedScanMetadata(
   context: vscode.ExtensionContext,
   currentIndex: SkillIndex,
   sourceIds: string[],
+  scannedAt = new Date().toISOString(),
 ): Promise<void> {
   const config = vscode.workspace.getConfiguration("resourceNinja");
   if (!getConfiguredUseSharedResourceIndex(config)) {
@@ -352,7 +353,6 @@ export async function updateSharedScanMetadata(
       currentIndex,
       existingIndex,
     );
-    const scannedAt = new Date().toISOString();
     for (const sourceId of sourceIds) {
       nextIndex.scanMeta[sourceId] = {
         ...(nextIndex.scanMeta[sourceId] || {}),

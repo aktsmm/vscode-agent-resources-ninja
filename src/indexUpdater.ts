@@ -31,6 +31,7 @@ import {
   shouldRunSharedScan,
   updateSharedScanMetadata,
 } from "./sharedResourceIndexStore";
+import { stampIndexedSources } from "./sourceFreshness";
 
 const REQUEST_TIMEOUT_MS = 15000;
 const FETCH_CONCURRENCY = 8;
@@ -1620,8 +1621,10 @@ export async function updateSingleSource(
       });
     }
 
+    const indexedAt = new Date().toISOString();
     const newIndex: SkillIndex = {
       ...currentIndex,
+      sources: stampIndexedSources(currentIndex.sources, [sourceId], indexedAt),
       skills: [...otherSkills, ...updatedSkills],
       lastUpdated: new Date().toISOString().split("T")[0],
     };
@@ -1639,6 +1642,7 @@ export async function updateSingleSource(
     }
 
     await saveSkillIndex(context, newIndex);
+    await updateSharedScanMetadata(context, newIndex, [sourceId], indexedAt);
 
     return {
       index: newIndex,
@@ -1756,16 +1760,27 @@ export async function updateIndexFromSources(
     (b) => !existingBundleIds.has(b.id),
   );
 
+  const indexedAt = new Date().toISOString();
   const updatedIndex: SkillIndex = {
     ...currentIndex,
     lastUpdated: getLocalDateString(),
+    sources: stampIndexedSources(
+      currentIndex.sources,
+      scannedSourceIds,
+      indexedAt,
+    ),
     skills: updatedSkills,
     bundles: [...preservedBundles, ...updatedBundles],
   };
 
   // 保存
   await saveSkillIndex(context, updatedIndex);
-  await updateSharedScanMetadata(context, updatedIndex, scannedSourceIds);
+  await updateSharedScanMetadata(
+    context,
+    updatedIndex,
+    scannedSourceIds,
+    indexedAt,
+  );
 
   return updatedIndex;
 }
@@ -1851,16 +1866,18 @@ export async function updateIndexFromSingleSource(
     increment: 50,
   });
 
+  const indexedAt = new Date().toISOString();
   const updatedIndex: SkillIndex = {
     ...currentIndex,
     lastUpdated: new Date().toISOString().split("T")[0],
+    sources: stampIndexedSources(currentIndex.sources, [sourceId], indexedAt),
     skills: [...otherSkills, ...newSkills],
     bundles: [...otherBundles, ...newBundles],
   };
 
   // 保存
   await saveSkillIndex(context, updatedIndex);
-  await updateSharedScanMetadata(context, updatedIndex, [sourceId]);
+  await updateSharedScanMetadata(context, updatedIndex, [sourceId], indexedAt);
 
   return updatedIndex;
 }
@@ -1891,13 +1908,18 @@ export async function addSource(
   );
 
   let updatedSources: Source[];
+  const indexedAt = new Date().toISOString();
+  // New sources are not in the existing array yet, so stamp the scanned source
+  // before inserting it instead of using stampIndexedSources().
+  const indexedSource = { ...result.source, lastIndexedAt: indexedAt };
+
   if (existingSourceIndex >= 0) {
     // 既存ソースを更新
     updatedSources = [...currentIndex.sources];
-    updatedSources[existingSourceIndex] = result.source;
+    updatedSources[existingSourceIndex] = indexedSource;
   } else {
     // 新規ソースを追加
-    updatedSources = [...currentIndex.sources, result.source];
+    updatedSources = [...currentIndex.sources, indexedSource];
   }
 
   // 既存のスキルを除外して新しいスキルを追加
@@ -1922,7 +1944,12 @@ export async function addSource(
 
   // 保存
   await saveSkillIndex(context, updatedIndex);
-  await updateSharedScanMetadata(context, updatedIndex, [result.source.id]);
+  await updateSharedScanMetadata(
+    context,
+    updatedIndex,
+    [result.source.id],
+    indexedAt,
+  );
 
   return { index: updatedIndex, addedSkills: result.skills.length };
 }
