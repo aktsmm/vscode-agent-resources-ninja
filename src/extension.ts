@@ -17,6 +17,13 @@ import {
 } from "./skillIndex";
 import { searchSkills, SkillQuickPickItem } from "./skillSearch";
 import {
+  initializeGitHubAuth,
+  migrateConfiguredGitHubTokenToSecretStorage,
+  syncConfiguredGitHubToken,
+  deleteStoredGitHubToken,
+  getGitHubToken,
+} from "./githubAuth";
+import {
   installSkill,
   InstallTargetScope,
   getResourceTargetUri,
@@ -584,6 +591,26 @@ export async function activate(
   registerLogger(context);
   logger.info("Agent Resources Ninja is now active!");
   await publishBeacon(context);
+
+  // GitHub 認証を初期化し、旧設定のトークンを SecretStorage へ移行
+  initializeGitHubAuth(context);
+  try {
+    const migrated = await migrateConfiguredGitHubTokenToSecretStorage();
+    if (migrated) {
+      logger.info(
+        "Migrated legacy resourceNinja.githubToken setting into SecretStorage.",
+      );
+    }
+  } catch (migrationError) {
+    logger.warn(
+      `Failed to migrate GitHub token into SecretStorage: ${
+        migrationError instanceof Error
+          ? migrationError.message
+          : String(migrationError)
+      }`,
+    );
+  }
+
   context.subscriptions.push(
     new vscode.Disposable(() => {
       activeExtensionContext = undefined;
@@ -1107,6 +1134,19 @@ export async function activate(
 
   // 設定変更を監視してビューをリフレッシュ
   const configWatcher = vscode.workspace.onDidChangeConfiguration(async (e) => {
+    if (e.affectsConfiguration("resourceNinja.githubToken")) {
+      // 旧設定のトークンが変更されたら SecretStorage を同期（セッション中の編集を反映）
+      try {
+        await syncConfiguredGitHubToken();
+      } catch (syncError) {
+        logger.warn(
+          `Failed to sync GitHub token to SecretStorage: ${
+            syncError instanceof Error ? syncError.message : String(syncError)
+          }`,
+        );
+      }
+    }
+
     if (e.affectsConfiguration("resourceNinja.language")) {
       // 言語設定が変わったらインデックスを再読み込みしてツリービューをリフレッシュ
       // バンドル版の description_ja を反映させるため
@@ -2482,10 +2522,21 @@ export async function activate(
         }
       }
       if (installedItem) {
-        installedTreeView.reveal(installedItem, {
-          select: true,
-          focus: true,
-        });
+        // reveal の失敗はインストール失敗として扱わず、警告ログのみ
+        try {
+          await installedTreeView.reveal(installedItem, {
+            select: true,
+            focus: true,
+          });
+        } catch (revealError) {
+          logger.warn(
+            `Failed to reveal installed item in tree view: ${
+              revealError instanceof Error
+                ? revealError.message
+                : String(revealError)
+            }`,
+          );
+        }
       }
       return true;
     } catch (error) {
@@ -4081,8 +4132,7 @@ export async function activate(
   const webSearchCmd = vscode.commands.registerCommand(
     "resourceNinja.webSearch",
     async () => {
-      const config = vscode.workspace.getConfiguration("resourceNinja");
-      const token = config.get<string>("githubToken");
+      const token = await getGitHubToken();
 
       // 連続検索のためのループ
       let continueSearch = true;
@@ -5533,13 +5583,14 @@ ${fileUri.fsPath}`,
         }
       }
 
-      // トークンもリセット
+      // トークンもリセット（旧設定 + SecretStorage）
       if (selected.value === "all") {
         await config.update(
           "githubToken",
           undefined,
           vscode.ConfigurationTarget.Global,
         );
+        await deleteStoredGitHubToken();
       }
 
       const restart = await vscode.window.showInformationMessage(

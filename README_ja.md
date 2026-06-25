@@ -607,6 +607,8 @@ Ref 出力を使う場合は、必要に応じて **Ref Catalog Detail Format** 
 
 公開リソースだけを扱う場合、scope は未選択のままで問題ありません。private repository を index する場合は、対象 repository に限定した fine-grained PAT に **Contents: Read** 権限を付けるのを推奨します。必要な場合のみ、より広い classic PAT の `repo` scope を使ってください。organization 配下の repository では SSO 承認や organization approval が必要なことがあります。
 
+> **注記**: この設定値は起動時に VS Code SecretStorage へ転記され、後方互換のためにのみ保持されます。トークンは SecretStorage → `GITHUB_TOKEN` / `GH_TOKEN` 環境変数 → GitHub CLI → この設定 の順で解決されるため、新規設定では設定への直書きより GitHub CLI または環境変数の利用を推奨します。
+
 ### 方法 2: GitHub CLI（推奨）
 
 ```bash

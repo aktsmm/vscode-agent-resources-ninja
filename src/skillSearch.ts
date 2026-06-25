@@ -138,10 +138,14 @@ function calculateSearchScore(skill: Skill, keywords: string[]): number {
  * スキルを検索してQuickPickアイテムに変換
  */
 export function searchSkills(
-  index: SkillIndex,
+  index: SkillIndex | undefined,
   query: string,
   kindFilter?: ResourceKind,
 ): SkillQuickPickItem[] {
+  // インデックスが未ロードまたは不正な場合は例外を投げず空結果を返す
+  if (!index || !Array.isArray(index.skills) || !Array.isArray(index.sources)) {
+    return [];
+  }
   const lowerQuery = query.toLowerCase().trim();
   const resources = kindFilter
     ? index.skills.filter((skill) => getResourceKind(skill) === kindFilter)

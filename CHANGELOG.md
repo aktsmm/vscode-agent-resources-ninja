@@ -5,6 +5,20 @@ All notable changes to the "Agent Resources Ninja" extension will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.36] - 2026-06-25
+
+### Added
+
+- **SecretStorage-first GitHub Authentication** - GitHub tokens are now resolved in the order SecretStorage → `GITHUB_TOKEN` / `GH_TOKEN` environment variable → GitHub CLI → legacy `resourceNinja.githubToken` setting. The legacy setting value is migrated into VS Code SecretStorage on startup, synced when changed, and removed on reset, while remaining a backward-compatible fallback / GitHub トークンを SecretStorage → `GITHUB_TOKEN` / `GH_TOKEN` 環境変数 → GitHub CLI → 旧 `resourceNinja.githubToken` 設定 の順で解決するようにしました。旧設定値は起動時に SecretStorage へ移行し、変更時は同期、reset 時は削除しつつ、後方互換の fallback として維持します。
+
+### Changed
+
+- **Install Flow Hardening** - Bounded the `gh auth token` lookup with a timeout, routed Web Search token retrieval through the shared resolver, isolated post-install tree reveal failures so they no longer fail an otherwise successful install, and guarded resource search against an unloaded or malformed index / `gh auth token` 取得に timeout を付け、Web Search のトークン取得を共有 resolver 経由に統一し、インストール後の tree reveal 失敗を分離して成功済みインストールを失敗扱いにしないようにし、未ロード/不正な index に対する resource 検索を guard しました。
+
+### Tests
+
+- Added `scripts/test-github-auth.js` (9 cases) covering SecretStorage precedence, legacy migration, config-change sync, bounded gh CLI exec, and token deletion, and wired it into the `test:resources` suite. Revalidated typecheck, lint, bundle build, resource regression, manifest consistency, localization guards, and npm audit before release / SecretStorage 優先順位、旧設定移行、設定変更同期、bounded gh CLI exec、トークン削除をカバーする `scripts/test-github-auth.js`（9 ケース）を追加し、`test:resources` suite に組み込みました。リリース前に typecheck、lint、bundle build、resource 回帰、manifest consistency、localization guard、npm audit を再検証しました。
+
 ## [0.2.35] - 2026-06-24
 
 ### Added

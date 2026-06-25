@@ -612,6 +612,8 @@ Find `Agent Resources Ninja: GitHub Token` in settings and enter your token:
 
 For public resources, leave scopes unchecked. To index a private repository, use a fine-grained PAT scoped to the selected repository with **Contents: Read** permission, or a classic PAT with the broader `repo` scope when that is the only viable option. If the repository belongs to an organization, the token may also need SSO or organization approval.
 
+> **Note**: This setting value is mirrored into VS Code SecretStorage on startup and kept only for backward compatibility. Tokens are resolved in the order SecretStorage → `GITHUB_TOKEN` / `GH_TOKEN` environment variable → GitHub CLI → this setting, so for new setups the GitHub CLI or an environment variable is preferred over storing a token in settings.
+
 ### Option 2: GitHub CLI (Recommended)
 
 ```bash
