@@ -146,6 +146,9 @@ function createModule() {
         loadSharedStoresIntoSkillIndex: async (_context, index) => index,
         syncSharedStoresFromSkillIndex: async () => undefined,
       },
+      "./sourceFreshness": {
+        stampIndexedSources: (sources) => sources,
+      },
       "./logger": {
         logger: {
           info: () => undefined,
@@ -396,6 +399,42 @@ async function testRemoveSourceRemovesOnlyIndexedEntries() {
   );
 }
 
+async function testMutationBoundariesRejectMalformedIndexShape() {
+  const { moduleExports } = createModule();
+
+  await assert.rejects(
+    () =>
+      moduleExports.removeSource(
+        { globalStorageUri: { fsPath: path.join("D:", "tmp", "storage") } },
+        {
+          version: "1.0.0",
+          lastUpdated: "2026-06-20",
+          sources: "not-array",
+          skills: [],
+          categories: [],
+        },
+        "sample-source",
+      ),
+    /Cannot remove source sample-source: resource index field "sources" must be an array/,
+  );
+
+  await assert.rejects(
+    () =>
+      moduleExports.addSource(
+        { globalStorageUri: { fsPath: path.join("D:", "tmp", "storage") } },
+        {
+          version: "1.0.0",
+          lastUpdated: "2026-06-20",
+          sources: [],
+          skills: "not-array",
+          categories: [],
+        },
+        "https://github.com/octo/private-resources",
+      ),
+    /Cannot add source: resource index field "skills" must be an array/,
+  );
+}
+
 async function testSaveSkillIndexSyncsSharedStores() {
   const writes = [];
   let syncedIndex;
@@ -577,6 +616,7 @@ async function main() {
   await testPrivateSourceUsesContentsFallback();
   await testPublicRawDoesNotAttachToken();
   await testRemoveSourceRemovesOnlyIndexedEntries();
+  await testMutationBoundariesRejectMalformedIndexShape();
   await testSaveSkillIndexSyncsSharedStores();
   await testTruncatedTreeFailsExplicitly();
   await testRootResourceLicensePathIsNormalized();

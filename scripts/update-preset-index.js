@@ -25,6 +25,14 @@ const SOURCE_FILTER = (
 // GitHub API トークン（環境変数から取得）
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
 
+function assertIndexShape(index, label = "resource index") {
+  for (const fieldName of ["sources", "skills", "categories"]) {
+    if (!Array.isArray(index?.[fieldName])) {
+      throw new Error(`${label} field "${fieldName}" must be an array`);
+    }
+  }
+}
+
 function getLocalDateString() {
   const now = new Date();
   const year = now.getFullYear();
@@ -1037,6 +1045,7 @@ async function main() {
 
   // 現在のインデックスを読み込む
   const index = JSON.parse(fs.readFileSync(INDEX_PATH, "utf-8"));
+  assertIndexShape(index, INDEX_PATH);
   console.log(
     `📂 Current index: ${index.skills.length} resources, ${index.sources.length} sources\n`,
   );

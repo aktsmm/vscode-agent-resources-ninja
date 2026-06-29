@@ -5,6 +5,16 @@ All notable changes to the "Agent Resources Ninja" extension will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.37] - 2026-06-30
+
+### Changed
+
+- **Skill Index Resilience** - Added safe resource index accessors and routed Browse view, Chat Participant, MCP tools, selected command flows, preview, search, instruction sync, and shared-index export through them so malformed runtime index shapes fall back to empty resource arrays with OutputChannel diagnostics instead of `undefined.skills`-style crashes / 安全な resource index accessor を追加し、Browse view、Chat Participant、MCP tools、主要 command flow、preview、search、instruction sync、shared-index export を accessor 経由に寄せました。これにより runtime の index shape が壊れていても `undefined.skills` 系で落ちず、空 resource 配列 fallback と OutputChannel 診断へ退避します。
+
+### Tests
+
+- Added bundled index content validation, direct user-facing/read-only `.skills` read guards, safe accessor and load-recovery regression coverage, index updater mutation-boundary checks, and script-side index shape checks for audit, preset update, and migration flows / bundled index content validation、ユーザー向け・読み取り系 runtime の `.skills` 直参照 guard、安全 accessor と load recovery の回帰テスト、index updater mutation boundary check、audit / preset update / migration flow の script-side index shape check を追加しました。
+
 ## [0.2.36] - 2026-06-25
 
 ### Added

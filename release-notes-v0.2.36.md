@@ -7,6 +7,7 @@
 - Bounded the `gh auth token` lookup with a timeout and routed Web Search token retrieval through the shared resolver.
 - Isolated post-install tree reveal failures so they no longer fail an otherwise successful install.
 - Guarded resource search against an unloaded or malformed index.
+- Kept `resourceNinja.refCatalogFormat` as the README index detail switch after native README index placement cleanup.
 - Added `scripts/test-github-auth.js` (9 cases) and wired it into the `test:resources` suite.
 
 ## Verification

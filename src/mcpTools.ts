@@ -11,6 +11,8 @@ import {
   SkillIndex,
   ResourceKind,
   getLocalizedDescription,
+  getIndexResources,
+  getIndexSources,
   getResourceKind,
   getResourceKindLabel,
   saveSkillIndex,
@@ -68,7 +70,22 @@ function mcpWorkspaceUnavailableMessage(): string {
 async function getSkillIndex(): Promise<SkillIndex> {
   const context = requireExtContext();
   if (!cachedIndex) {
-    cachedIndex = await loadSkillIndex(context);
+    try {
+      cachedIndex = await loadSkillIndex(context);
+    } catch (error) {
+      logger.error(
+        "[Resource Ninja] MCP tools failed to load resource index; using empty fallback.",
+        error,
+      );
+      return {
+        version: "1.0.0",
+        lastUpdated: new Date().toISOString().split("T")[0],
+        sources: [],
+        skills: [],
+        categories: [],
+        bundles: [],
+      };
+    }
   }
   return cachedIndex;
 }
@@ -122,8 +139,8 @@ function getIndexUpdateInfo(index: SkillIndex): {
  * ソース統計を取得
  */
 function getSourceStats(index: SkillIndex): string {
-  const sourceCount = index.sources?.length || 0;
-  const skillCount = index.skills?.length || 0;
+  const sourceCount = getIndexSources(index).length;
+  const skillCount = getIndexResources(index).length;
   return `${sourceCount} リポジトリ、${skillCount} リソース`;
 }
 
@@ -318,7 +335,7 @@ class SkillSearchTool implements vscode.LanguageModelTool<{
       ]);
     }
     const index = await getSkillIndex();
-    const skills = index.skills;
+    const skills = getIndexResources(index);
     const lowerQuery = query.toLowerCase();
 
     // インデックス更新情報を取得
@@ -476,7 +493,7 @@ class SkillInstallTool implements vscode.LanguageModelTool<{
       ]);
     }
     const index = await getSkillIndex();
-    const skills = index.skills;
+    const skills = getIndexResources(index);
 
     const matchResult = findIndexedResourceCandidates(
       skills,
@@ -705,7 +722,7 @@ class SkillRecommendTool implements vscode.LanguageModelTool<
     }
 
     const index = await getSkillIndex();
-    const skills = index.skills;
+    const skills = getIndexResources(index);
     const recommendations: { skill: Skill; reason: string }[] = [];
 
     // インデックス更新情報を取得
@@ -1058,7 +1075,7 @@ class UpdateIndexTool implements vscode.LanguageModelTool<
     try {
       // 更新前の情報
       const oldIndex = await getSkillIndex();
-      const oldCount = oldIndex.skills.length;
+      const oldCount = getIndexResources(oldIndex).length;
       const oldUpdated = oldIndex.lastUpdated || "unknown";
 
       // VS Code コマンドでインデックス更新を実行
@@ -1066,10 +1083,10 @@ class UpdateIndexTool implements vscode.LanguageModelTool<
 
       // キャッシュをクリアして新しいインデックスを読み込む
       cachedIndex = undefined;
-      const newIndex = await loadSkillIndex(extContext);
+      const newIndex = await getSkillIndex();
       cachedIndex = newIndex;
 
-      const newCount = newIndex.skills.length;
+      const newCount = getIndexResources(newIndex).length;
       const newUpdated =
         newIndex.lastUpdated || new Date().toISOString().split("T")[0];
       const diff = newCount - oldCount;
@@ -1332,13 +1349,13 @@ function formatSourceCandidates(
 ): string {
   return sourceIds
     .map((sourceId) => {
-      const source = index.sources.find(
+      const source = getIndexSources(index).find(
         (candidate) => candidate.id === sourceId,
       );
       if (!source) {
         return undefined;
       }
-      const count = index.skills.filter(
+      const count = getIndexResources(index).filter(
         (skill) => skill.source === source.id,
       ).length;
       return `| ${escapeMarkdownCell(source.id)} | ${escapeMarkdownCell(source.name)} | ${escapeMarkdownCell(source.url)} | ${count} |`;
@@ -1376,16 +1393,17 @@ class RemoveSourceTool implements vscode.LanguageModelTool<{
 
     try {
       const currentIndex = await getSkillIndex();
+      const sources = getIndexSources(currentIndex);
       const normalizedQuery = normalizeSourceLookupValue(query);
       const normalizedUrl = normalizeSourceLookupUrl(query);
 
-      const exactId = currentIndex.sources.find(
+      const exactId = sources.find(
         (source) => normalizeSourceLookupValue(source.id) === normalizedQuery,
       );
-      const exactNameMatches = currentIndex.sources.filter(
+      const exactNameMatches = sources.filter(
         (source) => normalizeSourceLookupValue(source.name) === normalizedQuery,
       );
-      const exactUrlMatches = currentIndex.sources.filter(
+      const exactUrlMatches = sources.filter(
         (source) => normalizeSourceLookupUrl(source.url) === normalizedUrl,
       );
 
@@ -1400,9 +1418,7 @@ class RemoveSourceTool implements vscode.LanguageModelTool<{
       );
 
       if (candidateIds.length === 0) {
-        const visibleSources = currentIndex.sources
-          .slice(0, 20)
-          .map((source) => source.id);
+        const visibleSources = sources.slice(0, 20).map((source) => source.id);
         const table = formatSourceCandidates(currentIndex, visibleSources);
         return new vscode.LanguageModelToolResult([
           new vscode.LanguageModelTextPart(
@@ -1421,9 +1437,7 @@ class RemoveSourceTool implements vscode.LanguageModelTool<{
       }
 
       const sourceId = candidateIds[0];
-      const source = currentIndex.sources.find(
-        (candidate) => candidate.id === sourceId,
-      );
+      const source = sources.find((candidate) => candidate.id === sourceId);
       const result = await removeSource(extContext, currentIndex, sourceId);
       cachedIndex = result.index;
       await vscode.commands.executeCommand("resourceNinja.refresh");
@@ -1493,7 +1507,7 @@ Usage: Provide resourceName and at least one of description_en or description_ja
 
     try {
       const index = await getSkillIndex();
-      const skill = index.skills.find(
+      const skill = getIndexResources(index).find(
         (s) => s.name.toLowerCase() === skillName.toLowerCase(),
       );
 

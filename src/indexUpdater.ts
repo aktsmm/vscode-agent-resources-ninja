@@ -36,6 +36,27 @@ import { stampIndexedSources } from "./sourceFreshness";
 const REQUEST_TIMEOUT_MS = 15000;
 const FETCH_CONCURRENCY = 8;
 
+function assertMutableIndexShape(
+  currentIndex: SkillIndex,
+  operation: string,
+): void {
+  for (const fieldName of ["sources", "skills", "categories"] as const) {
+    if (!Array.isArray(currentIndex[fieldName])) {
+      throw new Error(
+        `[Resource Ninja] Cannot ${operation}: resource index field "${fieldName}" must be an array.`,
+      );
+    }
+  }
+  if (
+    currentIndex.bundles !== undefined &&
+    !Array.isArray(currentIndex.bundles)
+  ) {
+    throw new Error(
+      `[Resource Ninja] Cannot ${operation}: resource index field "bundles" must be an array when present.`,
+    );
+  }
+}
+
 function getLocalDateString(): string {
   const now = new Date();
   const year = now.getFullYear();
@@ -1575,6 +1596,7 @@ export async function updateSingleSource(
   sourceId: string,
   progress?: vscode.Progress<{ message?: string; increment?: number }>,
 ): Promise<{ index: SkillIndex; addedSkills: number; removedSkills: number }> {
+  assertMutableIndexShape(currentIndex, `update source ${sourceId}`);
   const token = await getGitHubToken();
 
   const source = currentIndex.sources.find((s) => s.id === sourceId);
@@ -1667,6 +1689,7 @@ export async function updateIndexFromSources(
   currentIndex: SkillIndex,
   progress?: vscode.Progress<{ message?: string; increment?: number }>,
 ): Promise<SkillIndex> {
+  assertMutableIndexShape(currentIndex, "update all sources");
   const token = await getGitHubToken();
 
   // 既存スキルの説明をマップとして保持（ローカライズされた説明を保持するため）
@@ -1795,6 +1818,7 @@ export async function updateIndexFromSingleSource(
   progress?: vscode.Progress<{ message?: string; increment?: number }>,
   options?: { forceScan?: boolean },
 ): Promise<SkillIndex> {
+  assertMutableIndexShape(currentIndex, `update source ${sourceId}`);
   const token = await getGitHubToken();
 
   const source = currentIndex.sources.find((s) => s.id === sourceId);
@@ -1890,6 +1914,7 @@ export async function addSource(
   currentIndex: SkillIndex,
   repoUrl: string,
 ): Promise<{ index: SkillIndex; addedSkills: number }> {
+  assertMutableIndexShape(currentIndex, "add source");
   // repoUrlが文字列かどうか検証
   if (!repoUrl || typeof repoUrl !== "string") {
     throw new Error("repoUrl must be a valid string");
@@ -1962,6 +1987,7 @@ export async function removeSource(
   currentIndex: SkillIndex,
   sourceId: string,
 ): Promise<{ index: SkillIndex; removedSkills: number }> {
+  assertMutableIndexShape(currentIndex, `remove source ${sourceId}`);
   // ソースを検索
   const sourceToRemove = currentIndex.sources.find((s) => s.id === sourceId);
   if (!sourceToRemove) {

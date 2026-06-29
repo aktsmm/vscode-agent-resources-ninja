@@ -51,6 +51,7 @@ import {
   Skill,
   SkillIndex,
   Source,
+  getIndexResources,
   getResourceKindLabel,
 } from "./skillIndex";
 import { messages } from "./i18n";
@@ -464,9 +465,10 @@ function findIndexedResourceForSyncItem(
   resource: SyncResourceItem,
 ): Skill | undefined {
   const normalizedRemotePath = normalizeRemotePath(resource.remotePath);
+  const resources = getIndexResources(index);
 
   if (normalizedRemotePath && resource.source && resource.source !== "local") {
-    const byRemotePath = index.skills.find(
+    const byRemotePath = resources.find(
       (candidate) =>
         candidate.source === resource.source &&
         (candidate.kind || "skill") === resource.kind &&
@@ -477,7 +479,7 @@ function findIndexedResourceForSyncItem(
     }
   }
 
-  let byName = index.skills.find(
+  let byName = resources.find(
     (candidate) =>
       candidate.name === resource.name &&
       candidate.source === resource.source &&
@@ -485,7 +487,7 @@ function findIndexedResourceForSyncItem(
   );
 
   if (!byName && resource.source === "unknown") {
-    byName = index.skills.find(
+    byName = resources.find(
       (candidate) =>
         candidate.name === resource.name &&
         (candidate.kind || "skill") === resource.kind,

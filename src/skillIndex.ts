@@ -182,6 +182,57 @@ export interface SkillIndex {
   bundles?: Bundle[]; // Bundle一覧
 }
 
+function getArrayField<T>(
+  index: Partial<SkillIndex> | undefined,
+  fieldName: keyof Pick<
+    SkillIndex,
+    "sources" | "skills" | "categories" | "bundles"
+  >,
+): T[] {
+  const value = index?.[fieldName];
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function getNormalizedArrayField<T>(
+  index: Partial<SkillIndex>,
+  fieldName: keyof Pick<
+    SkillIndex,
+    "sources" | "skills" | "categories" | "bundles"
+  >,
+): T[] {
+  const value = index[fieldName];
+  if (value !== undefined && !Array.isArray(value)) {
+    logger.warn(
+      `[Resource Ninja] Skill index field "${fieldName}" is not an array (${typeof value}); using an empty array fallback.`,
+    );
+  }
+  return getArrayField<T>(index, fieldName);
+}
+
+export function getIndexResources(
+  index: Partial<SkillIndex> | undefined,
+): Skill[] {
+  return getArrayField<Skill>(index, "skills");
+}
+
+export function getIndexSources(
+  index: Partial<SkillIndex> | undefined,
+): Source[] {
+  return getArrayField<Source>(index, "sources");
+}
+
+export function getIndexCategories(
+  index: Partial<SkillIndex> | undefined,
+): Category[] {
+  return getArrayField<Category>(index, "categories");
+}
+
+export function getIndexBundles(
+  index: Partial<SkillIndex> | undefined,
+): Bundle[] {
+  return getArrayField<Bundle>(index, "bundles");
+}
+
 function createSkillKey(
   skill: Pick<Skill, "source" | "name" | "kind">,
 ): string {
@@ -196,15 +247,15 @@ function normalizeSkillIndex(index: Partial<SkillIndex>): SkillIndex {
   return {
     version: index.version || "1.0.0",
     lastUpdated: index.lastUpdated || new Date().toISOString().split("T")[0],
-    sources: Array.isArray(index.sources)
-      ? index.sources.map((source) => ({
-          ...source,
-          url: normalizeGitHubRepoUrl(source.url),
-        }))
-      : [],
-    skills: Array.isArray(index.skills) ? index.skills : [],
-    categories: Array.isArray(index.categories) ? index.categories : [],
-    bundles: Array.isArray(index.bundles) ? index.bundles : [],
+    sources: getNormalizedArrayField<Source>(index, "sources").map(
+      (source) => ({
+        ...source,
+        url: normalizeGitHubRepoUrl(source.url),
+      }),
+    ),
+    skills: getNormalizedArrayField<Skill>(index, "skills"),
+    categories: getNormalizedArrayField<Category>(index, "categories"),
+    bundles: getNormalizedArrayField<Bundle>(index, "bundles"),
   };
 }
 
@@ -237,7 +288,11 @@ export async function loadSkillIndex(
         Buffer.from(bundledContent).toString("utf-8"),
       ) as Partial<SkillIndex>,
     );
-  } catch {
+  } catch (error) {
+    logger.warn(
+      `[Resource Ninja] Failed to load bundled skill index from ${bundledIndexPath.toString(true)}; continuing without bundled fallback.`,
+      error,
+    );
     // バンドルがなければ null のまま
   }
 
@@ -261,7 +316,11 @@ export async function loadSkillIndex(
     } else {
       effectiveIndex = localIndex;
     }
-  } catch {
+  } catch (error) {
+    logger.warn(
+      `[Resource Ninja] Failed to load local skill index from ${localIndexPath.toString(true)}; using bundled fallback when available.`,
+      error,
+    );
     // ローカルにない場合はバンドルされたインデックスを使用
     if (bundledIndex) {
       // ローカルにコピー
@@ -272,7 +331,9 @@ export async function loadSkillIndex(
       );
       effectiveIndex = bundledIndex;
     } else {
-      logger.warn("No skill index found, using empty index");
+      logger.warn(
+        "[Resource Ninja] No skill index found; using empty index fallback. Run Resource Ninja: Update Index to rebuild it.",
+      );
       effectiveIndex = {
         version: "1.0.0",
         lastUpdated: new Date().toISOString().split("T")[0],

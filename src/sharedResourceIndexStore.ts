@@ -21,7 +21,12 @@ import {
   SourceEntry,
 } from "./sharedManifest";
 import { withSharedStoreLock } from "./sharedStoreLock";
-import { Skill, SkillIndex, getResourceKind } from "./skillIndex";
+import {
+  Skill,
+  SkillIndex,
+  getIndexResources,
+  getResourceKind,
+} from "./skillIndex";
 import {
   bootstrapSharedSourcesManifest,
   readSharedSourcesManifest,
@@ -128,7 +133,7 @@ export function buildSharedResourceIndexFromSkillIndex(
       }
     : createEmptySharedResourceIndex(SELF_EXTENSION_ID);
 
-  for (const resource of currentIndex.skills) {
+  for (const resource of getIndexResources(currentIndex)) {
     const kind = getResourceKind(resource);
     nextIndex.byKind[kind].push({ ...resource, kind });
     if (resource.description_ja) {
@@ -358,7 +363,7 @@ export async function updateSharedScanMetadata(
         ...(nextIndex.scanMeta[sourceId] || {}),
         lastScannedAt: scannedAt,
         lastScannedBy: SELF_EXTENSION_ID,
-        skillCount: currentIndex.skills.filter(
+        skillCount: getIndexResources(currentIndex).filter(
           (skill) => skill.source === sourceId,
         ).length,
       };

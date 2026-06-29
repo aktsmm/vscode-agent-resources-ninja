@@ -9,11 +9,13 @@ import {
   loadSkillIndex,
   SkillIndex,
   getLocalizedDescription,
+  getIndexResources,
   getResourceKind,
   getResourceKindLabel,
 } from "./skillIndex";
 import { scanLocalSkills } from "./localSkillScanner";
 import { isJapanese } from "./i18n";
+import { logger } from "./logger";
 
 /** Resource index cache. */
 let cachedIndex: SkillIndex | undefined;
@@ -30,7 +32,22 @@ function requireIndexContext(): vscode.ExtensionContext {
 async function getSkillIndex(): Promise<SkillIndex> {
   const context = requireIndexContext();
   if (!cachedIndex) {
-    cachedIndex = await loadSkillIndex(context);
+    try {
+      cachedIndex = await loadSkillIndex(context);
+    } catch (error) {
+      logger.error(
+        "[Resource Ninja] Chat participant failed to load resource index; using empty fallback.",
+        error,
+      );
+      return {
+        version: "1.0.0",
+        lastUpdated: new Date().toISOString().split("T")[0],
+        sources: [],
+        skills: [],
+        categories: [],
+        bundles: [],
+      };
+    }
   }
   return cachedIndex;
 }
@@ -175,7 +192,7 @@ async function handleSearch(
 
   const index = await getSkillIndex();
   const lowerQuery = query.toLowerCase();
-  const results = index.skills
+  const results = getIndexResources(index)
     .filter((resource: Skill) => {
       const kind = getResourceKind(resource);
       return (
@@ -255,7 +272,10 @@ async function handleInstall(
   }
 
   const index = await getSkillIndex();
-  const matchResult = findChatInstallCandidates(index.skills, query);
+  const matchResult = findChatInstallCandidates(
+    getIndexResources(index),
+    query,
+  );
   const resource = matchResult.match;
 
   if (!resource) {
@@ -447,6 +467,7 @@ async function handleRecommend(
   ];
 
   const index = await getSkillIndex();
+  const resources = getIndexResources(index);
   for (const pattern of patterns) {
     const files = await vscode.workspace.findFiles(
       pattern.glob,
@@ -457,7 +478,7 @@ async function handleRecommend(
       continue;
     }
 
-    const matchingResources = index.skills.filter(
+    const matchingResources = resources.filter(
       (resource: Skill) =>
         resource.categories?.some((category: string) =>
           category.toLowerCase().includes(pattern.category),
@@ -511,7 +532,7 @@ async function showPopularResources(
   stream: vscode.ChatResponseStream,
 ): Promise<vscode.ChatResult> {
   const index = await getSkillIndex();
-  const popular = index.skills
+  const popular = getIndexResources(index)
     .filter((resource: Skill) => resource.stars && resource.stars > 0)
     .sort((a: Skill, b: Skill) => (b.stars || 0) - (a.stars || 0))
     .slice(0, 5);

@@ -9,6 +9,8 @@ import {
   getResourceContentPath,
   Skill,
   Source,
+  getIndexResources,
+  getIndexSources,
   getResourceKind,
 } from "./skillIndex";
 import messages, { isJapanese } from "./i18n";
@@ -564,10 +566,14 @@ export async function showSkillPreview(
 
   // スキルインデックスからソース情報を取得
   const skillIndex = await loadSkillIndex(context);
-  const sources = skillIndex.sources;
+  const sources = getIndexSources(skillIndex);
 
   // スキルがインデックスに登録されているか確認
-  const indexedSkill = findIndexedSkill(skill, skillIndex.skills, sources);
+  const indexedSkill = findIndexedSkill(
+    skill,
+    getIndexResources(skillIndex),
+    sources,
+  );
   const installTargetSkill = indexedSkill || skill;
   const isInIndex = !!indexedSkill;
 
@@ -670,7 +676,7 @@ export async function showSkillPreview(
               }
 
               const targetSourceId = resolvedSourceId || skill.source;
-              const sourceScopedSkills = updatedIndex.skills.filter(
+              const sourceScopedSkills = getIndexResources(updatedIndex).filter(
                 (s: Skill) => s.source === targetSourceId,
               );
 

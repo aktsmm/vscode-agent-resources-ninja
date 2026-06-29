@@ -14,6 +14,9 @@ import {
   getResourceKind,
   getResourceKindIcon,
   getResourceKindLabel,
+  getIndexBundles,
+  getIndexResources,
+  getIndexSources,
 } from "./skillIndex";
 import { getInstalledSkillsWithMeta } from "./skillInstaller";
 import { LocalSkill, scanLocalSkills } from "./localSkillScanner";
@@ -816,7 +819,8 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
       const favorites = this.context.globalState.get<string[]>("favorites", []);
       if (favorites.length > 0) {
         // 実際にインデックスに存在するお気に入りスキルの数をカウント
-        const favoriteSkillCount = this.skillIndex.skills.filter((skill) =>
+        const resources = getIndexResources(this.skillIndex);
+        const favoriteSkillCount = resources.filter((skill) =>
           favorites.includes(getSkillId(skill)),
         ).length;
 
@@ -836,13 +840,9 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
       }
 
       if (this.getRemoteResourceViewMode() === "resourceTypeFirst") {
-        for (const kind of this.getPresentResourceKinds(
-          this.skillIndex.skills,
-        )) {
-          const count = this.getResourceCountForKind(
-            this.skillIndex.skills,
-            kind,
-          );
+        const resources = getIndexResources(this.skillIndex);
+        for (const kind of this.getPresentResourceKinds(resources)) {
+          const count = this.getResourceCountForKind(resources, kind);
           const item = new SkillTreeItem(
             getResourceKindLabel(kind, isJapanese()),
             `${count} resources`,
@@ -968,7 +968,8 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
       const isJa = isJapanese();
       // bundle.skills 配列にあるスキル名でマッチング
       const bundleSkillNames = element.bundle.skills || [];
-      let bundleSkills = this.skillIndex.skills.filter(
+      const resources = getIndexResources(this.skillIndex);
+      let bundleSkills = resources.filter(
         (skill) =>
           bundleSkillNames.includes(skill.name) ||
           bundleSkillNames.includes(skill.path) ||
@@ -981,7 +982,7 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
 
       // マッチするスキルがない場合、同じソースのスキルを表示
       if (bundleSkills.length === 0 && element.bundle.source) {
-        bundleSkills = this.skillIndex.skills.filter(
+        bundleSkills = resources.filter(
           (skill) => skill.source === element.bundle!.source,
         );
       }
@@ -1060,8 +1061,8 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
     // Favorites 配下
     if (element.contextValue === "favorites") {
       const favorites = this.context.globalState.get<string[]>("favorites", []);
-      const favoriteSkills = this.skillIndex.skills.filter((skill) =>
-        favorites.includes(getSkillId(skill)),
+      const favoriteSkills = getIndexResources(this.skillIndex).filter(
+        (skill) => favorites.includes(getSkillId(skill)),
       );
 
       return this.createResourceItems(favoriteSkills);
@@ -1071,10 +1072,7 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
   }
 
   private getResourcesForSource(sourceId: string): Skill[] {
-    if (!this.skillIndex) {
-      return [];
-    }
-    return this.skillIndex.skills.filter(
+    return getIndexResources(this.skillIndex).filter(
       (resource) => resource.source === sourceId,
     );
   }
@@ -1086,17 +1084,14 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
   }
 
   private getOrderedSources(): Source[] {
-    if (!this.skillIndex) {
-      return [];
-    }
-
-    const officialSources = this.skillIndex.sources.filter(
+    const sources = getIndexSources(this.skillIndex);
+    const officialSources = sources.filter(
       (source) => source.type === "official",
     );
-    const awesomeSources = this.skillIndex.sources.filter(
+    const awesomeSources = sources.filter(
       (source) => source.type === "awesome-list",
     );
-    const communitySources = this.skillIndex.sources.filter(
+    const communitySources = sources.filter(
       (source) =>
         source.type === "community" ||
         source.type === "user-added" ||
@@ -1106,13 +1101,13 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
   }
 
   private getSourceForBundle(bundle: Bundle): Source | undefined {
-    return this.skillIndex?.sources.find(
+    return getIndexSources(this.skillIndex).find(
       (source) => source.id === bundle.source,
     );
   }
 
   private getPluginGroups(): PluginGroup[] {
-    const resources = this.skillIndex?.skills || [];
+    const resources = getIndexResources(this.skillIndex);
     const packages = getPluginPackageCandidates(resources);
     const groups = new Map<string, PluginGroup>();
 
@@ -1144,7 +1139,7 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
   }
 
   private getResourcesForPlugin(pluginPackageId: string): Skill[] {
-    const resources = this.skillIndex?.skills || [];
+    const resources = getIndexResources(this.skillIndex);
     const packages = getPluginPackageCandidates(resources);
     return resources.filter(
       (resource) => getPluginPackageId(resource, packages) === pluginPackageId,
@@ -1154,23 +1149,23 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
   private getSourceForPlugin(plugin: PluginGroup): Source | undefined {
     const sourceId = plugin.packageInfo?.source || plugin.resources[0]?.source;
     return sourceId
-      ? this.skillIndex?.sources.find((source) => source.id === sourceId)
+      ? getIndexSources(this.skillIndex).find(
+          (source) => source.id === sourceId,
+        )
       : undefined;
   }
 
   private getResourcesForBundle(bundle: Bundle): Skill[] {
-    if (!this.skillIndex) {
-      return [];
-    }
     const identifiers = bundle.installOrder || bundle.skills;
+    const resources = getIndexResources(this.skillIndex);
     return identifiers
       .map(
         (identifier) =>
-          this.skillIndex!.skills.find(
+          resources.find(
             (skill) =>
               skill.name === identifier && skill.source === bundle.source,
           ) ||
-          this.skillIndex!.skills.find(
+          resources.find(
             (skill) =>
               skill.path === identifier && skill.source === bundle.source,
           ),
@@ -1201,7 +1196,7 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
   }
 
   private getOrderedBundles(): Bundle[] {
-    return [...(this.skillIndex?.bundles || [])].sort((a, b) => {
+    return [...getIndexBundles(this.skillIndex)].sort((a, b) => {
       const weightDiff =
         this.getBundleSortWeight(a) - this.getBundleSortWeight(b);
       if (weightDiff !== 0) {
@@ -1308,13 +1303,14 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
   }
 
   private addBundleSection(items: SkillTreeItem[]): void {
-    if (!this.skillIndex?.bundles || this.skillIndex.bundles.length === 0) {
+    const bundles = getIndexBundles(this.skillIndex);
+    if (bundles.length === 0) {
       return;
     }
 
     const bundleItem = new SkillTreeItem(
       isJapanese() ? "おすすめまとめインストール" : "Curated Install Sets",
-      `${this.skillIndex.bundles.length} sets`,
+      `${bundles.length} sets`,
       vscode.TreeItemCollapsibleState.Collapsed,
       "bundleSection",
     );
@@ -1349,10 +1345,9 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
   }
 
   private getSkillCountForSource(sourceId: string): number {
-    if (!this.skillIndex) {
-      return 0;
-    }
-    return this.skillIndex.skills.filter((s) => s.source === sourceId).length;
+    return getIndexResources(this.skillIndex).filter(
+      (resource) => resource.source === sourceId,
+    ).length;
   }
 
   private getPresentResourceKinds(resources: Skill[]): ResourceKind[] {

@@ -8,6 +8,8 @@ import {
   Source,
   ResourceKind,
   getLocalizedDescription,
+  getIndexResources,
+  getIndexSources,
   getResourceKind,
   getResourceKindIcon,
   getResourceKindLabel,
@@ -143,18 +145,20 @@ export function searchSkills(
   kindFilter?: ResourceKind,
 ): SkillQuickPickItem[] {
   // インデックスが未ロードまたは不正な場合は例外を投げず空結果を返す
-  if (!index || !Array.isArray(index.skills) || !Array.isArray(index.sources)) {
+  const indexResources = getIndexResources(index);
+  const indexSources = getIndexSources(index);
+  if (!index || indexResources.length === 0) {
     return [];
   }
   const lowerQuery = query.toLowerCase().trim();
   const resources = kindFilter
-    ? index.skills.filter((skill) => getResourceKind(skill) === kindFilter)
-    : index.skills;
+    ? indexResources.filter((skill) => getResourceKind(skill) === kindFilter)
+    : indexResources;
 
   // クエリが空の場合はソースタイプ順でソートして返す
   if (!lowerQuery) {
     const sorted = [...resources].sort((a, b) => {
-      return compareSearchTieBreakers(a, b, index.sources);
+      return compareSearchTieBreakers(a, b, indexSources);
     });
     const visibleResources = sorted.slice(0, 100);
     const duplicateNameCounts = getDuplicateNameCounts(visibleResources);
@@ -226,7 +230,7 @@ function skillToQuickPickItem(
 export function groupByCategory(index: SkillIndex): Map<string, Skill[]> {
   const groups = new Map<string, Skill[]>();
 
-  for (const skill of index.skills) {
+  for (const skill of getIndexResources(index)) {
     for (const category of skill.categories) {
       if (!groups.has(category)) {
         groups.set(category, []);
@@ -244,7 +248,7 @@ export function groupByCategory(index: SkillIndex): Map<string, Skill[]> {
 export function groupBySource(index: SkillIndex): Map<string, Skill[]> {
   const groups = new Map<string, Skill[]>();
 
-  for (const skill of index.skills) {
+  for (const skill of getIndexResources(index)) {
     if (!groups.has(skill.source)) {
       groups.set(skill.source, []);
     }

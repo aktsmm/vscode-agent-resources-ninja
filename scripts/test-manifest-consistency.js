@@ -70,6 +70,10 @@ const skillSearchSource = fs.readFileSync(
   path.join(repoRoot, "src", "skillSearch.ts"),
   "utf8",
 );
+const skillPreviewSource = fs.readFileSync(
+  path.join(repoRoot, "src", "skillPreview.ts"),
+  "utf8",
+);
 const skillInstallerSource = fs.readFileSync(
   path.join(repoRoot, "src", "skillInstaller.ts"),
   "utf8",
@@ -88,6 +92,10 @@ const sourceFreshnessSource = fs.readFileSync(
 );
 const sharedManifestSource = fs.readFileSync(
   path.join(repoRoot, "src", "sharedManifest.ts"),
+  "utf8",
+);
+const sharedResourceIndexStoreSource = fs.readFileSync(
+  path.join(repoRoot, "src", "sharedResourceIndexStore.ts"),
   "utf8",
 );
 const sharedSourcesManifestStoreSource = fs.readFileSync(
@@ -179,6 +187,19 @@ function parseReadmeSettingsTable(readmeText) {
   }
 
   return entries;
+}
+
+function assertNoDirectIndexSkillsRuntimeReads(sourceName, sourceText) {
+  const forbidden =
+    /\b(?:this\.)?(?:index|skillIndex|cachedIndex|currentIndex|updatedIndex)\.skills\s*(?:\.|\[)/g;
+  const matches = Array.from(sourceText.matchAll(forbidden)).map(
+    (match) => match[0],
+  );
+  assert.deepStrictEqual(
+    matches,
+    [],
+    `${sourceName} must use getIndexResources() instead of direct .skills reads`,
+  );
 }
 
 test("chat participant id matches implementation", () => {
@@ -413,6 +434,71 @@ test("MCP install targets avoid generic filename collisions", () => {
     skillInstallerSource,
     /`\$\{sanitizeSkillName\(skill\.source\)\}-\$\{normalizedFileName\}`/,
   );
+});
+
+test("bundled resource index has a release-safe shape", () => {
+  const knownKinds = new Set([
+    "skill",
+    "agent",
+    "instruction",
+    "prompt",
+    "hook",
+    "mcp",
+    "plugin",
+    "cursor-rule",
+  ]);
+  assert.ok(Array.isArray(bundledIndex.skills), "skills must be an array");
+  assert.ok(Array.isArray(bundledIndex.sources), "sources must be an array");
+  assert.ok(
+    Array.isArray(bundledIndex.categories),
+    "categories must be an array",
+  );
+  assert.ok(
+    bundledIndex.skills.length >= 100,
+    `bundled index should contain at least 100 resources, got ${bundledIndex.skills.length}`,
+  );
+  assert.ok(bundledIndex.sources.length > 0, "sources must not be empty");
+
+  const sourceIds = new Set(bundledIndex.sources.map((source) => source.id));
+  for (const [index, resource] of bundledIndex.skills.entries()) {
+    assert.ok(resource.name, `skills[${index}] missing name`);
+    assert.ok(resource.source, `skills[${index}] missing source`);
+    assert.strictEqual(
+      typeof resource.path,
+      "string",
+      `skills[${index}] missing path field`,
+    );
+    assert.ok(resource.description, `skills[${index}] missing description`);
+    assert.ok(
+      sourceIds.has(resource.source),
+      `skills[${index}] references missing source ${resource.source}`,
+    );
+    assert.ok(
+      !resource.kind || knownKinds.has(resource.kind),
+      `skills[${index}] has unknown kind ${resource.kind}`,
+    );
+  }
+});
+
+test("user-facing and read-only runtime code uses safe resource index accessors", () => {
+  assert.match(skillIndexSource, /export function getIndexResources/);
+  for (const [sourceName, sourceText] of [
+    ["treeProvider.ts", treeProviderSource],
+    ["chatParticipant.ts", chatParticipantSource],
+    ["mcpTools.ts", mcpToolsSource],
+    ["extension.ts", extensionSource],
+    ["instructionManager.ts", instructionManagerSource],
+    ["sharedResourceIndexStore.ts", sharedResourceIndexStoreSource],
+    ["skillPreview.ts", skillPreviewSource],
+    ["skillSearch.ts", skillSearchSource],
+  ]) {
+    assert.match(
+      sourceText,
+      /getIndexResources/,
+      `${sourceName} should import or call getIndexResources`,
+    );
+    assertNoDirectIndexSkillsRuntimeReads(sourceName, sourceText);
+  }
 });
 
 test("bundled MicrosoftDocs renamed skills use current upstream paths", () => {

@@ -12,6 +12,14 @@ const DEFAULT_INDEX_PATH = path.join(
 const DEFAULT_CONCURRENCY = 8;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
 
+function assertIndexShape(index, label = "resource index") {
+  for (const fieldName of ["sources", "skills"]) {
+    if (!Array.isArray(index?.[fieldName])) {
+      throw new Error(`${label} field "${fieldName}" must be an array`);
+    }
+  }
+}
+
 function normalizeGitHubRepoUrl(url) {
   const trimmed = String(url || "")
     .trim()
@@ -95,9 +103,7 @@ async function githubFetch(url, fetchImpl, token, options = {}) {
   ) {
     const bodyText = await response.clone().text();
     if (
-      bodyText.includes(
-        "forbids access via a personal access tokens (classic)",
-      )
+      bodyText.includes("forbids access via a personal access tokens (classic)")
     ) {
       return fetchImpl(url, {
         method: options.method || "GET",
@@ -155,6 +161,7 @@ async function checkRawUrl(rawUrl, fetchImpl, token) {
 }
 
 async function auditIndexInstallability(index, options = {}) {
+  assertIndexShape(index);
   const fetchImpl = options.fetchImpl || global.fetch;
   if (typeof fetchImpl !== "function") {
     throw new Error("fetch is not available in this environment");
@@ -166,9 +173,11 @@ async function auditIndexInstallability(index, options = {}) {
     ...source,
     normalizedUrl: normalizeGitHubRepoUrl(source.url),
   }));
-  const sourceMap = new Map(normalizedSources.map((source) => [source.id, source]));
+  const sourceMap = new Map(
+    normalizedSources.map((source) => [source.id, source]),
+  );
   const concurrency = Math.max(1, options.concurrency || DEFAULT_CONCURRENCY);
-  const resources = Array.isArray(index.skills) ? index.skills : [];
+  const resources = index.skills;
   let cursor = 0;
 
   const worker = async () => {
@@ -248,8 +257,11 @@ async function auditIndexInstallability(index, options = {}) {
 }
 
 function applyAuditFixes(index, auditResult) {
-  const failingKeys = new Set(auditResult.findings.map((finding) => finding.key));
-  const skills = (index.skills || []).filter(
+  assertIndexShape(index);
+  const failingKeys = new Set(
+    auditResult.findings.map((finding) => finding.key),
+  );
+  const skills = index.skills.filter(
     (resource) => !failingKeys.has(buildResourceKey(resource)),
   );
   const availableNamesBySource = new Map();
@@ -262,8 +274,11 @@ function applyAuditFixes(index, auditResult) {
 
   const bundles = (index.bundles || [])
     .map((bundle) => {
-      const availableNames = availableNamesBySource.get(bundle.source) || new Set();
-      const skillsInBundle = bundle.skills.filter((name) => availableNames.has(name));
+      const availableNames =
+        availableNamesBySource.get(bundle.source) || new Set();
+      const skillsInBundle = bundle.skills.filter((name) =>
+        availableNames.has(name),
+      );
       const installOrder = (bundle.installOrder || []).filter((name) =>
         skillsInBundle.includes(name),
       );
@@ -296,6 +311,7 @@ async function main() {
   const rawOnly = args.has("--raw-only");
   const indexPath = DEFAULT_INDEX_PATH;
   const index = JSON.parse(fs.readFileSync(indexPath, "utf8"));
+  assertIndexShape(index, indexPath);
   const auditResult = await auditIndexInstallability(index, {
     token: GITHUB_TOKEN,
     rawOnly,
@@ -315,7 +331,11 @@ async function main() {
   if (apply) {
     const nextIndex = applyAuditFixes(index, auditResult);
     if (JSON.stringify(nextIndex) !== JSON.stringify(index)) {
-      fs.writeFileSync(indexPath, `${JSON.stringify(nextIndex, null, 2)}\n`, "utf8");
+      fs.writeFileSync(
+        indexPath,
+        `${JSON.stringify(nextIndex, null, 2)}\n`,
+        "utf8",
+      );
       console.log(
         `APPLY updated ${path.relative(process.cwd(), indexPath)} (${auditResult.findings.length} stale resources pruned)`,
       );
@@ -343,6 +363,7 @@ module.exports = {
   getResourceContentPath,
   buildRawUrl,
   buildResourceKey,
+  assertIndexShape,
   auditIndexInstallability,
   applyAuditFixes,
 };

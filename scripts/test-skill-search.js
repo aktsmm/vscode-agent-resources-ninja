@@ -56,6 +56,10 @@ const { searchSkills } = requireTypeScriptModule(
     },
     "./skillIndex": {
       getLocalizedDescription: (resource) => resource.description || "",
+      getIndexResources: (index) =>
+        Array.isArray(index?.skills) ? index.skills : [],
+      getIndexSources: (index) =>
+        Array.isArray(index?.sources) ? index.sources : [],
       getResourceKind: (resource) => resource.kind || "skill",
       getResourceKindIcon: (kind) => kind,
       getResourceKindLabel: (kind) => kind,

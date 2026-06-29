@@ -11,6 +11,7 @@ import {
   buildGitHubResourceUrl,
   loadSkillIndex,
   getSkillGitHubUrlAsync,
+  getIndexResources,
   getResourceKind,
   getResourceKindIcon,
   getResourceKindLabel,
@@ -174,9 +175,10 @@ function findIndexedSkillForInstalledMeta(
   meta: Pick<SkillMeta, "name" | "source" | "remotePath">,
 ): Skill | undefined {
   const normalizedRemotePath = normalizeInstalledRemotePath(meta.remotePath);
+  const resources = getIndexResources(index);
 
   if (normalizedRemotePath && meta.source && meta.source !== "local") {
-    const matchedByRemotePath = index.skills.find(
+    const matchedByRemotePath = resources.find(
       (skill: Skill) =>
         getResourceKind(skill) === "skill" &&
         skill.source === meta.source &&
@@ -187,14 +189,14 @@ function findIndexedSkillForInstalledMeta(
     }
   }
 
-  let skill = index.skills.find(
+  let skill = resources.find(
     (candidate: Skill) =>
       getResourceKind(candidate) === "skill" &&
       candidate.name === meta.name &&
       candidate.source === meta.source,
   );
   if (!skill && meta.source === "unknown") {
-    skill = index.skills.find(
+    skill = resources.find(
       (candidate: Skill) =>
         getResourceKind(candidate) === "skill" && candidate.name === meta.name,
     );
@@ -857,7 +859,9 @@ export async function activate(
     try {
       let index = skillIndex || (await loadSkillIndex(context));
       skillIndex = index;
-      logger.info(`Loaded ${index.skills.length} resources from index`);
+      logger.info(
+        `Loaded ${getIndexResources(index).length} resources from index`,
+      );
 
       if (workspaceFolder) {
         const installedMeta = await getInstalledSkillsWithMeta(
@@ -1545,14 +1549,15 @@ export async function activate(
         resource.scope === "userData" ? "userData" : "globalHome";
 
       let index = await loadSkillIndex(context);
-      let fullSkill = index.skills.find(
+      let resources = getIndexResources(index);
+      let fullSkill = resources.find(
         (s: Skill) =>
           getResourceKind(s) === resource.kind &&
           s.source === resource.source &&
           s.path === resource.remotePath,
       );
       if (!fullSkill) {
-        fullSkill = index.skills.find(
+        fullSkill = resources.find(
           (s: Skill) =>
             getResourceKind(s) === resource.kind &&
             s.path === resource.remotePath,
@@ -1574,15 +1579,16 @@ export async function activate(
             [resource.source],
             resource.name,
           );
+          resources = getIndexResources(index);
 
-          fullSkill = index.skills.find(
+          fullSkill = resources.find(
             (s: Skill) =>
               getResourceKind(s) === resource.kind &&
               s.source === resource.source &&
               s.path === resource.remotePath,
           );
           if (!fullSkill) {
-            fullSkill = index.skills.find(
+            fullSkill = resources.find(
               (s: Skill) =>
                 getResourceKind(s) === resource.kind &&
                 s.path === resource.remotePath,
@@ -3052,20 +3058,21 @@ export async function activate(
       }
 
       let index = await loadSkillIndex(context);
-      let fullSkill = index.skills.find(
+      let resources = getIndexResources(index);
+      let fullSkill = resources.find(
         (s: Skill) =>
           getResourceKind(s) === resourceKind &&
           s.source === source &&
           s.path === remotePath,
       );
       if (!fullSkill && source === "unknown") {
-        fullSkill = index.skills.find(
+        fullSkill = resources.find(
           (s: Skill) =>
             getResourceKind(s) === resourceKind && s.name === resourceName,
         );
       }
       if (!fullSkill) {
-        fullSkill = index.skills.find(
+        fullSkill = resources.find(
           (s: Skill) =>
             getResourceKind(s) === resourceKind &&
             s.name === resourceName &&
@@ -3090,15 +3097,16 @@ export async function activate(
             [source],
             skill.name,
           );
+          resources = getIndexResources(index);
 
-          fullSkill = index.skills.find(
+          fullSkill = resources.find(
             (s: Skill) =>
               getResourceKind(s) === resourceKind &&
               s.source === source &&
               s.path === remotePath,
           );
           if (!fullSkill && source === "unknown") {
-            fullSkill = index.skills.find(
+            fullSkill = resources.find(
               (s: Skill) =>
                 getResourceKind(s) === resourceKind && s.name === resourceName,
             );
@@ -3391,16 +3399,17 @@ export async function activate(
       const isPluginPick = bundle.id.startsWith("plugin:");
 
       const index = await loadSkillIndex(context);
+      const resources = getIndexResources(index);
 
       // インストール順序を決定（installOrderがあればそれを使用、なければskills配列）
       const installOrder = bundle.installOrder || bundle.skills;
       const bundleResources = installOrder
         .map((skillName) => {
           const skill =
-            index.skills.find(
+            resources.find(
               (s: Skill) => s.name === skillName && s.source === bundle.source,
             ) ||
-            index.skills.find(
+            resources.find(
               (s: Skill) => s.path === skillName && s.source === bundle.source,
             );
           return { skillName, skill };
@@ -3814,15 +3823,14 @@ export async function activate(
               increment: 100 / selected.length,
             });
 
-            let skill = index.skills.find(
+            const resources = getIndexResources(index);
+            let skill = resources.find(
               (s: Skill) =>
                 s.name === item.meta.name && s.source === item.meta.source,
             );
             // source が "unknown" の場合は name だけで検索
             if (!skill && item.meta.source === "unknown") {
-              skill = index.skills.find(
-                (s: Skill) => s.name === item.meta.name,
-              );
+              skill = resources.find((s: Skill) => s.name === item.meta.name);
             }
 
             if (skill) {
@@ -3930,7 +3938,7 @@ export async function activate(
         skillIndex = await loadSkillIndex(context);
       }
 
-      const oldCount = skillIndex.skills.length;
+      const oldCount = getIndexResources(skillIndex).length;
 
       try {
         await vscode.window.withProgress(
@@ -3947,7 +3955,7 @@ export async function activate(
             );
           },
         );
-        const newCount = skillIndex.skills.length;
+        const newCount = getIndexResources(skillIndex).length;
         const diff = newCount - oldCount;
         const diffText = diff > 0 ? `+${diff}` : diff === 0 ? "±0" : `${diff}`;
         vscode.window.showInformationMessage(
@@ -3991,7 +3999,7 @@ export async function activate(
         skillIndex = await loadSkillIndex(context);
       }
 
-      const oldCount = skillIndex.skills.filter(
+      const oldCount = getIndexResources(skillIndex).filter(
         (s) => s.source === sourceId,
       ).length;
 
@@ -4012,7 +4020,7 @@ export async function activate(
             );
           },
         );
-        const newCount = skillIndex.skills.filter(
+        const newCount = getIndexResources(skillIndex).filter(
           (s) => s.source === sourceId,
         ).length;
         const diff = newCount - oldCount;
@@ -4573,7 +4581,7 @@ export async function activate(
         return;
       }
 
-      const favoriteSkills = skillIndex.skills.filter((s) =>
+      const favoriteSkills = getIndexResources(skillIndex).filter((s) =>
         favorites.includes(getSkillId(s)),
       );
 
@@ -4638,7 +4646,8 @@ export async function activate(
       }
 
       const categoryCounts = new Map<string, number>();
-      for (const skill of skillIndex.skills) {
+      const indexResources = getIndexResources(skillIndex);
+      for (const skill of indexResources) {
         for (const category of skill.categories || []) {
           categoryCounts.set(category, (categoryCounts.get(category) || 0) + 1);
         }
@@ -4656,7 +4665,7 @@ export async function activate(
         [
           {
             label: messages.allCategories(),
-            description: `${skillIndex.skills.length}`,
+            description: `${indexResources.length}`,
             category: "",
           },
           ...categories,
@@ -4669,10 +4678,10 @@ export async function activate(
       }
 
       const resources = selectedCategory.category
-        ? skillIndex.skills.filter((skill) =>
+        ? indexResources.filter((skill) =>
             skill.categories?.includes(selectedCategory.category),
           )
-        : skillIndex.skills;
+        : indexResources;
       const items: SkillQuickPickItem[] = resources.map((skill) => ({
         label: `$(package) ${skill.name}`,
         description: skill.source,

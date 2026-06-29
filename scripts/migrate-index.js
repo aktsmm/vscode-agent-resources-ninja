@@ -8,6 +8,12 @@ const path = require("path");
 const indexPath = path.join(__dirname, "..", "resources", "skill-index.json");
 const index = JSON.parse(fs.readFileSync(indexPath, "utf-8"));
 
+for (const fieldName of ["sources", "skills", "categories"]) {
+  if (!Array.isArray(index[fieldName])) {
+    throw new Error(`${indexPath} field "${fieldName}" must be an array`);
+  }
+}
+
 // スキル名から英語説明を生成するマッピング
 const englishDescriptions = {
   // Anthropic Skills
