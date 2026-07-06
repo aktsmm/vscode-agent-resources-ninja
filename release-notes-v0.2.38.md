@@ -24,5 +24,5 @@
 ## Artifact
 
 - VSIX: `agent-resources-ninja-0.2.38.vsix`
-- Size: TBD (filled after packaging)
-- SHA256: `TBD`
+- Size: 354,889 bytes (346.57 KB)
+- SHA256: `4786E2FF6251421F6031666504A9835FD66265753C85FAB1CC90730304BD2EC7`
