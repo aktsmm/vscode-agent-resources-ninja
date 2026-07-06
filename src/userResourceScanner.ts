@@ -103,12 +103,25 @@ const RESOURCE_DIRECTORY_NAMES = new Set([
   "skills",
 ]);
 
+// Directories that GitHub Copilot CLI / App / cloud agent create under the
+// global home (`~/.copilot`) for runtime state or working copies rather than
+// curated resources. They must never be surfaced as user resources.
+// `repos` in particular holds git worktrees checked out by the Copilot cloud
+// agent (e.g. `repos/copilot-worktrees/<repo>/<branch>/.github/skills/**`),
+// which otherwise leak into the tree as global-home skills.
 const GLOBAL_HOME_RUNTIME_DIRECTORY_NAMES = new Set([
+  "browser-output",
+  "chats",
   "crash-context",
+  "heartbeat",
   "ide",
   "logs",
+  "m-audit-logs",
   "mcp-oauth-config",
+  "media-cache",
+  "repos",
   "restart",
+  "run",
   "session-state",
   "session-store",
 ]);

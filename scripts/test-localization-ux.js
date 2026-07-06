@@ -105,6 +105,16 @@ test("package JSON localization placeholders resolve in both locales", () => {
   }
 });
 
+test("package NLS keys are all referenced by package.json (no dead keys)", () => {
+  const referenced = new Set(packagePlaceholderKeys());
+  const deadKeys = Object.keys(nls).filter((key) => !referenced.has(key));
+  assert.deepStrictEqual(
+    deadKeys,
+    [],
+    `Unused package.nls.json keys (not referenced as %key% in package.json): ${deadKeys.join(", ")}`,
+  );
+});
+
 test("package NLS values do not contain unresolved localization placeholders", () => {
   for (const [key, value] of Object.entries(nls)) {
     assert.doesNotMatch(

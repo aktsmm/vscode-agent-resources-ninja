@@ -365,6 +365,9 @@ test("global home scan skips Copilot CLI runtime directories", () => {
   );
   assert.match(userResourceScannerSource, /"logs"/);
   assert.match(userResourceScannerSource, /"session-state"/);
+  // `repos` holds Copilot cloud-agent git worktrees whose `.github/skills/**`
+  // would otherwise leak into the global-home tree.
+  assert.match(userResourceScannerSource, /"repos"/);
   assert.match(
     userResourceScannerSource,
     /skipRuntimeDirectories:[\s\S]*root\.scope === "globalHome"/,

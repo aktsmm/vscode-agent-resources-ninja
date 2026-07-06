@@ -36,7 +36,7 @@ test("local skills without remotePath are excluded from index-missing checks", (
 test("indexed install lookup prefers remotePath before name/source fallback", () => {
   assert.match(
     extensionSource,
-    /const matchedByRemotePath = index\.skills\.find\([\s\S]*normalizeInstalledRemotePath\(skill\.path\) === normalizedRemotePath/,
+    /const matchedByRemotePath = resources\.find\([\s\S]*normalizeInstalledRemotePath\(skill\.path\) === normalizedRemotePath/,
   );
   assert.match(
     extensionSource,

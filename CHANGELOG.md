@@ -5,6 +5,21 @@ All notable changes to the "Agent Resources Ninja" extension will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.38] - 2026-07-07
+
+### Fixed
+
+- **Global Home Runtime Directory Noise** - Excluded GitHub Copilot cloud-agent working copies and other runtime state directories under the global home (`~/.copilot`) from resource scanning. In particular, `repos/copilot-worktrees/<repo>/<branch>/.github/skills/**` worktrees checked out by the Copilot cloud agent no longer leak into the tree as global-home resources, while genuine `~/.copilot/skills` and built-in resources keep showing / グローバルホーム（`~/.copilot`）配下の GitHub Copilot cloud agent 作業コピーやランタイム状態ディレクトリを resource スキャンから除外しました。特に Copilot cloud agent が展開する `repos/copilot-worktrees/<repo>/<branch>/.github/skills/**` の worktree がグローバルリソースとしてツリーに混入しなくなり、本来の `~/.copilot/skills` や組み込みリソースは引き続き表示されます。
+
+### Changed
+
+- **Localization Cleanup** - Removed 7 unused `config.*.description` keys from `package.nls.json` and `package.nls.ja.json` that were superseded by `markdownDescription`, keeping the localized settings surface free of dead entries / `markdownDescription` に置き換わって未使用になっていた `config.*.description` キー 7 件を `package.nls.json` と `package.nls.ja.json` から削除し、ローカライズされた設定サーフェスから dead entry を排除しました。
+
+### Tests
+
+- Extended `scripts/test-global-home-routing.js` to assert that `repos` is part of the global-home runtime skip set so Copilot cloud-agent worktrees stay excluded from scanning / `scripts/test-global-home-routing.js` を拡張し、`repos` がグローバルホームのランタイムスキップ対象に含まれること（Copilot cloud agent の worktree がスキャンから除外され続けること）を検証しました。
+- Added a dead-key guard in `scripts/test-localization-ux.js` that fails when a `package.nls.json` key is not referenced as `%key%` in `package.json`, preventing future unused localization keys / `scripts/test-localization-ux.js` に dead-key guard を追加し、`package.nls.json` のキーが `package.json` で `%key%` として参照されていない場合に失敗するようにして、将来の未使用ローカライズキーを防止します。
+
 ## [0.2.37] - 2026-06-30
 
 ### Changed
