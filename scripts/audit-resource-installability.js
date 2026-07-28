@@ -12,6 +12,45 @@ const DEFAULT_INDEX_PATH = path.join(
 const DEFAULT_CONCURRENCY = 8;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
 
+function parseSourceIds(value) {
+  return String(value || "")
+    .split(",")
+    .map((sourceId) => sourceId.trim())
+    .filter(Boolean);
+}
+
+function resolveSourceFilter(args = [], env = process.env) {
+  let cliValue;
+  let cliSpecified = false;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--sources") {
+      cliSpecified = true;
+      cliValue = args[index + 1];
+      index += 1;
+    } else if (arg.startsWith("--sources=")) {
+      cliSpecified = true;
+      cliValue = arg.slice("--sources=".length);
+    }
+  }
+
+  if (cliSpecified && (!cliValue || cliValue.startsWith("--"))) {
+    throw new Error(
+      "--sources requires one or more comma-separated source IDs",
+    );
+  }
+
+  const envSpecified = env.RESOURCE_NINJA_SOURCES !== undefined;
+  const sourceIds = parseSourceIds(
+    cliSpecified ? cliValue : env.RESOURCE_NINJA_SOURCES || "",
+  );
+  if ((cliSpecified || envSpecified) && sourceIds.length === 0) {
+    throw new Error("Source filter requires at least one source ID");
+  }
+  return sourceIds;
+}
+
 function assertIndexShape(index, label = "resource index") {
   for (const fieldName of ["sources", "skills"]) {
     if (!Array.isArray(index?.[fieldName])) {
@@ -169,15 +208,36 @@ async function auditIndexInstallability(index, options = {}) {
 
   const branchCache = new Map();
   const findings = [];
-  const normalizedSources = (index.sources || []).map((source) => ({
-    ...source,
-    normalizedUrl: normalizeGitHubRepoUrl(source.url),
-  }));
+  const requestedSourceIds = Array.from(
+    new Set(parseSourceIds((options.sourceIds || []).join(","))),
+  );
+  const availableSourceIds = new Set(
+    (index.sources || []).map((source) => source.id),
+  );
+  const unknownSourceIds = requestedSourceIds.filter(
+    (sourceId) => !availableSourceIds.has(sourceId),
+  );
+  if (unknownSourceIds.length > 0) {
+    throw new Error(
+      `Unknown source ID(s): ${unknownSourceIds.join(", ")}. Available: ${Array.from(availableSourceIds).join(", ")}`,
+    );
+  }
+
+  const selectedSourceIds =
+    requestedSourceIds.length > 0 ? new Set(requestedSourceIds) : undefined;
+  const normalizedSources = (index.sources || [])
+    .filter((source) => !selectedSourceIds || selectedSourceIds.has(source.id))
+    .map((source) => ({
+      ...source,
+      normalizedUrl: normalizeGitHubRepoUrl(source.url),
+    }));
   const sourceMap = new Map(
     normalizedSources.map((source) => [source.id, source]),
   );
   const concurrency = Math.max(1, options.concurrency || DEFAULT_CONCURRENCY);
-  const resources = index.skills;
+  const resources = selectedSourceIds
+    ? index.skills.filter((resource) => selectedSourceIds.has(resource.source))
+    : index.skills;
   let cursor = 0;
 
   const worker = async () => {
@@ -246,6 +306,7 @@ async function auditIndexInstallability(index, options = {}) {
 
   return {
     findings,
+    auditedSourceIds: normalizedSources.map((source) => source.id),
     normalizedSourceUrls: normalizedSources
       .filter((source) => source.url !== source.normalizedUrl)
       .map((source) => ({
@@ -294,11 +355,18 @@ function applyAuditFixes(index, auditResult) {
     })
     .filter((bundle) => bundle.skills.length > 0);
 
+  const auditedSourceIds = Array.isArray(auditResult.auditedSourceIds)
+    ? new Set(auditResult.auditedSourceIds)
+    : undefined;
+
   return {
     ...index,
     sources: (index.sources || []).map((source) => ({
       ...source,
-      url: normalizeGitHubRepoUrl(source.url),
+      url:
+        !auditedSourceIds || auditedSourceIds.has(source.id)
+          ? normalizeGitHubRepoUrl(source.url)
+          : source.url,
     })),
     skills,
     bundles,
@@ -306,16 +374,23 @@ function applyAuditFixes(index, auditResult) {
 }
 
 async function main() {
-  const args = new Set(process.argv.slice(2));
+  const rawArgs = process.argv.slice(2);
+  const args = new Set(rawArgs);
   const apply = args.has("--apply");
   const rawOnly = args.has("--raw-only");
+  const sourceIds = resolveSourceFilter(rawArgs, process.env);
   const indexPath = DEFAULT_INDEX_PATH;
   const index = JSON.parse(fs.readFileSync(indexPath, "utf8"));
   assertIndexShape(index, indexPath);
   const auditResult = await auditIndexInstallability(index, {
     token: GITHUB_TOKEN,
     rawOnly,
+    sourceIds,
   });
+
+  console.log(
+    `INFO audited sources: ${auditResult.auditedSourceIds.join(", ")} (${sourceIds.length > 0 ? "scoped" : "full"})`,
+  );
 
   for (const sourceFix of auditResult.normalizedSourceUrls) {
     console.log(
@@ -358,6 +433,8 @@ async function main() {
 }
 
 module.exports = {
+  parseSourceIds,
+  resolveSourceFilter,
   normalizeGitHubRepoUrl,
   extractOwnerRepo,
   getResourceContentPath,

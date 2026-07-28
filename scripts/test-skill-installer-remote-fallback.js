@@ -4,10 +4,10 @@
  * `<remotePath>/SKILL.md` を raw URL から直接取得して復旧する。
  *
  * 検証ポイント:
- *  1. raw URL から実体の SKILL.md を取得して書き込み、true を返す
- *  2. raw.githubusercontent.com には token を付けない（SAML/classic PAT 403 回避）
+ *  1. public raw は匿名で取得する
+ *  2. private raw は匿名 404 の後だけ token 付きで復旧する
  *  3. 取得失敗（HTTP エラー）時は false を返し、template fallback に委ねる
- *  4. 短すぎる内容（<=100 bytes）は実体とみなさず false を返す
+ *  4. skill 404 は認証状態に応じた復旧導線を出し、suppression 時は UI を出さない
  *
  * 注: 復旧経路でも `.skill-meta.json` は呼び出し側で無条件に保存されるため、
  *     復旧成否に関わらず meta 保存は構造的に保証される。
@@ -62,45 +62,112 @@ function makeUri(fsPath) {
   };
 }
 
-function createVscodeStub(writes) {
+function createVscodeStub(writes, options = {}) {
+  const deleted = options.deleted || [];
+  const errorMessages = options.errorMessages || [];
+  const executedCommands = options.executedCommands || [];
+  const createdDirectories = options.createdDirectories || [];
+  const existingDirectories = new Set(options.existingDirectories || []);
   return {
+    version: "test",
+    extensions: {
+      getExtension: () => ({ packageJSON: { version: "test" } }),
+    },
     Uri: {
       joinPath: (base, ...segments) =>
         makeUri([base.fsPath, ...segments].join("/")),
       file: (p) => makeUri(p),
     },
     workspace: {
+      getConfiguration: () => ({ get: () => undefined }),
       fs: {
+        createDirectory: async (uri) => {
+          createdDirectories.push(uri.fsPath);
+        },
+        delete: async (uri) => {
+          deleted.push(uri.fsPath);
+          for (const key of writes.keys()) {
+            if (key === uri.fsPath || key.startsWith(`${uri.fsPath}/`)) {
+              writes.delete(key);
+            }
+          }
+        },
         writeFile: async (uri, content) => {
           writes.set(uri.fsPath, Buffer.from(content).toString("utf-8"));
         },
-        stat: async () => {
+        stat: async (uri) => {
+          const content = writes.get(uri.fsPath);
+          if (content !== undefined) {
+            return { size: Buffer.byteLength(content, "utf-8") };
+          }
+          if (existingDirectories.has(uri.fsPath)) {
+            return { size: 0 };
+          }
           throw new Error("not found");
         },
+        readDirectory: async (uri) => {
+          const normalizedParent = uri.fsPath.replace(/\\/g, "/").replace(/\/$/, "");
+          const entries = new Map();
+          for (const writtenPath of writes.keys()) {
+            const normalizedPath = writtenPath.replace(/\\/g, "/");
+            if (!normalizedPath.startsWith(`${normalizedParent}/`)) {
+              continue;
+            }
+            const relativePath = normalizedPath.slice(normalizedParent.length + 1);
+            const name = relativePath.split("/")[0];
+            if (name) {
+              entries.set(name, 1);
+            }
+          }
+          return [...entries.entries()];
+        },
+      },
+    },
+    window: {
+      showErrorMessage: async (...args) => {
+        errorMessages.push(args);
+        return options.errorMessageChoice;
+      },
+      showWarningMessage: async () => undefined,
+    },
+    commands: {
+      executeCommand: async (...args) => {
+        executedCommands.push(args);
       },
     },
   };
 }
 
-function loadInstaller(writes) {
+function loadInstaller(writes, options = {}) {
   const srcDir = path.join(__dirname, "..", "src");
 
-  // githubFetch は実装をそのまま使う（raw URL に token を付けない挙動を検証するため）。
+  // githubFetch は実装をそのまま使い、復旧経路が共通 helper を通ることを検証する。
   const githubFetch = requireTypeScriptModule(
     path.join(srcDir, "githubFetch.ts"),
     {},
   );
 
   return requireTypeScriptModule(path.join(srcDir, "skillInstaller.ts"), {
-    vscode: createVscodeStub(writes),
+    vscode: createVscodeStub(writes, options),
     "./githubFetch": githubFetch,
     "./skillIndex": {
-      loadSkillIndex: async () => ({ sources: [] }),
-      getSourceBranch: async () => "main",
-      getResourceKind: () => "skill",
+      loadSkillIndex: async () => options.skillIndex || { sources: [] },
+      getSourceBranch: async (source) => source.branch || "main",
+      getResourceKind: (resource) => resource.kind || "skill",
     },
-    "./i18n": { isJapanese: () => false },
-    "./githubAuth": { getGitHubToken: async () => undefined },
+    "./i18n": {
+      isJapanese: () => false,
+      messages: {
+        skillDownloadNotFoundNoAuth: (name) =>
+          `Skill "${name}" was not found. Private repositories require GitHub authentication.`,
+        skillDownloadNotFoundWithAuth: (name) =>
+          `Skill "${name}" was not found. GitHub authentication may not have Contents: read access.`,
+        openSettings: () => "Open Settings",
+        actionUpdateIndex: () => "Update Index",
+        actionReportBug: () => "Report Bug",
+      },
+    },
+    "./githubAuth": { getGitHubToken: async () => options.token },
     "./githubDirectoryTraversal": {
       partitionGitHubDirectoryEntries: () => ({ files: [], directories: [] }),
       resolveSymlinkTargetPath: () => undefined,
@@ -134,7 +201,8 @@ function loadInstaller(writes) {
     "./resourceKinds": {
       detectResourceKindFromPath: () => "skill",
       getPluginRootFromManifestPath: () => undefined,
-      getResourceMetadataPath: () => undefined,
+      getResourceMetadataPath: (resourcePath) =>
+        `${resourcePath}.resource-meta.json`,
       isHookConfigFilePath: () => false,
     },
     "./userDataPaths": {
@@ -148,7 +216,11 @@ function loadInstaller(writes) {
         error: () => undefined,
       },
     },
-    "./bugReport": { openBugReport: async () => undefined },
+    "./bugReport": {
+      openBugReport: async (...args) => {
+        (options.bugReports || []).push(args);
+      },
+    },
   });
 }
 
@@ -169,7 +241,7 @@ async function run() {
   let passed = 0;
 
   try {
-    // --- Test 1: raw 復旧成功 + raw に token を付けない ---
+    // --- Test 1: public raw 復旧成功 + 初回は匿名 ---
     {
       writes.clear();
       const requested = [];
@@ -206,10 +278,7 @@ async function run() {
         headers.Authorization ||
         headers.authorization ||
         (typeof headers.get === "function" && headers.get("Authorization"));
-      assert.ok(
-        !authValue,
-        "raw.githubusercontent.com must NOT receive an Authorization header",
-      );
+      assert.ok(!authValue, "public raw request must remain anonymous");
 
       const written = writes.get(
         "/tmp/.github/skills/cloud-run-basics/SKILL.md",
@@ -222,7 +291,57 @@ async function run() {
       passed++;
     }
 
-    // --- Test 2: HTTP エラー時は false（template fallback へ委譲） ---
+    // --- Test 2: private raw は匿名 404 後に token 付きで復旧 ---
+    {
+      writes.clear();
+      const requested = [];
+      global.fetch = async (url, options = {}) => {
+        requested.push({
+          url,
+          headers: options.headers || {},
+          redirect: options.redirect,
+        });
+        return requested.length === 1
+          ? {
+              ok: false,
+              status: 404,
+              statusText: "Not Found",
+              text: async () => "not found",
+            }
+          : {
+              ok: true,
+              status: 200,
+              statusText: "OK",
+              text: async () => realSkillMd,
+            };
+      };
+
+      const skillPath = makeUri("/tmp/.github/skills/private-skill");
+      const result = await recoverPrimarySkillMdFromRaw(
+        skillPath,
+        "owner",
+        "private-repo",
+        "main",
+        "skills/private-skill",
+        "private-token",
+      );
+
+      assert.strictEqual(result, true);
+      assert.strictEqual(requested.length, 2);
+      assert.strictEqual(requested[0].headers.Authorization, undefined);
+      assert.strictEqual(
+        requested[1].headers.Authorization,
+        "token private-token",
+      );
+      assert.strictEqual(requested[1].redirect, "error");
+      assert.ok(
+        writes.has("/tmp/.github/skills/private-skill/SKILL.md"),
+        "authenticated raw recovery should write SKILL.md",
+      );
+      passed++;
+    }
+
+    // --- Test 3: HTTP エラー時は false（template fallback へ委譲） ---
     {
       writes.clear();
       global.fetch = async () => ({
@@ -251,7 +370,7 @@ async function run() {
       passed++;
     }
 
-    // --- Test 3: 短すぎる内容は実体とみなさない ---
+    // --- Test 4: 短すぎる内容は実体とみなさない ---
     {
       writes.clear();
       global.fetch = async () => ({
@@ -284,7 +403,7 @@ async function run() {
       passed++;
     }
 
-    // --- Test 4: remotePath の前後スラッシュを正規化 ---
+    // --- Test 5: remotePath の前後スラッシュを正規化 ---
     {
       writes.clear();
       const requested = [];
@@ -316,6 +435,488 @@ async function run() {
       );
       passed++;
     }
+
+    const privateSourceIndex = {
+      sources: [
+        {
+          id: "private-source",
+          url: "https://github.com/owner/private-repo",
+          branch: "main",
+        },
+      ],
+    };
+    const privateSkill = {
+      name: "private-demo",
+      source: "private-source",
+      path: "skills/private-demo.md",
+      categories: [],
+      description: "Private demo skill",
+    };
+
+    // --- Test 6: token なし 404 は cleanup 後に設定導線を出す ---
+    {
+      writes.clear();
+      const deleted = [];
+      const errorMessages = [];
+      const executedCommands = [];
+      const { installSkill } = loadInstaller(writes, {
+        skillIndex: privateSourceIndex,
+        deleted,
+        errorMessages,
+        executedCommands,
+        errorMessageChoice: "Open Settings",
+      });
+      global.fetch = async () => ({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+        text: async () => "not found",
+      });
+
+      await assert.rejects(
+        installSkill(privateSkill, makeUri("/tmp/workspace"), {}),
+        /Skill not found: private-demo/,
+      );
+      assert.strictEqual(
+        deleted.length,
+        1,
+        "failed install must be cleaned up",
+      );
+      assert.strictEqual(errorMessages.length, 1);
+      assert.match(errorMessages[0][0], /Private repositories require/);
+      assert.deepStrictEqual(errorMessages[0].slice(1), [
+        "Open Settings",
+        "Update Index",
+        "Report Bug",
+      ]);
+      assert.deepStrictEqual(executedCommands, [
+        ["workbench.action.openSettings", "resourceNinja.githubToken"],
+      ]);
+      passed++;
+    }
+
+    // --- Test 7: suppression 時は directory 404 でも cleanup のみ ---
+    {
+      writes.clear();
+      const deleted = [];
+      const errorMessages = [];
+      const executedCommands = [];
+      const bugReports = [];
+      const { installSkill } = loadInstaller(writes, {
+        skillIndex: privateSourceIndex,
+        deleted,
+        errorMessages,
+        executedCommands,
+        bugReports,
+      });
+      global.fetch = async () => ({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+      });
+
+      await assert.rejects(
+        installSkill(
+          { ...privateSkill, path: "skills/private-demo" },
+          makeUri("/tmp/workspace"),
+          {},
+          { suppressRecoveryPrompt: true },
+        ),
+        /Skill not found: private-demo/,
+      );
+      assert.strictEqual(
+        deleted.length,
+        1,
+        "suppressed failure must be cleaned up",
+      );
+      assert.deepStrictEqual(errorMessages, []);
+      assert.deepStrictEqual(executedCommands, []);
+      assert.deepStrictEqual(bugReports, []);
+      passed++;
+    }
+
+    // --- Test 8: token あり 404 の bug report に秘密値を含めない ---
+    {
+      writes.clear();
+      const token = "test-token-must-not-leak";
+      const errorMessages = [];
+      const bugReports = [];
+      const { installSkill } = loadInstaller(writes, {
+        skillIndex: privateSourceIndex,
+        token,
+        errorMessages,
+        bugReports,
+        errorMessageChoice: "Report Bug",
+      });
+      global.fetch = async () => ({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+        text: async () => "not found",
+      });
+
+      await assert.rejects(
+        installSkill(privateSkill, makeUri("/tmp/workspace"), {}),
+        /Skill not found: private-demo/,
+      );
+      assert.match(errorMessages[0][0], /Contents: read access/);
+      assert.strictEqual(bugReports.length, 1);
+      const [issueTitle, issueBody] = bugReports[0];
+      assert.match(issueTitle, /Skill not found: private-demo/);
+      assert.match(issueBody, /GitHub Authentication: configured/);
+      assert.match(issueBody, /Contents: read access/);
+      assert.strictEqual(issueBody.includes(token), false);
+      passed++;
+    }
+
+    // --- Test 9: non-skill file resource も共通 raw helper を利用する ---
+    {
+      writes.clear();
+      const requested = [];
+      const { installSkill } = loadInstaller(writes, {
+        skillIndex: privateSourceIndex,
+        token: "agent-token",
+      });
+      global.fetch = async (url, options = {}) => {
+        requested.push({
+          url,
+          headers: options.headers || {},
+          redirect: options.redirect,
+        });
+        return requested.length === 1
+          ? {
+              ok: false,
+              status: 404,
+              statusText: "Not Found",
+              text: async () => "not found",
+            }
+          : {
+              ok: true,
+              status: 200,
+              statusText: "OK",
+              text: async () => "---\nname: private-agent\n---\nAgent body\n",
+            };
+      };
+
+      const result = await installSkill(
+        {
+          name: "private-agent",
+          kind: "agent",
+          source: "private-source",
+          path: "agents/private-agent.agent.md",
+          categories: [],
+          description: "Private agent",
+        },
+        makeUri("/tmp/workspace"),
+        {},
+      );
+
+      assert.deepStrictEqual(result, {});
+      assert.strictEqual(requested.length, 2);
+      assert.strictEqual(requested[0].headers.Authorization, undefined);
+      assert.strictEqual(
+        requested[1].headers.Authorization,
+        "token agent-token",
+      );
+      assert.strictEqual(requested[1].redirect, "error");
+      assert.strictEqual(
+        writes.get("/tmp/resource/private-agent.agent.md"),
+        "---\nname: private-agent\n---\nAgent body\n",
+      );
+      assert.ok(
+        [...writes.keys()].some(
+          (writtenPath) =>
+            writtenPath.replace(/\\/g, "/") ===
+            "/tmp/resource/private-agent.agent.md.resource-meta.json",
+        ),
+        "non-skill install should retain sidecar metadata",
+      );
+      passed++;
+    }
+
+    // --- Test 10: failed non-skill install cleans a newly created parent ---
+    {
+      writes.clear();
+      const deleted = [];
+      const createdDirectories = [];
+      const { installSkill } = loadInstaller(writes, {
+        skillIndex: privateSourceIndex,
+        deleted,
+        createdDirectories,
+      });
+      global.fetch = async () => ({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+        text: async () => "not found",
+      });
+
+      await assert.rejects(
+        installSkill(
+          {
+            name: "missing-agent",
+            kind: "agent",
+            source: "private-source",
+            path: "agents/missing-agent.agent.md",
+            categories: [],
+            description: "Missing agent",
+          },
+          makeUri("/tmp/workspace"),
+          {},
+        ),
+        /HTTP 404/,
+      );
+      assert.ok(createdDirectories.includes("/tmp/resource"));
+      assert.ok(
+        deleted.includes("/tmp/resource"),
+        "new empty parent directory should be removed",
+      );
+      assert.strictEqual(writes.size, 0);
+      passed++;
+    }
+
+    // --- Test 11: failed non-skill install preserves an existing parent ---
+    {
+      writes.clear();
+      const deleted = [];
+      const { installSkill } = loadInstaller(writes, {
+        skillIndex: privateSourceIndex,
+        deleted,
+        existingDirectories: ["/tmp/resource"],
+      });
+      global.fetch = async () => ({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+        text: async () => "not found",
+      });
+
+      await assert.rejects(
+        installSkill(
+          {
+            name: "missing-agent",
+            kind: "agent",
+            source: "private-source",
+            path: "agents/missing-agent.agent.md",
+            categories: [],
+            description: "Missing agent",
+          },
+          makeUri("/tmp/workspace"),
+          {},
+        ),
+        /HTTP 404/,
+      );
+      assert.strictEqual(
+        deleted.includes("/tmp/resource"),
+        false,
+        "pre-existing parent directory must be preserved",
+      );
+      passed++;
+    }
+
+    // --- Test 12: unresolved non-skill source creates no filesystem artifact ---
+    {
+      writes.clear();
+      const createdDirectories = [];
+      const { installSkill } = loadInstaller(writes, {
+        skillIndex: { sources: [] },
+        createdDirectories,
+      });
+
+      await assert.rejects(
+        installSkill(
+          {
+            name: "unknown-agent",
+            kind: "agent",
+            source: "unknown-source",
+            path: "agents/unknown.agent.md",
+            categories: [],
+            description: "Unknown agent",
+          },
+          makeUri("/tmp/workspace"),
+          {},
+        ),
+        /Source not found for agent/,
+      );
+      assert.deepStrictEqual(createdDirectories, []);
+      assert.strictEqual(writes.size, 0);
+      passed++;
+    }
+
+    // --- Test 13: failed plugin install removes its newly created root ---
+    {
+      writes.clear();
+      const deleted = [];
+      const { installSkill } = loadInstaller(writes, {
+        skillIndex: privateSourceIndex,
+        deleted,
+      });
+      global.fetch = async () => ({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+        json: async () => ({ message: "Not Found" }),
+      });
+
+      await assert.rejects(
+        installSkill(
+          {
+            name: "private-plugin",
+            kind: "plugin",
+            source: "private-source",
+            path: "plugin/.plugin/plugin.json",
+            pluginRoot: "plugin",
+            pluginManifestPath: "plugin/.plugin/plugin.json",
+            categories: [],
+            description: "Private plugin",
+          },
+          makeUri("/tmp/workspace"),
+          {},
+        ),
+        /Failed to list directory: 404/,
+      );
+      const normalizedDeleted = deleted.map((entry) =>
+        entry.replace(/\\/g, "/"),
+      );
+      assert.ok(
+        normalizedDeleted.includes(
+          "/tmp/workspace/.github/plugins/private-plugin",
+        ),
+        "new plugin root should be removed after a fatal listing failure",
+      );
+      passed++;
+    }
+
+    // --- Test 14: failed hook install removes its newly created folder ---
+    {
+      writes.clear();
+      const deleted = [];
+      const { installSkill } = loadInstaller(writes, {
+        skillIndex: privateSourceIndex,
+        deleted,
+      });
+      global.fetch = async () => ({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+        json: async () => ({ message: "Not Found" }),
+      });
+
+      await assert.rejects(
+        installSkill(
+          {
+            name: "private-hook",
+            kind: "hook",
+            source: "private-source",
+            path: "hooks/private-hook/README.md",
+            categories: [],
+            description: "Private hook",
+          },
+          makeUri("/tmp/workspace"),
+          {},
+        ),
+        /Failed to list directory: 404/,
+      );
+      assert.ok(
+        deleted
+          .map((entry) => entry.replace(/\\/g, "/"))
+          .includes("/tmp/resource/private-hook"),
+        "new hook resource folder should be removed after a fatal listing failure",
+      );
+      passed++;
+    }
+
+    // --- Test 15: failed reinstall preserves an existing non-skill file ---
+    {
+      writes.clear();
+      writes.set(
+        "/tmp/resource/existing-agent.agent.md",
+        "existing agent content",
+      );
+      const deleted = [];
+      const { installSkill } = loadInstaller(writes, {
+        skillIndex: privateSourceIndex,
+        deleted,
+        existingDirectories: ["/tmp/resource"],
+      });
+      global.fetch = async () => ({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+        text: async () => "not found",
+      });
+
+      await assert.rejects(
+        installSkill(
+          {
+            name: "existing-agent",
+            kind: "agent",
+            source: "private-source",
+            path: "agents/existing-agent.agent.md",
+            categories: [],
+            description: "Existing agent",
+          },
+          makeUri("/tmp/workspace"),
+          {},
+        ),
+        /HTTP 404/,
+      );
+      assert.strictEqual(
+        writes.get("/tmp/resource/existing-agent.agent.md"),
+        "existing agent content",
+      );
+      assert.strictEqual(
+        deleted
+          .map((entry) => entry.replace(/\\/g, "/"))
+          .includes("/tmp/resource/existing-agent.agent.md"),
+        false,
+        "pre-existing resource file must not be deleted",
+      );
+      passed++;
+    }
+
+    // --- Test 16: cleanup preserves a newly created but non-empty parent ---
+    {
+      writes.clear();
+      writes.set("/tmp/resource/concurrent.txt", "concurrent content");
+      const deleted = [];
+      const { installSkill } = loadInstaller(writes, {
+        skillIndex: privateSourceIndex,
+        deleted,
+      });
+      global.fetch = async () => ({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+        text: async () => "not found",
+      });
+
+      await assert.rejects(
+        installSkill(
+          {
+            name: "missing-agent",
+            kind: "agent",
+            source: "private-source",
+            path: "agents/missing-agent.agent.md",
+            categories: [],
+            description: "Missing agent",
+          },
+          makeUri("/tmp/workspace"),
+          {},
+        ),
+        /HTTP 404/,
+      );
+      assert.strictEqual(
+        deleted.includes("/tmp/resource"),
+        false,
+        "non-empty parent directory must not be deleted",
+      );
+      assert.strictEqual(
+        writes.get("/tmp/resource/concurrent.txt"),
+        "concurrent content",
+      );
+      passed++;
+    }
   } finally {
     if (originalFetch) {
       global.fetch = originalFetch;
@@ -325,7 +926,7 @@ async function run() {
   }
 
   console.log(
-    `PASS: test-skill-installer-remote-fallback.js (${passed}/4 cases)`,
+    `PASS: test-skill-installer-remote-fallback.js (${passed}/16 cases)`,
   );
 }
 

@@ -4,18 +4,14 @@ const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 const index = require("../resources/skill-index.json");
+const { loadRepositoryTree } = require("./update-preset-index.js");
 
 const SOURCE_ID = "microsoft-azure-skills";
 const SOURCE_REPO = "microsoft/azure-skills";
 const SOURCE_URL = `https://github.com/${SOURCE_REPO}`;
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
 
 function createHeaders(userAgent) {
-  const headers = { "User-Agent": userAgent };
-  if (GITHUB_TOKEN) {
-    headers.Authorization = `token ${GITHUB_TOKEN}`;
-  }
-  return headers;
+  return { "User-Agent": userAgent };
 }
 
 async function fetchJson(url) {
@@ -62,12 +58,6 @@ async function main() {
   const resources = index.skills.filter(
     (resource) => resource.source === SOURCE_ID,
   );
-  assert.strictEqual(
-    resources.length,
-    34,
-    "Expected 34 Azure Skills resources including one plugin manifest",
-  );
-
   const skillResources = resources.filter(
     (resource) => (resource.kind || "skill") === "skill",
   );
@@ -75,12 +65,16 @@ async function main() {
   const pluginResources = resources.filter(
     (resource) => resource.kind === "plugin",
   );
-  assert.strictEqual(skillResources.length, 32, "Expected 32 Azure skills");
+  assert.ok(skillResources.length > 0, "Expected indexed Azure skills");
   assert.strictEqual(mcpResources.length, 1, "Expected one Azure MCP config");
   assert.strictEqual(
     pluginResources.length,
     1,
     "Expected one Azure plugin manifest",
+  );
+  assert.strictEqual(
+    resources.length,
+    skillResources.length + mcpResources.length + pluginResources.length,
   );
   assert.strictEqual(pluginResources[0].path, ".");
   assert.strictEqual(pluginResources[0].pluginRoot, ".");
@@ -106,34 +100,13 @@ async function main() {
     "JSON MCP resources should not surface raw JSON braces as descriptions",
   );
 
-  const expectedSkills = [
-    "azure-prepare",
-    "azure-validate",
-    "azure-deploy",
-    "azure-rbac",
-    "azure-reliability",
-    "azure-cost",
-    "azure-diagnostics",
-    "microsoft-foundry",
-    "deploy-model",
-    "capacity",
-    "customize",
-    "preset",
-  ];
-  for (const name of expectedSkills) {
-    assert.ok(resourceByName(skillResources, name), `Expected ${name} skill`);
-  }
-
-  const azureRbac = resourceByName(skillResources, "azure-rbac");
-  assert.strictEqual(azureRbac.path, "skills/azure-rbac");
-  assert.strictEqual(azureRbac.pluginRoot, ".");
-  assert.strictEqual(azureRbac.pluginManifestPath, "plugin.json");
-  assert.match(azureRbac.description, /Azure/i);
-
-  const nestedDeployModel = resourceByName(skillResources, "deploy-model");
-  assert.strictEqual(
-    nestedDeployModel.path,
-    "skills/microsoft-foundry/models/deploy-model",
+  assert.ok(
+    skillResources.every(
+      (resource) =>
+        resource.pluginRoot === "." &&
+        resource.pluginManifestPath === "plugin.json",
+    ),
+    "Every top-level Azure skill should retain root plugin metadata",
   );
 
   const azureMcp = mcpResources[0];
@@ -165,45 +138,41 @@ async function main() {
     "Bundle should include every indexed non-plugin Microsoft Azure Skills resource",
   );
 
-  let branch = "main";
-  try {
-    const repo = await fetchJson(`https://api.github.com/repos/${SOURCE_REPO}`);
-    branch = repo.default_branch || "main";
-    assert.strictEqual(branch, "main");
+  const repositoryTree = await loadRepositoryTree(
+    "microsoft",
+    "azure-skills",
+    "main",
+  );
+  const branch = repositoryTree.branch;
+  const upstreamPaths = repositoryTree.data.tree.map((entry) => entry.path);
+  const upstreamSkillPaths = repositoryTree.data.tree
+    .filter(
+      (entry) =>
+        entry.type === "blob" && /^skills\/.+\/SKILL\.md$/.test(entry.path),
+    )
+    .map((entry) => entry.path.replace(/\/SKILL\.md$/, ""))
+    .sort();
+  assert.deepStrictEqual(
+    skillResources.map((resource) => resource.path).sort(),
+    upstreamSkillPaths,
+    "Indexed Azure skills should match the current top-level upstream tree",
+  );
+  assert.ok(
+    upstreamPaths.includes(".mcp.json"),
+    "Root MCP config should exist",
+  );
+  assert.ok(
+    upstreamPaths.includes("plugin.json"),
+    "Root plugin manifest should exist",
+  );
 
-    const tree = await fetchJson(
-      `https://api.github.com/repos/${SOURCE_REPO}/git/trees/${branch}?recursive=1`,
-    );
-    const upstreamPaths = tree.tree.map((entry) => entry.path);
-    assert.ok(
-      upstreamPaths.includes("skills/azure-rbac/SKILL.md"),
-      "Upstream top-level skills path should contain azure-rbac/SKILL.md",
-    );
-    assert.ok(
-      upstreamPaths.includes(
-        ".github/plugins/azure-skills/skills/azure-rbac/SKILL.md",
-      ),
-      "Upstream plugin payload duplicate should exist but stay excluded from this source",
-    );
-    assert.ok(
-      upstreamPaths.includes(".mcp.json"),
-      "Upstream root MCP config should exist",
-    );
-    assert.ok(
-      upstreamPaths.includes("plugin.json"),
-      "Upstream root plugin manifest should exist",
-    );
-  } catch (error) {
-    console.warn(
-      "WARN GitHub API tree unavailable; verifying indexed Azure Skills content through raw URLs only",
-    );
-    console.warn(error instanceof Error ? error.message : String(error));
-  }
+  const representativeSkill =
+    resourceByName(skillResources, "azure-prepare") || skillResources[0];
 
   const skillText = await fetchText(
-    `https://raw.githubusercontent.com/${SOURCE_REPO}/${branch}/skills/azure-rbac/SKILL.md`,
+    `https://raw.githubusercontent.com/${SOURCE_REPO}/${branch}/${representativeSkill.path}/SKILL.md`,
   );
-  assert.match(skillText, /^---\n[\s\S]*name:\s*azure-rbac/m);
+  assert.match(skillText, /^---\n[\s\S]*name:/m);
 
   const mcpJson = await fetchJson(
     `https://raw.githubusercontent.com/${SOURCE_REPO}/${branch}/.mcp.json`,

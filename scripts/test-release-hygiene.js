@@ -104,6 +104,7 @@ function assertVsixPayloadMinimal(vsixPath, label) {
     "extension/.github/",
     "extension/.vscode/",
     "extension/.vscode-test/",
+    "extension/.playwright-mcp/",
     "extension/artifacts/",
     "extension/docs/",
     "extension/output/",
@@ -184,6 +185,7 @@ test("vscodeignore excludes development and validation artifacts", () => {
   for (const pattern of [
     ".vscode/**",
     ".vscode-test/**",
+    ".playwright-mcp/**",
     "src/**",
     "scripts/**",
     "test/**",
@@ -202,6 +204,7 @@ test("vscodeignore excludes development and validation artifacts", () => {
     "hooks.json",
     "AGENTS.md.backup",
     "release-notes-v*.md",
+    "**/*.log",
   ]) {
     assert.ok(
       hasLine(vscodeignore, pattern),
@@ -266,6 +269,8 @@ test("package icon assets referenced by manifest exist", () => {
 test("existing VSIX payload stays release-minimal", () => {
   const vsixPath = path.join(
     repoRoot,
+    "artifacts",
+    "vsix",
     `agent-resources-ninja-${packageJson.version}.vsix`,
   );
   assertVsixPayloadMinimal(vsixPath, "release");

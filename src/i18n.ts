@@ -65,6 +65,12 @@ const jaMessages = {
   actionOpenGitHub: "GitHub で開く",
   authRequired:
     "GitHub認証が必要です。API制限を回避するために認証を設定してください。",
+  skillDownloadNotFoundNoAuth:
+    'スキル "{0}" が見つかりません。プライベート リポジトリの場合は GitHub 認証が必要です。認証を設定するか、インデックスを更新してください。',
+  skillDownloadNotFoundWithAuth:
+    'スキル "{0}" が見つかりません。インデックスのパスが古いか、GitHub 認証に対象リポジトリの Contents: read 権限がない可能性があります。',
+  actionUpdateIndex: "インデックス更新",
+  actionReportBug: "バグ報告",
   openSettings: "設定を開く",
   resetSettingsTitle: "設定の初期化",
   resetSettingsPrompt: "初期化する項目を選択してください",
@@ -204,6 +210,12 @@ const enMessages: MessageDictionary = {
   actionOpenGitHub: "Open on GitHub",
   authRequired:
     "GitHub authentication required. Please configure authentication to avoid API rate limits.",
+  skillDownloadNotFoundNoAuth:
+    'Skill "{0}" was not found. Private repositories require GitHub authentication. Configure authentication or update the resource index.',
+  skillDownloadNotFoundWithAuth:
+    'Skill "{0}" was not found. The index path may be outdated, or GitHub authentication may not have Contents: read access to the repository.',
+  actionUpdateIndex: "Update Index",
+  actionReportBug: "Report Bug",
   openSettings: "Open Settings",
   resetSettingsTitle: "Reset Settings",
   resetSettingsPrompt: "Select items to reset",
@@ -408,6 +420,12 @@ export const messages = {
 
   // 認証
   authRequired: () => localize("authRequired"),
+  skillDownloadNotFoundNoAuth: (name: string) =>
+    localize("skillDownloadNotFoundNoAuth", name),
+  skillDownloadNotFoundWithAuth: (name: string) =>
+    localize("skillDownloadNotFoundWithAuth", name),
+  actionUpdateIndex: () => localize("actionUpdateIndex"),
+  actionReportBug: () => localize("actionReportBug"),
   openSettings: () => localize("openSettings"),
   authWithGhCli: () => localize("authWithGhCli"),
 

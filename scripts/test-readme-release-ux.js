@@ -160,6 +160,10 @@ test("README token guidance follows least privilege", () => {
   assert.doesNotMatch(docs, /Required scopes/i);
   assert.match(readme, /leave scopes unchecked/);
   assert.match(readmeJa, /scope は未選択/);
+  assert.match(readme, /reports `404` or "not found"/);
+  assert.match(readme, /never include the token value/);
+  assert.match(readmeJa, /インデックス更新.*バグ報告/);
+  assert.match(readmeJa, /token 値は含めません/);
 });
 
 test("README documents release preflight for installability audit and VSCE_PAT", () => {
@@ -168,12 +172,24 @@ test("README documents release preflight for installability audit and VSCE_PAT",
     /node scripts\/audit-resource-installability\.js --raw-only/,
   );
   assert.match(readme, /npm run release:vsce -- verify-pat/);
+  assert.match(readme, /--raw-only --sources pai-packs/);
+  assert.match(readme, /RESOURCE_NINJA_SOURCES/);
+  assert.match(readme, /credential-free, non-interactive shallow Git clone/);
+  assert.match(readme, /syncWithSource/);
+  assert.match(readme, /npm run audit:runtime/);
+  assert.match(readme, /development-only advisories remain visible/);
   assert.match(readme, /stale bundled entries/i);
   assert.match(
     readmeJa,
     /node scripts\/audit-resource-installability\.js --raw-only/,
   );
   assert.match(readmeJa, /npm run release:vsce -- verify-pat/);
+  assert.match(readmeJa, /--raw-only --sources pai-packs/);
+  assert.match(readmeJa, /RESOURCE_NINJA_SOURCES/);
+  assert.match(readmeJa, /credential を使わない非対話の shallow Git clone/);
+  assert.match(readmeJa, /syncWithSource/);
+  assert.match(readmeJa, /npm run audit:runtime/);
+  assert.match(readmeJa, /development-only advisory/);
   assert.match(readmeJa, /期限切れ publisher credential|期限切れ publisher/);
 });
 

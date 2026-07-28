@@ -8,6 +8,9 @@ const repoRoot = path.resolve(__dirname, "..");
 const packageJson = JSON.parse(
   fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"),
 );
+const packageLock = JSON.parse(
+  fs.readFileSync(path.join(repoRoot, "package-lock.json"), "utf8"),
+);
 const nls = JSON.parse(
   fs.readFileSync(path.join(repoRoot, "package.nls.json"), "utf8"),
 );
@@ -539,12 +542,10 @@ test("bundled Microsoft Azure Skills plugin source is complete", () => {
   const resources = bundledIndex.skills.filter(
     (resource) => resource.source === "microsoft-azure-skills",
   );
-  assert.strictEqual(resources.length, 34);
-  assert.strictEqual(
-    resources.filter((resource) => (resource.kind || "skill") === "skill")
-      .length,
-    32,
+  const skillResources = resources.filter(
+    (resource) => (resource.kind || "skill") === "skill",
   );
+  assert.ok(skillResources.length > 0, "Expected current Azure skills");
   assert.strictEqual(
     resources.filter((resource) => resource.kind === "mcp").length,
     1,
@@ -553,6 +554,7 @@ test("bundled Microsoft Azure Skills plugin source is complete", () => {
     resources.filter((resource) => resource.kind === "plugin").length,
     1,
   );
+  assert.strictEqual(resources.length, skillResources.length + 2);
   assert.ok(
     resources.some(
       (resource) =>
@@ -568,6 +570,8 @@ test("bundled Microsoft Azure Skills plugin source is complete", () => {
   );
   assert.ok(bundle, "Expected Microsoft Azure Skills resource bundle");
   assert.strictEqual(bundle.source, "microsoft-azure-skills");
+  assert.strictEqual(bundle.syncWithSource, true);
+  assert.deepStrictEqual(bundle.syncResourceKinds, ["skill", "mcp"]);
   assert.match(bundle.description, /Azure skills plus the Azure MCP config/);
   assert.match(bundle.description, /optional workspace mcp\.json merge/);
   assert.deepStrictEqual(
@@ -1506,6 +1510,16 @@ test("settings distinguish skill index sync from native non-skill resource paths
   );
   assert.match(
     packageJson.scripts?.["test:resources"] || "",
+    /test-update-preset-index-fallback\.js/,
+    "Resource test suite should validate preset updater rate-limit fallback and source-synchronized bundles",
+  );
+  assert.strictEqual(
+    packageJson.scripts?.["audit:runtime"],
+    "npm audit --omit=dev --audit-level=moderate",
+    "Runtime dependency audit should remain an explicit release gate",
+  );
+  assert.match(
+    packageJson.scripts?.["test:resources"] || "",
     /test-temporary-install-source\.js/,
     "Resource test suite should validate temporary preview or web-search installs without a persisted source entry",
   );
@@ -2440,6 +2454,26 @@ test("ignore files exclude local release and agent artifacts", () => {
   }
 });
 
+test("package lock uses public registry URLs and sha512 integrity", () => {
+  for (const [packagePath, packageInfo] of Object.entries(
+    packageLock.packages || {},
+  )) {
+    if (!packageInfo.resolved) {
+      continue;
+    }
+    assert.match(
+      packageInfo.resolved,
+      /^https:\/\/registry\.npmjs\.org\//,
+      `${packagePath} should resolve through the public npm registry`,
+    );
+    assert.match(
+      packageInfo.integrity || "",
+      /^sha512-/,
+      `${packagePath} should use sha512 package integrity`,
+    );
+  }
+});
+
 test("version info reflects extension release and bundled resource index metadata", () => {
   const changelog = fs.readFileSync(
     path.join(repoRoot, "CHANGELOG.md"),
@@ -2459,6 +2493,7 @@ test("version info reflects extension release and bundled resource index metadat
     `Extension | **${packageJson.version}**`,
     `Resource Index | **v${bundledIndex.version}**`,
     `Last Updated | ${extensionReleaseDate}`,
+    `Resource Index Updated | ${bundledIndex.lastUpdated}`,
     `Resources | ${bundledIndex.skills.length}`,
     `Sources | ${bundledIndex.sources.length}`,
   ];

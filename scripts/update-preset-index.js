@@ -7,7 +7,9 @@
  *   GITHUB_TOKEN - GitHub API トークン（レート制限回避のため推奨）
  */
 
+const { execFileSync } = require("child_process");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
 const INDEX_PATH = path.join(__dirname, "..", "resources", "skill-index.json");
@@ -87,6 +89,127 @@ async function githubFetch(url) {
     }
   }
   return response;
+}
+
+function shouldUseGitTreeFallback(status) {
+  return status === 403 || status === 429;
+}
+
+function synchronizeSourceBundles(bundles, resources) {
+  return (bundles || []).map((bundle) => {
+    if (bundle.syncWithSource !== true) {
+      return bundle;
+    }
+
+    const allowedKinds = new Set(bundle.syncResourceKinds || ["skill"]);
+    const resourceNames = Array.from(
+      new Set(
+        resources
+          .filter((resource) => resource.source === bundle.source)
+          .filter((resource) => allowedKinds.has(resource.kind || "skill"))
+          .map((resource) => resource.name),
+      ),
+    );
+    const nextBundle = {
+      ...bundle,
+      skills: resourceNames,
+      installOrder: resourceNames,
+    };
+    if (nextBundle.coreSkill && !resourceNames.includes(nextBundle.coreSkill)) {
+      delete nextBundle.coreSkill;
+    }
+    return nextBundle;
+  });
+}
+
+function readRepositoryTreeWithGit(repoUrl, branch, dependencies = {}) {
+  const runGit = dependencies.execFileSync || execFileSync;
+  const makeTempDirectory = dependencies.mkdtempSync || fs.mkdtempSync;
+  const removeDirectory = dependencies.rmSync || fs.rmSync;
+  const tempRoot = makeTempDirectory(
+    path.join(os.tmpdir(), "resource-ninja-index-"),
+  );
+  const checkoutPath = path.join(tempRoot, "repo");
+
+  try {
+    runGit(
+      "git",
+      [
+        "-c",
+        "credential.helper=",
+        "clone",
+        "--depth",
+        "1",
+        "--filter=blob:none",
+        "--no-checkout",
+        "--single-branch",
+        "--branch",
+        branch,
+        repoUrl,
+        checkoutPath,
+      ],
+      {
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+        stdio: ["ignore", "ignore", "pipe"],
+        timeout: 120000,
+      },
+    );
+    const fileList = runGit(
+      "git",
+      ["-C", checkoutPath, "ls-tree", "-r", "-z", "--name-only", "HEAD"],
+      {
+        encoding: "utf8",
+        maxBuffer: 50 * 1024 * 1024,
+      },
+    );
+    const paths = String(fileList).split("\0").filter(Boolean);
+    return {
+      tree: paths.map((filePath) => ({ path: filePath, type: "blob" })),
+      truncated: false,
+    };
+  } finally {
+    removeDirectory(tempRoot, { recursive: true, force: true });
+  }
+}
+
+async function loadRepositoryTree(owner, repoName, branch, dependencies = {}) {
+  const fetchTree = dependencies.githubFetch || githubFetch;
+  const readTreeWithGit =
+    dependencies.readRepositoryTreeWithGit || readRepositoryTreeWithGit;
+  const repoUrl = `https://github.com/${owner}/${repoName}.git`;
+  const branches = [branch, branch === "main" ? "master" : "main"];
+  let lastResponse;
+
+  for (const candidateBranch of branches) {
+    const treeUrl = `https://api.github.com/repos/${owner}/${repoName}/git/trees/${candidateBranch}?recursive=1`;
+    const response = await fetchTree(treeUrl);
+    lastResponse = response;
+    if (response.ok) {
+      return { data: await response.json(), branch: candidateBranch };
+    }
+    if (response.status === 404) {
+      continue;
+    }
+    if (shouldUseGitTreeFallback(response.status)) {
+      console.warn(
+        `  ⚠️  GitHub tree API returned ${response.status}; reading tracked paths through anonymous Git transport`,
+      );
+      try {
+        return {
+          data: readTreeWithGit(repoUrl, candidateBranch),
+          branch: candidateBranch,
+        };
+      } catch (error) {
+        if (candidateBranch === branches[branches.length - 1]) {
+          throw error;
+        }
+      }
+      continue;
+    }
+    break;
+  }
+
+  throw new Error(`Failed to fetch tree: ${lastResponse?.status || "unknown"}`);
 }
 
 function unquoteYamlValue(value) {
@@ -241,26 +364,14 @@ async function scanRepositoryForSkills(source) {
   const branch = source.branch || (await getDefaultBranch(owner, repoName));
   console.log(`  📦 ${owner}/${repoName} (branch: ${branch})`);
 
-  // リポジトリのツリーを取得
-  const treeUrl = `https://api.github.com/repos/${owner}/${repoName}/git/trees/${branch}?recursive=1`;
-  const response = await githubFetch(treeUrl);
-
-  if (!response.ok) {
-    if (response.status === 404) {
-      // 別のブランチを試す
-      const fallbackBranch = branch === "main" ? "master" : "main";
-      const fallbackUrl = `https://api.github.com/repos/${owner}/${repoName}/git/trees/${fallbackBranch}?recursive=1`;
-      const fallbackResponse = await githubFetch(fallbackUrl);
-      if (fallbackResponse.ok) {
-        const data = await fallbackResponse.json();
-        return await processTree(data, owner, repoName, fallbackBranch, source);
-      }
-    }
-    throw new Error(`Failed to fetch tree: ${response.status}`);
-  }
-
-  const data = await response.json();
-  return await processTree(data, owner, repoName, branch, source);
+  const repositoryTree = await loadRepositoryTree(owner, repoName, branch);
+  return await processTree(
+    repositoryTree.data,
+    owner,
+    repoName,
+    repositoryTree.branch,
+    source,
+  );
 }
 
 /**
@@ -1193,7 +1304,7 @@ async function main() {
     lastUpdated: getLocalDateString(),
     sources: index.sources,
     categories: index.categories,
-    bundles: index.bundles,
+    bundles: synchronizeSourceBundles(index.bundles, uniqueSkills),
     skills: uniqueSkills,
   };
 
@@ -1210,7 +1321,16 @@ async function main() {
   console.log(`📁 Saved to: ${INDEX_PATH}`);
 }
 
-main().catch((error) => {
-  console.error("❌ Fatal error:", error);
-  process.exit(1);
-});
+module.exports = {
+  loadRepositoryTree,
+  readRepositoryTreeWithGit,
+  shouldUseGitTreeFallback,
+  synchronizeSourceBundles,
+};
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error("❌ Fatal error:", error);
+    process.exit(1);
+  });
+}

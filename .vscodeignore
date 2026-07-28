@@ -1,6 +1,7 @@
 .vscode/**
 .vscode-test/**
 .hiker/**
+.playwright-mcp/**
 src/**
 .gitignore
 esbuild.js
@@ -30,6 +31,7 @@ compile-output.txt
 audit-output.json
 hooks.json
 *.log
+**/*.log
 quality-*.log
 release-notes-v*.md
 artifacts/**

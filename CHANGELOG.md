@@ -5,6 +5,31 @@ All notable changes to the "Agent Resources Ninja" extension will be documented 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.2.39] - 2026-07-29
+
+### Added
+
+- 🔍 **Source-scoped Installability Audit** - Added `--sources` and `RESOURCE_NINJA_SOURCES` filtering with hard failures for empty or unknown source IDs, allowing stale source migrations to be validated without auditing or pruning unrelated resources / `--sources` と `RESOURCE_NINJA_SOURCES` による絞り込みを追加し、空または未知の source ID はエラーにしました。stale source migration を他リソースの監査・prune と切り離して検証できます。
+- 🛡️ **Rate-limit-safe Preset Updates** - Added a credential-free, non-interactive shallow Git fallback when the GitHub Trees API returns `403` or `429`, plus explicit source-synchronized bundle metadata so complete-source bundles update atomically with their allowed resource kinds / GitHub Trees API が `403` または `429` を返した場合に credential を使わない非対話の shallow Git fallback を追加し、complete-source bundle が許可された resource kind と原子的に同期する明示メタデータを追加しました。
+
+### Changed
+
+- 🔄 **PAI to LifeOS Migration** - Kept the compatible `pai-packs` source ID while migrating it to `danielmiessler/LifeOS` under `LifeOS/install/skills` and updating the `pai-kai` bundle to valid LifeOS successor skills / 互換用 `pai-packs` source ID を維持したまま `danielmiessler/LifeOS` の `LifeOS/install/skills` へ移行し、`pai-kai` bundle を実在する LifeOS successor skills へ更新しました。
+- ☁️ **Azure Preset Refresh** - Regenerated both official Azure preset sources, removed retired entries such as `azure-rbac`, added current upstream skills, and refreshed Resource Index v1.26.0 to 2609 resources across 24 sources / Microsoft公式Azure preset 2 sourceを再生成し、`azure-rbac` など廃止済みentryを除去して現行upstream skillsを追加しました。Resource Index v1.26.0 は24 sources・2609 resourcesです。
+
+### Fixed
+
+- 🔐 **Private Raw Resource Downloads** - Kept public raw GitHub requests anonymous, retried authenticated private raw downloads once only after an anonymous `404` with redirects disabled, and routed multi-resource file downloads through the shared helper / public raw GitHub request は匿名のまま維持し、匿名 `404` の場合だけ redirect を無効化した認証付き request を1回再試行するようにしました。multi-resource の file download も共通 helper 経由に統一しました。
+- 🩹 **Authentication-aware Skill Recovery** - Centralized single-file and directory skill `404` cleanup, distinguished missing authentication from stale paths or missing Contents access, preserved Update Index and Report Bug actions, and kept suppressed recovery free of UI while preventing token leakage in bug reports / skill の単一ファイル・directory `404` cleanup を共通化し、未認証と stale path / Contents 権限不足を区別しました。インデックス更新・バグ報告を維持し、suppression 時は UI を出さず、bug report に token 値を含めません。
+- 🧹 **Atomic Non-skill Install Cleanup** - Deferred non-skill directory creation until source resolution and rolled back only newly created file, plugin, hook, and empty parent artifacts after fatal download or metadata failures, while preserving every pre-existing install path / non-skill directory作成をsource解決後まで遅延し、致命的なdownload/metadata失敗時は今回新規作成したfile・plugin・hook・空parentだけをrollbackするようにしました。既存install pathはすべて保持します。
+- 🔒 **Development Dependency Security** - Updated transitive development overrides for `brace-expansion`, `js-yaml`, and patched `shell-quote@1.10.0`, added a clean packaged-runtime audit gate, and kept the remaining no-fix `brace-expansion` development advisory visible in the full audit / transitive development overrideの`brace-expansion`、`js-yaml`、修正版`shell-quote@1.10.0`を更新し、packaged runtime用のclean audit gateを追加しました。修正版未提供の`brace-expansion` development advisoryはfull auditで引き続き表示します。
+
+### Tests
+
+- 🧪 Added raw authentication retry, exact-host, suppression, token non-leakage, source filter, scoped apply, LifeOS bundle integrity, Git tree fallback, source-synchronized bundle, and live Azure tree coverage / raw 認証再試行、exact host、suppression、token 非漏洩、source filter、scoped apply、LifeOS bundle 整合、Git tree fallback、source同期bundle、Azure live treeの回帰検証を追加しました。
+
 ## [0.2.38] - 2026-07-07
 
 ### Fixed

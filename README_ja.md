@@ -173,7 +173,7 @@ ext install yamapan.agent-resources-ninja
 | [glittercowboy/taches-cc-resources](https://github.com/glittercowboy/taches-cc-resources)                                     | Community | Claude Code resources と skills                                           |
 | [Yeachan-Heo/oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex)                                                         | Community | Codex workflow plugin metadata、skills、prompts、hooks、OMX guidance      |
 | [muratcankoylan/Agent-Skills-for-Context-Engineering](https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering) | Community | Context Engineering スキル (5k+)                                          |
-| [danielmiessler/Personal_AI_Infrastructure](https://github.com/danielmiessler/Personal_AI_Infrastructure)                     | Community | PAI Packs - スキル・フィーチャー集                                        |
+| [danielmiessler/LifeOS](https://github.com/danielmiessler/LifeOS)                                                             | Community | LifeOS skills - PAI successor                                             |
 | [EveryInc/compound-engineering-plugin](https://github.com/EveryInc/compound-engineering-plugin)                               | Community | Compound Engineering (3.5k+)                                              |
 | [Wirasm/PRPs-agentic-eng](https://github.com/Wirasm/PRPs-agentic-eng)                                                         | Community | PRP (Prompt Recipe Patterns)                                              |
 | [qdhenry/Claude-Command-Suite](https://github.com/qdhenry/Claude-Command-Suite)                                               | Community | Claude コマンド・スキル集                                                 |
@@ -607,6 +607,8 @@ Ref 出力を使う場合は、必要に応じて **Ref Catalog Detail Format** 
 
 公開リソースだけを扱う場合、scope は未選択のままで問題ありません。private repository を index する場合は、対象 repository に限定した fine-grained PAT に **Contents: Read** 権限を付けるのを推奨します。必要な場合のみ、より広い classic PAT の `repo` scope を使ってください。organization 配下の repository では SSO 承認や organization approval が必要なことがあります。
 
+GitHub raw file は最初に匿名で取得し、private file が `404` を返した場合だけ設定済み認証で1回再試行します。それでも `404` または「見つかりません」と表示される場合、private repository では **設定を開く** から認証を設定してから **インデックス更新** や **バグ報告** を選んでください。認証設定済みの場合は、index path が古いか、token に **Contents: Read** 権限がない可能性があります。bug report には認証の設定有無だけを記録し、token 値は含めません。
+
 > **注記**: この設定値は起動時に VS Code SecretStorage へ転記され、後方互換のためにのみ保持されます。トークンは SecretStorage → `GITHUB_TOKEN` / `GH_TOKEN` 環境変数 → GitHub CLI → この設定 の順で解決されるため、新規設定では設定への直書きより GitHub CLI または環境変数の利用を推奨します。
 
 ### 方法 2: GitHub CLI（推奨）
@@ -642,7 +644,9 @@ node scripts/test-user-data-paths.js
 node scripts/test-manifest-consistency.js
 node scripts/test-logger.js
 node scripts/test-skill-installer-auth-fallback.js
+node scripts/test-skill-installer-remote-fallback.js
 node scripts/test-audit-resource-installability.js
+node scripts/test-update-preset-index-fallback.js
 node scripts/test-temporary-install-source.js
 node scripts/test-whenToUse.js
 node scripts/test-search-logic.js
@@ -654,6 +658,7 @@ npm test
 - mutex が空いているときは、machine-installed な VS Code を使い、`.vscode-test/manual-local-launch` 配下の分離した user-data / extensions ディレクトリで smoke test を実行します。
 
 # 依存関係監査
+npm run audit:runtime
 npm audit --audit-level=moderate
 ```
 
@@ -663,12 +668,17 @@ npm audit --audit-level=moderate
 
 ```powershell
 node scripts/audit-resource-installability.js --raw-only
+node scripts/audit-resource-installability.js --raw-only --sources pai-packs
 npm run test:resources
+npm run audit:runtime
 npm audit --audit-level=moderate
 npm run release:vsce -- verify-pat
 ```
 
 - `audit-resource-installability.js --raw-only` は bundled remote resource が raw GitHub content path からまだ取得できるかを検証します。
+- `--sources <id[,id...]>` を追加するか `RESOURCE_NINJA_SOURCES` を設定すると、選択した source だけを監査できます。source 指定が空または未知の場合は full audit に戻らずエラーになります。
+- GitHub Trees API が `403` または `429` を返した場合、`update-preset-index.js` は credential を使わない非対話の shallow Git clone へ fallback し、file content を checkout せず tracked path を取得します。`syncWithSource` を持つ bundle は、同じ更新内で許可された resource kind から再構築されます。
+- packaged runtime dependency は `npm run audit:runtime` が常にcleanであることを確認します。修正版が未提供のdevelopment-only advisoryも見落とさないよう、full `npm audit` も省略しません。
 - `npm run release:vsce -- verify-pat` は現在の process `VSCE_PAT` を先に検証し、VS Code が古い値を保持している場合は User 環境変数の `VSCE_PAT` へ自動で fallback します。
 
 ### デバッグ

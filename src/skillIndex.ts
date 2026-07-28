@@ -170,6 +170,8 @@ export interface Bundle {
   pluginId?: string; // Plugin-scoped install set の識別子
   mode?: string; // skill-only / plugin-managed-copy などの安全境界ラベル
   safetyBoundary?: string; // Hooks/executables/MCP などの扱い説明
+  syncWithSource?: boolean; // Source 更新時に全 non-plugin resources へ同期
+  syncResourceKinds?: string[]; // 同期対象の resource kind allowlist
 }
 
 // インデックス全体の型定義
@@ -581,6 +583,11 @@ function shouldPersistMergedIndex(
       localBundle.pluginId !== mergedBundle.pluginId ||
       localBundle.mode !== mergedBundle.mode ||
       localBundle.safetyBoundary !== mergedBundle.safetyBoundary ||
+      localBundle.syncWithSource !== mergedBundle.syncWithSource ||
+      !areStringArraysEqual(
+        localBundle.syncResourceKinds,
+        mergedBundle.syncResourceKinds,
+      ) ||
       !areStringArraysEqual(localBundle.skills, mergedBundle.skills) ||
       !areStringArraysEqual(localBundle.installOrder, mergedBundle.installOrder)
     ) {

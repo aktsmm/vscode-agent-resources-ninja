@@ -177,7 +177,7 @@ Preset index includes skills, agents, prompts, instructions, hooks, MCP config r
 | [glittercowboy/taches-cc-resources](https://github.com/glittercowboy/taches-cc-resources)                                     | Community | Claude Code resources and skills                                                |
 | [Yeachan-Heo/oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex)                                                         | Community | Codex workflow plugin metadata, skills, prompts, hooks, and OMX guidance        |
 | [muratcankoylan/Agent-Skills-for-Context-Engineering](https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering) | Community | Context Engineering skills (5k+)                                                |
-| [danielmiessler/Personal_AI_Infrastructure](https://github.com/danielmiessler/Personal_AI_Infrastructure)                     | Community | PAI Packs - Skills & Features                                                   |
+| [danielmiessler/LifeOS](https://github.com/danielmiessler/LifeOS)                                                             | Community | LifeOS skills - PAI successor                                                   |
 | [EveryInc/compound-engineering-plugin](https://github.com/EveryInc/compound-engineering-plugin)                               | Community | Compound Engineering (3.5k+)                                                    |
 | [Wirasm/PRPs-agentic-eng](https://github.com/Wirasm/PRPs-agentic-eng)                                                         | Community | PRP (Prompt Recipe Patterns)                                                    |
 | [qdhenry/Claude-Command-Suite](https://github.com/qdhenry/Claude-Command-Suite)                                               | Community | Claude commands & skills                                                        |
@@ -612,6 +612,8 @@ Find `Agent Resources Ninja: GitHub Token` in settings and enter your token:
 
 For public resources, leave scopes unchecked. To index a private repository, use a fine-grained PAT scoped to the selected repository with **Contents: Read** permission, or a classic PAT with the broader `repo` scope when that is the only viable option. If the repository belongs to an organization, the token may also need SSO or organization approval.
 
+Raw GitHub file downloads start anonymously. When a private file returns `404`, Resource Ninja retries once with configured authentication. If an install still reports `404` or "not found", use **Open Settings** to configure authentication before choosing **Update Index** or **Report Bug**. With authentication already configured, the index path may be stale or the token may lack **Contents: Read** access. Bug reports include only whether authentication is configured and never include the token value.
+
 > **Note**: This setting value is mirrored into VS Code SecretStorage on startup and kept only for backward compatibility. Tokens are resolved in the order SecretStorage → `GITHUB_TOKEN` / `GH_TOKEN` environment variable → GitHub CLI → this setting, so for new setups the GitHub CLI or an environment variable is preferred over storing a token in settings.
 
 ### Option 2: GitHub CLI (Recommended)
@@ -647,7 +649,9 @@ node scripts/test-user-data-paths.js
 node scripts/test-manifest-consistency.js
 node scripts/test-logger.js
 node scripts/test-skill-installer-auth-fallback.js
+node scripts/test-skill-installer-remote-fallback.js
 node scripts/test-audit-resource-installability.js
+node scripts/test-update-preset-index-fallback.js
 node scripts/test-temporary-install-source.js
 node scripts/test-whenToUse.js
 node scripts/test-search-logic.js
@@ -659,6 +663,7 @@ npm test
 - When the mutex is clear, the smoke run uses the machine-installed VS Code executable with isolated `.vscode-test/manual-local-launch` user-data and extensions directories.
 
 # Dependency audit
+npm run audit:runtime
 npm audit --audit-level=moderate
 ```
 
@@ -668,12 +673,17 @@ Use this checklist before packaging or Marketplace publish so stale bundled entr
 
 ```powershell
 node scripts/audit-resource-installability.js --raw-only
+node scripts/audit-resource-installability.js --raw-only --sources pai-packs
 npm run test:resources
+npm run audit:runtime
 npm audit --audit-level=moderate
 npm run release:vsce -- verify-pat
 ```
 
 - `audit-resource-installability.js --raw-only` validates that every bundled remote resource still resolves through its raw GitHub content path.
+- Add `--sources <id[,id...]>` or set `RESOURCE_NINJA_SOURCES` to audit only selected sources. Unknown or empty source selections fail instead of silently running a full audit.
+- When the GitHub Trees API returns `403` or `429`, `update-preset-index.js` falls back to a credential-free, non-interactive shallow Git clone and reads tracked paths without checking out file contents. Bundles marked `syncWithSource` are rebuilt from their allowed resource kinds in the same update.
+- `npm run audit:runtime` must stay clean for packaged runtime dependencies. Keep the full `npm audit` check as well so development-only advisories remain visible even when an upstream package has no patched release yet.
 - `npm run release:vsce -- verify-pat` first validates the current process `VSCE_PAT`, then automatically falls back to the User-scoped `VSCE_PAT` when VS Code is still holding an expired process value.
 
 ### Debugging

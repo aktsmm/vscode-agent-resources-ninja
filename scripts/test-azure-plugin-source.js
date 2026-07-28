@@ -5,17 +5,13 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const index = require("../resources/skill-index.json");
+const { loadRepositoryTree } = require("./update-preset-index.js");
 
 const SOURCE_ID = "microsoft-copilot-for-azure-plugin";
 const SOURCE_REPO = "microsoft/GitHub-Copilot-for-Azure";
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
 
 function createHeaders(userAgent) {
-  const headers = { "User-Agent": userAgent };
-  if (GITHUB_TOKEN) {
-    headers.Authorization = `token ${GITHUB_TOKEN}`;
-  }
-  return headers;
+  return { "User-Agent": userAgent };
 }
 
 async function fetchJson(url) {
@@ -41,6 +37,17 @@ async function fetchText(url) {
   return response.text();
 }
 
+async function fetchBuffer(url) {
+  const response = await fetch(url, {
+    headers: createHeaders("ResourceNinja-AzurePluginTest"),
+  });
+  assert.ok(
+    response.ok,
+    `Expected ${url} to be reachable, got ${response.status}`,
+  );
+  return Buffer.from(await response.arrayBuffer());
+}
+
 async function main() {
   const source = index.sources.find((candidate) => candidate.id === SOURCE_ID);
   assert.ok(source, "Azure plugin source should be bundled");
@@ -56,14 +63,13 @@ async function main() {
   const resources = index.skills.filter(
     (resource) => resource.source === SOURCE_ID,
   );
-  assert.strictEqual(
-    resources.length,
-    33,
-    "Expected 32 Azure plugin skills plus one plugin manifest",
+  const skillResources = resources.filter(
+    (resource) => (resource.kind || "skill") === "skill",
   );
   const pluginResources = resources.filter(
     (resource) => resource.kind === "plugin",
   );
+  assert.ok(skillResources.length > 0, "Expected indexed Azure plugin skills");
   assert.strictEqual(
     pluginResources.length,
     1,
@@ -76,60 +82,59 @@ async function main() {
     azurePlugin.pluginManifestPath,
     "plugin/.plugin/plugin.json",
   );
+  assert.strictEqual(resources.length, skillResources.length + 1);
   assert.ok(
-    resources.filter((resource) => resource.kind !== "plugin").length === 32 &&
-      resources
-        .filter((resource) => resource.kind !== "plugin")
-        .every((resource) => (resource.kind || "skill") === "skill"),
-  );
-  assert.ok(
-    resources
-      .filter((resource) => resource.kind !== "plugin")
-      .every((resource) => resource.path.startsWith("plugin/skills/")),
+    skillResources.every((resource) =>
+      resource.path.startsWith("plugin/skills/"),
+    ),
     "Azure plugin resources should stay under the filtered plugin/skills root",
   );
 
-  const azureRbac = resources.find(
-    (resource) => resource.name === "azure-rbac",
+  const repositoryTree = await loadRepositoryTree(
+    "microsoft",
+    "GitHub-Copilot-for-Azure",
+    "main",
   );
-  assert.ok(azureRbac, "Expected azure-rbac to be indexed");
-  assert.strictEqual(azureRbac.path, "plugin/skills/azure-rbac");
-  assert.strictEqual(azureRbac.pluginRoot, "plugin");
-  assert.strictEqual(
-    azureRbac.pluginManifestPath,
-    "plugin/.plugin/plugin.json",
+  const branch = repositoryTree.branch;
+  const upstreamSkillPaths = repositoryTree.data.tree
+    .filter(
+      (entry) =>
+        entry.type === "blob" &&
+        /^plugin\/skills\/.+\/SKILL\.md$/.test(entry.path),
+    )
+    .map((entry) => entry.path.replace(/\/SKILL\.md$/, ""))
+    .sort();
+  assert.deepStrictEqual(
+    skillResources.map((resource) => resource.path).sort(),
+    upstreamSkillPaths,
+    "Indexed Azure plugin skills should match the current upstream tree",
+  );
+  assert.ok(
+    repositoryTree.data.tree.some(
+      (entry) => entry.path === "plugin/.plugin/plugin.json",
+    ),
+    "The indexed Azure plugin manifest should exist upstream",
   );
 
-  let branch = "main";
-  let azureRbacFiles = [`${azureRbac.path}/SKILL.md`];
-  try {
-    const repo = await fetchJson(`https://api.github.com/repos/${SOURCE_REPO}`);
-    branch = repo.default_branch || "main";
-    const tree = await fetchJson(
-      `https://api.github.com/repos/${SOURCE_REPO}/git/trees/${branch}?recursive=1`,
-    );
-    azureRbacFiles = tree.tree
-      .map((entry) => entry.path)
-      .filter((entryPath) => entryPath.startsWith(`${azureRbac.path}/`));
-  } catch (error) {
-    console.warn(
-      "WARN GitHub API tree unavailable; verifying indexed Azure plugin content through raw URLs only",
-    );
-    console.warn(error instanceof Error ? error.message : String(error));
-  }
+  const representativeSkill =
+    skillResources.find((resource) => resource.name === "azure-prepare") ||
+    skillResources[0];
+  const representativeFiles = repositoryTree.data.tree
+    .filter(
+      (entry) =>
+        entry.type === "blob" &&
+        entry.path.startsWith(`${representativeSkill.path}/`),
+    )
+    .map((entry) => entry.path);
   assert.ok(
-    azureRbacFiles.includes(`${azureRbac.path}/SKILL.md`),
-    "The indexed Azure plugin install path should contain SKILL.md upstream",
-  );
-  assert.ok(
-    pluginResources.length === 1,
-    "Expected Azure plugin manifest resource to be indexed",
+    representativeFiles.includes(`${representativeSkill.path}/SKILL.md`),
+    "Representative Azure plugin skill should contain SKILL.md upstream",
   );
 
   const skillText = await fetchText(
-    `https://raw.githubusercontent.com/${SOURCE_REPO}/${branch}/${azureRbac.path}/SKILL.md`,
+    `https://raw.githubusercontent.com/${SOURCE_REPO}/${branch}/${representativeSkill.path}/SKILL.md`,
   );
-  assert.match(skillText, /^---\n[\s\S]*name:\s*azure-rbac/m);
+  assert.match(skillText, /^---\n[\s\S]*name:/m);
 
   const pluginJson = await fetchJson(
     `https://raw.githubusercontent.com/${SOURCE_REPO}/${branch}/plugin/.plugin/plugin.json`,
@@ -140,20 +145,22 @@ async function main() {
     path.join(os.tmpdir(), "resource-ninja-azure-plugin-"),
   );
   try {
-    const installRoot = path.join(tempRoot, "azure-rbac");
+    const installRoot = path.join(tempRoot, representativeSkill.name);
     fs.mkdirSync(installRoot, { recursive: true });
-    for (const upstreamPath of azureRbacFiles) {
-      const relativePath = upstreamPath.slice(`${azureRbac.path}/`.length);
-      const content = await fetchText(
+    for (const upstreamPath of representativeFiles) {
+      const relativePath = upstreamPath.slice(
+        `${representativeSkill.path}/`.length,
+      );
+      const content = await fetchBuffer(
         `https://raw.githubusercontent.com/${SOURCE_REPO}/${branch}/${upstreamPath}`,
       );
       const localPath = path.join(installRoot, relativePath);
       fs.mkdirSync(path.dirname(localPath), { recursive: true });
-      fs.writeFileSync(localPath, content, "utf8");
+      fs.writeFileSync(localPath, content);
     }
     assert.ok(
       fs.existsSync(path.join(installRoot, "SKILL.md")),
-      "A lightweight install copy should create azure-rbac/SKILL.md",
+      "A lightweight install copy should create the representative SKILL.md",
     );
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });

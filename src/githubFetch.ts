@@ -1,4 +1,14 @@
 const GITHUB_USER_AGENT = "VSCode-AgentResourcesNinja";
+const GITHUB_API_PREFIX = "https://api.github.com/";
+const RAW_GITHUB_PREFIX = "https://raw.githubusercontent.com/";
+
+function isRawGitHubUrl(url: string): boolean {
+  return url.startsWith(RAW_GITHUB_PREFIX);
+}
+
+function isGitHubApiUrl(url: string): boolean {
+  return url.startsWith(GITHUB_API_PREFIX);
+}
 
 function shouldAttachGitHubToken(url: string, token?: string): boolean {
   if (!token) {
@@ -7,7 +17,7 @@ function shouldAttachGitHubToken(url: string, token?: string): boolean {
 
   // Public raw content works without auth, and authenticated raw requests can
   // fail in some environments even when the repository is public.
-  return !url.includes("raw.githubusercontent.com");
+  return isGitHubApiUrl(url);
 }
 
 export function createGitHubHeaders(
@@ -41,6 +51,21 @@ export async function fetchGitHubWithOptionalAuthRetry(
     headers,
     method: options.method,
   });
+
+  if (
+    response.status === 404 &&
+    Boolean(options.token) &&
+    isRawGitHubUrl(url)
+  ) {
+    response = await fetch(url, {
+      headers: {
+        ...headers,
+        Authorization: `token ${options.token}`,
+      },
+      method: options.method,
+      redirect: "error",
+    });
+  }
 
   if (
     (response.status === 401 || response.status === 403) &&

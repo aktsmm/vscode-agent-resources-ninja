@@ -167,7 +167,7 @@ async function main() {
       },
     },
     {
-      name: "fetchGitHubWithOptionalAuthRetry skips auth and retry for raw preview URLs",
+      name: "fetchGitHubWithOptionalAuthRetry keeps public raw requests anonymous",
       run: async () => {
         const fetchCalls = [];
         global.fetch = async (url, options = {}) => {
@@ -175,6 +175,7 @@ async function main() {
             url,
             headers: options.headers || {},
             method: options.method,
+            redirect: options.redirect,
           });
           return {
             ok: true,
@@ -196,11 +197,111 @@ async function main() {
         assert.strictEqual(
           fetchCalls.length,
           1,
-          "Raw preview fetch should not retry",
+          "Public raw fetch should not retry",
         );
         assert.ok(
           !fetchCalls[0].headers.Authorization,
-          "Raw preview fetch should not attach Authorization header",
+          "Public raw fetch should not attach Authorization header",
+        );
+      },
+    },
+    {
+      name: "fetchGitHubWithOptionalAuthRetry authenticates a private raw 404 once",
+      run: async () => {
+        const fetchCalls = [];
+        global.fetch = async (url, options = {}) => {
+          fetchCalls.push({
+            url,
+            headers: options.headers || {},
+            redirect: options.redirect,
+          });
+          return fetchCalls.length === 1
+            ? { ok: false, status: 404 }
+            : { ok: true, status: 200 };
+        };
+
+        const response =
+          await githubFetchModule.fetchGitHubWithOptionalAuthRetry(
+            "https://raw.githubusercontent.com/owner/private-repo/main/SKILL.md",
+            {
+              accept: "text/plain",
+              token: "test-token",
+            },
+          );
+
+        assert.strictEqual(response.status, 200);
+        assert.strictEqual(fetchCalls.length, 2, "Should retry exactly once");
+        assert.strictEqual(
+          fetchCalls[0].headers.Authorization,
+          undefined,
+          "First raw request should be anonymous",
+        );
+        assert.strictEqual(
+          fetchCalls[1].headers.Authorization,
+          "token test-token",
+          "Private raw retry should use the token",
+        );
+        assert.strictEqual(fetchCalls[1].redirect, "error");
+      },
+    },
+    {
+      name: "fetchGitHubWithOptionalAuthRetry stops after a missing raw retry",
+      run: async () => {
+        const fetchCalls = [];
+        global.fetch = async (url, options = {}) => {
+          fetchCalls.push({
+            url,
+            headers: options.headers || {},
+            redirect: options.redirect,
+          });
+          return { ok: false, status: 404 };
+        };
+
+        const response =
+          await githubFetchModule.fetchGitHubWithOptionalAuthRetry(
+            "https://raw.githubusercontent.com/owner/private-repo/main/missing.md",
+            {
+              accept: "text/plain",
+              token: "test-token",
+            },
+          );
+
+        assert.strictEqual(response.status, 404);
+        assert.strictEqual(fetchCalls.length, 2, "Should stop after one retry");
+        assert.strictEqual(fetchCalls[0].headers.Authorization, undefined);
+        assert.strictEqual(
+          fetchCalls[1].headers.Authorization,
+          "token test-token",
+        );
+        assert.strictEqual(fetchCalls[1].redirect, "error");
+      },
+    },
+    {
+      name: "fetchGitHubWithOptionalAuthRetry does not treat lookalike hosts as raw",
+      run: async () => {
+        const fetchCalls = [];
+        global.fetch = async (url, options = {}) => {
+          fetchCalls.push({ url, options });
+          return { ok: false, status: 404 };
+        };
+
+        await githubFetchModule.fetchGitHubWithOptionalAuthRetry(
+          "https://raw.githubusercontent.com.example/owner/repo/main/SKILL.md",
+          {
+            accept: "text/plain",
+            token: "test-token",
+          },
+        );
+
+        assert.strictEqual(
+          fetchCalls.length,
+          1,
+          "Lookalike raw host should not enter the authenticated raw retry",
+        );
+        assert.strictEqual(
+          fetchCalls[0].options.headers.Authorization,
+          undefined,
+          "Lookalike raw host must not receive an Authorization header",
         );
       },
     },

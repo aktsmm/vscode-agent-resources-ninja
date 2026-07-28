@@ -52,6 +52,24 @@ function sorted(values) {
   return [...values].sort();
 }
 
+for (const bundle of index.bundles || []) {
+  const indexedNames = new Set(
+    index.skills
+      .filter((resource) => resource.source === bundle.source)
+      .map((resource) => resource.name),
+  );
+  for (const resourceName of [
+    ...(bundle.skills || []),
+    ...(bundle.installOrder || []),
+    ...(bundle.coreSkill ? [bundle.coreSkill] : []),
+  ]) {
+    assert.ok(
+      indexedNames.has(resourceName),
+      `${bundle.id} references missing resource ${resourceName}`,
+    );
+  }
+}
+
 for (const { source, bundleId, mode } of pluginBundles) {
   const sourceInfo = index.sources.find((candidate) => candidate.id === source);
   assert.ok(sourceInfo, `Missing plugin source ${source}`);
@@ -63,6 +81,11 @@ for (const { source, bundleId, mode } of pluginBundles) {
   const bundle = index.bundles.find((candidate) => candidate.id === bundleId);
   assert.ok(bundle, `Missing plugin bundle ${bundleId}`);
   assert.strictEqual(bundle.source, source);
+  assert.strictEqual(bundle.syncWithSource, true);
+  assert.deepStrictEqual(
+    bundle.syncResourceKinds,
+    mode === "skills-and-mcp" ? ["skill", "mcp"] : ["skill"],
+  );
   if (mode === "skill-only") {
     assert.match(
       bundle.description,
