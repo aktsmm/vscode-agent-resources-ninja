@@ -41,8 +41,12 @@ async function main() {
   const traversalModule = requireTypeScriptModule(
     path.join(__dirname, "..", "src", "githubDirectoryTraversal.ts"),
   );
+  const githubResponseModule = requireTypeScriptModule(
+    path.join(__dirname, "..", "src", "githubResponse.ts"),
+  );
   const githubFetchModule = requireTypeScriptModule(
     path.join(__dirname, "..", "src", "githubFetch.ts"),
+    { "./githubResponse": githubResponseModule },
   );
 
   const tests = [
@@ -60,11 +64,10 @@ async function main() {
               "token test-token",
               "First request should use provided token",
             );
-            return {
-              ok: false,
+            return new Response(JSON.stringify({ message: "Forbidden" }), {
               status: 403,
-              json: async () => ({ message: "Forbidden" }),
-            };
+              headers: { "content-type": "application/json" },
+            });
           }
 
           assert.ok(
@@ -206,7 +209,7 @@ async function main() {
       },
     },
     {
-      name: "fetchGitHubWithOptionalAuthRetry authenticates a private raw 404 once",
+      name: "fetchGitHubWithOptionalAuthRetry uses Contents API after a private raw 404",
       run: async () => {
         const fetchCalls = [];
         global.fetch = async (url, options = {}) => {
@@ -239,9 +242,12 @@ async function main() {
         assert.strictEqual(
           fetchCalls[1].headers.Authorization,
           "token test-token",
-          "Private raw retry should use the token",
+          "Private Contents API retry should use the token",
         );
-        assert.strictEqual(fetchCalls[1].redirect, "error");
+        assert.strictEqual(
+          fetchCalls[1].url,
+          "https://api.github.com/repos/owner/private-repo/contents/SKILL.md?ref=main",
+        );
       },
     },
     {
@@ -273,7 +279,10 @@ async function main() {
           fetchCalls[1].headers.Authorization,
           "token test-token",
         );
-        assert.strictEqual(fetchCalls[1].redirect, "error");
+        assert.strictEqual(
+          fetchCalls[1].url,
+          "https://api.github.com/repos/owner/private-repo/contents/missing.md?ref=main",
+        );
       },
     },
     {
@@ -324,11 +333,10 @@ async function main() {
               "token branch-token",
               "API request should use token first",
             );
-            return {
-              ok: false,
+            return new Response(JSON.stringify({ message: "Forbidden" }), {
               status: 403,
-              json: async () => ({ message: "Forbidden" }),
-            };
+              headers: { "content-type": "application/json" },
+            });
           }
 
           assert.ok(

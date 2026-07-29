@@ -38,8 +38,12 @@ function requireTypeScriptModule(filePath, stubs = {}) {
 }
 
 async function main() {
+  const githubResponseModule = requireTypeScriptModule(
+    path.join(__dirname, "..", "src", "githubResponse.ts"),
+  );
   const githubFetchModule = requireTypeScriptModule(
     path.join(__dirname, "..", "src", "githubFetch.ts"),
+    { "./githubResponse": githubResponseModule },
   );
   const traversalModule = requireTypeScriptModule(
     path.join(__dirname, "..", "src", "githubDirectoryTraversal.ts"),

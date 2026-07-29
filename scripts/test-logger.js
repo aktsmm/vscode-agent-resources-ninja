@@ -77,6 +77,9 @@ const vscodeStub = {
         dispose() {
           this.disposed = true;
         },
+        show(preserveFocus) {
+          this.lastPreserveFocus = preserveFocus;
+        },
       };
       createdChannels.push(channel);
       return channel;
@@ -103,6 +106,8 @@ test("logger writes structured diagnostics to output channel", () => {
   ]);
   assert.match(createdChannels[0].lines[2], /^ERROR: broken Error: boom/);
   assert.strictEqual(subscriptions.length, 1);
+  loggerModule.logger.show(true);
+  assert.strictEqual(createdChannels[0].lastPreserveFocus, true);
 });
 
 test("logger recreates channel after disposal", () => {

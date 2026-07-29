@@ -1554,6 +1554,10 @@ export interface SkillMeta {
   [key: string]: unknown;
 }
 
+const RETIRED_SOURCE_ALIASES: Readonly<Record<string, string>> = {
+  "microsoft-copilot-for-azure-plugin": "microsoft-azure-skills",
+};
+
 export function normalizeSkillMetaSource(
   meta: Pick<Partial<SkillMeta>, "source" | "remotePath">,
 ): string {
@@ -1566,7 +1570,7 @@ export function normalizeSkillMetaSource(
     return "local";
   }
 
-  return source || "unknown";
+  return (source && RETIRED_SOURCE_ALIASES[source]) || source || "unknown";
 }
 
 /**

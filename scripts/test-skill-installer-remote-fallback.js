@@ -5,7 +5,7 @@
  *
  * 検証ポイント:
  *  1. public raw は匿名で取得する
- *  2. private raw は匿名 404 の後だけ token 付きで復旧する
+ *  2. private content は匿名 raw 404 の後だけ token 付き Contents API で復旧する
  *  3. 取得失敗（HTTP エラー）時は false を返し、template fallback に委ねる
  *  4. skill 404 は認証状態に応じた復旧導線を出し、suppression 時は UI を出さない
  *
@@ -106,14 +106,18 @@ function createVscodeStub(writes, options = {}) {
           throw new Error("not found");
         },
         readDirectory: async (uri) => {
-          const normalizedParent = uri.fsPath.replace(/\\/g, "/").replace(/\/$/, "");
+          const normalizedParent = uri.fsPath
+            .replace(/\\/g, "/")
+            .replace(/\/$/, "");
           const entries = new Map();
           for (const writtenPath of writes.keys()) {
             const normalizedPath = writtenPath.replace(/\\/g, "/");
             if (!normalizedPath.startsWith(`${normalizedParent}/`)) {
               continue;
             }
-            const relativePath = normalizedPath.slice(normalizedParent.length + 1);
+            const relativePath = normalizedPath.slice(
+              normalizedParent.length + 1,
+            );
             const name = relativePath.split("/")[0];
             if (name) {
               entries.set(name, 1);
@@ -142,9 +146,13 @@ function loadInstaller(writes, options = {}) {
   const srcDir = path.join(__dirname, "..", "src");
 
   // githubFetch は実装をそのまま使い、復旧経路が共通 helper を通ることを検証する。
+  const githubResponse = requireTypeScriptModule(
+    path.join(srcDir, "githubResponse.ts"),
+    {},
+  );
   const githubFetch = requireTypeScriptModule(
     path.join(srcDir, "githubFetch.ts"),
-    {},
+    { "./githubResponse": githubResponse },
   );
 
   return requireTypeScriptModule(path.join(srcDir, "skillInstaller.ts"), {
@@ -227,7 +235,7 @@ function loadInstaller(writes, options = {}) {
 async function run() {
   const writes = new Map();
   const installer = loadInstaller(writes);
-  const { recoverPrimarySkillMdFromRaw } = installer;
+  const { normalizeSkillMetaSource, recoverPrimarySkillMdFromRaw } = installer;
 
   assert.strictEqual(
     typeof recoverPrimarySkillMdFromRaw,
@@ -241,7 +249,19 @@ async function run() {
   let passed = 0;
 
   try {
-    // --- Test 1: public raw 復旧成功 + 初回は匿名 ---
+    // --- Test 1: retired source metadata は canonical source へ移行 ---
+    {
+      assert.strictEqual(
+        normalizeSkillMetaSource({
+          source: "microsoft-copilot-for-azure-plugin",
+          remotePath: "plugin/skills/azure-cost",
+        }),
+        "microsoft-azure-skills",
+      );
+      passed++;
+    }
+
+    // --- Test 2: public raw 復旧成功 + 初回は匿名 ---
     {
       writes.clear();
       const requested = [];
@@ -291,7 +311,7 @@ async function run() {
       passed++;
     }
 
-    // --- Test 2: private raw は匿名 404 後に token 付きで復旧 ---
+    // --- Test 2: private content は匿名 raw 404 後に Contents API で復旧 ---
     {
       writes.clear();
       const requested = [];
@@ -333,10 +353,13 @@ async function run() {
         requested[1].headers.Authorization,
         "token private-token",
       );
-      assert.strictEqual(requested[1].redirect, "error");
+      assert.strictEqual(
+        requested[1].url,
+        "https://api.github.com/repos/owner/private-repo/contents/skills/private-skill/SKILL.md?ref=main",
+      );
       assert.ok(
         writes.has("/tmp/.github/skills/private-skill/SKILL.md"),
-        "authenticated raw recovery should write SKILL.md",
+        "authenticated Contents API recovery should write SKILL.md",
       );
       passed++;
     }
@@ -618,7 +641,10 @@ async function run() {
         requested[1].headers.Authorization,
         "token agent-token",
       );
-      assert.strictEqual(requested[1].redirect, "error");
+      assert.strictEqual(
+        requested[1].url,
+        "https://api.github.com/repos/owner/private-repo/contents/agents/private-agent.agent.md?ref=main",
+      );
       assert.strictEqual(
         writes.get("/tmp/resource/private-agent.agent.md"),
         "---\nname: private-agent\n---\nAgent body\n",
@@ -926,7 +952,7 @@ async function run() {
   }
 
   console.log(
-    `PASS: test-skill-installer-remote-fallback.js (${passed}/16 cases)`,
+    `PASS: test-skill-installer-remote-fallback.js (${passed}/17 cases)`,
   );
 }
 

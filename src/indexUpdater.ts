@@ -27,6 +27,11 @@ import { getGitHubToken } from "./githubAuth";
 export { checkGitHubAuth } from "./githubAuth";
 import { LICENSE_EXTRACTION, INDEX_LIMITS } from "./constants";
 import { logger } from "./logger";
+import { fetchGitHubWithOptionalAuthRetry } from "./githubFetch";
+import {
+  createGitHubResponseError,
+  isGitHubResponseError,
+} from "./githubResponse";
 import {
   shouldRunSharedScan,
   updateSharedScanMetadata,
@@ -244,7 +249,7 @@ function joinGitHubContentPath(...parts: string[]): string {
   return parts.map(normalizeGitHubContentPath).filter(Boolean).join("/");
 }
 
-async function fetchGitHubTextContent(
+export async function fetchGitHubTextContent(
   owner: string,
   repo: string,
   branch: string,
@@ -253,30 +258,38 @@ async function fetchGitHubTextContent(
   timeoutMs: number = REQUEST_TIMEOUT_MS,
 ): Promise<string | undefined> {
   const rawUrl = buildRawContentUrl(owner, repo, branch, filePath);
-  try {
-    const rawResponse = await fetchWithTimeout(rawUrl, undefined, timeoutMs);
-    if (rawResponse.ok) {
-      return await rawResponse.text();
-    }
-    if (!token || ![401, 403, 404].includes(rawResponse.status)) {
-      return undefined;
-    }
-  } catch {
-    if (!token) {
-      return undefined;
-    }
+  const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeGitHubContentPath(filePath)}?ref=${encodeURIComponent(branch)}`;
+  const response = await fetchGitHubWithOptionalAuthRetry(rawUrl, {
+    accept: "text/plain",
+    token,
+    authenticatedUrl: apiUrl,
+    request: (url, init) => fetchWithTimeout(url, init, timeoutMs),
+  });
+  if (response.ok) {
+    return await response.text();
   }
 
-  const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeGitHubContentPath(filePath)}?ref=${encodeURIComponent(branch)}`;
-  const headers: Record<string, string> = {
-    Accept: "application/vnd.github.raw+json",
-    Authorization: `token ${token}`,
-    "User-Agent": "VSCode-AgentResourcesNinja",
-  };
-  const apiResponse = await fetchWithTimeout(apiUrl, { headers }, timeoutMs);
-  if (apiResponse.ok) {
-    return await apiResponse.text();
+  if (response.status === 404) {
+    return undefined;
   }
+
+  const bodyText = await response
+    .clone()
+    .text()
+    .catch(() => "");
+  if (
+    response.status === 401 ||
+    response.status === 403 ||
+    response.status === 429 ||
+    bodyText.toLowerCase().includes("rate limit")
+  ) {
+    throw createGitHubResponseError(
+      response,
+      bodyText,
+      `GitHub content request failed for ${owner}/${repo}/${filePath}`,
+    );
+  }
+
   return undefined;
 }
 
@@ -382,7 +395,10 @@ async function fetchAndExtractLicense(
           return license;
         }
       }
-    } catch {
+    } catch (error) {
+      if (isGitHubResponseError(error)) {
+        throw error;
+      }
       // 取得失敗は無視
     }
   }
@@ -459,36 +475,12 @@ function extractLicenseFromContent(content: string): string | null {
  * GitHub API リクエストを実行（認証付き）
  */
 async function githubFetch(url: string, token?: string): Promise<Response> {
-  // トークンが渡されなかった場合は自動取得を試みる
   const effectiveToken = token || (await getGitHubToken());
-
-  const headers: Record<string, string> = {
-    Accept: "application/vnd.github.v3+json",
-    "User-Agent": "VSCode-AgentResourcesNinja",
-  };
-
-  if (effectiveToken) {
-    headers["Authorization"] = `token ${effectiveToken}`;
-  }
-
-  const response = await fetchWithTimeout(url, { headers });
-  if (response.status === 403 && headers.Authorization) {
-    const bodyText = await response.clone().text();
-    if (
-      bodyText.includes("forbids access via a personal access tokens (classic)")
-    ) {
-      logger.warn(
-        "[Resource Ninja] Retrying without token because the repository rejects this classic PAT policy",
-      );
-      const retryHeaders: Record<string, string> = {
-        Accept: "application/vnd.github.v3+json",
-        "User-Agent": "VSCode-AgentResourcesNinja",
-      };
-      return fetchWithTimeout(url, { headers: retryHeaders });
-    }
-  }
-
-  return response;
+  return fetchGitHubWithOptionalAuthRetry(url, {
+    accept: "application/vnd.github.v3+json",
+    token: effectiveToken,
+    request: (requestUrl, init) => fetchWithTimeout(requestUrl, init),
+  });
 }
 
 function createPrivateRepositoryAccessError(
@@ -734,14 +726,15 @@ export async function scanRepositoryForSkills(
     if (response.status === 401 || (response.status === 404 && !token)) {
       throw createPrivateRepositoryAccessError(owner, repoName);
     }
-    if (response.status === 403) {
-      throw new Error(
-        token
-          ? "GitHub token cannot access this repository. Check repository access, Contents: Read permission, and SSO approval if required."
-          : "GitHub API rate limit exceeded or repository is private. Please authenticate with a GitHub token.",
-      );
-    }
-    throw new Error(`GitHub API error: ${response.status}`);
+    const bodyText = await response
+      .clone()
+      .text()
+      .catch(() => "");
+    throw createGitHubResponseError(
+      response,
+      bodyText,
+      `GitHub tree request failed for ${owner}/${repoName}`,
+    );
   }
 
   const responseData = (await response.json()) as {
@@ -1030,7 +1023,10 @@ async function processTreeResponse(
           skill.pluginManifestKind = skillInfo.pluginManifestKind;
         }
         return skill;
-      } catch {
+      } catch (error) {
+        if (isGitHubResponseError(error)) {
+          throw error;
+        }
         logger.warn(`Failed to fetch resource: ${file.path}`);
         return undefined;
       }
@@ -1130,6 +1126,9 @@ async function scanBundleJson(
         }
       }
     } catch (error) {
+      if (isGitHubResponseError(error)) {
+        throw error;
+      }
       logger.warn(`Failed to parse bundle.json: ${file.path}`, error);
     }
   }
@@ -1216,7 +1215,10 @@ async function scanClaudeCommands(
           categories: [category, "claude-code", "prp"],
           description: description || `Claude Code command: ${skillName}`,
         };
-      } catch {
+      } catch (error) {
+        if (isGitHubResponseError(error)) {
+          throw error;
+        }
         logger.warn(`Failed to fetch command: ${file.path}`);
         return undefined;
       }
@@ -1320,6 +1322,9 @@ async function scanSkillRegistryJson(
     };
     return parseSearchIndex(searchIndex, owner, repoName, branch);
   } catch (error) {
+    if (isGitHubResponseError(error)) {
+      throw error;
+    }
     logger.error(`[Resource Ninja] Failed to fetch skill registry:`, error);
     return null;
   }
@@ -1684,11 +1689,32 @@ export async function updateSingleSource(
  * 既存ソースからインデックスを更新
  * 既存のローカライズされた説明は保持し、新規スキルのみGitHubから説明を取得
  */
+export interface SourceIndexUpdateAllResult {
+  index: SkillIndex;
+  succeeded: Source[];
+  failures: Array<{ entry: Source; error: unknown }>;
+  skipped: Source[];
+}
+
 export async function updateIndexFromSources(
   context: vscode.ExtensionContext,
   currentIndex: SkillIndex,
   progress?: vscode.Progress<{ message?: string; increment?: number }>,
 ): Promise<SkillIndex> {
+  const result = await updateIndexFromSourcesWithResult(
+    context,
+    currentIndex,
+    progress,
+  );
+  return result.index;
+}
+
+export async function updateIndexFromSourcesWithResult(
+  context: vscode.ExtensionContext,
+  currentIndex: SkillIndex,
+  progress?: vscode.Progress<{ message?: string; increment?: number }>,
+  options?: { forceScan?: boolean },
+): Promise<SourceIndexUpdateAllResult> {
   assertMutableIndexShape(currentIndex, "update all sources");
   const token = await getGitHubToken();
 
@@ -1705,26 +1731,40 @@ export async function updateIndexFromSources(
   const updatedBundles: Bundle[] = [];
   const totalSources = currentIndex.sources.length;
   const scannedSourceIds: string[] = [];
+  const succeeded: Source[] = [];
+  const failures: Array<{ entry: Source; error: unknown }> = [];
+  let skipped: Source[] = [];
 
-  for (const source of currentIndex.sources) {
+  const preserveExistingSource = (source: Source): void => {
+    updatedSkills.push(
+      ...currentIndex.skills.filter((skill) => skill.source === source.id),
+    );
+    updatedBundles.push(
+      ...(currentIndex.bundles || []).filter(
+        (bundle) => bundle.source === source.id,
+      ),
+    );
+  };
+
+  for (
+    let sourceIndex = 0;
+    sourceIndex < currentIndex.sources.length;
+    sourceIndex += 1
+  ) {
+    const source = currentIndex.sources[sourceIndex];
     try {
       progress?.report({
-        message: `Updating ${source.name}...`,
-        increment: (1 / totalSources) * 100,
+        message: messages.updatingSource(source.name),
       });
 
-      if (!(await shouldRunSharedScan(context, source.id))) {
+      if (
+        !options?.forceScan &&
+        !(await shouldRunSharedScan(context, source.id))
+      ) {
         logger.info(
           `[Resource Ninja] Skipping shared scan for ${source.id} because a recent shared scan is available.`,
         );
-        const existingSkills = currentIndex.skills.filter(
-          (skill) => skill.source === source.id,
-        );
-        updatedSkills.push(...existingSkills);
-        const existingBundles = (currentIndex.bundles || []).filter(
-          (bundle) => bundle.source === source.id,
-        );
-        updatedBundles.push(...existingBundles);
+        preserveExistingSource(source);
         continue;
       }
 
@@ -1735,45 +1775,51 @@ export async function updateIndexFromSources(
         source.branch,
         source,
       );
-      if (result) {
-        // 既存の説明があれば保持、なければGitHubから取得した説明を使用
-        // source ID は既存の source.id を使用（GitHub から生成された ID ではなく）
-        for (const skill of result.skills) {
-          const skillWithCorrectSource = {
-            ...skill,
-            source: source.id, // 既存の source ID を使用
-          };
-          const key = `${source.id}:${skill.name}`;
-          const existingDesc = existingDescriptions.get(key);
-          updatedSkills.push({
-            ...skillWithCorrectSource,
-            description: existingDesc || skill.description,
+      if (!result) {
+        throw new Error(`Failed to scan repository: ${source.url}`);
+      }
+
+      // 既存の説明があれば保持、なければGitHubから取得した説明を使用
+      // source ID は既存の source.id を使用（GitHub から生成された ID ではなく）
+      for (const skill of result.skills) {
+        const skillWithCorrectSource = {
+          ...skill,
+          source: source.id, // 既存の source ID を使用
+        };
+        const key = `${source.id}:${skill.name}`;
+        const existingDesc = existingDescriptions.get(key);
+        updatedSkills.push({
+          ...skillWithCorrectSource,
+          description: existingDesc || skill.description,
+        });
+      }
+
+      // Bundlesもマージ（source ID を修正）
+      if (result.bundles?.length) {
+        for (const bundle of result.bundles) {
+          updatedBundles.push({
+            ...bundle,
+            source: source.id,
           });
         }
-
-        // Bundlesもマージ（source ID を修正）
-        if (result.bundles?.length) {
-          for (const bundle of result.bundles) {
-            updatedBundles.push({
-              ...bundle,
-              source: source.id,
-            });
-          }
-        }
-        scannedSourceIds.push(source.id);
       }
+      scannedSourceIds.push(source.id);
+      succeeded.push(source);
     } catch (error) {
       logger.warn(`Failed to update source ${source.id}:`, error);
-      // 更新に失敗したソースの既存スキルは保持
-      const existingSkills = currentIndex.skills.filter(
-        (s) => s.source === source.id,
-      );
-      updatedSkills.push(...existingSkills);
-      // 既存のBundlesも保持
-      const existingBundles = (currentIndex.bundles || []).filter(
-        (b) => b.source === source.id,
-      );
-      updatedBundles.push(...existingBundles);
+      failures.push({ entry: source, error });
+      preserveExistingSource(source);
+      if (isGitHubResponseError(error) && error.kind === "rate-limit") {
+        skipped = currentIndex.sources.slice(sourceIndex + 1);
+        for (const skippedSource of skipped) {
+          preserveExistingSource(skippedSource);
+        }
+        break;
+      }
+    } finally {
+      progress?.report({
+        increment: totalSources > 0 ? 100 / totalSources : 100,
+      });
     }
   }
 
@@ -1805,7 +1851,7 @@ export async function updateIndexFromSources(
     indexedAt,
   );
 
-  return updatedIndex;
+  return { index: updatedIndex, succeeded, failures, skipped };
 }
 
 /**
@@ -1836,14 +1882,14 @@ export async function updateIndexFromSingleSource(
   }
 
   progress?.report({
-    message: `Updating ${source.name}...`,
-    increment: 50,
+    message: messages.updatingSource(source.name),
   });
 
   if (!options?.forceScan && !(await shouldRunSharedScan(context, sourceId))) {
     logger.info(
       `[Resource Ninja] Skipping shared scan for ${sourceId} because a recent shared scan is available.`,
     );
+    progress?.report({ increment: 100 });
     return currentIndex;
   }
 
@@ -1886,8 +1932,8 @@ export async function updateIndexFromSingleSource(
   }));
 
   progress?.report({
-    message: `Updated ${newSkills.length} skills`,
-    increment: 50,
+    message: messages.sourceIndexResourcesUpdatedProgress(newSkills.length),
+    increment: 100,
   });
 
   const indexedAt = new Date().toISOString();
@@ -2366,7 +2412,10 @@ export async function searchGitHub(
 
     try {
       const rawUrl = `https://raw.githubusercontent.com/${result.repo}/${result.defaultBranch}/${result.itemPath}`;
-      const contentResponse = await githubFetch(rawUrl, token);
+      const contentResponse = await fetchGitHubWithOptionalAuthRetry(rawUrl, {
+        accept: "text/plain",
+        token,
+      });
       if (contentResponse.ok) {
         const content = await contentResponse.text();
         const frontmatterMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
@@ -2457,6 +2506,13 @@ export async function searchGitHub(
 /**
  * 認証エラー時のヘルプメッセージを表示
  */
+export async function openGitHubAuthSettings(): Promise<void> {
+  await vscode.commands.executeCommand(
+    "workbench.action.openSettings",
+    "resourceNinja.githubToken",
+  );
+}
+
 export async function showAuthHelp(): Promise<void> {
   const openSettingsLabel = messages.openSettings();
   const authWithGhCliLabel = messages.authWithGhCli();
@@ -2470,10 +2526,7 @@ export async function showAuthHelp(): Promise<void> {
   );
 
   if (action === openSettingsLabel) {
-    await vscode.commands.executeCommand(
-      "workbench.action.openSettings",
-      "resourceNinja.githubToken",
-    );
+    await openGitHubAuthSettings();
   } else if (action === authWithGhCliLabel) {
     const terminal = vscode.window.createTerminal("GitHub Auth");
     terminal.show();

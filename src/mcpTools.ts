@@ -26,11 +26,17 @@ import {
 import { formatHookConfigUpdateSummary } from "./hookConfigManager";
 import { updateInstructionFile } from "./instructionManager";
 import { getConfiguredInstructionFilePath } from "./customizationPaths";
-import { searchGitHub, addSource, removeSource } from "./indexUpdater";
+import {
+  searchGitHub,
+  addSource,
+  removeSource,
+  type SourceIndexUpdateAllResult,
+} from "./indexUpdater";
 import { isJapanese } from "./i18n";
 import { getGitHubToken } from "./githubAuth";
 import { logger } from "./logger";
 import { scanLocalSkills } from "./localSkillScanner";
+import { formatSourceIndexUpdateToolResult } from "./sourceIndexUpdatePresentation";
 
 /** スキルインデックスをキャッシュ */
 let cachedIndex: SkillIndex | undefined;
@@ -1079,7 +1085,12 @@ class UpdateIndexTool implements vscode.LanguageModelTool<
       const oldUpdated = oldIndex.lastUpdated || "unknown";
 
       // VS Code コマンドでインデックス更新を実行
-      await vscode.commands.executeCommand("resourceNinja.updateIndex");
+      const updateResult = await vscode.commands.executeCommand<
+        SourceIndexUpdateAllResult | undefined
+      >("resourceNinja.updateIndex");
+      if (!updateResult) {
+        throw new Error("Index update did not return a result");
+      }
 
       // キャッシュをクリアして新しいインデックスを読み込む
       cachedIndex = undefined;
@@ -1089,39 +1100,28 @@ class UpdateIndexTool implements vscode.LanguageModelTool<
       const newCount = getIndexResources(newIndex).length;
       const newUpdated =
         newIndex.lastUpdated || new Date().toISOString().split("T")[0];
-      const diff = newCount - oldCount;
-      const diffText = diff > 0 ? `+${diff}` : diff === 0 ? "±0" : `${diff}`;
-
       // ソース統計
       const sourceStats = getSourceStats(newIndex);
 
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          `✅ スキルインデックスを更新しました！
-
-| 項目 | Before | After |
-          |-----------|--------|-------|
-| スキル数 | ${oldCount} | ${newCount} (${diffText}) |
-| 最終更新 | ${oldUpdated} | ${newUpdated} |
-| ソース | - | ${sourceStats} |
-
----
-**Agent Instructions:**
-- Report the update summary
-- If new resources were added, suggest searching for them
-
-**📋 Next Actions:**
-1. 🔍 Search for new resources? → use #searchResources
-2. 💡 Get recommendations? → use #recommendResources
-3. 📋 List workspace resources? → use #listResources
-
----
-**💡 さらにリソースを増やすには？**
-
-| アクション | 説明 |
-|-----------|------|
-| 🌐 **GitHub で検索** | インデックスにないスキルを GitHub から直接検索 |
-| ➕ **ソースを追加** | 新しいリポジトリをインデックスに追加 |`,
+          formatSourceIndexUpdateToolResult(
+            {
+              oldCount,
+              newCount,
+              oldUpdated,
+              newUpdated,
+              sourceStats,
+              totalSources: oldIndex.sources.length,
+              succeededCount: updateResult.succeeded.length,
+              failureCount: updateResult.failures.length,
+              skippedCount: updateResult.skipped.length,
+              failedSources: updateResult.failures.map(
+                (failure) => failure.entry.name || failure.entry.id,
+              ),
+            },
+            vscode.env.language,
+          ),
         ),
       ]);
     } catch (error) {

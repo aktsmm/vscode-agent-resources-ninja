@@ -162,7 +162,6 @@ Preset index includes skills, agents, prompts, instructions, hooks, MCP config r
 | [github/awesome-copilot](https://github.com/github/awesome-copilot)                                                           | Official  | GitHub official Copilot resources, including plugin-published skills and agents |
 | [cursor/plugins](https://github.com/cursor/plugins)                                                                           | Official  | Cursor official plugin manifests, skills, agents, and rules                     |
 | [MicrosoftDocs/Agent-Skills](https://github.com/MicrosoftDocs/Agent-Skills)                                                   | Official  | Microsoft official Azure agent skills                                           |
-| [microsoft/GitHub-Copilot-for-Azure](https://github.com/microsoft/GitHub-Copilot-for-Azure)                                   | Official  | GitHub Copilot for Azure skills indexed from the plugin payload                 |
 | [microsoft/azure-skills](https://github.com/microsoft/azure-skills)                                                           | Official  | Microsoft Azure skills and MCP config resources                                 |
 | [awslabs/agent-plugins](https://github.com/awslabs/agent-plugins)                                                             | Official  | AWS Labs agent plugin skills                                                    |
 | [elastic/agent-skills](https://github.com/elastic/agent-skills)                                                               | Official  | Elastic official agent skills                                                   |
@@ -182,7 +181,7 @@ Preset index includes skills, agents, prompts, instructions, hooks, MCP config r
 | [Wirasm/PRPs-agentic-eng](https://github.com/Wirasm/PRPs-agentic-eng)                                                         | Community | PRP (Prompt Recipe Patterns)                                                    |
 | [qdhenry/Claude-Command-Suite](https://github.com/qdhenry/Claude-Command-Suite)                                               | Community | Claude commands & skills                                                        |
 
-Azure appears through two official Microsoft sources. `microsoft/GitHub-Copilot-for-Azure` indexes plugin-embedded skills from the Copilot for Azure repository, while `microsoft/azure-skills` indexes the top-level Azure Skills Plugin distribution and its Azure MCP config. The Azure Skills bundle is selectable: skills can be installed together, and the MCP config can be copied for review or explicitly merged into `.vscode/mcp.json`.
+Azure uses the canonical `microsoft/azure-skills` source for the Azure Skills Plugin distribution and its Azure MCP config. The selectable Azure Skills bundle can install skills together, while the MCP config can be copied for review or explicitly merged into `.vscode/mcp.json`.
 
 Cursor official plugins and Superpowers are indexed both as plugin manifest resources and as individual plugin-contained resources such as skills, agents, rules, hooks, and MCP config when present. Installing a plugin resource creates a managed copy for review; it does not run plugin hooks or merge MCP configuration without a separate explicit action.
 
@@ -437,6 +436,8 @@ Use `additionalSkillRoots` when workspace skills are stored outside the primary 
 |  34   | `resourceNinja.instructionBlock.globalHome.includeInstructions` | `inherit`              | Override Global Resource Home instruction listing policy (`inherit` / `on` / `off`)             |
 
 `staleSourceIndexUpdateMode` refreshes remote source indexes only. It does not reinstall installed files, and sources that fail to refresh keep their previous timestamp so they can be retried later.
+
+An explicit **Update Index** force-scans every configured source. Progress advances after each source finishes, and each result is logged as `OK`, `FAILED`, or `SKIPPED` in the **Agent Resources Ninja** Output Channel. Existing entries are preserved for failed sources; a GitHub rate-limit failure stops the remaining requests and reports them as not attempted. The notification and `#updateResourceIndex` tool return one localized summary instead of reporting a partial update as full success. From that summary, **Configure GitHub Authentication** opens the relevant setting directly without showing a second error dialog.
 
 > Settings are displayed in the order above
 

@@ -79,6 +79,17 @@ test("resource install sidecar metadata normalizes source and carries plugin fie
   );
 });
 
+test("retired source metadata migrates to the canonical source", () => {
+  assert.match(
+    skillInstallerSource,
+    /"microsoft-copilot-for-azure-plugin": "microsoft-azure-skills"/,
+  );
+  assert.match(
+    skillInstallerSource,
+    /return \(source && RETIRED_SOURCE_ALIASES\[source\]\) \|\| source \|\| "unknown";/,
+  );
+});
+
 test("mergeSkillMeta keeps unknown fields while applying latest values", () => {
   assert.match(
     skillInstallerSource,

@@ -72,8 +72,8 @@ const index = {
     { id: "official-source", name: "Official Source", type: "official" },
     { id: "community-source", name: "Community Source", type: "community" },
     {
-      id: "microsoft-copilot-for-azure-plugin",
-      name: "GitHub Copilot for Azure Skills (Official)",
+      id: "embedded-plugin-source",
+      name: "Embedded Plugin Source",
       type: "official",
     },
     {
@@ -115,7 +115,7 @@ const index = {
     },
     {
       name: "azure-rbac",
-      source: "microsoft-copilot-for-azure-plugin",
+      source: "embedded-plugin-source",
       kind: "skill",
       description: "Azure RBAC guidance from embedded plugin path",
       categories: ["azure"],
@@ -139,7 +139,7 @@ const index = {
     },
     {
       name: "azure-cost",
-      source: "microsoft-copilot-for-azure-plugin",
+      source: "embedded-plugin-source",
       kind: "skill",
       description: "Azure cost guidance from plugin path",
       categories: ["azure", "cost"],
@@ -207,14 +207,14 @@ test("duplicate skill names prefer top-level distribution paths", () => {
   assert.strictEqual(results[0].skill.path, "skills/azure-rbac");
   assert.strictEqual(
     results[1].skill.source,
-    "microsoft-copilot-for-azure-plugin",
+    "embedded-plugin-source",
   );
 });
 
 test("duplicate skill names show friendly source names", () => {
   const results = searchSkills(index, "azure-rbac", "skill");
   assert.match(results[0].description, /Microsoft Azure Skills \+ MCP/);
-  assert.match(results[1].description, /GitHub Copilot for Azure Skills/);
+  assert.match(results[1].description, /Embedded Plugin Source/);
 });
 
 test("duplicate skill names include source id and path detail", () => {
@@ -254,7 +254,7 @@ test("same-score official results beat awesome-list results", () => {
   assert.strictEqual(results[0].skill.source, "microsoft-azure-skills");
   assert.strictEqual(
     results[1].skill.source,
-    "microsoft-copilot-for-azure-plugin",
+    "embedded-plugin-source",
   );
   assert.strictEqual(results[2].skill.source, "awesome-source");
 });

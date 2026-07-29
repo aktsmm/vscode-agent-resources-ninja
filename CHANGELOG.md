@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.40] - 2026-07-30
+
+### Changed
+
+- ☁️ **Canonical Azure Source** - Consolidated the retired `microsoft/GitHub-Copilot-for-Azure` plugin payload source into `microsoft/azure-skills`, removing 38 stale duplicate resources and refreshing Resource Index v1.27.0 to 2571 resources across 23 sources / 廃止された `microsoft/GitHub-Copilot-for-Azure` plugin payload source を `microsoft/azure-skills` へ統合し、stale な重複リソース38件を削除しました。Resource Index v1.27.0 は23 sources・2571 resourcesです。
+
+### Fixed
+
+- 🔄 **Retired Source Metadata Migration** - Added a compatibility alias so installed skill metadata using the retired Azure source ID resolves to the canonical source during index matching and reinstall / 廃止済み Azure source ID を使うインストール済み skill metadata が index 照合・再インストール時に canonical source へ解決される互換 alias を追加しました。
+- 🚦 **Manual Source Update Results** - Explicit full-index updates now force-scan configured sources, advance progress only after each source completes, stop after a classified GitHub rate-limit failure, preserve failed and unattempted source entries, log per-source `OK` / `FAILED` / `SKIPPED` diagnostics, and return one localized partial-result summary to notifications and the Language Model Tool. The authentication recovery action opens the relevant setting directly without a duplicate error dialog / 明示的な全 index 更新は設定済み source を force scan し、各 source の完了後だけ進捗を進め、分類済み GitHub rate limit 後に停止して失敗・未試行 source の既存 entry を保持するようにしました。source ごとの `OK` / `FAILED` / `SKIPPED` 診断を記録し、通知と Language Model Tool へ日英の1件の部分結果 summary を返します。認証復旧 action は重複エラーダイアログを出さず該当設定を直接開きます。
+
 ## [0.2.39] - 2026-07-29
 
 ### Added

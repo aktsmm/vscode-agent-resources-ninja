@@ -1330,9 +1330,12 @@ test("startup stale update flow avoids duplicate missing-index prompts", () => {
   );
   assert.match(
     extensionSource,
-    /if \(failedSources\.length > 0\) \{[\s\S]*\} else if \(staleUpdateMode === "always"\) \{[\s\S]*\} else \{\s*await context\.globalState\.update\(/,
+    /if \(failures\.length === 0 && staleUpdateMode !== "always"\) \{\s*await context\.globalState\.update\(/,
     "Successful prompt-driven stale source updates should record the daily prompt after updates finish",
   );
+  assert.match(extensionSource, /runSourceIndexUpdateBatch\(/);
+  assert.match(extensionSource, /scaleSourceIndexProgressIncrement\(/);
+  assert.match(extensionSource, /\[Source Index\] \[SKIPPED\]/);
 });
 
 test("chat participant and MCP short responses use runtime localization helpers", () => {

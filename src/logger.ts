@@ -59,4 +59,11 @@ export const logger = {
   error(message: unknown, ...details: unknown[]): void {
     appendLine(`ERROR: ${formatMessage(message, details)}`);
   },
+  show(preserveFocus: boolean = true): void {
+    try {
+      getOutputChannel().show(preserveFocus);
+    } catch {
+      // Diagnostics must never break extension behavior.
+    }
+  },
 };

@@ -39,6 +39,13 @@ function requireTypeScriptModule(filePath, stubs = {}) {
 
 function createModule() {
   const writes = [];
+  const githubResponseModule = requireTypeScriptModule(
+    path.join(__dirname, "..", "src", "githubResponse.ts"),
+  );
+  const githubFetchModule = requireTypeScriptModule(
+    path.join(__dirname, "..", "src", "githubFetch.ts"),
+    { "./githubResponse": githubResponseModule },
+  );
   const uriApi = {
     joinPath: (base, ...segments) => ({
       fsPath: path.join(base.fsPath, ...segments),
@@ -138,6 +145,9 @@ function createModule() {
       "./i18n": {
         messages: {
           authRequired: () => "GitHub authentication required",
+          updatingSource: (name) => `Updating ${name}...`,
+          sourceIndexResourcesUpdatedProgress: (count) =>
+            `Updated ${count} resource(s)`,
         },
       },
       "./sharedResourceIndexStore": {
@@ -156,6 +166,8 @@ function createModule() {
           error: () => undefined,
         },
       },
+      "./githubFetch": githubFetchModule,
+      "./githubResponse": githubResponseModule,
     },
   );
 
@@ -166,7 +178,7 @@ function response(status, body, headers = {}) {
   return {
     ok: status >= 200 && status < 300,
     status,
-    headers,
+    headers: new Headers(headers),
     text: async () => (typeof body === "string" ? body : JSON.stringify(body)),
     json: async () => (typeof body === "string" ? JSON.parse(body) : body),
     clone() {
@@ -319,6 +331,166 @@ async function testPublicRawDoesNotAttachToken() {
   assert.strictEqual(result.addedSkills, 1);
   assert.strictEqual(rawCalls.length, 1);
   assert.ok(!rawCalls[0].Authorization, "Public raw fetch should omit token");
+}
+
+async function testFullUpdateStopsAfterRateLimit() {
+  const { moduleExports } = createModule();
+  const fetchCalls = [];
+  const progressEvents = [];
+  global.fetch = async (url) => {
+    fetchCalls.push(url);
+    assert.deepStrictEqual(
+      progressEvents.map((event) => event.increment),
+      [undefined],
+      "Progress must not advance before the source request completes",
+    );
+    if (
+      url ===
+      "https://api.github.com/repos/octo/rate-limited/git/trees/main?recursive=1"
+    ) {
+      return response(403, "API rate limit exceeded", {
+        "x-ratelimit-remaining": "0",
+        "x-ratelimit-reset": "1785344400",
+      });
+    }
+    throw new Error(`Unexpected fetch ${url}`);
+  };
+
+  const currentIndex = {
+    version: "1.0.0",
+    lastUpdated: "2026-06-20",
+    sources: [
+      {
+        id: "rate-limited",
+        name: "Rate Limited",
+        url: "https://github.com/octo/rate-limited",
+        type: "official",
+        branch: "main",
+        description: "Rate limited source",
+      },
+      {
+        id: "not-attempted",
+        name: "Not Attempted",
+        url: "https://github.com/octo/not-attempted",
+        type: "official",
+        branch: "main",
+        description: "Skipped source",
+      },
+    ],
+    skills: [
+      {
+        name: "existing-first",
+        source: "rate-limited",
+        path: "skills/existing-first",
+        categories: [],
+        description: "Existing first",
+      },
+      {
+        name: "existing-second",
+        source: "not-attempted",
+        path: "skills/existing-second",
+        categories: [],
+        description: "Existing second",
+      },
+    ],
+    categories: [],
+    bundles: [],
+  };
+
+  const result = await moduleExports.updateIndexFromSourcesWithResult(
+    { globalStorageUri: { fsPath: path.join("D:", "tmp", "storage") } },
+    currentIndex,
+    {
+      report(event) {
+        progressEvents.push(event);
+      },
+    },
+    { forceScan: true },
+  );
+
+  assert.deepStrictEqual(fetchCalls, [
+    "https://api.github.com/repos/octo/rate-limited/git/trees/main?recursive=1",
+  ]);
+  assert.strictEqual(result.succeeded.length, 0);
+  assert.deepStrictEqual(
+    result.failures.map((failure) => failure.entry.id),
+    ["rate-limited"],
+  );
+  assert.deepStrictEqual(
+    result.skipped.map((source) => source.id),
+    ["not-attempted"],
+  );
+  assert.deepStrictEqual(
+    result.index.skills.map((skill) => skill.name).sort(),
+    ["existing-first", "existing-second"],
+  );
+  assert.deepStrictEqual(progressEvents, [
+    { message: "Updating Rate Limited..." },
+    { increment: 50 },
+  ]);
+}
+
+async function testSingleSourceProgressAdvancesAfterScan() {
+  const { moduleExports } = createModule();
+  const progressEvents = [];
+  global.fetch = async (url) => {
+    assert.deepStrictEqual(
+      progressEvents.map((event) => event.increment),
+      [undefined],
+      "Single-source progress must not advance before its request completes",
+    );
+    if (
+      url ===
+      "https://api.github.com/repos/octo/progress-source/git/trees/main?recursive=1"
+    ) {
+      return response(200, {
+        tree: [{ path: "skills/demo/SKILL.md", type: "blob" }],
+      });
+    }
+    if (
+      url ===
+      "https://raw.githubusercontent.com/octo/progress-source/main/skills/demo/SKILL.md"
+    ) {
+      return response(
+        200,
+        "---\nname: demo\ndescription: Demo\nlicense: MIT\n---\n# Demo\n",
+      );
+    }
+    throw new Error(`Unexpected fetch ${url}`);
+  };
+
+  await moduleExports.updateIndexFromSingleSource(
+    { globalStorageUri: { fsPath: path.join("D:", "tmp", "storage") } },
+    {
+      version: "1.0.0",
+      lastUpdated: "2026-06-20",
+      sources: [
+        {
+          id: "progress-source",
+          name: "Progress Source",
+          url: "https://github.com/octo/progress-source",
+          type: "official",
+          branch: "main",
+          description: "Progress source",
+        },
+      ],
+      skills: [],
+      categories: [],
+      bundles: [],
+    },
+    "progress-source",
+    {
+      report(event) {
+        progressEvents.push(event);
+      },
+    },
+    { forceScan: true },
+  );
+
+  assert.deepStrictEqual(progressEvents, [
+    { message: "Updating Progress Source..." },
+    { message: "Updated 1 resource(s)", increment: 100 },
+  ]);
 }
 
 async function testRemoveSourceRemovesOnlyIndexedEntries() {
@@ -615,6 +787,8 @@ async function testRootResourceLicensePathIsNormalized() {
 async function main() {
   await testPrivateSourceUsesContentsFallback();
   await testPublicRawDoesNotAttachToken();
+  await testFullUpdateStopsAfterRateLimit();
+  await testSingleSourceProgressAdvancesAfterScan();
   await testRemoveSourceRemovesOnlyIndexedEntries();
   await testMutationBoundariesRejectMalformedIndexShape();
   await testSaveSkillIndexSyncsSharedStores();

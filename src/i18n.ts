@@ -34,6 +34,22 @@ const jaMessages = {
   updatingSource: "{0} を更新中...",
   indexUpdated: "✅ インデックスを更新しました ({0} → {1} リソース, {2})",
   updateFailed: "更新失敗: {0}",
+  staleSourceIndexUpdating: "古いソースインデックスを更新中...",
+  staleSourceIndexUpdated:
+    "✅ ソースインデックスを更新しました ({0}/{1} ソース)",
+  staleSourceIndexPartialFailed:
+    "ソースインデックスの更新結果: {0}/{2} 件更新、{1} 件失敗、{5} 件未試行。失敗: {3}。理由: {4}",
+  sourceIndexResourcesUpdatedProgress: "{0} 件のリソースを更新",
+  sourceIndexUpdated: "✅ {0} を更新しました: {1} → {2} リソース ({3})",
+  githubRateLimitReason: "GitHub API の rate limit に達しました",
+  githubRateLimitResetAt: "再試行可能: {0}",
+  githubSsoRequiredReason: "GitHub organization の SSO 認証が必要です",
+  githubClassicPatForbiddenReason:
+    "GitHub organization のポリシーにより classic PAT が拒否されました",
+  githubAuthRequiredReason:
+    "GitHub 認証またはリポジトリへのアクセス権が必要です",
+  actionShowDetails: "詳細を表示",
+  actionConfigureGitHubAuth: "GitHub 認証を設定",
   updating: "{0} を更新中...",
   updateSourceSelectRequired:
     "Remote Resources ビューから更新するソースを選択してください。",
@@ -179,6 +195,21 @@ const enMessages: MessageDictionary = {
   updatingSource: "Updating {0}...",
   indexUpdated: "✅ Index updated ({0} → {1} resources, {2})",
   updateFailed: "Update failed: {0}",
+  staleSourceIndexUpdating: "Updating stale source indexes...",
+  staleSourceIndexUpdated: "✅ Updated source indexes ({0}/{1} sources)",
+  staleSourceIndexPartialFailed:
+    "Source index update result: {0}/{2} updated, {1} failed, {5} not attempted. Failed: {3}. Reason: {4}",
+  sourceIndexResourcesUpdatedProgress: "Updated {0} resource(s)",
+  sourceIndexUpdated: "✅ Updated {0}: {1} → {2} resource(s) ({3})",
+  githubRateLimitReason: "GitHub API rate limit exceeded",
+  githubRateLimitResetAt: "retry after {0}",
+  githubSsoRequiredReason: "GitHub organization SSO authorization is required",
+  githubClassicPatForbiddenReason:
+    "GitHub organization policy rejected the classic PAT",
+  githubAuthRequiredReason:
+    "GitHub authentication or repository permission is required",
+  actionShowDetails: "Show Details",
+  actionConfigureGitHubAuth: "Configure GitHub Authentication",
   updating: "Updating {0}...",
   updateSourceSelectRequired:
     "Please select a source to update from the Remote Resources view.",
@@ -381,6 +412,43 @@ export const messages = {
   indexUpdated: (oldCount: number, newCount: number, diff: string) =>
     localize("indexUpdated", oldCount, newCount, diff),
   updateFailed: (error: string) => localize("updateFailed", error),
+  staleSourceIndexUpdating: () => localize("staleSourceIndexUpdating"),
+  staleSourceIndexUpdated: (updated: number, total: number) =>
+    localize("staleSourceIndexUpdated", updated, total),
+  staleSourceIndexPartialFailed: (
+    updated: number,
+    failed: number,
+    total: number,
+    failedSources: string,
+    reason: string,
+    skipped: number,
+  ) =>
+    localize(
+      "staleSourceIndexPartialFailed",
+      updated,
+      failed,
+      total,
+      failedSources,
+      reason,
+      skipped,
+    ),
+  sourceIndexResourcesUpdatedProgress: (count: number) =>
+    localize("sourceIndexResourcesUpdatedProgress", count),
+  sourceIndexUpdated: (
+    name: string,
+    oldCount: number,
+    newCount: number,
+    diff: string,
+  ) => localize("sourceIndexUpdated", name, oldCount, newCount, diff),
+  githubRateLimitReason: () => localize("githubRateLimitReason"),
+  githubRateLimitResetAt: (resetAt: string) =>
+    localize("githubRateLimitResetAt", resetAt),
+  githubSsoRequiredReason: () => localize("githubSsoRequiredReason"),
+  githubClassicPatForbiddenReason: () =>
+    localize("githubClassicPatForbiddenReason"),
+  githubAuthRequiredReason: () => localize("githubAuthRequiredReason"),
+  actionShowDetails: () => localize("actionShowDetails"),
+  actionConfigureGitHubAuth: () => localize("actionConfigureGitHubAuth"),
   updating: (name: string) => localize("updating", name),
   updateSourceSelectRequired: () => localize("updateSourceSelectRequired"),
   sourceIdNotFound: () => localize("sourceIdNotFound"),

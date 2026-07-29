@@ -64,11 +64,13 @@ import {
 } from "./userResourcesProvider";
 import {
   updateIndexFromSources,
+  updateIndexFromSourcesWithResult,
   updateIndexFromSingleSource,
   addSource,
   removeSource,
   searchGitHub,
   showAuthHelp,
+  openGitHubAuthSettings,
 } from "./indexUpdater";
 import { messages, isJapanese } from "./i18n";
 import { showSkillPreview, getSkillId } from "./skillPreview";
@@ -137,6 +139,13 @@ import {
 } from "./sharedResourceIndexStore";
 import { readSharedSourcesManifest } from "./sharedSourcesManifestStore";
 import { collectStaleSources } from "./sourceFreshness";
+import { GitHubResponseError, isGitHubResponseError } from "./githubResponse";
+import { runSourceIndexUpdateBatch } from "./sourceIndexUpdateBatch";
+import {
+  formatSourceIndexResetAt,
+  getSourceIndexUpdateNotificationKind,
+  scaleSourceIndexProgressIncrement,
+} from "./sourceIndexUpdatePresentation";
 
 // 現在の拡張機能バージョン
 const EXTENSION_VERSION =
@@ -227,6 +236,45 @@ function getLocalDateString(): string {
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const day = String(now.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function getSourceUpdateDisplayName(source: Source): string {
+  return source.name || source.id;
+}
+
+function formatSourceUpdateFailureReason(error: unknown): string {
+  if (!isGitHubResponseError(error)) {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  switch (error.kind) {
+    case "rate-limit":
+      return error.resetAt
+        ? `${messages.githubRateLimitReason()} (${messages.githubRateLimitResetAt(
+            formatSourceIndexResetAt(error.resetAt, vscode.env.language),
+          )})`
+        : messages.githubRateLimitReason();
+    case "sso-required":
+      return messages.githubSsoRequiredReason();
+    case "classic-pat-forbidden":
+      return messages.githubClassicPatForbiddenReason();
+    case "auth-required":
+      return messages.githubAuthRequiredReason();
+    default:
+      return error.message;
+  }
+}
+
+function shouldOfferGitHubAuth(error: unknown): error is GitHubResponseError {
+  return (
+    isGitHubResponseError(error) &&
+    [
+      "rate-limit",
+      "sso-required",
+      "classic-pat-forbidden",
+      "auth-required",
+    ].includes(error.kind)
+  );
 }
 
 function collectMissingIndexedInstalledSkillSources(
@@ -966,55 +1014,99 @@ export async function activate(
         }
       }
 
-      const failedSources: string[] = [];
-      index = await vscode.window.withProgress(
+      logger.info(
+        `[Source Index] [${new Date().toISOString()}] Updating ${staleSources.length} stale source(s)`,
+      );
+      const batchResult = await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
-          title: isJapanese()
-            ? "古いソースインデックスを更新中..."
-            : "Updating stale source indexes...",
+          title: messages.staleSourceIndexUpdating(),
           cancellable: false,
         },
-        async (progress) => {
-          let nextIndex = index;
-          let completed = 0;
-          for (const source of staleSources) {
-            progress.report({
-              message: `${source.name || source.id} (${completed + 1}/${staleSources.length})`,
-              increment: 100 / staleSources.length,
-            });
-            try {
-              nextIndex = await updateIndexFromSingleSource(
+        async (progress) =>
+          runSourceIndexUpdateBatch(
+            staleSources,
+            index,
+            async (nextIndex, source) =>
+              updateIndexFromSingleSource(
                 context,
                 nextIndex,
                 source.id,
-                progress,
+                {
+                  report(value) {
+                    progress.report({
+                      ...value,
+                      increment: scaleSourceIndexProgressIncrement(
+                        staleSources.length,
+                        value.increment,
+                      ),
+                    });
+                  },
+                },
                 { forceScan: true },
-              );
-            } catch (error) {
-              failedSources.push(source.name || source.id);
-              logger.warn(
-                `[Resource Ninja] Failed to update stale source ${source.id}:`,
-                error,
-              );
-            }
-            completed++;
-          }
-          return nextIndex;
-        },
+              ),
+          ),
       );
+      const { value: nextIndex, succeeded, failures, skipped } = batchResult;
+      index = nextIndex;
       skillIndex = index;
       browseProvider.refresh();
 
-      if (failedSources.length > 0) {
-        vscode.window.showWarningMessage(
-          isJapanese()
-            ? `古いソースインデックスの一部を更新できませんでした: ${failedSources.slice(0, 3).join(", ")}${failedSources.length > 3 ? "..." : ""}`
-            : `Some stale source indexes could not be updated: ${failedSources.slice(0, 3).join(", ")}${failedSources.length > 3 ? "..." : ""}`,
+      for (const source of succeeded) {
+        logger.info(
+          `[Source Index] [OK] ${getSourceUpdateDisplayName(source)}`,
         );
-      } else if (staleUpdateMode === "always") {
-        logger.info("[Resource Ninja] Stale source indexes updated.");
+      }
+      for (const failure of failures) {
+        logger.warn(
+          `[Source Index] [FAILED] ${getSourceUpdateDisplayName(failure.entry)}: ${formatSourceUpdateFailureReason(failure.error)}`,
+        );
+      }
+      for (const source of skipped) {
+        logger.info(
+          `[Source Index] [SKIPPED] ${getSourceUpdateDisplayName(source)}`,
+        );
+      }
+
+      const notificationKind = getSourceIndexUpdateNotificationKind(
+        failures.length,
+      );
+      if (notificationKind === "success") {
+        await vscode.window.showInformationMessage(
+          messages.staleSourceIndexUpdated(
+            succeeded.length,
+            staleSources.length,
+          ),
+        );
       } else {
+        const firstFailure = failures[0];
+        const detailAction = messages.actionShowDetails();
+        const authAction = messages.actionConfigureGitHubAuth();
+        const actions = shouldOfferGitHubAuth(firstFailure.error)
+          ? [detailAction, authAction]
+          : [detailAction];
+        const action = await vscode.window.showWarningMessage(
+          messages.staleSourceIndexPartialFailed(
+            succeeded.length,
+            failures.length,
+            staleSources.length,
+            failures
+              .slice(0, 3)
+              .map((failure) => getSourceUpdateDisplayName(failure.entry))
+              .join(", "),
+            formatSourceUpdateFailureReason(firstFailure.error),
+            skipped.length,
+          ),
+          ...actions,
+        );
+        if (action === detailAction) {
+          logger.show(true);
+        } else if (action === authAction) {
+          await openGitHubAuthSettings();
+        }
+      }
+
+      if (failures.length === 0 && staleUpdateMode !== "always") {
         await context.globalState.update(
           STALE_SOURCE_PROMPT_DATE_KEY,
           getLocalDateString(),
@@ -3939,29 +4031,78 @@ export async function activate(
       }
 
       const oldCount = getIndexResources(skillIndex).length;
+      const totalSources = skillIndex.sources.length;
 
       try {
-        await vscode.window.withProgress(
+        const updateResult = await vscode.window.withProgress(
           {
             location: vscode.ProgressLocation.Notification,
             title: messages.updatingIndex(),
             cancellable: false,
           },
-          async (progress) => {
-            skillIndex = await updateIndexFromSources(
+          async (progress) =>
+            updateIndexFromSourcesWithResult(
               context,
               skillIndex!,
               progress,
-            );
-          },
+              { forceScan: true },
+            ),
         );
+        skillIndex = updateResult.index;
         const newCount = getIndexResources(skillIndex).length;
         const diff = newCount - oldCount;
         const diffText = diff > 0 ? `+${diff}` : diff === 0 ? "±0" : `${diff}`;
-        vscode.window.showInformationMessage(
-          messages.indexUpdated(oldCount, newCount, diffText),
-        );
+        for (const source of updateResult.succeeded) {
+          logger.info(
+            `[Source Index] [OK] ${getSourceUpdateDisplayName(source)}`,
+          );
+        }
+        for (const failure of updateResult.failures) {
+          logger.warn(
+            `[Source Index] [FAILED] ${getSourceUpdateDisplayName(failure.entry)}: ${formatSourceUpdateFailureReason(failure.error)}`,
+          );
+        }
+        for (const source of updateResult.skipped) {
+          logger.info(
+            `[Source Index] [SKIPPED] ${getSourceUpdateDisplayName(source)}`,
+          );
+        }
+
+        if (updateResult.failures.length === 0) {
+          await vscode.window.showInformationMessage(
+            messages.indexUpdated(oldCount, newCount, diffText),
+          );
+        } else {
+          const firstFailure = updateResult.failures[0];
+          const detailAction = messages.actionShowDetails();
+          const authAction = messages.actionConfigureGitHubAuth();
+          const actions = shouldOfferGitHubAuth(firstFailure.error)
+            ? [detailAction, authAction]
+            : [detailAction];
+          const action = await vscode.window.showWarningMessage(
+            messages.staleSourceIndexPartialFailed(
+              updateResult.succeeded.length,
+              updateResult.failures.length,
+              totalSources,
+              updateResult.failures
+                .slice(0, 3)
+                .map((failure) =>
+                  getSourceUpdateDisplayName(failure.entry),
+                )
+                .join(", "),
+              formatSourceUpdateFailureReason(firstFailure.error),
+              updateResult.skipped.length,
+            ),
+            ...actions,
+          );
+          if (action === detailAction) {
+            logger.show(true);
+          } else if (action === authAction) {
+            await openGitHubAuthSettings();
+          }
+        }
         browseProvider.refresh();
+        return updateResult;
       } catch (error: unknown) {
         const errorMessage =
           error instanceof Error ? error.message : String(error);
@@ -3973,6 +4114,7 @@ export async function activate(
         } else {
           vscode.window.showErrorMessage(messages.updateFailed(errorMessage));
         }
+        return undefined;
       }
     },
   );
@@ -4026,7 +4168,12 @@ export async function activate(
         const diff = newCount - oldCount;
         const diffText = diff > 0 ? `+${diff}` : diff === 0 ? "±0" : `${diff}`;
         vscode.window.showInformationMessage(
-          `Updated ${item.source?.name || sourceId}: ${oldCount} → ${newCount} skills (${diffText})`,
+          messages.sourceIndexUpdated(
+            item.source?.name || sourceId,
+            oldCount,
+            newCount,
+            diffText,
+          ),
         );
         browseProvider.refresh();
       } catch (error: unknown) {

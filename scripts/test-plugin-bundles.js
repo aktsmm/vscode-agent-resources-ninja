@@ -5,11 +5,6 @@ const index = require("../resources/skill-index.json");
 
 const pluginBundles = [
   {
-    source: "microsoft-copilot-for-azure-plugin",
-    bundleId: "microsoft-copilot-for-azure-plugin-skills",
-    mode: "skill-only",
-  },
-  {
     source: "microsoft-azure-skills",
     bundleId: "microsoft-azure-skills-plugin-resources",
     mode: "skills-and-mcp",
@@ -131,7 +126,6 @@ for (const { source, bundleId, mode } of pluginBundles) {
 }
 
 for (const source of [
-  "microsoft-copilot-for-azure-plugin",
   "microsoft-azure-skills",
   "aws-agent-plugins",
   "elastic-agent-skills",

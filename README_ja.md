@@ -158,7 +158,6 @@ ext install yamapan.agent-resources-ninja
 | [github/awesome-copilot](https://github.com/github/awesome-copilot)                                                           | Official  | plugin から公開された skills / agents を含む GitHub 公式 Copilot リソース |
 | [cursor/plugins](https://github.com/cursor/plugins)                                                                           | Official  | Cursor 公式 plugin manifest、skills、agents、rules                        |
 | [MicrosoftDocs/Agent-Skills](https://github.com/MicrosoftDocs/Agent-Skills)                                                   | Official  | Microsoft 公式 Azure Agent Skills                                         |
-| [microsoft/GitHub-Copilot-for-Azure](https://github.com/microsoft/GitHub-Copilot-for-Azure)                                   | Official  | plugin payload から収録した GitHub Copilot for Azure 公式 skills          |
 | [microsoft/azure-skills](https://github.com/microsoft/azure-skills)                                                           | Official  | Microsoft Azure 公式 skills と MCP config リソース                        |
 | [awslabs/agent-plugins](https://github.com/awslabs/agent-plugins)                                                             | Official  | AWS Labs の Agent Plugins skills                                          |
 | [elastic/agent-skills](https://github.com/elastic/agent-skills)                                                               | Official  | Elastic 公式 Agent Skills                                                 |
@@ -178,7 +177,7 @@ ext install yamapan.agent-resources-ninja
 | [Wirasm/PRPs-agentic-eng](https://github.com/Wirasm/PRPs-agentic-eng)                                                         | Community | PRP (Prompt Recipe Patterns)                                              |
 | [qdhenry/Claude-Command-Suite](https://github.com/qdhenry/Claude-Command-Suite)                                               | Community | Claude コマンド・スキル集                                                 |
 
-Azure は Microsoft 公式 source が 2 系統あります。`microsoft/GitHub-Copilot-for-Azure` は Copilot for Azure リポジトリ内の plugin-embedded skills を index し、`microsoft/azure-skills` は top-level の Azure Skills Plugin 配布物と Azure MCP config を index します。Azure Skills bundle は選択式で、skills をまとめて入れられます。MCP config は確認用にコピーするか、`.vscode/mcp.json` へ明示的にマージするかを選べます。
+Azure は canonical な `microsoft/azure-skills` source から Azure Skills Plugin 配布物と Azure MCP config を index します。Azure Skills bundle は選択式で、skills をまとめて入れられます。MCP config は確認用にコピーするか、`.vscode/mcp.json` へ明示的にマージするかを選べます。
 
 Cursor 公式 plugins と Superpowers は、plugin manifest リソースとしても、plugin 内の skills、agents、rules、hooks、MCP config などの個別リソースとしても index します。plugin リソースのインストールは確認用の managed copy を作成するだけで、plugin hooks の実行や MCP config のマージは別途明示操作がない限り行いません。
 
@@ -432,6 +431,8 @@ workspace skill を主 Workspace Skill Directory 以外に置く場合は、`add
 |  34  | `resourceNinja.instructionBlock.globalHome.includeInstructions` | `inherit`              | Global Resource Home 向け instruction 掲載ポリシーの上書き（`inherit` / `on` / `off`） |
 
 `staleSourceIndexUpdateMode` は remote source index だけを更新します。インストール済みファイルは再インストールせず、更新に失敗した source は前回 timestamp のまま残るため、後から再試行できます。
+
+明示的な **Update Index** は、設定済み source をすべて force scan します。進捗は各 source の処理完了後に進み、結果は **Agent Resources Ninja** Output Channel に `OK` / `FAILED` / `SKIPPED` として記録されます。失敗した source の既存 entry は保持し、GitHub rate limit を検出した場合は残りの request を停止して未試行として報告します。通知と `#updateResourceIndex` tool は、部分成功を全成功と表示せず、日英の1件の結果 summary に統合します。summary の **GitHub 認証を設定** は、2つ目のエラーダイアログを表示せず該当設定を直接開きます。
 
 > 設定画面では上記の順序で表示されます
 
