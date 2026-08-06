@@ -190,10 +190,7 @@ test("keeps batch diagnostics and anonymous raw guards wired", () => {
   assert.doesNotMatch(attachTokenFunction, /return isRawGitHubUrl\(url\)/);
   assert.match(mcpToolsSource, /SourceIndexUpdateAllResult \| undefined/);
   assert.match(mcpToolsSource, /formatSourceIndexUpdateToolResult\(/);
-  assert.doesNotMatch(
-    mcpToolsSource,
-    /✅ スキルインデックスを更新しました/,
-  );
+  assert.doesNotMatch(mcpToolsSource, /✅ スキルインデックスを更新しました/);
 });
 
 console.log("Source index update presentation tests passed");

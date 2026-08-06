@@ -46,7 +46,12 @@ async function main() {
   );
   const githubFetchModule = requireTypeScriptModule(
     path.join(__dirname, "..", "src", "githubFetch.ts"),
-    { "./githubResponse": githubResponseModule },
+    {
+      "./githubResponse": githubResponseModule,
+      "./githubAuth": {
+        resolveGitHubTokenAfterFailure: async () => undefined,
+      },
+    },
   );
 
   const tests = [
@@ -381,12 +386,26 @@ async function main() {
         const headCalls = fetchCalls.filter((call) => call.method === "HEAD");
         assert.strictEqual(
           headCalls.length,
-          2,
-          "Should still probe main/master before API fallback",
+          4,
+          "Should probe raw and authenticated Contents API for main/master",
+        );
+        const rawHeadCalls = headCalls.filter((call) =>
+          call.url.startsWith("https://raw.githubusercontent.com/"),
+        );
+        const apiHeadCalls = headCalls.filter((call) =>
+          call.url.startsWith("https://api.github.com/"),
+        );
+        assert.strictEqual(rawHeadCalls.length, 2);
+        assert.strictEqual(apiHeadCalls.length, 2);
+        assert.ok(
+          rawHeadCalls.every((call) => !call.headers.Authorization),
+          "Raw HEAD checks should not attach Authorization header",
         );
         assert.ok(
-          headCalls.every((call) => !call.headers.Authorization),
-          "Raw HEAD checks should not attach Authorization header",
+          apiHeadCalls.every(
+            (call) => call.headers.Authorization === "token branch-token",
+          ),
+          "Private Contents API HEAD checks should use Authorization",
         );
       },
     },

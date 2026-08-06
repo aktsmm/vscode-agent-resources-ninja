@@ -44,7 +44,15 @@ function createModule() {
   );
   const githubFetchModule = requireTypeScriptModule(
     path.join(__dirname, "..", "src", "githubFetch.ts"),
-    { "./githubResponse": githubResponseModule },
+    {
+      "./githubResponse": githubResponseModule,
+      "./githubAuth": {
+        resolveGitHubTokenAfterFailure: async () => undefined,
+      },
+    },
+  );
+  const sourceUpdateReconcileModule = requireTypeScriptModule(
+    path.join(__dirname, "..", "src", "sourceUpdateReconcile.ts"),
   );
   const uriApi = {
     joinPath: (base, ...segments) => ({
@@ -78,6 +86,7 @@ function createModule() {
       vscode: vscodeStub,
       "./skillIndex": {
         getResourceKind: (resource) => resource.kind || "skill",
+        createBundleKey: (bundle) => `${bundle.source}:${bundle.id}`,
         normalizeGitHubRepoUrl: (url) => {
           const trimmed = url
             .trim()
@@ -168,6 +177,7 @@ function createModule() {
       },
       "./githubFetch": githubFetchModule,
       "./githubResponse": githubResponseModule,
+      "./sourceUpdateReconcile": sourceUpdateReconcileModule,
     },
   );
 
@@ -409,6 +419,7 @@ async function testFullUpdateStopsAfterRateLimit() {
   );
 
   assert.deepStrictEqual(fetchCalls, [
+    "https://api.github.com/repos/octo/rate-limited",
     "https://api.github.com/repos/octo/rate-limited/git/trees/main?recursive=1",
   ]);
   assert.strictEqual(result.succeeded.length, 0);

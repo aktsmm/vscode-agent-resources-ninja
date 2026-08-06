@@ -205,10 +205,7 @@ test("duplicate skill names prefer top-level distribution paths", () => {
   const results = searchSkills(index, "azure-rbac", "skill");
   assert.strictEqual(results[0].skill.source, "microsoft-azure-skills");
   assert.strictEqual(results[0].skill.path, "skills/azure-rbac");
-  assert.strictEqual(
-    results[1].skill.source,
-    "embedded-plugin-source",
-  );
+  assert.strictEqual(results[1].skill.source, "embedded-plugin-source");
 });
 
 test("duplicate skill names show friendly source names", () => {
@@ -252,10 +249,7 @@ test("empty search also prefers top-level paths for same-name resources", () => 
 test("same-score official results beat awesome-list results", () => {
   const results = searchSkills(index, "azure-cost", "skill");
   assert.strictEqual(results[0].skill.source, "microsoft-azure-skills");
-  assert.strictEqual(
-    results[1].skill.source,
-    "embedded-plugin-source",
-  );
+  assert.strictEqual(results[1].skill.source, "embedded-plugin-source");
   assert.strictEqual(results[2].skill.source, "awesome-source");
 });
 

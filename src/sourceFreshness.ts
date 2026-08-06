@@ -4,6 +4,7 @@ import type { ScanMeta } from "./sharedManifest";
 export const STALE_SOURCE_INDEX_DAYS = 30;
 export const STALE_SOURCE_INDEX_MAX_AGE_MS =
   STALE_SOURCE_INDEX_DAYS * 24 * 60 * 60 * 1000;
+export const STALE_SOURCE_INDEX_MAX_PER_STARTUP = 5;
 
 export interface SourceFreshnessInfo {
   source: Source;
@@ -91,4 +92,44 @@ export function stampIndexedSources(
       ? { ...source, lastIndexedAt: indexedAt }
       : source,
   );
+}
+
+export interface StaleSourceStartupSelection {
+  selected: Source[];
+  deferred: Source[];
+  nextCursorSourceId?: string;
+}
+
+/**
+ * Caps how many stale sources one startup refreshes and rotates the starting point,
+ * so a source that keeps failing cannot starve the ones behind it.
+ */
+export function selectStaleSourcesForStartup(
+  staleSources: Source[],
+  options?: { maxPerStartup?: number; startAfterSourceId?: string },
+): StaleSourceStartupSelection {
+  const maxPerStartup =
+    options?.maxPerStartup ?? STALE_SOURCE_INDEX_MAX_PER_STARTUP;
+
+  if (staleSources.length === 0 || maxPerStartup <= 0) {
+    return { selected: [], deferred: [...staleSources] };
+  }
+
+  const cursorIndex = options?.startAfterSourceId
+    ? staleSources.findIndex(
+        (source) => source.id === options.startAfterSourceId,
+      )
+    : -1;
+  const startIndex = cursorIndex >= 0 ? cursorIndex + 1 : 0;
+  const rotated = [
+    ...staleSources.slice(startIndex),
+    ...staleSources.slice(0, startIndex),
+  ];
+
+  const selected = rotated.slice(0, maxPerStartup);
+  return {
+    selected,
+    deferred: rotated.slice(maxPerStartup),
+    nextCursorSourceId: selected[selected.length - 1]?.id,
+  };
 }

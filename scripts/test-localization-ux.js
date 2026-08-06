@@ -22,6 +22,14 @@ const extensionSource = fs.readFileSync(
   path.join(repoRoot, "src", "extension.ts"),
   "utf8",
 );
+const indexUpdaterSource = fs.readFileSync(
+  path.join(repoRoot, "src", "indexUpdater.ts"),
+  "utf8",
+);
+const skillInstallerSource = fs.readFileSync(
+  path.join(repoRoot, "src", "skillInstaller.ts"),
+  "utf8",
+);
 const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
 const readmeJa = fs.readFileSync(path.join(repoRoot, "README_ja.md"), "utf8");
 
@@ -194,6 +202,65 @@ test("GitHub token setting uses password presentation", () => {
     ].editPresentation,
     "password",
   );
+});
+
+test("clear GitHub token recovery is localized and registered", () => {
+  const clearCommand = packageJson.contributes.commands.find(
+    (command) => command.command === "resourceNinja.clearGitHubToken",
+  );
+  assert.strictEqual(clearCommand.title, "%command.clearGitHubToken%");
+  assert.strictEqual(
+    nls["command.clearGitHubToken"],
+    "Clear GitHub Token (SecretStorage only)",
+  );
+  assert.strictEqual(
+    nlsJa["command.clearGitHubToken"],
+    "GitHub トークンをクリア（SecretStorage のみ）",
+  );
+  assert.match(
+    extensionSource,
+    /registerCommand\(\s*"resourceNinja\.clearGitHubToken",\s*clearStoredGitHubTokenWithFeedback,\s*\)/,
+  );
+  assert.match(
+    extensionSource,
+    /context\.subscriptions\.push\([\s\S]*?\bclearGitHubTokenCmd\b[\s\S]*?\);/,
+  );
+});
+
+test("clear-token recovery is conditional and README guidance stays in parity", () => {
+  for (const source of [indexUpdaterSource, skillInstallerSource]) {
+    assert.match(source, /hasStoredGitHubToken\(\)/);
+    assert.match(source, /resourceNinja\.clearGitHubToken/);
+  }
+  for (const expected of [
+    "Clear GitHub Token (SecretStorage only)",
+    "does not modify `GITHUB_TOKEN` / `GH_TOKEN`",
+    "legacy `resourceNinja.githubToken` setting",
+    "re-migration",
+  ]) {
+    assert.ok(readme.includes(expected), `README.md should include: ${expected}`);
+  }
+  for (const expected of [
+    "GitHub トークンをクリア（SecretStorage のみ）",
+    "`GITHUB_TOKEN` / `GH_TOKEN`",
+    "legacy の `resourceNinja.githubToken` setting",
+    "再移行",
+  ]) {
+    assert.ok(
+      readmeJa.includes(expected),
+      `README_ja.md should include: ${expected}`,
+    );
+  }
+});
+
+test("diagnostics report credential source without token values", () => {
+  assert.match(extensionSource, /GitHub Credential Source: \$\{githubAuth\.source\}/);
+  assert.match(
+    skillInstallerSource,
+    /GitHub Credential Source: \$\{githubAuth\.source\}/,
+  );
+  assert.doesNotMatch(extensionSource, /GitHub Credential Token:/);
+  assert.doesNotMatch(skillInstallerSource, /GitHub Credential Token:/);
 });
 
 test("GitHub token guidance follows least privilege", () => {

@@ -3,15 +3,31 @@ import { messages } from "./i18n";
 
 export type GitHubTokenSource = "secret" | "config" | "env" | "gh-cli" | "none";
 
+export interface ResolveGitHubTokenOptions {
+  excludeSources?: readonly GitHubTokenSource[];
+}
+
 /** SecretStorage に保存する GitHub トークンのキー */
 const GITHUB_TOKEN_SECRET_KEY = "resourceNinja.githubToken";
+export const GITHUB_AUTH_TIMEOUT_MS = 5000;
 
 /** activate 時に注入される SecretStorage 参照 */
 let secretStorage: vscode.SecretStorage | undefined;
+let pendingSecretStorageMutation: Promise<void> = Promise.resolve();
 
 /** SecretStorage を初期化する（activate から呼ぶ） */
 export function initializeGitHubAuth(context: vscode.ExtensionContext): void {
   secretStorage = context.secrets;
+  pendingSecretStorageMutation = Promise.resolve();
+}
+
+function runSecretStorageMutation<T>(mutation: () => Promise<T>): Promise<T> {
+  const result = pendingSecretStorageMutation.then(mutation, mutation);
+  pendingSecretStorageMutation = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
 }
 
 function getConfiguredGitHubToken(): string | undefined {
@@ -34,19 +50,21 @@ async function getSecretToken(): Promise<string | undefined> {
  * 移行が発生した場合のみ true を返す（冪等）。
  */
 export async function migrateConfiguredGitHubTokenToSecretStorage(): Promise<boolean> {
-  if (!secretStorage) {
-    return false;
-  }
-  const configToken = getConfiguredGitHubToken();
-  if (!configToken) {
-    return false;
-  }
-  const stored = (await secretStorage.get(GITHUB_TOKEN_SECRET_KEY))?.trim();
-  if (stored === configToken) {
-    return false;
-  }
-  await secretStorage.store(GITHUB_TOKEN_SECRET_KEY, configToken);
-  return true;
+  return runSecretStorageMutation(async () => {
+    if (!secretStorage) {
+      return false;
+    }
+    const configToken = getConfiguredGitHubToken();
+    if (!configToken) {
+      return false;
+    }
+    const stored = (await secretStorage.get(GITHUB_TOKEN_SECRET_KEY))?.trim();
+    if (stored === configToken) {
+      return false;
+    }
+    await secretStorage.store(GITHUB_TOKEN_SECRET_KEY, configToken);
+    return true;
+  });
 }
 
 /**
@@ -54,20 +72,47 @@ export async function migrateConfiguredGitHubTokenToSecretStorage(): Promise<boo
  * 値があれば保存し、空になっていれば削除する（セッション中の編集を反映）。
  */
 export async function syncConfiguredGitHubToken(): Promise<void> {
-  if (!secretStorage) {
-    return;
-  }
-  const configToken = getConfiguredGitHubToken();
-  if (configToken) {
-    await secretStorage.store(GITHUB_TOKEN_SECRET_KEY, configToken);
-  } else {
-    await secretStorage.delete(GITHUB_TOKEN_SECRET_KEY);
-  }
+  return runSecretStorageMutation(async () => {
+    if (!secretStorage) {
+      return;
+    }
+    const configToken = getConfiguredGitHubToken();
+    if (configToken) {
+      await secretStorage.store(GITHUB_TOKEN_SECRET_KEY, configToken);
+    } else {
+      await secretStorage.delete(GITHUB_TOKEN_SECRET_KEY);
+    }
+  });
 }
 
 /** SecretStorage に保存されたトークンを削除する（reset all 用） */
-export async function deleteStoredGitHubToken(): Promise<void> {
-  await secretStorage?.delete(GITHUB_TOKEN_SECRET_KEY);
+export async function deleteStoredGitHubToken(): Promise<boolean> {
+  return runSecretStorageMutation(async () => {
+    if (!secretStorage) {
+      return false;
+    }
+    const storedToken = await secretStorage.get(GITHUB_TOKEN_SECRET_KEY);
+    if (storedToken === undefined) {
+      return false;
+    }
+    await secretStorage.delete(GITHUB_TOKEN_SECRET_KEY);
+    return true;
+  });
+}
+
+export async function clearStoredGitHubTokenWithFeedback(): Promise<void> {
+  try {
+    const deleted = await deleteStoredGitHubToken();
+    await vscode.window.showInformationMessage(
+      deleted ? messages.githubTokenCleared() : messages.githubTokenNotStored(),
+    );
+  } catch {
+    await vscode.window.showErrorMessage(messages.githubTokenClearFailed());
+  }
+}
+
+export async function hasStoredGitHubToken(): Promise<boolean> {
+  return Boolean(await getSecretToken());
 }
 
 /** gh CLI からトークンを取得 */
@@ -77,7 +122,7 @@ export async function getGhCliToken(): Promise<string | null> {
     const token = await new Promise<string>((resolve, reject) => {
       exec(
         "gh auth token",
-        { timeout: 5000, windowsHide: true },
+        { timeout: GITHUB_AUTH_TIMEOUT_MS, windowsHide: true },
         (error: Error | null, stdout: string) => {
           if (error) {
             reject(error);
@@ -105,31 +150,60 @@ function getEnvToken(): string | undefined {
  * SecretStorage / 環境変数 / gh CLI / 旧設定 の順でトークンを解決する。
  * 旧設定（githubToken）は後方互換のための最終フォールバック。
  */
-export async function resolveGitHubToken(): Promise<{
+export async function resolveGitHubToken(
+  options: ResolveGitHubTokenOptions = {},
+): Promise<{
   token: string | undefined;
   source: GitHubTokenSource;
 }> {
+  const excludedSources = new Set(options.excludeSources);
   const secretToken = await getSecretToken();
-  if (secretToken) {
+  if (secretToken && !excludedSources.has("secret")) {
     return { token: secretToken, source: "secret" };
   }
 
   const envToken = getEnvToken();
-  if (envToken) {
+  if (envToken && !excludedSources.has("env")) {
     return { token: envToken, source: "env" };
   }
 
-  const ghCliToken = await getGhCliToken();
-  if (ghCliToken) {
-    return { token: ghCliToken, source: "gh-cli" };
+  if (!excludedSources.has("gh-cli")) {
+    const ghCliToken = await getGhCliToken();
+    if (ghCliToken) {
+      return { token: ghCliToken, source: "gh-cli" };
+    }
   }
 
   const configToken = getConfiguredGitHubToken();
-  if (configToken) {
+  if (configToken && !excludedSources.has("config")) {
     return { token: configToken, source: "config" };
   }
 
   return { token: undefined, source: "none" };
+}
+
+export async function resolveGitHubTokenAfterFailure(
+  failedToken: string,
+): Promise<{ token: string; source: GitHubTokenSource } | undefined> {
+  const current = await resolveGitHubToken();
+  if (current.token && current.token !== failedToken) {
+    return { token: current.token, source: current.source };
+  }
+  if (current.source !== "secret") {
+    return undefined;
+  }
+
+  const excludeSources: GitHubTokenSource[] = ["secret"];
+  while (true) {
+    const fallback = await resolveGitHubToken({ excludeSources });
+    if (!fallback.token || fallback.source === "none") {
+      return undefined;
+    }
+    if (fallback.token !== failedToken) {
+      return { token: fallback.token, source: fallback.source };
+    }
+    excludeSources.push(fallback.source);
+  }
 }
 
 /** トークンのみ取得したい場合のヘルパー */
@@ -148,13 +222,19 @@ export async function checkGitHubAuth(): Promise<{
 
   if (token) {
     try {
-      const response = await fetch("https://api.github.com/user", {
-        headers: { Authorization: `token ${token}` },
-      });
-      if (response.ok) {
+      if (await validateGitHubToken(token)) {
         return {
           authenticated: true,
           method: source,
+          message: "GitHub token authenticated",
+        };
+      }
+
+      const fallback = await resolveGitHubTokenAfterFailure(token);
+      if (fallback && (await validateGitHubToken(fallback.token))) {
+        return {
+          authenticated: true,
+          method: fallback.source,
           message: "GitHub token authenticated",
         };
       }
@@ -168,4 +248,12 @@ export async function checkGitHubAuth(): Promise<{
     method: "none",
     message: messages.authRequired(),
   };
+}
+
+async function validateGitHubToken(token: string): Promise<boolean> {
+  const response = await fetch("https://api.github.com/user", {
+    headers: { Authorization: `token ${token}` },
+    signal: AbortSignal.timeout(GITHUB_AUTH_TIMEOUT_MS),
+  });
+  return response.ok;
 }

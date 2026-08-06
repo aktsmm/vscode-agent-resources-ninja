@@ -29,7 +29,7 @@ function Test-VscePat {
     return $false
   }
 
-  & npx --yes vsce verify-pat -p $Pat *> $null
+  & npx --yes @vscode/vsce verify-pat -p $Pat *> $null
   return ($LASTEXITCODE -eq 0)
 }
 
@@ -67,5 +67,5 @@ if (
   $effectiveArgs += @('-p', $patInfo.Value)
 }
 
-& npx --yes vsce @effectiveArgs
+& npx --yes @vscode/vsce @effectiveArgs
 exit $LASTEXITCODE

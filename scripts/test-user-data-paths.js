@@ -1,63 +1,48 @@
 #!/usr/bin/env node
 
+// Exercises the real path helpers from src so this test cannot pass against a stale copy.
+
 const assert = require("assert");
+const fs = require("fs");
+const Module = require("module");
 const path = require("path");
+const ts = require("typescript");
 
-function getVsCodeUserDataFolderName(appName = "Visual Studio Code") {
-  const normalizedName = appName.toLowerCase();
+function requireTypeScriptModule(filePath, stubs = {}) {
+  const source = fs.readFileSync(filePath, "utf8");
+  const transpiled = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+    },
+    fileName: filePath,
+  });
 
-  if (normalizedName.includes("insiders") && normalizedName.includes("code")) {
-    return "Code - Insiders";
-  }
+  const loadedModule = new Module(filePath, module);
+  loadedModule.filename = filePath;
+  loadedModule.paths = Module._nodeModulePaths(path.dirname(filePath));
 
-  if (normalizedName.includes("codium")) {
-    return "VSCodium";
-  }
-
-  if (normalizedName.includes("cursor")) {
-    return "Cursor";
-  }
-
-  return "Code";
-}
-
-function getVsCodeUserDataPath({
-  platform,
-  homeDir,
-  env = {},
-  appName = "Visual Studio Code",
-}) {
-  const folderName = getVsCodeUserDataFolderName(appName);
-
-  switch (platform) {
-    case "win32": {
-      const appData = env.APPDATA || path.join(homeDir, "AppData", "Roaming");
-      return path.join(appData, folderName, "User");
+  const originalLoad = Module._load;
+  Module._load = function patchedLoad(request, parent, isMain) {
+    if (Object.prototype.hasOwnProperty.call(stubs, request)) {
+      return stubs[request];
     }
-    case "darwin":
-      return path.join(
-        homeDir,
-        "Library",
-        "Application Support",
-        folderName,
-        "User",
-      );
-    case "linux": {
-      const configHome = env.XDG_CONFIG_HOME || path.join(homeDir, ".config");
-      return path.join(configHome, folderName, "User");
-    }
-    default:
-      return path.join(homeDir, ".config", folderName, "User");
+    return originalLoad(request, parent, isMain);
+  };
+
+  try {
+    loadedModule._compile(transpiled.outputText, filePath);
+  } finally {
+    Module._load = originalLoad;
   }
+
+  return loadedModule.exports;
 }
 
-function getVsCodeUserPromptsPath(options) {
-  return path.join(getVsCodeUserDataPath(options), "prompts");
-}
-
-function getCopilotHomePath({ homeDir }) {
-  return path.join(homeDir, ".copilot");
-}
+const { getVsCodeUserPromptsPath, getCopilotHomePath } =
+  requireTypeScriptModule(
+    path.join(__dirname, "..", "src", "userDataPaths.ts"),
+  );
 
 function normalize(value) {
   return value.replace(/\\/g, "/");

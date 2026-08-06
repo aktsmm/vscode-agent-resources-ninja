@@ -8,12 +8,14 @@ import {
   Source,
   Bundle,
   ResourceKind,
+  createBundleKey,
   getResourceKind,
   normalizeGitHubRepoUrl,
   saveSkillIndex,
 } from "./skillIndex";
 import {
   detectResourceKindFromPath,
+  detectPluginChildResourceKind,
   getDefaultResourceCategories,
   getFallbackResourceName,
   getPluginIdFromPath,
@@ -23,11 +25,15 @@ import {
   isNestedResourcePathUnderSkillRoot,
 } from "./resourceKinds";
 import { messages } from "./i18n";
-import { getGitHubToken } from "./githubAuth";
+import { getGitHubToken, hasStoredGitHubToken } from "./githubAuth";
 export { checkGitHubAuth } from "./githubAuth";
 import { LICENSE_EXTRACTION, INDEX_LIMITS } from "./constants";
 import { logger } from "./logger";
-import { fetchGitHubWithOptionalAuthRetry } from "./githubFetch";
+import {
+  fetchGitHubWithOptionalAuthRetry,
+  fetchGitHubWithTimeout,
+  GITHUB_REQUEST_TIMEOUT_MS,
+} from "./githubFetch";
 import {
   createGitHubResponseError,
   isGitHubResponseError,
@@ -37,8 +43,13 @@ import {
   updateSharedScanMetadata,
 } from "./sharedResourceIndexStore";
 import { stampIndexedSources } from "./sourceFreshness";
+import {
+  createEmptySourceScanError,
+  assertSourceRepositoryIdentity,
+  mergeScannedSource,
+  reconcileSourceScanResult,
+} from "./sourceUpdateReconcile";
 
-const REQUEST_TIMEOUT_MS = 15000;
 const FETCH_CONCURRENCY = 8;
 
 function assertMutableIndexShape(
@@ -206,25 +217,6 @@ function parsePluginManifestMetadata(
   };
 }
 
-async function fetchWithTimeout(
-  url: string,
-  options?: RequestInit,
-  timeoutMs: number = REQUEST_TIMEOUT_MS,
-): Promise<Response> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } catch (error) {
-    if (controller.signal.aborted) {
-      throw new Error(`Request timeout: ${url}`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
 function buildRawContentUrl(
   owner: string,
   repo: string,
@@ -255,7 +247,7 @@ export async function fetchGitHubTextContent(
   branch: string,
   filePath: string,
   token?: string,
-  timeoutMs: number = REQUEST_TIMEOUT_MS,
+  timeoutMs: number = GITHUB_REQUEST_TIMEOUT_MS,
 ): Promise<string | undefined> {
   const rawUrl = buildRawContentUrl(owner, repo, branch, filePath);
   const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeGitHubContentPath(filePath)}?ref=${encodeURIComponent(branch)}`;
@@ -263,7 +255,7 @@ export async function fetchGitHubTextContent(
     accept: "text/plain",
     token,
     authenticatedUrl: apiUrl,
-    request: (url, init) => fetchWithTimeout(url, init, timeoutMs),
+    request: (url, init) => fetchGitHubWithTimeout(url, init, timeoutMs),
   });
   if (response.ok) {
     return await response.text();
@@ -479,7 +471,6 @@ async function githubFetch(url: string, token?: string): Promise<Response> {
   return fetchGitHubWithOptionalAuthRetry(url, {
     accept: "application/vnd.github.v3+json",
     token: effectiveToken,
-    request: (requestUrl, init) => fetchWithTimeout(requestUrl, init),
   });
 }
 
@@ -490,6 +481,55 @@ function createPrivateRepositoryAccessError(
   return new Error(
     `Repository not found or private: ${owner}/${repo}. Configure a GitHub token with repository Contents: Read access, or authenticate with gh CLI for this repository.`,
   );
+}
+
+interface GitHubRepositoryMetadata {
+  id?: number;
+  owner: string;
+  repo: string;
+  defaultBranch?: string;
+}
+
+/**
+ * Resolves the canonical owner/repo plus the numeric repository id in one call so
+ * renames are followed and repository takeovers can be detected.
+ */
+async function fetchGitHubRepositoryMetadata(
+  owner: string,
+  repoName: string,
+  token?: string,
+): Promise<GitHubRepositoryMetadata | undefined> {
+  try {
+    const response = await githubFetch(
+      `https://api.github.com/repos/${owner}/${repoName}`,
+      token,
+    );
+    if (!response.ok) {
+      return undefined;
+    }
+
+    const repoInfo = (await response.json()) as {
+      id?: number;
+      full_name?: string;
+      default_branch?: string;
+    };
+    const [canonicalOwner, canonicalRepo] = (
+      repoInfo.full_name || `${owner}/${repoName}`
+    ).split("/");
+
+    return {
+      id: typeof repoInfo.id === "number" ? repoInfo.id : undefined,
+      owner: canonicalOwner || owner,
+      repo: canonicalRepo || repoName,
+      defaultBranch: repoInfo.default_branch,
+    };
+  } catch (error) {
+    logger.warn(
+      `[Resource Ninja] Failed to resolve repository metadata for ${owner}/${repoName}:`,
+      error,
+    );
+    return undefined;
+  }
 }
 
 function throwIfTreeResponseTruncated(
@@ -642,7 +682,11 @@ export async function scanRepositoryForSkills(
   repoUrl: string,
   token?: string,
   preferredBranch?: string, // skill-index.json で指定されたブランチ
-  sourceOptions?: Pick<Source, "includePaths" | "excludePaths">,
+  sourceOptions?: Pick<
+    Source,
+    "id" | "name" | "repoId" | "scanner" | "includePaths" | "excludePaths"
+  >,
+  scanOptions?: { allowRepositoryChange?: boolean },
 ): Promise<{ skills: Skill[]; source: Source; bundles?: Bundle[] } | null> {
   const normalizedRepoUrl = normalizeGitHubRepoUrl(repoUrl);
   // URLからowner/repoを抽出
@@ -651,24 +695,52 @@ export async function scanRepositoryForSkills(
     throw new Error("Invalid GitHub repository URL");
   }
 
-  const [, owner, repo] = match;
-  const repoName = repo.replace(/\.git$/, "");
+  const [, requestedOwner, requestedRepo] = match;
+  const requestedRepoName = requestedRepo.replace(/\.git$/, "");
 
-  // ブランチを決定: 指定されたブランチ → デフォルトブランチを取得
-  let branch = preferredBranch;
-  if (!branch) {
-    // GitHub API でデフォルトブランチを取得
-    const repoInfoUrl = `https://api.github.com/repos/${owner}/${repoName}`;
-    const repoInfoResponse = await githubFetch(repoInfoUrl, token);
-    if (repoInfoResponse.ok) {
-      const repoInfo = (await repoInfoResponse.json()) as {
-        default_branch: string;
-      };
-      branch = repoInfo.default_branch;
-    } else {
-      branch = "main"; // フォールバック
-    }
+  const metadata = await fetchGitHubRepositoryMetadata(
+    requestedOwner,
+    requestedRepoName,
+    token,
+  );
+
+  assertSourceRepositoryIdentity({
+    sourceId: sourceOptions?.id,
+    sourceName: sourceOptions?.name,
+    expectedRepoId: sourceOptions?.repoId,
+    actualRepoId: metadata?.id,
+    allowRepositoryChange: scanOptions?.allowRepositoryChange,
+  });
+
+  if (sourceOptions?.repoId !== undefined && metadata?.id === undefined) {
+    logger.warn(
+      `[Resource Ninja] Repository identity check skipped for ${sourceOptions.id || requestedOwner}: GitHub did not return a repository id.`,
+    );
   }
+
+  // rename/transfer 後も追従できるよう canonical な owner/repo を使う
+  const owner = metadata?.owner || requestedOwner;
+  const repoName = metadata?.repo || requestedRepoName;
+  const canonicalRepoUrl = metadata
+    ? `https://github.com/${owner}/${repoName}`
+    : normalizedRepoUrl;
+
+  // ブランチを決定: 指定されたブランチ → デフォルトブランチ → フォールバック
+  const branch = preferredBranch || metadata?.defaultBranch || "main";
+
+  const applyRepositoryIdentity = (
+    result: { skills: Skill[]; source: Source; bundles?: Bundle[] } | null,
+  ) => {
+    if (!result) {
+      return result;
+    }
+    result.source = {
+      ...result.source,
+      url: canonicalRepoUrl,
+      repoId: metadata?.id ?? sourceOptions?.repoId,
+    };
+    return result;
+  };
 
   // claude-skill-registry 特別処理: registry.json から読み込む
   const isSkillRegistry = repoName.toLowerCase().includes("skill-registry");
@@ -680,7 +752,7 @@ export async function scanRepositoryForSkills(
       token,
     );
     if (registryResult) {
-      return registryResult;
+      return applyRepositoryIdentity(registryResult);
     }
     // registry.json がない場合は通常処理にフォールバック
   }
@@ -706,14 +778,16 @@ export async function scanRepositoryForSkills(
           repoName,
           fallbackBranch,
         );
-        return processTreeResponse(
-          fallbackData,
-          owner,
-          repoName,
-          normalizedRepoUrl,
-          fallbackBranch,
-          token,
-          sourceOptions,
+        return applyRepositoryIdentity(
+          await processTreeResponse(
+            fallbackData,
+            owner,
+            repoName,
+            canonicalRepoUrl,
+            fallbackBranch,
+            token,
+            sourceOptions,
+          ),
         );
       }
       if (!token) {
@@ -742,14 +816,16 @@ export async function scanRepositoryForSkills(
     tree: Array<{ path: string; type: string }>;
   };
   throwIfTreeResponseTruncated(responseData, owner, repoName, branch);
-  return processTreeResponse(
-    responseData,
-    owner,
-    repoName,
-    normalizedRepoUrl,
-    branch,
-    token,
-    sourceOptions,
+  return applyRepositoryIdentity(
+    await processTreeResponse(
+      responseData,
+      owner,
+      repoName,
+      canonicalRepoUrl,
+      branch,
+      token,
+      sourceOptions,
+    ),
   );
 }
 
@@ -813,34 +889,6 @@ function getRelativePathFromPluginRoot(
     : undefined;
 }
 
-function detectPluginChildResourceKind(
-  relativePath: string,
-): ResourceKind | undefined {
-  const lowerPath = relativePath.toLowerCase();
-  if (/^agents\/[^/]+\.md$/.test(lowerPath)) {
-    return "agent";
-  }
-  if (/^instructions\/[^/]+\.md$/.test(lowerPath)) {
-    return "instruction";
-  }
-  if (/^prompts\/[^/]+\.md$/.test(lowerPath)) {
-    return "prompt";
-  }
-  if (/^rules\/[^/]+\.mdc$/.test(lowerPath)) {
-    return "cursor-rule";
-  }
-  if (/^hooks\/[^/]+\/readme\.md$/.test(lowerPath)) {
-    return "hook";
-  }
-  if (/^(?:mcp\.json|\.vscode\/mcp\.json|mcp\/[^/]+\.json)$/.test(lowerPath)) {
-    return "mcp";
-  }
-  if (/^skills\/[^/]+\/skill\.md$/.test(lowerPath)) {
-    return "skill";
-  }
-  return undefined;
-}
-
 function detectResourceKindWithPluginRoots(
   filePath: string,
   pluginRoots: string[],
@@ -874,7 +922,7 @@ async function processTreeResponse(
   repoUrl: string,
   branch: string,
   token?: string,
-  sourceOptions?: Pick<Source, "includePaths" | "excludePaths">,
+  sourceOptions?: Pick<Source, "scanner" | "includePaths" | "excludePaths">,
 ): Promise<{ skills: Skill[]; source: Source; bundles?: Bundle[] }> {
   const allowedBlobFiles = data.tree.filter(
     (item) =>
@@ -897,11 +945,16 @@ async function processTreeResponse(
     resourceFiles.length === 0 &&
     !sourceOptions?.includePaths?.length &&
     !sourceOptions?.excludePaths?.length;
+  const declaredScanner = sourceOptions?.scanner;
 
-  // PRPs-agentic-eng リポジトリの特別処理: .claude/commands/**/*.md をスキャン
-  // 通常の ResourceKind 対応ファイルが見つかる場合は通常スキャンを優先する。
-  const isPRPsRepo = repoName.toLowerCase().includes("prps-agentic");
-  if (isPRPsRepo && canUseLegacyFallbackScanner) {
+  // .claude/commands/**/*.md をスキャンするリポジトリ。
+  // リポジトリ名一致は scanner 未宣言の旧インデックス向け fallback。
+  const useClaudeCommandsScanner =
+    declaredScanner === "claude-commands" ||
+    (declaredScanner === undefined &&
+      repoName.toLowerCase().includes("prps-agentic") &&
+      canUseLegacyFallbackScanner);
+  if (useClaudeCommandsScanner) {
     const claudeCommandSkills = await scanClaudeCommands(
       data,
       owner,
@@ -920,12 +973,13 @@ async function processTreeResponse(
     return { skills: claudeCommandSkills, source };
   }
 
-  // ComposioHQ/awesome-claude-skills リポジトリの特別処理: トップレベルディレクトリをスキル扱い
-  // 現在のリポジトリ構造で SKILL.md が見つかる場合は通常スキャンを優先する。
-  const isComposioRepo = repoName
-    .toLowerCase()
-    .includes("awesome-claude-skills");
-  if (isComposioRepo && canUseLegacyFallbackScanner) {
+  // トップレベルディレクトリをスキル扱いするリポジトリ。
+  const useTopLevelDirectoryScanner =
+    declaredScanner === "top-level-dirs" ||
+    (declaredScanner === undefined &&
+      repoName.toLowerCase().includes("awesome-claude-skills") &&
+      canUseLegacyFallbackScanner);
+  if (useTopLevelDirectoryScanner) {
     const composioSkills = scanComposioSkills(data, owner, repoName);
     const source: Source = {
       id: `${owner}-${repoName}`,
@@ -1600,6 +1654,7 @@ export async function updateSingleSource(
   currentIndex: SkillIndex,
   sourceId: string,
   progress?: vscode.Progress<{ message?: string; increment?: number }>,
+  options?: { allowEmptyResult?: boolean },
 ): Promise<{ index: SkillIndex; addedSkills: number; removedSkills: number }> {
   assertMutableIndexShape(currentIndex, `update source ${sourceId}`);
   const token = await getGitHubToken();
@@ -1638,34 +1693,54 @@ export async function updateSingleSource(
     }
 
     // 新しいスキルを追加（既存の説明があれば保持）
-    const updatedSkills: Skill[] = [];
+    const scannedSkills: Skill[] = [];
     for (const skill of result.skills) {
       const existingDesc = existingDescriptions.get(skill.name);
-      updatedSkills.push({
+      scannedSkills.push({
         ...skill,
         source: sourceId,
         description: existingDesc || skill.description,
       });
     }
 
+    const reconciled = reconcileSourceScanResult({
+      existingSkills: currentIndex.skills.filter((s) => s.source === sourceId),
+      scannedSkills,
+      existingBundles: (currentIndex.bundles || []).filter(
+        (b) => b.source === sourceId,
+      ),
+      scannedBundles: (result.bundles || []).map((b) => ({
+        ...b,
+        source: sourceId,
+      })),
+      allowEmptyResult: options?.allowEmptyResult,
+    });
+
+    if (reconciled.keptExisting) {
+      throw createEmptySourceScanError(sourceId, source.name);
+    }
+
+    const updatedSkills = reconciled.skills;
     const indexedAt = new Date().toISOString();
     const newIndex: SkillIndex = {
       ...currentIndex,
-      sources: stampIndexedSources(currentIndex.sources, [sourceId], indexedAt),
+      sources: stampIndexedSources(
+        currentIndex.sources,
+        [sourceId],
+        indexedAt,
+      ).map((s) =>
+        s.id === sourceId ? mergeScannedSource(s, result.source) : s,
+      ),
       skills: [...otherSkills, ...updatedSkills],
       lastUpdated: new Date().toISOString().split("T")[0],
     };
 
     // バンドル更新も処理
-    if (result.bundles?.length) {
+    if (reconciled.bundles.length > 0) {
       const otherBundles = (currentIndex.bundles || []).filter(
         (b) => b.source !== sourceId,
       );
-      const updatedBundles = result.bundles.map((b) => ({
-        ...b,
-        source: sourceId,
-      }));
-      newIndex.bundles = [...otherBundles, ...updatedBundles];
+      newIndex.bundles = [...otherBundles, ...reconciled.bundles];
     }
 
     await saveSkillIndex(context, newIndex);
@@ -1713,7 +1788,7 @@ export async function updateIndexFromSourcesWithResult(
   context: vscode.ExtensionContext,
   currentIndex: SkillIndex,
   progress?: vscode.Progress<{ message?: string; increment?: number }>,
-  options?: { forceScan?: boolean },
+  options?: { forceScan?: boolean; allowEmptyResult?: boolean },
 ): Promise<SourceIndexUpdateAllResult> {
   assertMutableIndexShape(currentIndex, "update all sources");
   const token = await getGitHubToken();
@@ -1729,6 +1804,7 @@ export async function updateIndexFromSourcesWithResult(
 
   const updatedSkills: Skill[] = [];
   const updatedBundles: Bundle[] = [];
+  const scannedSourcesById = new Map<string, Source>();
   const totalSources = currentIndex.sources.length;
   const scannedSourceIds: string[] = [];
   const succeeded: Source[] = [];
@@ -1781,28 +1857,48 @@ export async function updateIndexFromSourcesWithResult(
 
       // 既存の説明があれば保持、なければGitHubから取得した説明を使用
       // source ID は既存の source.id を使用（GitHub から生成された ID ではなく）
-      for (const skill of result.skills) {
-        const skillWithCorrectSource = {
-          ...skill,
-          source: source.id, // 既存の source ID を使用
-        };
+      const scannedSkills = result.skills.map((skill) => {
         const key = `${source.id}:${skill.name}`;
         const existingDesc = existingDescriptions.get(key);
-        updatedSkills.push({
-          ...skillWithCorrectSource,
+        return {
+          ...skill,
+          source: source.id, // 既存の source ID を使用
           description: existingDesc || skill.description,
-        });
+        };
+      });
+
+      const reconciled = reconcileSourceScanResult({
+        existingSkills: currentIndex.skills.filter(
+          (skill) => skill.source === source.id,
+        ),
+        scannedSkills,
+        existingBundles: (currentIndex.bundles || []).filter(
+          (bundle) => bundle.source === source.id,
+        ),
+        scannedBundles: (result.bundles || []).map((bundle) => ({
+          ...bundle,
+          source: source.id,
+        })),
+        allowEmptyResult: options?.allowEmptyResult,
+      });
+
+      // A bulk refresh keeps the existing index instead of failing the whole run.
+      // The scan itself succeeded, so the source is still stamped as indexed and
+      // will not be retried as stale on every startup.
+      if (reconciled.keptExisting) {
+        logger.warn(
+          `[Resource Ninja] Kept the existing index for ${source.id}: the scan succeeded but returned no resources.`,
+        );
+        preserveExistingSource(source);
+        scannedSourcesById.set(source.id, result.source);
+        scannedSourceIds.push(source.id);
+        succeeded.push(source);
+        continue;
       }
 
-      // Bundlesもマージ（source ID を修正）
-      if (result.bundles?.length) {
-        for (const bundle of result.bundles) {
-          updatedBundles.push({
-            ...bundle,
-            source: source.id,
-          });
-        }
-      }
+      updatedSkills.push(...reconciled.skills);
+      updatedBundles.push(...reconciled.bundles);
+      scannedSourcesById.set(source.id, result.source);
       scannedSourceIds.push(source.id);
       succeeded.push(source);
     } catch (error) {
@@ -1824,9 +1920,9 @@ export async function updateIndexFromSourcesWithResult(
   }
 
   // 既存のBundles（バンドル版から来たもの）を保持しつつ、新規を追加
-  const existingBundleIds = new Set(updatedBundles.map((b) => b.id));
+  const updatedBundleKeys = new Set(updatedBundles.map(createBundleKey));
   const preservedBundles = (currentIndex.bundles || []).filter(
-    (b) => !existingBundleIds.has(b.id),
+    (b) => !updatedBundleKeys.has(createBundleKey(b)),
   );
 
   const indexedAt = new Date().toISOString();
@@ -1837,7 +1933,10 @@ export async function updateIndexFromSourcesWithResult(
       currentIndex.sources,
       scannedSourceIds,
       indexedAt,
-    ),
+    ).map((source) => {
+      const scanned = scannedSourcesById.get(source.id);
+      return scanned ? mergeScannedSource(source, scanned) : source;
+    }),
     skills: updatedSkills,
     bundles: [...preservedBundles, ...updatedBundles],
   };
@@ -1862,7 +1961,7 @@ export async function updateIndexFromSingleSource(
   currentIndex: SkillIndex,
   sourceId: string,
   progress?: vscode.Progress<{ message?: string; increment?: number }>,
-  options?: { forceScan?: boolean },
+  options?: { forceScan?: boolean; allowEmptyResult?: boolean },
 ): Promise<SkillIndex> {
   assertMutableIndexShape(currentIndex, `update source ${sourceId}`);
   const token = await getGitHubToken();
@@ -1911,7 +2010,7 @@ export async function updateIndexFromSingleSource(
   );
 
   // 新しいスキルをマージ
-  const newSkills: Skill[] = [];
+  const scannedSkills: Skill[] = [];
   for (const skill of result.skills) {
     const skillWithCorrectSource = {
       ...skill,
@@ -1919,17 +2018,51 @@ export async function updateIndexFromSingleSource(
     };
     const key = `${sourceId}:${skill.name}`;
     const existingDesc = existingDescriptions.get(key);
-    newSkills.push({
+    scannedSkills.push({
       ...skillWithCorrectSource,
       description: existingDesc || skill.description,
     });
   }
 
-  // 新しいバンドルをマージ
-  const newBundles: Bundle[] = (result.bundles || []).map((b) => ({
-    ...b,
-    source: sourceId,
-  }));
+  const reconciled = reconcileSourceScanResult({
+    existingSkills: currentIndex.skills.filter((s) => s.source === sourceId),
+    scannedSkills,
+    existingBundles: (currentIndex.bundles || []).filter(
+      (b) => b.source === sourceId,
+    ),
+    scannedBundles: (result.bundles || []).map((b) => ({
+      ...b,
+      source: sourceId,
+    })),
+    allowEmptyResult: options?.allowEmptyResult,
+  });
+
+  if (reconciled.keptExisting) {
+    // The scan itself succeeded, so refresh freshness before refusing the empty
+    // result; otherwise the source stays stale and is retried on every startup.
+    const guardedAt = new Date().toISOString();
+    const guardedIndex: SkillIndex = {
+      ...currentIndex,
+      sources: stampIndexedSources(
+        currentIndex.sources,
+        [sourceId],
+        guardedAt,
+      ).map((s) =>
+        s.id === sourceId ? mergeScannedSource(s, result.source) : s,
+      ),
+    };
+    await saveSkillIndex(context, guardedIndex);
+    await updateSharedScanMetadata(
+      context,
+      guardedIndex,
+      [sourceId],
+      guardedAt,
+    );
+    throw createEmptySourceScanError(sourceId, source.name);
+  }
+
+  const newSkills = reconciled.skills;
+  const newBundles = reconciled.bundles;
 
   progress?.report({
     message: messages.sourceIndexResourcesUpdatedProgress(newSkills.length),
@@ -1940,7 +2073,13 @@ export async function updateIndexFromSingleSource(
   const updatedIndex: SkillIndex = {
     ...currentIndex,
     lastUpdated: new Date().toISOString().split("T")[0],
-    sources: stampIndexedSources(currentIndex.sources, [sourceId], indexedAt),
+    sources: stampIndexedSources(
+      currentIndex.sources,
+      [sourceId],
+      indexedAt,
+    ).map((s) =>
+      s.id === sourceId ? mergeScannedSource(s, result.source) : s,
+    ),
     skills: [...otherSkills, ...newSkills],
     bundles: [...otherBundles, ...newBundles],
   };
@@ -1959,6 +2098,7 @@ export async function addSource(
   context: vscode.ExtensionContext,
   currentIndex: SkillIndex,
   repoUrl: string,
+  options?: { allowRepositoryChange?: boolean },
 ): Promise<{ index: SkillIndex; addedSkills: number }> {
   assertMutableIndexShape(currentIndex, "add source");
   // repoUrlが文字列かどうか検証
@@ -1968,7 +2108,19 @@ export async function addSource(
 
   const token = await getGitHubToken();
 
-  const result = await scanRepositoryForSkills(repoUrl, token);
+  // 既に登録済みの URL なら、その source の repo identity を引き継いで検証する
+  const normalizedRepoUrl = normalizeGitHubRepoUrl(repoUrl);
+  const knownSource = currentIndex.sources.find(
+    (s) => normalizeGitHubRepoUrl(s.url) === normalizedRepoUrl,
+  );
+
+  const result = await scanRepositoryForSkills(
+    repoUrl,
+    token,
+    knownSource?.branch,
+    knownSource,
+    { allowRepositoryChange: options?.allowRepositoryChange },
+  );
   if (!result) {
     throw new Error("No resources found in repository");
   }
@@ -1985,9 +2137,15 @@ export async function addSource(
   const indexedSource = { ...result.source, lastIndexedAt: indexedAt };
 
   if (existingSourceIndex >= 0) {
-    // 既存ソースを更新
+    // 既存ソースを更新（curation 設定は保持する）
     updatedSources = [...currentIndex.sources];
-    updatedSources[existingSourceIndex] = indexedSource;
+    updatedSources[existingSourceIndex] = {
+      ...mergeScannedSource(
+        currentIndex.sources[existingSourceIndex],
+        result.source,
+      ),
+      lastIndexedAt: indexedAt,
+    };
   } else {
     // 新規ソースを追加
     updatedSources = [...currentIndex.sources, indexedSource];
@@ -2179,13 +2337,16 @@ export async function searchGitHub(
         const response = await githubFetch(searchUrl, token);
 
         if (!response.ok) {
-          if (response.status === 403) {
-            throw new Error(
-              "GitHub API rate limit exceeded. Please authenticate with a GitHub token.",
+          if (response.status === 401 || response.status === 403) {
+            const bodyText = await response
+              .clone()
+              .text()
+              .catch(() => "");
+            throw createGitHubResponseError(
+              response,
+              bodyText,
+              "GitHub code search failed",
             );
-          }
-          if (response.status === 401) {
-            throw new Error("GitHub authentication required for code search.");
           }
           continue;
         }
@@ -2516,12 +2677,15 @@ export async function openGitHubAuthSettings(): Promise<void> {
 export async function showAuthHelp(): Promise<void> {
   const openSettingsLabel = messages.openSettings();
   const authWithGhCliLabel = messages.authWithGhCli();
+  const clearStoredTokenLabel = messages.actionClearStoredGitHubToken();
   const cancelLabel = messages.actionCancel();
+  const hasStoredToken = await hasStoredGitHubToken();
 
   const action = await vscode.window.showErrorMessage(
     messages.authRequired(),
     openSettingsLabel,
     authWithGhCliLabel,
+    ...(hasStoredToken ? [clearStoredTokenLabel] : []),
     cancelLabel,
   );
 
@@ -2531,5 +2695,7 @@ export async function showAuthHelp(): Promise<void> {
     const terminal = vscode.window.createTerminal("GitHub Auth");
     terminal.show();
     terminal.sendText("gh auth login");
+  } else if (action === clearStoredTokenLabel) {
+    await vscode.commands.executeCommand("resourceNinja.clearGitHubToken");
   }
 }

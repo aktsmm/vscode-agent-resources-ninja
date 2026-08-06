@@ -9,6 +9,8 @@ export type SourceEntry = Pick<
   | "name"
   | "url"
   | "type"
+  | "repoId"
+  | "scanner"
   | "branch"
   | "lastIndexedAt"
   | "description"

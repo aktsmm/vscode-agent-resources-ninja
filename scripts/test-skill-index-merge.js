@@ -1,129 +1,68 @@
 #!/usr/bin/env node
 
+// Exercises the real mergeSkillIndexes from src so this test cannot drift from it.
+
 const assert = require("assert");
+const fs = require("fs");
+const Module = require("module");
+const path = require("path");
+const ts = require("typescript");
 
-function mergeSkillIndexes(localIndex, bundledIndex) {
-  const localCategories = localIndex.categories || [];
-  const localBundles = localIndex.bundles || [];
-  const bundledCategories = bundledIndex.categories || [];
-  const bundledBundles = bundledIndex.bundles || [];
-  const localSourceIds = new Set(localIndex.sources.map((source) => source.id));
-  const localCategoryIds = new Set(
-    localCategories.map((category) => category.id),
-  );
-  const localBundleKeys = new Set(
-    localBundles.map((bundle) => `${bundle.source}:${bundle.id}`),
-  );
-
-  const newSources = bundledIndex.sources.filter(
-    (source) => !localSourceIds.has(source.id),
-  );
-  const newCategories = bundledCategories.filter(
-    (category) => !localCategoryIds.has(category.id),
-  );
-  const newBundles = bundledBundles.filter(
-    (bundle) => !localBundleKeys.has(`${bundle.source}:${bundle.id}`),
-  );
-
-  const updatedSources = localIndex.sources.map((localSource) => {
-    const bundledSource = bundledIndex.sources.find(
-      (source) => source.id === localSource.id,
-    );
-    if (!bundledSource) {
-      return localSource;
-    }
-
-    return {
-      ...localSource,
-      ...bundledSource,
-      description_ja:
-        bundledSource.description_ja || localSource.description_ja,
-    };
+function requireTypeScriptModule(filePath, stubs = {}) {
+  const source = fs.readFileSync(filePath, "utf8");
+  const transpiled = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+    },
+    fileName: filePath,
   });
 
-  const updatedCategories = localCategories.map((localCategory) => {
-    const bundledCategory = bundledCategories.find(
-      (category) => category.id === localCategory.id,
-    );
-    if (!bundledCategory) {
-      return localCategory;
+  const loadedModule = new Module(filePath, module);
+  loadedModule.filename = filePath;
+  loadedModule.paths = Module._nodeModulePaths(path.dirname(filePath));
+
+  const originalLoad = Module._load;
+  Module._load = function patchedLoad(request, parent, isMain) {
+    if (Object.prototype.hasOwnProperty.call(stubs, request)) {
+      return stubs[request];
     }
-
-    return {
-      ...localCategory,
-      ...bundledCategory,
-      name_ja: bundledCategory.name_ja || localCategory.name_ja,
-      description_ja:
-        bundledCategory.description_ja || localCategory.description_ja,
-    };
-  });
-
-  const localSkillKeys = new Set(
-    localIndex.skills.map((skill) => `${skill.source}:${skill.name}`),
-  );
-  const newSkills = bundledIndex.skills.filter(
-    (skill) => !localSkillKeys.has(`${skill.source}:${skill.name}`),
-  );
-
-  const updatedSkills = localIndex.skills.map((localSkill) => {
-    const bundledSkill = bundledIndex.skills.find(
-      (skill) =>
-        skill.name === localSkill.name && skill.source === localSkill.source,
-    );
-    if (!bundledSkill) {
-      return localSkill;
-    }
-
-    return {
-      ...localSkill,
-      ...bundledSkill,
-      description_ja: bundledSkill.description_ja || localSkill.description_ja,
-      requires:
-        bundledSkill.requires && bundledSkill.requires.length > 0
-          ? bundledSkill.requires
-          : localSkill.requires,
-      categories:
-        bundledSkill.categories.length > 0
-          ? bundledSkill.categories
-          : localSkill.categories,
-      standalone: bundledSkill.standalone ?? localSkill.standalone,
-      bundle: bundledSkill.bundle || localSkill.bundle,
-      license: bundledSkill.license || localSkill.license,
-      author: bundledSkill.author || localSkill.author,
-      version: bundledSkill.version || localSkill.version,
-    };
-  });
-
-  const updatedBundles = localBundles.map((localBundle) => {
-    const bundledBundle = bundledBundles.find(
-      (bundle) =>
-        bundle.id === localBundle.id && bundle.source === localBundle.source,
-    );
-    if (!bundledBundle) {
-      return localBundle;
-    }
-
-    return {
-      ...localBundle,
-      ...bundledBundle,
-      description_ja:
-        bundledBundle.description_ja || localBundle.description_ja,
-    };
-  });
-
-  return {
-    ...localIndex,
-    version: bundledIndex.version,
-    lastUpdated: bundledIndex.lastUpdated,
-    sources: [...updatedSources, ...newSources],
-    categories: [...updatedCategories, ...newCategories],
-    skills: [...updatedSkills, ...newSkills],
-    bundles:
-      updatedBundles.length > 0 || newBundles.length > 0
-        ? [...updatedBundles, ...newBundles]
-        : localIndex.bundles,
+    return originalLoad(request, parent, isMain);
   };
+
+  try {
+    loadedModule._compile(transpiled.outputText, filePath);
+  } finally {
+    Module._load = originalLoad;
+  }
+
+  return loadedModule.exports;
 }
+
+const { mergeSkillIndexes } = requireTypeScriptModule(
+  path.join(__dirname, "..", "src", "skillIndex.ts"),
+  {
+    vscode: {
+      Uri: { joinPath: (base, ...segments) => ({ base, segments }) },
+      workspace: { fs: {} },
+      env: { language: "en" },
+    },
+    "./githubFetch": {
+      fetchGitHubWithOptionalAuthRetry: async () => undefined,
+    },
+    "./logger": {
+      logger: {
+        info: () => undefined,
+        warn: () => undefined,
+        error: () => undefined,
+      },
+    },
+    "./sharedResourceIndexStore": {
+      loadSharedStoresIntoSkillIndex: async (_context, index) => index,
+      syncSharedStoresFromSkillIndex: async () => undefined,
+    },
+  },
+);
 
 function test(name, fn) {
   try {
@@ -405,6 +344,110 @@ test("merge tolerates legacy indexes without categories or bundles", () => {
   assert.strictEqual(merged.categories.length, 1);
   assert.strictEqual(merged.bundles.length, 1);
   assert.deepStrictEqual(merged.skills[0].categories, ["utility"]);
+});
+
+test("the bundled preset does not overwrite runtime-resolved repository facts", () => {
+  const localIndex = {
+    version: "1.0.0",
+    lastUpdated: "2026-03-01",
+    sources: [
+      {
+        id: "acme-demo",
+        name: "Acme Demo",
+        url: "https://github.com/acme/demo",
+        type: "community",
+        repoId: 4242,
+        lastIndexedAt: "2026-08-01T00:00:00.000Z",
+        description: "local",
+      },
+    ],
+    categories: [],
+    skills: [],
+    bundles: [],
+  };
+
+  const bundledIndex = {
+    version: "1.1.0",
+    lastUpdated: "2026-03-10",
+    sources: [
+      {
+        id: "acme-demo",
+        name: "Acme Demo (curated)",
+        url: "https://github.com/acme/demo",
+        type: "community",
+        description: "curated",
+        description_ja: "キュレーション済み",
+      },
+    ],
+    categories: [],
+    skills: [],
+    bundles: [],
+  };
+
+  const merged = mergeSkillIndexes(localIndex, bundledIndex);
+  const mergedSource = merged.sources[0];
+
+  assert.strictEqual(mergedSource.repoId, 4242);
+  assert.strictEqual(mergedSource.lastIndexedAt, "2026-08-01T00:00:00.000Z");
+  assert.strictEqual(mergedSource.name, "Acme Demo (curated)");
+  assert.strictEqual(mergedSource.description_ja, "キュレーション済み");
+});
+
+test("a followed rename survives the bundled preset, but an unverified source takes the preset URL", () => {
+  const bundledSources = [
+    {
+      id: "acme-demo",
+      name: "Acme Demo",
+      url: "https://github.com/acme/old-name",
+      type: "community",
+      description: "curated",
+    },
+  ];
+  const makeIndex = (sources) => ({
+    version: "1.0.0",
+    lastUpdated: "2026-03-01",
+    sources,
+    categories: [],
+    skills: [],
+    bundles: [],
+  });
+
+  const verified = mergeSkillIndexes(
+    makeIndex([
+      {
+        id: "acme-demo",
+        name: "Acme Demo",
+        url: "https://github.com/acme/new-name",
+        type: "community",
+        repoId: 4242,
+        description: "local",
+      },
+    ]),
+    { ...makeIndex(bundledSources), version: "1.1.0" },
+  );
+  assert.strictEqual(
+    verified.sources[0].url,
+    "https://github.com/acme/new-name",
+    "a scan-followed rename must not be reverted by the bundled preset",
+  );
+
+  const unverified = mergeSkillIndexes(
+    makeIndex([
+      {
+        id: "acme-demo",
+        name: "Acme Demo",
+        url: "https://github.com/acme/stale",
+        type: "community",
+        description: "local",
+      },
+    ]),
+    { ...makeIndex(bundledSources), version: "1.1.0" },
+  );
+  assert.strictEqual(
+    unverified.sources[0].url,
+    "https://github.com/acme/old-name",
+    "a source without a recorded identity should take the bundled preset URL",
+  );
 });
 
 console.log("RESULT=PASS");

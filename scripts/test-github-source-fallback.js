@@ -51,9 +51,20 @@ const root = path.join(__dirname, "..");
 const githubResponseModule = requireTypeScriptModule(
   path.join(root, "src", "githubResponse.ts"),
 );
-const { fetchGitHubWithOptionalAuthRetry } = requireTypeScriptModule(
+let resolveFallback = async () => undefined;
+const {
+  fetchGitHubWithOptionalAuthRetry,
+  fetchGitHubWithTimeout,
+  GITHUB_REQUEST_TIMEOUT_MS,
+} = requireTypeScriptModule(
   path.join(root, "src", "githubFetch.ts"),
-  { "./githubResponse": githubResponseModule },
+  {
+    "./githubResponse": githubResponseModule,
+    "./githubAuth": {
+      resolveGitHubTokenAfterFailure: async (failedToken) =>
+        resolveFallback(failedToken),
+    },
+  },
 );
 const {
   classifyGitHubFailure,
@@ -63,6 +74,102 @@ const {
 
 (async () => {
   const originalFetch = global.fetch;
+
+  await test("uses a bounded default request timeout", async () => {
+    assert.strictEqual(GITHUB_REQUEST_TIMEOUT_MS, 15000);
+    global.fetch = async (_url, options = {}) =>
+      new Promise((_resolve, reject) => {
+        options.signal.addEventListener(
+          "abort",
+          () => {
+            const error = new Error("aborted");
+            error.name = "AbortError";
+            reject(error);
+          },
+          { once: true },
+        );
+      });
+
+    await assert.rejects(
+      () =>
+        fetchGitHubWithTimeout(
+          "https://api.github.com/repos/octo/repo",
+          {},
+          5,
+        ),
+      (error) =>
+        error.message ===
+        "Request timeout: https://api.github.com/repos/octo/repo",
+    );
+  });
+
+  await test("preserves caller cancellation instead of reporting timeout", async () => {
+    global.fetch = async (_url, options = {}) =>
+      new Promise((_resolve, reject) => {
+        options.signal.addEventListener(
+          "abort",
+          () => {
+            const error = new Error("caller aborted");
+            error.name = "AbortError";
+            reject(error);
+          },
+          { once: true },
+        );
+      });
+    const controller = new AbortController();
+    const request = fetchGitHubWithTimeout(
+      "https://api.github.com/repos/octo/repo",
+      { signal: controller.signal },
+      1000,
+    );
+    controller.abort();
+
+    await assert.rejects(
+      request,
+      (error) =>
+        error.name === "AbortError" && error.message === "caller aborted",
+    );
+  });
+
+  await test("successful requests release timeout and caller listener", async () => {
+    const originalSetTimeout = global.setTimeout;
+    const originalClearTimeout = global.clearTimeout;
+    const timeoutHandle = { id: "timeout" };
+    let clearedHandle;
+    let addedListener;
+    let removedListener;
+    const callerSignal = {
+      aborted: false,
+      addEventListener(_event, listener) {
+        addedListener = listener;
+      },
+      removeEventListener(_event, listener) {
+        removedListener = listener;
+      },
+    };
+    global.setTimeout = (_callback, timeoutMs) => {
+      assert.strictEqual(timeoutMs, 250);
+      return timeoutHandle;
+    };
+    global.clearTimeout = (handle) => {
+      clearedHandle = handle;
+    };
+    global.fetch = async () => response(200, "ok");
+
+    try {
+      const result = await fetchGitHubWithTimeout(
+        "https://api.github.com/repos/octo/repo",
+        { signal: callerSignal },
+        250,
+      );
+      assert.strictEqual(result.status, 200);
+      assert.strictEqual(clearedHandle, timeoutHandle);
+      assert.strictEqual(removedListener, addedListener);
+    } finally {
+      global.setTimeout = originalSetTimeout;
+      global.clearTimeout = originalClearTimeout;
+    }
+  });
 
   await test("fetches public raw content anonymously", async () => {
     const requests = [];
@@ -101,6 +208,67 @@ const {
     assert.strictEqual(requests[1].headers.Authorization, "token secret-token");
   });
 
+  await test("retries private raw content with the next distinct credential", async () => {
+    const requests = [];
+    resolveFallback = async (failedToken) => {
+      assert.strictEqual(failedToken, "secret-token");
+      return { token: "env-token", source: "env" };
+    };
+    global.fetch = async (url, options = {}) => {
+      requests.push({
+        url: String(url),
+        headers: options.headers || {},
+        method: options.method,
+      });
+      return requests.length < 3
+        ? response(404, "Not Found")
+        : response(200, "private");
+    };
+
+    try {
+      const result = await fetchGitHubWithOptionalAuthRetry(
+        "https://raw.githubusercontent.com/octo/private/main/SKILL.md",
+        { accept: "text/plain", token: "secret-token" },
+      );
+      assert.strictEqual(result.status, 200);
+      assert.strictEqual(requests.length, 3);
+      assert.strictEqual(requests[0].headers.Authorization, undefined);
+      assert.strictEqual(requests[1].headers.Authorization, "token secret-token");
+      assert.strictEqual(requests[2].headers.Authorization, "token env-token");
+      assert.strictEqual(requests[2].url, requests[1].url);
+    } finally {
+      resolveFallback = async () => undefined;
+    }
+  });
+
+  await test("preserves HEAD across private and credential retries", async () => {
+    const requests = [];
+    resolveFallback = async () => ({ token: "gh-token", source: "gh-cli" });
+    global.fetch = async (url, options = {}) => {
+      requests.push({
+        url: String(url),
+        headers: options.headers || {},
+        method: options.method,
+      });
+      return requests.length < 3
+        ? response(404, "Not Found")
+        : response(200, "");
+    };
+
+    try {
+      const result = await fetchGitHubWithOptionalAuthRetry(
+        "https://raw.githubusercontent.com/octo/private/main/SKILL.md",
+        { accept: "*/*", token: "secret-token", method: "HEAD" },
+      );
+      assert.strictEqual(result.status, 200);
+      assert.strictEqual(requests.length, 3);
+      assert.ok(requests.every((request) => request.method === "HEAD"));
+      assert.strictEqual(requests[2].headers.Authorization, "token gh-token");
+    } finally {
+      resolveFallback = async () => undefined;
+    }
+  });
+
   await test("retries SAML and stale-token API failures anonymously", async () => {
     for (const initial of [
       response(403, "Resource protected by organization SAML enforcement"),
@@ -122,6 +290,35 @@ const {
         "token stale-token",
       );
       assert.strictEqual(requests[1].headers.Authorization, undefined);
+    }
+  });
+
+  await test("retries API auth failure with a different credential", async () => {
+    const requests = [];
+    resolveFallback = async () => ({ token: "gh-token", source: "gh-cli" });
+    global.fetch = async (url, options = {}) => {
+      requests.push({ url: String(url), headers: options.headers || {} });
+      if (requests.length === 1) {
+        return response(401, "Bad credentials");
+      }
+      if (requests.length === 2) {
+        return response(404, "Not Found");
+      }
+      return response(200, "private");
+    };
+
+    try {
+      const result = await fetchGitHubWithOptionalAuthRetry(
+        "https://api.github.com/repos/octo/private",
+        { accept: "application/json", token: "secret-token" },
+      );
+      assert.strictEqual(result.status, 200);
+      assert.strictEqual(requests.length, 3);
+      assert.strictEqual(requests[0].headers.Authorization, "token secret-token");
+      assert.strictEqual(requests[1].headers.Authorization, undefined);
+      assert.strictEqual(requests[2].headers.Authorization, "token gh-token");
+    } finally {
+      resolveFallback = async () => undefined;
     }
   });
 
@@ -186,6 +383,17 @@ const {
     githubFetchSource,
     /fetch\(url,[\s\S]*?Authorization:[\s\S]*?isRawGitHubUrl/,
   );
+
+  const bareFetchFiles = fs
+    .readdirSync(path.join(root, "src"))
+    .filter((fileName) => fileName.endsWith(".ts"))
+    .filter((fileName) =>
+      /\bfetch\s*\(/.test(
+        fs.readFileSync(path.join(root, "src", fileName), "utf8"),
+      ),
+    )
+    .sort();
+  assert.deepStrictEqual(bareFetchFiles, ["githubAuth.ts", "githubFetch.ts"]);
 
   global.fetch = originalFetch;
   console.log("GitHub source fallback tests passed");

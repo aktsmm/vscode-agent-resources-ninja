@@ -2,7 +2,7 @@
   "name": "agent-resources-ninja",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.40",
+  "version": "0.2.41",
   "publisher": "yamapan",
   "license": "CC-BY-NC-SA-4.0",
   "icon": "resources/icon.png",
@@ -752,6 +752,12 @@
         "title": "%command.resetSettings%",
         "category": "Agent Resources Ninja",
         "icon": "$(warning)"
+      },
+      {
+        "command": "resourceNinja.clearGitHubToken",
+        "title": "%command.clearGitHubToken%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(key)"
       },
       {
         "command": "resourceNinja.installBundle",

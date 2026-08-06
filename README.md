@@ -439,6 +439,12 @@ Use `additionalSkillRoots` when workspace skills are stored outside the primary 
 
 An explicit **Update Index** force-scans every configured source. Progress advances after each source finishes, and each result is logged as `OK`, `FAILED`, or `SKIPPED` in the **Agent Resources Ninja** Output Channel. Existing entries are preserved for failed sources; a GitHub rate-limit failure stops the remaining requests and reports them as not attempted. The notification and `#updateResourceIndex` tool return one localized summary instead of reporting a partial update as full success. From that summary, **Configure GitHub Authentication** opens the relevant setting directly without showing a second error dialog.
 
+Three safeguards keep a refresh from quietly damaging the index:
+
+- **Empty scan protection** - A scan that succeeds but finds no resources does not delete the ones you already have. A full refresh keeps them and records it in the Output Channel; a single-source refresh reports the result and offers **Apply Empty Result** so shrinking a source stays a deliberate choice.
+- **Repository identity** - A source remembers the GitHub repository id it was indexed from. If the URL later resolves to a different repository, the update is refused so a name that was deleted or renamed away cannot be re-registered by someone else and served as the same source. Re-adding the source offers **Approve Repository Change**. A repository rename keeps the same id, so renames are followed automatically and the stored URL is updated.
+- **Startup budget** - The startup refresh handles at most 5 stale sources per launch and rotates where it starts, so a large workspace does not spend its GitHub quota at once and a repeatedly failing source cannot block the ones behind it. Deferred sources are listed in the Output Channel and picked up on a later launch.
+
 > Settings are displayed in the order above
 
 ### How Instruction File Sync Works
@@ -613,9 +619,11 @@ Find `Agent Resources Ninja: GitHub Token` in settings and enter your token:
 
 For public resources, leave scopes unchecked. To index a private repository, use a fine-grained PAT scoped to the selected repository with **Contents: Read** permission, or a classic PAT with the broader `repo` scope when that is the only viable option. If the repository belongs to an organization, the token may also need SSO or organization approval.
 
-Raw GitHub file downloads start anonymously. When a private file returns `404`, Resource Ninja retries once with configured authentication. If an install still reports `404` or "not found", use **Open Settings** to configure authentication before choosing **Update Index** or **Report Bug**. With authentication already configured, the index path may be stale or the token may lack **Contents: Read** access. Bug reports include only whether authentication is configured and never include the token value.
+Raw GitHub file downloads start anonymously. When a private file returns `404`, Resource Ninja retries with configured authentication and then tries the next distinct credential after a `401`, `403`, or private `404`. If an install still reports `404` or "not found", use **Open Settings** to configure authentication before choosing **Update Index** or **Report Bug**. With authentication already configured, the index path may be stale or the token may lack **Contents: Read** access. Bug reports include only the authentication state and credential source and never include the token value.
 
 > **Note**: This setting value is mirrored into VS Code SecretStorage on startup and kept only for backward compatibility. Tokens are resolved in the order SecretStorage → `GITHUB_TOKEN` / `GH_TOKEN` environment variable → GitHub CLI → this setting, so for new setups the GitHub CLI or an environment variable is preferred over storing a token in settings.
+
+Use **Agent Resources Ninja: Clear GitHub Token (SecretStorage only)** to remove only the SecretStorage copy during authentication recovery. The command does not modify `GITHUB_TOKEN` / `GH_TOKEN`, GitHub CLI credentials, or the legacy `resourceNinja.githubToken` setting. If that legacy setting remains, reloading VS Code can migrate its value back into SecretStorage; clear the setting separately to prevent re-migration.
 
 ### Option 2: GitHub CLI (Recommended)
 

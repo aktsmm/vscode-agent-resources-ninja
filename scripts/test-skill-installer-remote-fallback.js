@@ -152,7 +152,12 @@ function loadInstaller(writes, options = {}) {
   );
   const githubFetch = requireTypeScriptModule(
     path.join(srcDir, "githubFetch.ts"),
-    { "./githubResponse": githubResponse },
+    {
+      "./githubResponse": githubResponse,
+      "./githubAuth": {
+        resolveGitHubTokenAfterFailure: async () => undefined,
+      },
+    },
   );
 
   return requireTypeScriptModule(path.join(srcDir, "skillInstaller.ts"), {
@@ -173,9 +178,17 @@ function loadInstaller(writes, options = {}) {
         openSettings: () => "Open Settings",
         actionUpdateIndex: () => "Update Index",
         actionReportBug: () => "Report Bug",
+        actionClearStoredGitHubToken: () => "Clear Stored Token",
       },
     },
-    "./githubAuth": { getGitHubToken: async () => options.token },
+    "./githubAuth": {
+      getGitHubToken: async () => options.token,
+      hasStoredGitHubToken: async () => false,
+      resolveGitHubToken: async () => ({
+        token: options.token,
+        source: options.token ? "secret" : "none",
+      }),
+    },
     "./githubDirectoryTraversal": {
       partitionGitHubDirectoryEntries: () => ({ files: [], directories: [] }),
       resolveSymlinkTargetPath: () => undefined,

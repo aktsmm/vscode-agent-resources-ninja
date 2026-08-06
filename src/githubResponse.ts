@@ -128,7 +128,21 @@ export async function retryGitHubRequestAnonymously(
 
   try {
     const retryResponse = await requestWithoutToken();
-    return retryResponse.ok ? retryResponse : response;
+    if (retryResponse.ok) {
+      return retryResponse;
+    }
+
+    // Unauthenticated api.github.com allows only 60 req/h, so an exhausted
+    // anonymous quota must not be reported as the authenticated auth failure.
+    const retryBodyText = await retryResponse
+      .clone()
+      .text()
+      .catch(() => "");
+    if (classifyGitHubFailure(retryResponse, retryBodyText) === "rate-limit") {
+      return retryResponse;
+    }
+
+    return response;
   } catch {
     return response;
   }

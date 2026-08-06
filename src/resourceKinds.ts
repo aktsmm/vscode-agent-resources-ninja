@@ -19,6 +19,46 @@ type PluginPackageResource = Pick<
   | "pluginManifestKind"
 >;
 
+const PLUGIN_PATH_PREFIX_PATTERN = /^(?:\.github\/)?plugins\/[^/]+\//;
+
+/**
+ * Kind rules for a path relative to a plugin root. Shared by the `plugins/<name>/`
+ * layout and by roots discovered from a plugin manifest, so the rules stay in one place.
+ */
+export function detectPluginChildResourceKind(
+  relativePath: string,
+): ResourceKind | undefined {
+  const lowerPath = relativePath.toLowerCase().replace(/\\/g, "/");
+  if (/^agents\/[^/]+\.md$/.test(lowerPath)) {
+    return "agent";
+  }
+  if (/^instructions\/[^/]+\.md$/.test(lowerPath)) {
+    return "instruction";
+  }
+  if (/^prompts\/[^/]+\.md$/.test(lowerPath)) {
+    return "prompt";
+  }
+  if (/^rules\/[^/]+\.mdc$/.test(lowerPath)) {
+    return "cursor-rule";
+  }
+  if (/^hooks\/[^/]+\/readme\.md$/.test(lowerPath)) {
+    return "hook";
+  }
+  if (
+    /^hooks\/[^/]+\.json$/.test(lowerPath) &&
+    !isResourceMetadataSidecarPath(lowerPath)
+  ) {
+    return "hook";
+  }
+  if (/^(?:mcp\.json|\.vscode\/mcp\.json|mcp\/[^/]+\.json)$/.test(lowerPath)) {
+    return "mcp";
+  }
+  if (/^skills\/[^/]+\/skill\.md$/.test(lowerPath)) {
+    return "skill";
+  }
+  return undefined;
+}
+
 export function detectResourceKindFromPath(
   resourcePath: string,
 ): ResourceKind | undefined {
@@ -29,31 +69,20 @@ export function detectResourceKindFromPath(
   if (isPluginManifestPath(lowerPath)) {
     return "plugin";
   }
-  const pluginPrefix = "(?:\\.github/)?plugins/[^/]+/";
-  if (new RegExp(`^(?:${pluginPrefix})?rules/[^/]+\\.mdc$`).test(lowerPath)) {
+  const pluginPrefix = lowerPath.match(PLUGIN_PATH_PREFIX_PATTERN);
+  if (pluginPrefix) {
+    const childKind = detectPluginChildResourceKind(
+      lowerPath.slice(pluginPrefix[0].length),
+    );
+    if (childKind) {
+      return childKind;
+    }
+  }
+  if (/^rules\/[^/]+\.mdc$/.test(lowerPath)) {
     return "cursor-rule";
-  }
-  if (new RegExp(`^${pluginPrefix}agents/[^/]+\\.md$`).test(lowerPath)) {
-    return "agent";
-  }
-  if (new RegExp(`^${pluginPrefix}instructions/[^/]+\\.md$`).test(lowerPath)) {
-    return "instruction";
-  }
-  if (new RegExp(`^${pluginPrefix}prompts/[^/]+\\.md$`).test(lowerPath)) {
-    return "prompt";
-  }
-  if (new RegExp(`^${pluginPrefix}hooks/[^/]+/readme\\.md$`).test(lowerPath)) {
-    return "hook";
   }
   if (isHookConfigFilePath(lowerPath)) {
     return "hook";
-  }
-  if (
-    new RegExp(
-      `^${pluginPrefix}(?:mcp\\.json|\\.vscode/mcp\\.json|mcp/[^/]+\\.json)$`,
-    ).test(lowerPath)
-  ) {
-    return "mcp";
   }
   if (isNativeInstructionFilePath(lowerPath)) {
     return "instruction";
@@ -74,9 +103,6 @@ export function detectResourceKindFromPath(
     return "prompt";
   }
   if (/^(?:\.github\/)?hooks\/[^/]+\/readme\.md$/i.test(lowerPath)) {
-    return "hook";
-  }
-  if (isHookConfigFilePath(lowerPath)) {
     return "hook";
   }
   if (

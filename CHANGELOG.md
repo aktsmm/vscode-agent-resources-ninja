@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.41] - 2026-08-07
+
+### Added
+
+- � **GitHub Token in SecretStorage** - The GitHub token is now kept in VS Code SecretStorage instead of a settings value. An existing token in the legacy setting is migrated on activation and kept in sync when the setting changes, and a new `Clear Stored GitHub Token` / `保存済み GitHub トークンをクリア` command removes it. The command is available from the Command Palette and is offered directly from the install and index-update recovery dialogs, and it only clears SecretStorage so environment variables and the `gh` CLI credential are left untouched / GitHub トークンを設定値ではなく VS Code SecretStorage で保持するようにしました。旧設定にトークンがある場合は起動時に移行し、設定変更時も同期します。新しい `Clear Stored GitHub Token` コマンドで削除でき、コマンドパレットのほかインストールや index 更新の復旧ダイアログからも実行できます。削除するのは SecretStorage だけで、環境変数や `gh` CLI の認証情報は変更しません。
+- �🛡️ **Repository Identity Check** - A source records the GitHub repository id whenever a scan can resolve it, and refuses to update when the URL later resolves to a different repository, so a deleted or renamed-away repository name cannot be re-registered by someone else and silently served as the same source. When GitHub does not return an id the check stays disabled and the skip is logged. Re-adding the source shows a confirmation dialog with an explicit `Approve Repository Change` / `別リポジトリへの差し替えを承認` action / source はスキャンで解決できたときに GitHub の repository id を記録し、以降その URL が別 repository に解決された場合は更新を拒否します。削除や rename 後に同名 repository が第三者へ再登録されても、同じ source として黙って配信されません。id を取得できない場合は検証を無効化してログに残します。同じ source を再追加すると確認ダイアログが出て、明示的に承認できます。
+- 🧭 **Declarative Source Scanner** - A source can declare which scan strategy it uses instead of relying on repository-name matching. Repository-name matching remains only as a fallback for sources that do not declare one / source は repository 名の一致に頼らず、使用するスキャン方式を宣言できるようになりました。repository 名一致は未宣言 source 向けの fallback としてのみ残ります。
+
+### Changed
+
+- 🧯 **Empty Scan Protection** - A scan that succeeds but returns no resources no longer wipes that source. A full refresh keeps the existing resources and records it in the output channel, and a single-source refresh reports the result with an `Apply Empty Result` / `空の結果を反映` action so shrinking the index stays an explicit choice / スキャンが成功してもリソースが 0 件だった場合、その source を消さなくなりました。全体更新は既存リソースを保持して output channel に記録し、単一 source 更新は結果を報告して明示操作でのみ縮退できます。
+- ⏳ **Stale Refresh Cap** - The startup refresh of stale source indexes now updates at most 5 sources per launch and rotates the starting point, so a large workspace no longer spends its GitHub quota in one go and a repeatedly failing source cannot starve the ones behind it. Deferred sources are listed in the output channel / 起動時の stale source index 更新は 1 回あたり最大 5 source までにし、開始位置をローテーションします。GitHub の quota を一度に使い切らず、失敗し続ける source が後続を止めることもありません。繰り越した source は output channel に出力します。
+- 🔗 **Renamed Repository Follow-up** - A source scan resolves the canonical owner and repository name before building request URLs and writes the result back, so a renamed upstream repository keeps working without editing the source / source スキャンはリクエスト URL を組み立てる前に canonical な owner / repository 名を解決して書き戻すため、upstream の rename 後も source を編集せずに使えます。
+
+### Fixed
+
+- 🔐 **GitHub Failure Diagnosis** - An organization SSO failure on a request that was escalated to the authenticated API is now retried anonymously, an exhausted anonymous rate limit is no longer reported as `SSO required`, and code search failures are classified instead of always claiming a rate limit. Rate-limit failures now correctly stop a batch update early / 認証付き API へ昇格したリクエストで発生した組織 SSO エラーも匿名リトライの対象になりました。匿名側のレート制限枯渇が `SSO 認証が必要` と誤表示されることがなくなり、コード検索の失敗も一律 rate limit と断定せず分類します。rate limit 失敗はバッチ更新を正しく早期停止させます。
+- 🧩 **Bundled Preset Precedence** - The bundled preset index no longer overwrites the repository facts a scan resolved, so a followed rename is not reverted on every launch, and preset merging tolerates older index files that omit categories or bundles / 同梱プリセット index がスキャンで解決した repository 情報を上書きしなくなり、追従した rename が起動のたびに巻き戻ることがなくなりました。categories や bundles を持たない古い index file もマージできます。
+
 ## [0.2.40] - 2026-07-30
 
 ### Changed
@@ -224,8 +243,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Revalidated resource regression, welcome UX, localization, manifest consistency, compile, extension-host smoke, and npm audit before release / リリース前に resource 回帰、welcome UX、localization、manifest consistency、compile、extension-host smoke、npm audit を再検証しました。
 
-## [0.2.23] - 2026-05-19
-
 ## [0.2.24] - 2026-05-19
 
 ### Fixed
@@ -237,6 +254,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Tests
 
 - Added regression guards for MCP uninstall sequencing, shared `.skill-meta.json` coexistence fields, and PowerShell task invocation, then revalidated compile, resource regression, extension-host smoke, helper-task execution, targeted metadata contract tests, and npm audit / MCP アンインストール順序、共有 `.skill-meta.json` 共存フィールド、PowerShell task 呼び出し形式の回帰ガードを追加し、compile、resource 回帰、extension-host smoke、helper task 実行、metadata 契約テスト、npm audit を再検証しました。
+
+## [0.2.23] - 2026-05-19
 
 ## [0.2.22] - 2026-05-19
 

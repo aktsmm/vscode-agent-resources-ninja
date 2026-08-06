@@ -178,4 +178,67 @@ test("stampIndexedSources only stamps successful source IDs", () => {
   assert.strictEqual(stamped[1].lastIndexedAt, "2026-01-01T00:00:00.000Z");
 });
 
+function makeSources(count) {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `source-${index + 1}`,
+    name: `Source ${index + 1}`,
+    url: `https://github.com/a/source-${index + 1}`,
+    type: "github",
+    description: `Source ${index + 1}`,
+  }));
+}
+
+test("startup stale updates are capped and the rest are deferred", () => {
+  const selection = freshness.selectStaleSourcesForStartup(makeSources(12));
+
+  assert.strictEqual(
+    selection.selected.length,
+    freshness.STALE_SOURCE_INDEX_MAX_PER_STARTUP,
+  );
+  assert.strictEqual(selection.selected.length + selection.deferred.length, 12);
+  assert.deepStrictEqual(
+    selection.selected.map((source) => source.id),
+    ["source-1", "source-2", "source-3", "source-4", "source-5"],
+  );
+  assert.strictEqual(selection.nextCursorSourceId, "source-5");
+});
+
+test("the cursor rotates the starting point on the next startup", () => {
+  const sources = makeSources(12);
+  const second = freshness.selectStaleSourcesForStartup(sources, {
+    startAfterSourceId: "source-5",
+  });
+
+  assert.deepStrictEqual(
+    second.selected.map((source) => source.id),
+    ["source-6", "source-7", "source-8", "source-9", "source-10"],
+  );
+  assert.strictEqual(second.nextCursorSourceId, "source-10");
+});
+
+test("the cursor wraps around so no stale source starves", () => {
+  const sources = makeSources(6);
+  const wrapped = freshness.selectStaleSourcesForStartup(sources, {
+    startAfterSourceId: "source-5",
+  });
+
+  assert.deepStrictEqual(
+    wrapped.selected.map((source) => source.id),
+    ["source-6", "source-1", "source-2", "source-3", "source-4"],
+  );
+});
+
+test("an unknown or removed cursor restarts from the beginning", () => {
+  const sources = makeSources(3);
+  const selection = freshness.selectStaleSourcesForStartup(sources, {
+    startAfterSourceId: "removed-source",
+  });
+
+  assert.deepStrictEqual(
+    selection.selected.map((source) => source.id),
+    ["source-1", "source-2", "source-3"],
+  );
+  assert.deepStrictEqual(selection.deferred, []);
+});
+
 console.log("RESULT=PASS");

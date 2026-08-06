@@ -11,7 +11,11 @@ import {
   getSourceBranch,
 } from "./skillIndex";
 import { isJapanese, messages } from "./i18n";
-import { getGitHubToken } from "./githubAuth";
+import {
+  getGitHubToken,
+  hasStoredGitHubToken,
+  resolveGitHubToken,
+} from "./githubAuth";
 import { fetchGitHubWithOptionalAuthRetry } from "./githubFetch";
 import {
   GitHubDirectoryEntry,
@@ -300,11 +304,14 @@ async function handleSkillNotFound(
     const openSettings = messages.openSettings();
     const updateIndex = messages.actionUpdateIndex();
     const reportBug = messages.actionReportBug();
+    const clearStoredToken = messages.actionClearStoredGitHubToken();
+    const hasStoredToken = await hasStoredGitHubToken();
     const choice = await vscode.window.showErrorMessage(
       buildSkillNotFoundMessage(skill.name, token),
       openSettings,
       updateIndex,
       reportBug,
+      ...(hasStoredToken ? [clearStoredToken] : []),
     );
 
     if (choice === openSettings) {
@@ -322,6 +329,8 @@ async function handleSkillNotFound(
         "404 Not Found",
         Boolean(token),
       );
+    } else if (choice === clearStoredToken) {
+      await vscode.commands.executeCommand("resourceNinja.clearGitHubToken");
     }
   }
 
@@ -2390,6 +2399,7 @@ async function openBugReport(
 
   const repoUrl = source?.url || "unknown";
   const branch = source?.branch || "default";
+  const githubAuth = await resolveGitHubToken();
 
   const issueTitle = `[Bug] Skill not found: ${skill.name}`;
   const issueBody =
@@ -2409,6 +2419,7 @@ async function openBugReport(
     `- VS Code: ${vscode.version}\n` +
     `- OS: ${process.platform}\n` +
     `- GitHub Authentication: ${hasToken ? "configured" : "not configured"}\n\n` +
+    `- GitHub Credential Source: ${githubAuth.source}\n\n` +
     `**Possible Cause**\n` +
     buildSkillNotFoundPossibleCause(hasToken);
 

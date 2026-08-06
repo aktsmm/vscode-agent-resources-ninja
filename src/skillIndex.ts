@@ -2,10 +2,7 @@
 // プリインストールされたインデックスと更新可能なローカルインデックスを管理
 
 import * as vscode from "vscode";
-import {
-  createGitHubHeaders,
-  fetchGitHubWithOptionalAuthRetry,
-} from "./githubFetch";
+import { fetchGitHubWithOptionalAuthRetry } from "./githubFetch";
 import { logger } from "./logger";
 import {
   loadSharedStoresIntoSkillIndex,
@@ -134,12 +131,17 @@ export function getLocalizedCategoryNames(
   });
 }
 
+// リポジトリ構造ごとのスキャン方式（未指定は auto）
+export type SourceScanner = "auto" | "claude-commands" | "top-level-dirs";
+
 // ソース情報の型定義
 export interface Source {
   id: string;
   name: string;
   url: string;
   type: string;
+  repoId?: number; // GitHub の数値 repository id（初回スキャンで TOFU 記録）
+  scanner?: SourceScanner; // リポジトリ名に依存しないスキャン方式の宣言
   branch?: string; // 明示的なデフォルトブランチ（省略時は runtime で解決）
   lastIndexedAt?: string; // ソース単位の最終 index 更新日時
   includePaths?: string[]; // Only index resources under these path prefixes
@@ -241,7 +243,7 @@ function createSkillKey(
   return `${skill.source}:${getResourceKind(skill)}:${skill.name}`;
 }
 
-function createBundleKey(bundle: Pick<Bundle, "source" | "id">): string {
+export function createBundleKey(bundle: Pick<Bundle, "source" | "id">): string {
   return `${bundle.source}:${bundle.id}`;
 }
 
@@ -367,46 +369,51 @@ export async function loadSkillIndex(
  * バンドル版の新しいソースをローカル版に追加
  * 既存スキルの多言語説明も更新
  */
-function mergeSkillIndexes(
+export function mergeSkillIndexes(
   localIndex: SkillIndex,
   bundledIndex: SkillIndex,
 ): SkillIndex {
+  const bundledCategories = getIndexCategories(bundledIndex);
+  const localCategories = getIndexCategories(localIndex);
   const bundledSourcesById = new Map(
-    bundledIndex.sources.map((source) => [source.id, source]),
+    getIndexSources(bundledIndex).map((source) => [source.id, source]),
   );
   const bundledCategoriesById = new Map(
-    bundledIndex.categories.map((category) => [category.id, category]),
+    bundledCategories.map((category) => [category.id, category]),
   );
   const bundledBundlesByKey = new Map(
-    (bundledIndex.bundles || []).map((bundle) => [
+    getIndexBundles(bundledIndex).map((bundle) => [
       createBundleKey(bundle),
       bundle,
     ]),
   );
   const bundledSkillsByKey = new Map(
-    bundledIndex.skills.map((skill) => [createSkillKey(skill), skill]),
+    getIndexResources(bundledIndex).map((skill) => [
+      createSkillKey(skill),
+      skill,
+    ]),
   );
 
   // ローカルのソース ID セット
-  const localSourceIds = new Set(localIndex.sources.map((s) => s.id));
-  const localCategoryIds = new Set(localIndex.categories.map((c) => c.id));
+  const localSourceIds = new Set(getIndexSources(localIndex).map((s) => s.id));
+  const localCategoryIds = new Set(localCategories.map((c) => c.id));
   const localBundleKeys = new Set(
-    (localIndex.bundles || []).map((bundle) => createBundleKey(bundle)),
+    getIndexBundles(localIndex).map((bundle) => createBundleKey(bundle)),
   );
 
   // バンドル版の新しいソースを追加
-  const newSources = bundledIndex.sources.filter(
+  const newSources = getIndexSources(bundledIndex).filter(
     (s) => !localSourceIds.has(s.id),
   );
-  const newCategories = bundledIndex.categories.filter(
+  const newCategories = bundledCategories.filter(
     (category) => !localCategoryIds.has(category.id),
   );
-  const newBundles = (bundledIndex.bundles || []).filter(
+  const newBundles = getIndexBundles(bundledIndex).filter(
     (bundle) => !localBundleKeys.has(createBundleKey(bundle)),
   );
 
   // 既存ソースをバンドル版で補完・更新
-  const updatedSources = localIndex.sources.map((localSource) => {
+  const updatedSources = getIndexSources(localIndex).map((localSource) => {
     const bundledSource = bundledSourcesById.get(localSource.id);
     if (bundledSource) {
       return {
@@ -414,13 +421,23 @@ function mergeSkillIndexes(
         ...bundledSource,
         description_ja:
           bundledSource.description_ja || localSource.description_ja,
+        // Repository facts are resolved by a scan; a bundled preset ships
+        // curation only and must not overwrite what the runtime verified.
+        // Once an identity is recorded the runtime owns the URL so a followed
+        // rename is not reverted; repointing a preset uses a new source id.
+        repoId: localSource.repoId ?? bundledSource.repoId,
+        lastIndexedAt: localSource.lastIndexedAt ?? bundledSource.lastIndexedAt,
+        url:
+          localSource.repoId === undefined
+            ? bundledSource.url
+            : localSource.url,
       };
     }
     return localSource;
   });
 
   // 既存カテゴリをバンドル版で補完・更新
-  const updatedCategories = localIndex.categories.map((localCategory) => {
+  const updatedCategories = localCategories.map((localCategory) => {
     const bundledCategory = bundledCategoriesById.get(localCategory.id);
     if (bundledCategory) {
       return {
@@ -437,14 +454,14 @@ function mergeSkillIndexes(
   // バンドル版の新しいスキルを追加
   // 既存ソースでも新スキルが追加されるため、source+name で欠分を補完する
   const localSkillKeys = new Set(
-    localIndex.skills.map((skill) => createSkillKey(skill)),
+    getIndexResources(localIndex).map((skill) => createSkillKey(skill)),
   );
-  const newSkills = bundledIndex.skills.filter(
+  const newSkills = getIndexResources(bundledIndex).filter(
     (skill) => !localSkillKeys.has(createSkillKey(skill)),
   );
 
   // 既存スキルをバンドル版で補完・更新
-  const updatedSkills = localIndex.skills.map((localSkill) => {
+  const updatedSkills = getIndexResources(localIndex).map((localSkill) => {
     const bundledSkill = bundledSkillsByKey.get(createSkillKey(localSkill));
     if (bundledSkill) {
       return {
@@ -537,22 +554,31 @@ function shouldPersistMergedIndex(
       localSource.name !== mergedSource.name ||
       localSource.url !== mergedSource.url ||
       localSource.type !== mergedSource.type ||
+      localSource.repoId !== mergedSource.repoId ||
+      localSource.scanner !== mergedSource.scanner ||
       localSource.branch !== mergedSource.branch ||
       localSource.lastIndexedAt !== mergedSource.lastIndexedAt ||
       localSource.description !== mergedSource.description ||
-      localSource.description_ja !== mergedSource.description_ja
+      localSource.description_ja !== mergedSource.description_ja ||
+      !areStringArraysEqual(
+        localSource.includePaths,
+        mergedSource.includePaths,
+      ) ||
+      !areStringArraysEqual(localSource.excludePaths, mergedSource.excludePaths)
     ) {
       return true;
     }
   }
 
-  if (localIndex.categories.length !== mergedIndex.categories.length) {
+  const localCategories = getIndexCategories(localIndex);
+  const mergedCategories = getIndexCategories(mergedIndex);
+  if (localCategories.length !== mergedCategories.length) {
     return true;
   }
 
-  for (let index = 0; index < localIndex.categories.length; index += 1) {
-    const localCategory = localIndex.categories[index];
-    const mergedCategory = mergedIndex.categories[index];
+  for (let index = 0; index < localCategories.length; index += 1) {
+    const localCategory = localCategories[index];
+    const mergedCategory = mergedCategories[index];
     if (
       localCategory.id !== mergedCategory.id ||
       localCategory.name !== mergedCategory.name ||
@@ -659,11 +685,12 @@ const branchCache = new Map<string, string>();
  * URL が存在するか HEAD リクエストで確認
  */
 async function checkUrlExists(url: string, token?: string): Promise<boolean> {
-  const headers = createGitHubHeaders(url, "*/*", token);
-  delete headers.Accept;
-
   try {
-    const response = await fetch(url, { method: "HEAD", headers });
+    const response = await fetchGitHubWithOptionalAuthRetry(url, {
+      accept: "*/*",
+      token,
+      method: "HEAD",
+    });
     return response.ok;
   } catch {
     return false;

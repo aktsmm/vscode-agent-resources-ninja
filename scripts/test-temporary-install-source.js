@@ -43,7 +43,12 @@ async function main() {
   );
   const githubFetchModule = requireTypeScriptModule(
     path.join(__dirname, "..", "src", "githubFetch.ts"),
-    { "./githubResponse": githubResponseModule },
+    {
+      "./githubResponse": githubResponseModule,
+      "./githubAuth": {
+        resolveGitHubTokenAfterFailure: async () => undefined,
+      },
+    },
   );
   const traversalModule = requireTypeScriptModule(
     path.join(__dirname, "..", "src", "githubDirectoryTraversal.ts"),

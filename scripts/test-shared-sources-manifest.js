@@ -82,6 +82,7 @@ async function main() {
     name: "Source A",
     url: "https://github.com/a/source-a",
     type: "github",
+    repoId: 123456,
     branch: "main",
     description: "Source A",
     description_ja: "ソースA",
@@ -99,11 +100,38 @@ async function main() {
 
   const raw = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   assert.strictEqual(raw.sources[0].lastIndexedAt, source.lastIndexedAt);
+  assert.strictEqual(raw.sources[0].repoId, 123456);
 
   const readBack = await moduleExports.readSharedSourcesManifest();
   assert.strictEqual(readBack.sources[0].lastIndexedAt, source.lastIndexedAt);
+  assert.strictEqual(readBack.sources[0].repoId, 123456);
   assert.deepStrictEqual(readBack.sources[0].includePaths, ["skills/"]);
   assert.deepStrictEqual(readBack.sources[0].excludePaths, ["tmp/"]);
+
+  // A shared store is writable by any tool on the machine.
+  fs.writeFileSync(
+    manifestPath,
+    JSON.stringify({
+      schemaVersion: 1,
+      sources: [
+        { ...source, repoId: "123456; DROP", scanner: "../../etc/passwd" },
+      ],
+      lastUpdated: "2026-06-24T12:02:00.000Z",
+      updatedBy: "someone-else",
+    }),
+    "utf8",
+  );
+  const tampered = await moduleExports.readSharedSourcesManifest();
+  assert.strictEqual(
+    tampered.sources[0].repoId,
+    undefined,
+    "a non-numeric repoId must not be trusted",
+  );
+  assert.strictEqual(
+    tampered.sources[0].scanner,
+    undefined,
+    "an unknown scanner value must not be trusted",
+  );
 
   fs.rmSync(tempDir, { recursive: true, force: true });
 }

@@ -50,6 +50,8 @@ const jaMessages = {
     "GitHub 認証またはリポジトリへのアクセス権が必要です",
   actionShowDetails: "詳細を表示",
   actionConfigureGitHubAuth: "GitHub 認証を設定",
+  actionClearStoredGitHubToken:
+    "保存済み GitHub トークンをクリア（SecretStorage のみ）",
   updating: "{0} を更新中...",
   updateSourceSelectRequired:
     "Remote Resources ビューから更新するソースを選択してください。",
@@ -99,6 +101,11 @@ const jaMessages = {
     "Resource Ninja のキャッシュ、すべての設定、GitHub Token をリセットします。この操作は元に戻せません。続行しますか？",
   resetConfirmAction: "リセットする",
   resetComplete: "✅ 初期化が完了しました。VS Codeを再起動してください。",
+  githubTokenCleared: "SecretStorage の GitHub トークンを削除しました。",
+  githubTokenNotStored:
+    "SecretStorage に保存された GitHub トークンはありません。",
+  githubTokenClearFailed:
+    "SecretStorage の GitHub トークンを削除できませんでした。VS Code を再読み込みして再試行してください。",
   authWithGhCli: "gh CLIで認証",
   installedFolder: "インストール済み",
   rateLimitExceeded:
@@ -210,6 +217,8 @@ const enMessages: MessageDictionary = {
     "GitHub authentication or repository permission is required",
   actionShowDetails: "Show Details",
   actionConfigureGitHubAuth: "Configure GitHub Authentication",
+  actionClearStoredGitHubToken:
+    "Clear Stored GitHub Token (SecretStorage only)",
   updating: "Updating {0}...",
   updateSourceSelectRequired:
     "Please select a source to update from the Remote Resources view.",
@@ -259,6 +268,10 @@ const enMessages: MessageDictionary = {
     "Reset the Resource Ninja cache, all settings, and the GitHub token. This cannot be undone. Continue?",
   resetConfirmAction: "Reset",
   resetComplete: "✅ Reset complete. Please restart VS Code.",
+  githubTokenCleared: "Removed the GitHub token from SecretStorage.",
+  githubTokenNotStored: "No GitHub token is stored in SecretStorage.",
+  githubTokenClearFailed:
+    "Could not remove the GitHub token from SecretStorage. Reload VS Code and try again.",
   authWithGhCli: "Authenticate with gh CLI",
   installedFolder: "Installed",
   rateLimitExceeded:
@@ -449,6 +462,8 @@ export const messages = {
   githubAuthRequiredReason: () => localize("githubAuthRequiredReason"),
   actionShowDetails: () => localize("actionShowDetails"),
   actionConfigureGitHubAuth: () => localize("actionConfigureGitHubAuth"),
+  actionClearStoredGitHubToken: () =>
+    localize("actionClearStoredGitHubToken"),
   updating: (name: string) => localize("updating", name),
   updateSourceSelectRequired: () => localize("updateSourceSelectRequired"),
   sourceIdNotFound: () => localize("sourceIdNotFound"),
@@ -496,6 +511,9 @@ export const messages = {
   actionReportBug: () => localize("actionReportBug"),
   openSettings: () => localize("openSettings"),
   authWithGhCli: () => localize("authWithGhCli"),
+  githubTokenCleared: () => localize("githubTokenCleared"),
+  githubTokenNotStored: () => localize("githubTokenNotStored"),
+  githubTokenClearFailed: () => localize("githubTokenClearFailed"),
 
   // 初期化
   resetSettingsTitle: () => localize("resetSettingsTitle"),

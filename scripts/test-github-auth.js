@@ -48,12 +48,16 @@ function requireTypeScriptModule(filePath, stubs = {}) {
 const SECRET_KEY = "resourceNinja.githubToken";
 
 const secretMap = new Map();
+let secretDeleteError;
 const secretStorage = {
   get: async (key) => secretMap.get(key),
   store: async (key, value) => {
     secretMap.set(key, value);
   },
   delete: async (key) => {
+    if (secretDeleteError) {
+      throw secretDeleteError;
+    }
     secretMap.delete(key);
   },
 };
@@ -61,6 +65,8 @@ const secretStorage = {
 let configState = {};
 let execHandler = null;
 const execCalls = [];
+let informationMessages = [];
+let errorMessages = [];
 
 // `gh auth token` is invoked via `await import("child_process")`, which resolves
 // after the Module._load stub is restored. Monkeypatch the real singleton's exec
@@ -78,6 +84,14 @@ realChildProcess.exec = (command, options, callback) => {
 };
 
 const vscodeStub = {
+  window: {
+    showInformationMessage: async (message) => {
+      informationMessages.push(message);
+    },
+    showErrorMessage: async (message) => {
+      errorMessages.push(message);
+    },
+  },
   workspace: {
     getConfiguration: (section) => {
       assert.strictEqual(
@@ -106,6 +120,9 @@ const childProcessStub = {
 const i18nStub = {
   messages: {
     authRequired: () => "auth required",
+    githubTokenCleared: () => "token cleared",
+    githubTokenNotStored: () => "token not stored",
+    githubTokenClearFailed: () => "token clear failed",
   },
 };
 
@@ -127,6 +144,9 @@ function resetState() {
   configState = {};
   execHandler = null;
   execCalls.length = 0;
+  informationMessages = [];
+  errorMessages = [];
+  secretDeleteError = undefined;
   delete process.env.GITHUB_TOKEN;
   delete process.env.GH_TOKEN;
 }
@@ -153,6 +173,72 @@ const tests = [
       const result = await githubAuth.resolveGitHubToken();
       assert.strictEqual(result.source, "env");
       assert.strictEqual(result.token, "env-tok");
+    },
+  },
+  {
+    name: "Stale SecretStorage source can be excluded",
+    run: async () => {
+      secretMap.set(SECRET_KEY, "secret-tok");
+      execHandler = (_command, _options, callback) => {
+        callback(null, "gh-tok\n", "");
+      };
+
+      const result = await githubAuth.resolveGitHubToken({
+        excludeSources: ["secret"],
+      });
+      assert.deepStrictEqual(result, { token: "gh-tok", source: "gh-cli" });
+    },
+  },
+  {
+    name: "Stale SecretStorage failure falls back to environment token",
+    run: async () => {
+      secretMap.set(SECRET_KEY, "secret-tok");
+      process.env.GITHUB_TOKEN = "env-tok";
+
+      const result =
+        await githubAuth.resolveGitHubTokenAfterFailure("secret-tok");
+      assert.deepStrictEqual(result, { token: "env-tok", source: "env" });
+    },
+  },
+  {
+    name: "Stale SecretStorage failure falls back to gh CLI token",
+    run: async () => {
+      secretMap.set(SECRET_KEY, "secret-tok");
+      execHandler = (_command, _options, callback) => {
+        callback(null, "gh-tok\n", "");
+      };
+
+      const result =
+        await githubAuth.resolveGitHubTokenAfterFailure("secret-tok");
+      assert.deepStrictEqual(result, { token: "gh-tok", source: "gh-cli" });
+    },
+  },
+  {
+    name: "Credential changes during a failed request are retried",
+    run: async () => {
+      secretMap.set(SECRET_KEY, "rotated-tok");
+
+      const result =
+        await githubAuth.resolveGitHubTokenAfterFailure("request-tok");
+      assert.deepStrictEqual(result, {
+        token: "rotated-tok",
+        source: "secret",
+      });
+    },
+  },
+  {
+    name: "Duplicate tokens from different sources are skipped",
+    run: async () => {
+      secretMap.set(SECRET_KEY, "same-tok");
+      process.env.GITHUB_TOKEN = "same-tok";
+      execHandler = (_command, _options, callback) => {
+        callback(null, "gh-tok\n", "");
+      };
+
+      const result =
+        await githubAuth.resolveGitHubTokenAfterFailure("same-tok");
+      assert.deepStrictEqual(result, { token: "gh-tok", source: "gh-cli" });
+      assert.strictEqual(execCalls.length, 1);
     },
   },
   {
@@ -195,6 +281,38 @@ const tests = [
     },
   },
   {
+    name: "Token validation is bounded and retries stale secret with gh CLI",
+    run: async () => {
+      secretMap.set(SECRET_KEY, "secret-tok");
+      execHandler = (_command, _options, callback) => {
+        callback(null, "gh-tok\n", "");
+      };
+      const requests = [];
+      const originalFetch = global.fetch;
+      global.fetch = async (url, options = {}) => {
+        requests.push({ url, options });
+        const authenticated = options.headers.Authorization === "token gh-tok";
+        return { ok: authenticated, status: authenticated ? 200 : 401 };
+      };
+
+      try {
+        const result = await githubAuth.checkGitHubAuth();
+        assert.deepStrictEqual(result, {
+          authenticated: true,
+          method: "gh-cli",
+          message: "GitHub token authenticated",
+        });
+        assert.strictEqual(githubAuth.GITHUB_AUTH_TIMEOUT_MS, 5000);
+        assert.strictEqual(requests.length, 2);
+        assert.ok(
+          requests.every(({ options }) => options.signal instanceof AbortSignal),
+        );
+      } finally {
+        global.fetch = originalFetch;
+      }
+    },
+  },
+  {
     name: "gh CLI errors fall back to legacy config",
     run: async () => {
       configState.githubToken = "cfg-tok";
@@ -231,6 +349,42 @@ const tests = [
     },
   },
   {
+    name: "Clear-token feedback reports success without deleting other sources",
+    run: async () => {
+      secretMap.set(SECRET_KEY, "secret-tok");
+      process.env.GITHUB_TOKEN = "env-tok";
+      configState.githubToken = "config-tok";
+
+      await githubAuth.clearStoredGitHubTokenWithFeedback();
+
+      assert.strictEqual(secretMap.has(SECRET_KEY), false);
+      assert.deepStrictEqual(informationMessages, ["token cleared"]);
+      assert.strictEqual(process.env.GITHUB_TOKEN, "env-tok");
+      assert.strictEqual(configState.githubToken, "config-tok");
+    },
+  },
+  {
+    name: "Clear-token feedback reports no stored token",
+    run: async () => {
+      await githubAuth.clearStoredGitHubTokenWithFeedback();
+      assert.deepStrictEqual(informationMessages, ["token not stored"]);
+      assert.deepStrictEqual(errorMessages, []);
+    },
+  },
+  {
+    name: "Clear-token feedback reports deletion failure",
+    run: async () => {
+      secretMap.set(SECRET_KEY, "secret-tok");
+      secretDeleteError = new Error("SecretStorage unavailable");
+
+      await githubAuth.clearStoredGitHubTokenWithFeedback();
+
+      assert.deepStrictEqual(informationMessages, []);
+      assert.deepStrictEqual(errorMessages, ["token clear failed"]);
+      assert.strictEqual(secretMap.get(SECRET_KEY), "secret-tok");
+    },
+  },
+  {
     name: "Config change syncs new token into SecretStorage",
     run: async () => {
       secretMap.set(SECRET_KEY, "old-tok");
@@ -251,6 +405,44 @@ const tests = [
 
       const result = await githubAuth.resolveGitHubToken();
       assert.strictEqual(result.source, "none");
+    },
+  },
+  {
+    name: "Migration, sync, and clear mutations stay ordered",
+    run: async () => {
+      configState.githubToken = "legacy-tok";
+      const originalStore = secretStorage.store;
+      let releaseStore;
+      let markStoreStarted;
+      const storeStarted = new Promise((resolve) => {
+        markStoreStarted = resolve;
+      });
+      const storeGate = new Promise((resolve) => {
+        releaseStore = resolve;
+      });
+      secretStorage.store = async (key, value) => {
+        markStoreStarted();
+        await storeGate;
+        secretMap.set(key, value);
+      };
+
+      try {
+        const migration =
+          githubAuth.migrateConfiguredGitHubTokenToSecretStorage();
+        await storeStarted;
+        configState.githubToken = "synced-tok";
+        const sync = githubAuth.syncConfiguredGitHubToken();
+        const clear = githubAuth.clearStoredGitHubTokenWithFeedback();
+        releaseStore();
+
+        assert.strictEqual(await migration, true);
+        await sync;
+        await clear;
+        assert.strictEqual(secretMap.has(SECRET_KEY), false);
+        assert.deepStrictEqual(informationMessages, ["token cleared"]);
+      } finally {
+        secretStorage.store = originalStore;
+      }
     },
   },
 ];

@@ -22,7 +22,9 @@ import {
   migrateConfiguredGitHubTokenToSecretStorage,
   syncConfiguredGitHubToken,
   deleteStoredGitHubToken,
+  clearStoredGitHubTokenWithFeedback,
   getGitHubToken,
+  resolveGitHubToken,
 } from "./githubAuth";
 import {
   installSkill,
@@ -138,9 +140,16 @@ import {
   readSharedResourceIndex,
 } from "./sharedResourceIndexStore";
 import { readSharedSourcesManifest } from "./sharedSourcesManifestStore";
-import { collectStaleSources } from "./sourceFreshness";
+import {
+  collectStaleSources,
+  selectStaleSourcesForStartup,
+} from "./sourceFreshness";
 import { GitHubResponseError, isGitHubResponseError } from "./githubResponse";
 import { runSourceIndexUpdateBatch } from "./sourceIndexUpdateBatch";
+import {
+  isEmptySourceScanError,
+  isSourceRepositoryChangedError,
+} from "./sourceUpdateReconcile";
 import {
   formatSourceIndexResetAt,
   getSourceIndexUpdateNotificationKind,
@@ -152,6 +161,7 @@ const EXTENSION_VERSION =
   vscode.extensions.getExtension("yamapan.agent-resources-ninja")?.packageJSON
     ?.version || "0.0.0";
 const STALE_SOURCE_PROMPT_DATE_KEY = "resourceNinja.staleSourceLastPromptDate";
+const STALE_SOURCE_CURSOR_KEY = "resourceNinja.staleSourceUpdateCursor";
 
 let activeExtensionContext: vscode.ExtensionContext | undefined;
 
@@ -1017,6 +1027,28 @@ export async function activate(
       logger.info(
         `[Source Index] [${new Date().toISOString()}] Updating ${staleSources.length} stale source(s)`,
       );
+      const { selected, deferred, nextCursorSourceId } =
+        selectStaleSourcesForStartup(staleSources, {
+          startAfterSourceId: context.globalState.get<string>(
+            STALE_SOURCE_CURSOR_KEY,
+          ),
+        });
+      for (const source of deferred) {
+        logger.info(
+          `[Source Index] [DEFERRED] ${getSourceUpdateDisplayName(source)}`,
+        );
+      }
+      if (deferred.length > 0) {
+        logger.info(
+          `[Source Index] Deferred ${deferred.length} stale source(s) to a later startup.`,
+        );
+      }
+      if (nextCursorSourceId) {
+        await context.globalState.update(
+          STALE_SOURCE_CURSOR_KEY,
+          nextCursorSourceId,
+        );
+      }
       const batchResult = await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
@@ -1025,7 +1057,7 @@ export async function activate(
         },
         async (progress) =>
           runSourceIndexUpdateBatch(
-            staleSources,
+            selected,
             index,
             async (nextIndex, source) =>
               updateIndexFromSingleSource(
@@ -1037,7 +1069,7 @@ export async function activate(
                     progress.report({
                       ...value,
                       increment: scaleSourceIndexProgressIncrement(
-                        staleSources.length,
+                        selected.length,
                         value.increment,
                       ),
                     });
@@ -1073,10 +1105,7 @@ export async function activate(
       );
       if (notificationKind === "success") {
         await vscode.window.showInformationMessage(
-          messages.staleSourceIndexUpdated(
-            succeeded.length,
-            staleSources.length,
-          ),
+          messages.staleSourceIndexUpdated(succeeded.length, selected.length),
         );
       } else {
         const firstFailure = failures[0];
@@ -1089,7 +1118,7 @@ export async function activate(
           messages.staleSourceIndexPartialFailed(
             succeeded.length,
             failures.length,
-            staleSources.length,
+            selected.length,
             failures
               .slice(0, 3)
               .map((failure) => getSourceUpdateDisplayName(failure.entry))
@@ -4041,12 +4070,9 @@ export async function activate(
             cancellable: false,
           },
           async (progress) =>
-            updateIndexFromSourcesWithResult(
-              context,
-              skillIndex!,
-              progress,
-              { forceScan: true },
-            ),
+            updateIndexFromSourcesWithResult(context, skillIndex!, progress, {
+              forceScan: true,
+            }),
         );
         skillIndex = updateResult.index;
         const newCount = getIndexResources(skillIndex).length;
@@ -4086,9 +4112,7 @@ export async function activate(
               totalSources,
               updateResult.failures
                 .slice(0, 3)
-                .map((failure) =>
-                  getSourceUpdateDisplayName(failure.entry),
-                )
+                .map((failure) => getSourceUpdateDisplayName(failure.entry))
                 .join(", "),
               formatSourceUpdateFailureReason(firstFailure.error),
               updateResult.skipped.length,
@@ -4145,7 +4169,9 @@ export async function activate(
         (s) => s.source === sourceId,
       ).length;
 
-      try {
+      const runSourceIndexUpdate = async (
+        allowEmptyResult: boolean,
+      ): Promise<void> => {
         await vscode.window.withProgress(
           {
             location: vscode.ProgressLocation.Notification,
@@ -4158,7 +4184,7 @@ export async function activate(
               skillIndex!,
               sourceId,
               progress,
-              { forceScan: true },
+              { forceScan: true, allowEmptyResult },
             );
           },
         );
@@ -4176,7 +4202,37 @@ export async function activate(
           ),
         );
         browseProvider.refresh();
+      };
+
+      try {
+        await runSourceIndexUpdate(false);
       } catch (error: unknown) {
+        if (isEmptySourceScanError(error)) {
+          const applyAction = isJapanese()
+            ? "空の結果を反映"
+            : "Apply Empty Result";
+          const choice = await vscode.window.showWarningMessage(
+            isJapanese()
+              ? `${item.source?.name || sourceId} のスキャンでリソースが 0 件でした。既存のインデックス（${oldCount} 件）を保持しています。`
+              : `Scanning ${item.source?.name || sourceId} returned no resources. The existing index (${oldCount}) was kept.`,
+            applyAction,
+          );
+          if (choice === applyAction) {
+            try {
+              await runSourceIndexUpdate(true);
+            } catch (retryError: unknown) {
+              vscode.window.showErrorMessage(
+                messages.updateFailed(
+                  retryError instanceof Error
+                    ? retryError.message
+                    : String(retryError),
+                ),
+              );
+            }
+          }
+          return;
+        }
+
         const errorMessage =
           error instanceof Error ? error.message : String(error);
         if (
@@ -4246,7 +4302,9 @@ export async function activate(
         skillIndex = await loadSkillIndex(context);
       }
 
-      try {
+      const runAddSource = async (
+        allowRepositoryChange: boolean,
+      ): Promise<void> => {
         const result = await vscode.window.withProgress(
           {
             location: vscode.ProgressLocation.Notification,
@@ -4254,7 +4312,9 @@ export async function activate(
             cancellable: false,
           },
           async () => {
-            return await addSource(context, skillIndex!, repoUrl);
+            return await addSource(context, skillIndex!, repoUrl, {
+              allowRepositoryChange,
+            });
           },
         );
 
@@ -4264,7 +4324,36 @@ export async function activate(
         );
         // 更新されたインデックスを直接設定
         browseProvider.setIndex(skillIndex);
+      };
+
+      try {
+        await runAddSource(false);
       } catch (error: unknown) {
+        if (isSourceRepositoryChangedError(error)) {
+          const approveAction = isJapanese()
+            ? "別リポジトリへの差し替えを承認"
+            : "Approve Repository Change";
+          const choice = await vscode.window.showWarningMessage(
+            error.message,
+            { modal: true },
+            approveAction,
+          );
+          if (choice === approveAction) {
+            try {
+              await runAddSource(true);
+            } catch (retryError: unknown) {
+              vscode.window.showErrorMessage(
+                messages.addSourceFailed(
+                  retryError instanceof Error
+                    ? retryError.message
+                    : String(retryError),
+                ),
+              );
+            }
+          }
+          return;
+        }
+
         const errorMessage =
           error instanceof Error ? error.message : String(error);
         if (
@@ -4562,6 +4651,7 @@ export async function activate(
           const errorMessage =
             error instanceof Error ? error.message : String(error);
           if (
+            shouldOfferGitHubAuth(error) ||
             errorMessage.includes("rate limit") ||
             errorMessage.includes("authentication")
           ) {
@@ -5759,6 +5849,11 @@ ${fileUri.fsPath}`,
     },
   );
 
+  const clearGitHubTokenCmd = vscode.commands.registerCommand(
+    "resourceNinja.clearGitHubToken",
+    clearStoredGitHubTokenWithFeedback,
+  );
+
   // Command: Copy URL (for Browse view)
   const copyUrlCmd = vscode.commands.registerCommand(
     "resourceNinja.copyUrl",
@@ -5819,6 +5914,7 @@ ${fileUri.fsPath}`,
           ?.packageJSON?.version || "unknown";
 
       const isJa = isJapanese();
+      const githubAuth = await resolveGitHubToken();
 
       const issueTitle = isJa ? "[バグ報告] " : "[Bug] ";
       const issueBody = isJa
@@ -5835,7 +5931,8 @@ ${fileUri.fsPath}`,
           `**環境**\n` +
           `- 拡張機能バージョン: ${extensionVersion}\n` +
           `- VS Code: ${vscode.version}\n` +
-          `- OS: ${process.platform}\n`
+          `- OS: ${process.platform}\n` +
+          `- GitHub 認証ソース: ${githubAuth.source}\n`
         : `**Issue Description**\n` +
           `<!-- Please describe the bug you encountered -->\n\n` +
           `**Steps to Reproduce**\n` +
@@ -5849,7 +5946,8 @@ ${fileUri.fsPath}`,
           `**Environment**\n` +
           `- Extension Version: ${extensionVersion}\n` +
           `- VS Code: ${vscode.version}\n` +
-          `- OS: ${process.platform}\n`;
+          `- OS: ${process.platform}\n` +
+          `- GitHub Credential Source: ${githubAuth.source}\n`;
 
       await openBugReport(issueTitle, issueBody);
     },
@@ -5909,6 +6007,7 @@ ${fileUri.fsPath}`,
     openGlobalInstructionFileCmd,
     openSettingsCmd,
     resetSettingsCmd,
+    clearGitHubTokenCmd,
     copyUrlCmd,
     copyPathCmd,
     openInTerminalCmd,

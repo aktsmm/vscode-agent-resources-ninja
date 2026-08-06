@@ -24,6 +24,7 @@ import { withSharedStoreLock } from "./sharedStoreLock";
 import {
   Skill,
   SkillIndex,
+  Source,
   getIndexResources,
   getResourceKind,
 } from "./skillIndex";
@@ -267,6 +268,35 @@ export async function syncSharedStoresFromSkillIndex(
   }
 }
 
+/**
+ * The manifest decides which sources exist, but a field the writer did not know
+ * about must not clear the locally known value. Keeps repo identity intact when an
+ * older extension shares the same store.
+ */
+function mergeSharedManifestSources(
+  localSources: Source[],
+  manifestSources: SourceEntry[],
+): Source[] {
+  const localSourcesById = new Map(
+    localSources.map((source) => [source.id, source]),
+  );
+
+  return manifestSources.map((incoming) => {
+    const local = localSourcesById.get(incoming.id);
+    if (!local) {
+      return { ...incoming } as Source;
+    }
+
+    const merged: Source = { ...local };
+    for (const [key, value] of Object.entries(incoming)) {
+      if (value !== undefined) {
+        (merged as unknown as Record<string, unknown>)[key] = value;
+      }
+    }
+    return merged;
+  });
+}
+
 export async function loadSharedStoresIntoSkillIndex(
   context: vscode.ExtensionContext,
   currentIndex: SkillIndex,
@@ -282,7 +312,10 @@ export async function loadSharedStoresIntoSkillIndex(
     if (manifest) {
       nextIndex = {
         ...nextIndex,
-        sources: manifest.sources.map((source) => ({ ...source })),
+        sources: mergeSharedManifestSources(
+          nextIndex.sources,
+          manifest.sources,
+        ),
       };
     } else {
       try {

@@ -10,6 +10,7 @@ import {
   SharedSourcesManifest,
   SourceEntry,
 } from "./sharedManifest";
+import type { SourceScanner } from "./skillIndex";
 import { logger } from "./logger";
 import { withSharedStoreLock } from "./sharedStoreLock";
 
@@ -18,12 +19,34 @@ async function renameBrokenFile(filePath: string): Promise<void> {
   await fs.rename(filePath, brokenPath);
 }
 
+// The shared store is writable by any tool on the machine, so a repository id is
+// only trusted when it looks like a real GitHub numeric id.
+function normalizeRepoId(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? value
+    : undefined;
+}
+
+const KNOWN_SOURCE_SCANNERS: SourceScanner[] = [
+  "auto",
+  "claude-commands",
+  "top-level-dirs",
+];
+
+function normalizeScanner(value: unknown): SourceScanner | undefined {
+  return KNOWN_SOURCE_SCANNERS.includes(value as SourceScanner)
+    ? (value as SourceScanner)
+    : undefined;
+}
+
 function normalizeSourceEntry(source: SourceEntry): SourceEntry {
   return {
     id: source.id,
     name: source.name,
     url: source.url,
     type: source.type,
+    repoId: normalizeRepoId(source.repoId),
+    scanner: normalizeScanner(source.scanner),
     branch: source.branch,
     lastIndexedAt: source.lastIndexedAt,
     description: source.description,

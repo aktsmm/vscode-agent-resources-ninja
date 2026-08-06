@@ -62,8 +62,8 @@ const skillIndexModule = requireTypeScriptModule(
   {
     vscode: {},
     "./githubFetch": {
-      createGitHubHeaders: () => ({}),
-      fetchGitHubWithOptionalAuthRetry: async () => ({ ok: false }),
+      fetchGitHubWithOptionalAuthRetry: async (url, options = {}) =>
+        fetch(url, { method: options.method }),
     },
     "./sharedResourceIndexStore": {
       loadSharedStoresIntoSkillIndex: async (index) => index,

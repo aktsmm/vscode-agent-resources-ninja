@@ -846,18 +846,41 @@ test("explicit source refresh works from both remote layouts", () => {
   );
   assert.match(
     extensionSource,
-    /updateIndexFromSingleSource\([\s\S]*?\{ forceScan: true \}/,
+    /updateIndexFromSingleSource\([\s\S]*?\{ forceScan: true[,\s}]/,
     "Manual source refresh should bypass shared scan dedup when explicitly requested",
   );
   assert.match(
     indexUpdaterSource,
-    /options\?: \{ forceScan\?: boolean \}/,
+    /options\?: \{ forceScan\?: boolean[;,\s]/,
     "Single-source updater should expose a forceScan option for explicit refreshes",
   );
   assert.match(
     indexUpdaterSource,
     /!options\?\.forceScan && !\(await shouldRunSharedScan\(context, sourceId\)\)/,
     "Shared scan dedup should only apply when forceScan is not requested",
+  );
+});
+
+test("source index updates keep the data-integrity guards wired", () => {
+  assert.match(
+    indexUpdaterSource,
+    /reconcileSourceScanResult\(\{/,
+    "Source updates should route scan results through the empty-scan reconcile guard",
+  );
+  assert.match(
+    indexUpdaterSource,
+    /assertSourceRepositoryIdentity\(\{/,
+    "Repository scans should verify the recorded repository identity",
+  );
+  assert.match(
+    indexUpdaterSource,
+    /new Set\(updatedBundles\.map\(createBundleKey\)\)/,
+    "Bundle preservation should key on source:id, not on a bare bundle id",
+  );
+  assert.doesNotMatch(
+    indexUpdaterSource,
+    /new Set\(updatedBundles\.map\(\(b\) => b\.id\)\)/,
+    "Bundle preservation should not fall back to bare bundle ids",
   );
 });
 
@@ -2381,13 +2404,23 @@ test("legacy special scanners are fallback-only", () => {
   );
   assert.match(
     indexUpdaterSource,
-    /isPRPsRepo && canUseLegacyFallbackScanner/,
-    "PRPs legacy command scanner should not override normal resource files",
+    /declaredScanner === "claude-commands"/,
+    "The claude-commands scanner should be selectable declaratively",
   );
   assert.match(
     indexUpdaterSource,
-    /isComposioRepo && canUseLegacyFallbackScanner/,
-    "Composio legacy directory scanner should not override normal resource files",
+    /declaredScanner === "top-level-dirs"/,
+    "The top-level-dirs scanner should be selectable declaratively",
+  );
+  assert.match(
+    indexUpdaterSource,
+    /declaredScanner === undefined &&\s*repoName\.toLowerCase\(\)\.includes\("prps-agentic"\) &&\s*canUseLegacyFallbackScanner/,
+    "PRPs repo-name matching should stay a fallback for sources without a declared scanner",
+  );
+  assert.match(
+    indexUpdaterSource,
+    /declaredScanner === undefined &&\s*repoName\.toLowerCase\(\)\.includes\("awesome-claude-skills"\) &&\s*canUseLegacyFallbackScanner/,
+    "Composio repo-name matching should stay a fallback for sources without a declared scanner",
   );
 });
 
@@ -2458,6 +2491,12 @@ test("ignore files exclude local release and agent artifacts", () => {
 });
 
 test("package lock uses public registry URLs and sha512 integrity", () => {
+  const packageLockText = JSON.stringify(packageLock);
+  assert.doesNotMatch(
+    packageLockText,
+    /pkgs\.visualstudio\.com|ms-feed/i,
+    "package-lock.json must not contain private Azure Artifacts feed URLs",
+  );
   for (const [packagePath, packageInfo] of Object.entries(
     packageLock.packages || {},
   )) {

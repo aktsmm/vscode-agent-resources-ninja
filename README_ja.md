@@ -434,6 +434,12 @@ workspace skill を主 Workspace Skill Directory 以外に置く場合は、`add
 
 明示的な **Update Index** は、設定済み source をすべて force scan します。進捗は各 source の処理完了後に進み、結果は **Agent Resources Ninja** Output Channel に `OK` / `FAILED` / `SKIPPED` として記録されます。失敗した source の既存 entry は保持し、GitHub rate limit を検出した場合は残りの request を停止して未試行として報告します。通知と `#updateResourceIndex` tool は、部分成功を全成功と表示せず、日英の1件の結果 summary に統合します。summary の **GitHub 認証を設定** は、2つ目のエラーダイアログを表示せず該当設定を直接開きます。
 
+更新が index を黙って壊さないよう、3 つの保護が入っています。
+
+- **空スキャン保護** - スキャンは成功したがリソースが 0 件だった場合、既存のリソースを削除しません。全体更新はそのまま保持して Output Channel に記録し、単一 source の更新は結果を報告して **空の結果を反映** を提示します。縮退は意図的な操作のときだけ起きます。
+- **リポジトリ同一性** - source は index した GitHub repository id を覚えています。後からその URL が別 repository に解決された場合は更新を拒否するため、削除や rename で空いた名前が第三者に再登録されて同じ source として配信されることがありません。同じ source を再追加すると **別リポジトリへの差し替えを承認** を選べます。repository の rename では id が変わらないため、rename は自動で追従し URL も更新されます。
+- **起動時の上限** - 起動時の更新は 1 回あたり最大 5 source までとし、開始位置をローテーションします。GitHub の quota を一度に使い切らず、失敗し続ける source が後続を止めることもありません。繰り越した source は Output Channel に出力され、次回以降の起動で処理されます。
+
 > 設定画面では上記の順序で表示されます
 
 ### Instruction File 同期の仕組み
@@ -608,9 +614,11 @@ Ref 出力を使う場合は、必要に応じて **Ref Catalog Detail Format** 
 
 公開リソースだけを扱う場合、scope は未選択のままで問題ありません。private repository を index する場合は、対象 repository に限定した fine-grained PAT に **Contents: Read** 権限を付けるのを推奨します。必要な場合のみ、より広い classic PAT の `repo` scope を使ってください。organization 配下の repository では SSO 承認や organization approval が必要なことがあります。
 
-GitHub raw file は最初に匿名で取得し、private file が `404` を返した場合だけ設定済み認証で1回再試行します。それでも `404` または「見つかりません」と表示される場合、private repository では **設定を開く** から認証を設定してから **インデックス更新** や **バグ報告** を選んでください。認証設定済みの場合は、index path が古いか、token に **Contents: Read** 権限がない可能性があります。bug report には認証の設定有無だけを記録し、token 値は含めません。
+GitHub raw file は最初に匿名で取得し、private file が `404` を返した場合は設定済み認証で再試行します。さらに `401`、`403`、private `404` の後は、次の異なる credential を試します。それでも `404` または「見つかりません」と表示される場合、private repository では **設定を開く** から認証を設定してから **インデックス更新** や **バグ報告** を選んでください。認証設定済みの場合は、index path が古いか、token に **Contents: Read** 権限がない可能性があります。bug report には認証状態と credential source だけを記録し、token 値は含めません。
 
 > **注記**: この設定値は起動時に VS Code SecretStorage へ転記され、後方互換のためにのみ保持されます。トークンは SecretStorage → `GITHUB_TOKEN` / `GH_TOKEN` 環境変数 → GitHub CLI → この設定 の順で解決されるため、新規設定では設定への直書きより GitHub CLI または環境変数の利用を推奨します。
+
+認証復旧時は **Agent Resources Ninja: GitHub トークンをクリア（SecretStorage のみ）** を使うと、SecretStorage のコピーだけを削除できます。この command は `GITHUB_TOKEN` / `GH_TOKEN`、GitHub CLI credential、legacy の `resourceNinja.githubToken` setting を変更しません。legacy setting が残っている場合、VS Code の reload 後にその値が SecretStorage へ再移行される可能性があります。再移行を防ぐには setting も別途クリアしてください。
 
 ### 方法 2: GitHub CLI（推奨）
 

@@ -35,6 +35,26 @@ function assertIndexShape(index, label = "resource index") {
   }
 }
 
+// This generator only implements the default resource-file scan. Any other
+// Source.scanner would make the bundled index disagree with a runtime update.
+const GENERATOR_SUPPORTED_SCANNERS = [undefined, "auto"];
+
+function assertSupportedSourceScanners(index, label = "resource index") {
+  const unsupported = index.sources.filter(
+    (source) => !GENERATOR_SUPPORTED_SCANNERS.includes(source.scanner),
+  );
+  if (unsupported.length === 0) {
+    return;
+  }
+
+  const details = unsupported
+    .map((source) => `${source.id} (scanner: ${source.scanner})`)
+    .join(", ");
+  throw new Error(
+    `${label} declares scanner values this generator cannot honor: ${details}. Implement the scanner in scripts/update-preset-index.js or remove the declaration, otherwise the bundled index will not match a runtime source update.`,
+  );
+}
+
 function getLocalDateString() {
   const now = new Date();
   const year = now.getFullYear();
@@ -886,7 +906,12 @@ function detectPluginChildResourceKind(relativePath) {
   if (/^prompts\/[^/]+\.md$/.test(lowerPath)) return "prompt";
   if (/^rules\/[^/]+\.mdc$/.test(lowerPath)) return "cursor-rule";
   if (/^hooks\/[^/]+\/readme\.md$/.test(lowerPath)) return "hook";
-  if (/^hooks\/[^/]+\.json$/.test(lowerPath)) return "hook";
+  if (
+    /^hooks\/[^/]+\.json$/.test(lowerPath) &&
+    !isResourceMetadataSidecarPath(lowerPath)
+  ) {
+    return "hook";
+  }
   if (/^(?:mcp\.json|\.vscode\/mcp\.json|mcp\/[^/]+\.json)$/.test(lowerPath)) {
     return "mcp";
   }
@@ -1157,6 +1182,7 @@ async function main() {
   // 現在のインデックスを読み込む
   const index = JSON.parse(fs.readFileSync(INDEX_PATH, "utf-8"));
   assertIndexShape(index, INDEX_PATH);
+  assertSupportedSourceScanners(index, INDEX_PATH);
   console.log(
     `📂 Current index: ${index.skills.length} resources, ${index.sources.length} sources\n`,
   );
@@ -1322,6 +1348,9 @@ async function main() {
 }
 
 module.exports = {
+  assertSupportedSourceScanners,
+  detectPluginChildResourceKind,
+  detectResourceKindFromPath,
   loadRepositoryTree,
   readRepositoryTreeWithGit,
   shouldUseGitTreeFallback,
