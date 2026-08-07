@@ -1,463 +1,50 @@
 #!/usr/bin/env node
 
 const assert = require("assert");
+const fs = require("fs");
+const Module = require("module");
 const path = require("path");
+const ts = require("typescript");
 
 const bundledIndex = require(
   path.join(__dirname, "..", "resources", "skill-index.json"),
 );
 
-function detectResourceKindFromPath(resourcePath) {
-  const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
-  if (isResourceMetadataSidecarPath(lowerPath)) {
-    return undefined;
-  }
-  if (isPluginManifestPath(lowerPath)) {
-    return "plugin";
-  }
-  const pluginPrefix = "(?:\\.github/)?plugins/[^/]+/";
-  if (new RegExp(`^(?:${pluginPrefix})?rules/[^/]+\\.mdc$`).test(lowerPath)) {
-    return "cursor-rule";
-  }
-  if (new RegExp(`^${pluginPrefix}agents/[^/]+\\.md$`).test(lowerPath)) {
-    return "agent";
-  }
-  if (new RegExp(`^${pluginPrefix}instructions/[^/]+\\.md$`).test(lowerPath)) {
-    return "instruction";
-  }
-  if (new RegExp(`^${pluginPrefix}prompts/[^/]+\\.md$`).test(lowerPath)) {
-    return "prompt";
-  }
-  if (new RegExp(`^${pluginPrefix}hooks/[^/]+/readme\\.md$`).test(lowerPath)) {
-    return "hook";
-  }
-  if (isHookConfigFilePath(lowerPath)) {
-    return "hook";
-  }
-  if (
-    new RegExp(
-      `^${pluginPrefix}(?:mcp\\.json|\\.vscode/mcp\\.json|mcp/[^/]+\\.json)$`,
-    ).test(lowerPath)
-  ) {
-    return "mcp";
-  }
-  if (isNativeInstructionFilePath(lowerPath)) {
-    return "instruction";
-  }
-  if (lowerPath === "skill.md" || lowerPath.endsWith("/skill.md")) {
-    return "skill";
-  }
-  if (/(^|\/)skills\/[^/]+\//.test(lowerPath)) {
-    return undefined;
-  }
-  if (lowerPath.endsWith(".agent.md")) {
-    return "agent";
-  }
-  if (lowerPath.endsWith(".instructions.md")) {
-    return "instruction";
-  }
-  if (lowerPath.endsWith(".prompt.md")) {
-    return "prompt";
-  }
-  if (/^(?:\.github\/)?hooks\/[^/]+\/readme\.md$/i.test(lowerPath)) {
-    return "hook";
-  }
-  if (isHookConfigFilePath(lowerPath)) {
-    return "hook";
-  }
-  if (
-    lowerPath === "mcp.json" ||
-    lowerPath === "mcp-config.json" ||
-    lowerPath === ".mcp.json" ||
-    lowerPath === ".vscode/mcp.json" ||
-    /^(?:\.github\/)?mcp\/[^/]+\.json$/i.test(lowerPath)
-  ) {
-    return "mcp";
-  }
-  return undefined;
+// Load the shipped rules instead of copying them, so the checks cannot pass
+// against a stale duplicate. src/resourceKinds.ts only imports types.
+function requireTypeScriptModule(filePath) {
+  const transpiled = ts.transpileModule(fs.readFileSync(filePath, "utf8"), {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+    },
+    fileName: filePath,
+  });
+  const loadedModule = new Module(filePath, module);
+  loadedModule.filename = filePath;
+  loadedModule.paths = Module._nodeModulePaths(path.dirname(filePath));
+  loadedModule._compile(transpiled.outputText, filePath);
+  return loadedModule.exports;
 }
 
-function isResourceMetadataSidecarPath(lowerPath) {
-  return (
-    lowerPath.endsWith("/.skill-meta.json") ||
-    lowerPath.endsWith("/.resource-ninja.json") ||
-    lowerPath.endsWith(".resource-ninja.json")
-  );
-}
-
-function isHookConfigFilePath(resourcePath) {
-  const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
-  if (!/(^|\/)(?:\.github\/)?hooks\/[^/]+\.json$/i.test(lowerPath)) {
-    return false;
-  }
-  return !isResourceMetadataSidecarPath(lowerPath);
-}
-
-function isNativeInstructionFilePath(lowerPath) {
-  return (
-    lowerPath === "copilot-instructions.md" ||
-    lowerPath === ".github/copilot-instructions.md" ||
-    lowerPath === "claude.md" ||
-    lowerPath === "agents.md" ||
-    lowerPath === ".codex/agents.md" ||
-    lowerPath === "gemini.md" ||
-    lowerPath === ".gemini/gemini.md"
-  );
-}
-
-function isPluginManifestPath(lowerPath) {
-  return (
-    lowerPath === "plugin.json" ||
-    lowerPath === "gemini-extension.json" ||
-    lowerPath === "apm.yml" ||
-    lowerPath === "apm.yaml" ||
-    /(^|\/)\.(?:claude-plugin|codex-plugin|cursor-plugin|plugin)\/(?:plugin|marketplace)\.json$/.test(
-      lowerPath,
-    )
-  );
-}
-
-function getPluginRootFromManifestPath(resourcePath) {
-  const normalizedPath = String(resourcePath)
-    .replace(/\\/g, "/")
-    .replace(/^\/+/, "");
-  const lowerPath = normalizedPath.toLowerCase();
-  if (!isPluginManifestPath(lowerPath)) {
-    return undefined;
-  }
-  if (
-    lowerPath === "plugin.json" ||
-    lowerPath === "gemini-extension.json" ||
-    lowerPath === "apm.yml" ||
-    lowerPath === "apm.yaml"
-  ) {
-    return ".";
-  }
-  const markerMatch = normalizedPath.match(
-    /^(.*?)(?:^|\/)\.(?:claude-plugin|codex-plugin|cursor-plugin|plugin)\/(?:plugin|marketplace)\.json$/i,
-  );
-  if (!markerMatch) {
-    return ".";
-  }
-  return markerMatch[1].replace(/\/+$/, "") || ".";
-}
-
-function getPluginIdFromPath(resourcePath) {
-  const normalizedPath = String(resourcePath || "").replace(/\\/g, "/");
-  const match = normalizedPath.match(/^plugins\/([^/]+)\//i);
-  if (match?.[1]) return match[1];
-  return normalizedPath.match(/^\.github\/plugins\/([^/]+)\//i)?.[1];
-}
-
-function normalizePluginRoot(root) {
-  if (!root) return undefined;
-  const normalizedRoot = root.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-  return normalizedRoot || ".";
-}
-
-function getPluginPackageKey(source, root) {
-  return `${source}:${root}`;
-}
-
-function getPluginFallbackRoot(resourcePath) {
-  const pluginId = getPluginIdFromPath(resourcePath);
-  return pluginId ? `plugins/${pluginId}` : undefined;
-}
-
-function getPluginPackageRoot(resource) {
-  if (resource.kind === "plugin") {
-    return normalizePluginRoot(
-      resource.pluginRoot ||
-        getPluginRootFromManifestPath(
-          resource.pluginManifestPath || resource.path,
-        ),
-    );
-  }
-  return getPluginFallbackRoot(resource.path);
-}
-
-function getPluginPackageCandidates(resources) {
-  const packages = new Map();
-  for (const resource of resources) {
-    if (
-      (resource.kind || detectResourceKindFromPath(resource.path)) !== "plugin"
-    ) {
-      continue;
-    }
-    if (resource.pluginManifestKind === "marketplace") {
-      continue;
-    }
-    const root = getPluginPackageRoot(resource);
-    if (!root) continue;
-    const id = getPluginPackageKey(resource.source, root);
-    const existing = packages.get(id);
-    if (existing) {
-      existing.manifestPaths.push(resource.pluginManifestPath || resource.path);
-      continue;
-    }
-    packages.set(id, {
-      id,
-      label: resource.name || (root === "." ? resource.source : root),
-      source: resource.source,
-      root,
-      manifestPaths: [resource.pluginManifestPath || resource.path],
-    });
-  }
-  for (const resource of resources) {
-    const fallbackRoot = getPluginFallbackRoot(resource.path);
-    if (!fallbackRoot) continue;
-    const id = getPluginPackageKey(resource.source, fallbackRoot);
-    if (packages.has(id)) continue;
-    packages.set(id, {
-      id,
-      label: fallbackRoot.split("/").pop(),
-      source: resource.source,
-      root: fallbackRoot,
-      manifestPaths: [],
-    });
-  }
-  return [...packages.values()];
-}
-
-function getPluginPackageId(resource, packages = []) {
-  const directRoot = getPluginPackageRoot(resource);
-  if (directRoot) {
-    const directId = getPluginPackageKey(resource.source, directRoot);
-    if (packages.length === 0 || packages.some((pkg) => pkg.id === directId)) {
-      return directId;
-    }
-  }
-  const normalizedPath = resource.path.replace(/\\/g, "/").replace(/^\/+/, "");
-  const sourcePackages = packages
-    .filter((pkg) => pkg.source === resource.source)
-    .sort((a, b) => b.root.length - a.root.length);
-  for (const pkg of sourcePackages) {
-    if (
-      pkg.root !== "." &&
-      (normalizedPath === pkg.root || normalizedPath.startsWith(`${pkg.root}/`))
-    ) {
-      return pkg.id;
-    }
-  }
-  return sourcePackages.find((pkg) => pkg.root === ".")?.id;
-}
-
-function isBuiltInResourcePath(resourcePath) {
-  const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
-  return (
-    /(^|\/)resources\/app\/out\/vs\/sessions\//.test(lowerPath) ||
-    /(^|\/)extensions[^/]*\/github\.copilot-chat-[^/]+\/assets\/prompts\//.test(
-      lowerPath,
-    ) ||
-    /(^|\/)globalstorage\/github\.copilot-chat\//.test(lowerPath) ||
-    /(^|\/)resources\/app\/extensions\/copilot\/assets\/prompts\//.test(
-      lowerPath,
-    ) ||
-    /(^|\/)resources\/app\/extensions\/[^/]+\/skills\//.test(lowerPath) ||
-    /(^|\/)resources\/app\/node_modules\//.test(lowerPath) ||
-    /(^|\/)pkg\/universal\/[^/]+\/builtin-(skills|agents|prompts|instructions|hooks|mcp)\//.test(
-      lowerPath,
-    ) ||
-    /(^|\/)builtin-(skills|agents|prompts|instructions|hooks|mcp)\//.test(
-      lowerPath,
-    )
-  );
-}
-
-function getBuiltInResourceSourceLabel(resourcePath) {
-  const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
-  if (
-    /(^|\/)globalstorage\/github\.copilot-chat\//.test(lowerPath) ||
-    /(^|\/)extensions[^/]*\/github\.copilot-chat-[^/]+\/assets\/prompts\//.test(
-      lowerPath,
-    ) ||
-    /(^|\/)resources\/app\/extensions\/copilot\/assets\/prompts\//.test(
-      lowerPath,
-    )
-  ) {
-    return "GitHub Copilot Chat";
-  }
-  if (
-    /(^|\/)pkg\/universal\/[^/]+\/builtin-(skills|agents|prompts|instructions|hooks|mcp)\//.test(
-      lowerPath,
-    ) ||
-    /(^|\/)builtin-(skills|agents|prompts|instructions|hooks|mcp)\//.test(
-      lowerPath,
-    ) ||
-    /(^|\/)resources\/app\/node_modules\/.*builtin-skills\//.test(lowerPath)
-  ) {
-    return "GitHub Copilot CLI";
-  }
-  if (
-    /(^|\/)resources\/app\/out\/vs\/sessions\//.test(lowerPath) ||
-    /(^|\/)resources\/app\/extensions\/[^/]+\/skills\//.test(lowerPath) ||
-    /(^|\/)resources\/app\/node_modules\//.test(lowerPath)
-  ) {
-    return "VS Code";
-  }
-  return "Built-in";
-}
-
-function getResourceMetadataPath(resourcePath, kind) {
-  const normalizedPath = resourcePath.replace(/\\/g, "/");
-  if (kind === "skill") {
-    return `${normalizedPath.replace(/\/SKILL\.md$/i, "")}/.skill-meta.json`;
-  }
-  if (kind === "hook") {
-    return `${normalizedPath.replace(/\/README\.md$/i, "")}/.resource-ninja.json`;
-  }
-  if (kind === "plugin") {
-    return `${normalizedPath.replace(/\/+$/g, "")}/.resource-ninja.json`;
-  }
-  return `${normalizedPath}.resource-ninja.json`;
-}
-
-function getBuiltInPackageVersion(resourcePath) {
-  const match = resourcePath
-    .toLowerCase()
-    .replace(/\\/g, "/")
-    .match(
-      /(^|\/)pkg\/universal\/([^/]+)\/builtin-(skills|agents|prompts|instructions|hooks|mcp)\//,
-    );
-  if (!match) {
-    return undefined;
-  }
-  return match[2]
-    .split(/[.-]/)
-    .map((part) => Number.parseInt(part, 10))
-    .map((part) => (Number.isFinite(part) ? part : 0));
-}
-
-function compareVersionParts(a, b) {
-  const maxLength = Math.max(a.length, b.length);
-  for (let index = 0; index < maxLength; index += 1) {
-    const left = a[index] ?? 0;
-    const right = b[index] ?? 0;
-    if (left !== right) {
-      return left - right;
-    }
-  }
-  return 0;
-}
-
-function getBuiltInResourcePathPriority(resourcePath) {
-  const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
-  if (
-    /(^|\/)pkg\/universal\/[^/]+\/builtin-(skills|agents|prompts|instructions|hooks|mcp)\//.test(
-      lowerPath,
-    )
-  ) {
-    return 0;
-  }
-  if (
-    /\/resources\/app\/extensions\/copilot\/assets\/prompts\//.test(lowerPath)
-  ) {
-    return 1;
-  }
-  if (/\/resources\/app\/out\/vs\/sessions\//.test(lowerPath)) {
-    return 2;
-  }
-  if (/\/resources\/app\/extensions\/[^/]+\/skills\//.test(lowerPath)) {
-    return 3;
-  }
-  if (/\/resources\/app\/node_modules\//.test(lowerPath)) {
-    return 4;
-  }
-  if (
-    /\/extensions[^/]*\/github\.copilot-chat-[^/]+\/assets\/prompts\//.test(
-      lowerPath,
-    )
-  ) {
-    return 5;
-  }
-  if (/\/globalstorage\/github\.copilot-chat\/[^/]+-agent\//.test(lowerPath)) {
-    return 6;
-  }
-  return 9;
-}
-
-function getBuiltInResourceDedupeKey(resource) {
-  return `built-in:${resource.kind || "skill"}:${resource.name.toLowerCase()}`;
-}
-
-function shouldReplaceBuiltInResourcePath(existingPath, candidatePath) {
-  const existingVersion = getBuiltInPackageVersion(existingPath);
-  const candidateVersion = getBuiltInPackageVersion(candidatePath);
-  if (existingVersion && candidateVersion) {
-    const versionCompare = compareVersionParts(
-      candidateVersion,
-      existingVersion,
-    );
-    if (versionCompare !== 0) {
-      return versionCompare > 0;
-    }
-  }
-
-  const existingPriority = getBuiltInResourcePathPriority(existingPath);
-  const candidatePriority = getBuiltInResourcePathPriority(candidatePath);
-  if (existingPriority !== candidatePriority) {
-    return candidatePriority < existingPriority;
-  }
-
-  const existingNormalized = existingPath.toLowerCase().replace(/\\/g, "/");
-  const candidateNormalized = candidatePath.toLowerCase().replace(/\\/g, "/");
-  if (existingNormalized.length !== candidateNormalized.length) {
-    return candidateNormalized.length < existingNormalized.length;
-  }
-  return candidateNormalized.localeCompare(existingNormalized) < 0;
-}
-
-function getResourceInstallPath(filePath, kind) {
-  const normalizedPath = filePath.replace(/\\/g, "/");
-  if (kind === "skill") {
-    return normalizedPath.replace(/\/SKILL\.md$/i, "");
-  }
-  if (kind === "plugin") {
-    return getPluginRootFromManifestPath(normalizedPath) || normalizedPath;
-  }
-  return normalizedPath;
-}
-
-function normalizeResourcePath(resourcePath) {
-  return resourcePath.replace(/\\/g, "/").replace(/^\/+/, "").toLowerCase();
-}
-
-function getSkillRootDirectoryFromPath(resourcePath) {
-  const normalizedPath = normalizeResourcePath(resourcePath);
-  if (normalizedPath !== "skill.md" && !normalizedPath.endsWith("/skill.md")) {
-    return undefined;
-  }
-  const slashIndex = normalizedPath.lastIndexOf("/");
-  return slashIndex === -1 ? "" : normalizedPath.slice(0, slashIndex);
-}
-
-function getSkillRootDirectoriesFromPaths(resourcePaths) {
-  const rootDirectories = new Set();
-  for (const resourcePath of resourcePaths) {
-    const rootDirectory = getSkillRootDirectoryFromPath(resourcePath);
-    if (rootDirectory !== undefined) {
-      rootDirectories.add(rootDirectory);
-    }
-  }
-  return rootDirectories;
-}
-
-function isNestedResourcePathUnderSkillRoot(
-  resourcePath,
-  kind,
-  skillRootDirectories,
-) {
-  if (kind === "skill") {
-    return false;
-  }
-  const normalizedPath = normalizeResourcePath(resourcePath);
-  for (const rootDirectory of skillRootDirectories) {
-    if (rootDirectory && normalizedPath.startsWith(`${rootDirectory}/`)) {
-      return true;
-    }
-  }
-  return false;
-}
+// Only bind what the assertions exercise; an unused import could go undefined
+// after a rename and still let the file pass.
+const {
+  detectResourceKindFromPath,
+  getBuiltInResourceDedupeKey,
+  getBuiltInResourceSourceLabel,
+  getFallbackResourceName,
+  getPluginPackageCandidates,
+  getPluginPackageId,
+  getResourceInstallPath,
+  getResourceMetadataPath,
+  getSkillRootDirectoriesFromPaths,
+  isBuiltInResourcePath,
+  isNestedResourcePathUnderSkillRoot,
+  shouldReplaceBuiltInResourcePath,
+} = requireTypeScriptModule(
+  path.join(__dirname, "..", "src", "resourceKinds.ts"),
+);
 
 function getIndexedResourcePathsFromTree(paths) {
   const skillRootDirectories = getSkillRootDirectoriesFromPaths(paths);
@@ -472,31 +59,6 @@ function getIndexedResourcePathsFromTree(paths) {
       )
     );
   });
-}
-
-function getFallbackResourceName(filePath, kind) {
-  const pathParts = filePath.replace(/\\/g, "/").split("/");
-  if (kind === "skill") {
-    return pathParts[pathParts.length - 2] || "Unknown";
-  }
-  if (kind === "hook" && !isHookConfigFilePath(filePath)) {
-    return pathParts[pathParts.length - 2] || "Unknown";
-  }
-  if (kind === "plugin") {
-    const pluginRoot = getPluginRootFromManifestPath(filePath);
-    if (pluginRoot && pluginRoot !== ".") {
-      const rootParts = pluginRoot.split("/");
-      return rootParts[rootParts.length - 1] || "plugin";
-    }
-    return "plugin";
-  }
-
-  const fileName = pathParts[pathParts.length - 1] || "Unknown";
-  return fileName
-    .replace(/\.(agent|instructions|prompt)\.md$/i, "")
-    .replace(/\.mdc$/i, "")
-    .replace(/\.mcp\.json$/i, "")
-    .replace(/\.json$/i, "");
 }
 
 function test(name, fn) {

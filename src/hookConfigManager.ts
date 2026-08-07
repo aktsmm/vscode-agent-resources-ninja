@@ -1,5 +1,6 @@
 import * as path from "path";
 import * as vscode from "vscode";
+import { createSerialQueue } from "./serialQueue";
 import {
   getFallbackRecommendedHookConfig,
   getHookConfigCommandPaths,
@@ -243,7 +244,26 @@ export function formatHookConfigUpdateSummary(
   return `${prefix}: ${parts.join("; ")}`;
 }
 
+// hooks.json is rewritten in full, so overlapping installs must not interleave.
+const runHookConfigUpdate = createSerialQueue();
+
 async function updateHookConfig(
+  operation: "install" | "uninstall",
+  configRootUri: vscode.Uri,
+  hookReadmeUri: vscode.Uri,
+  options: HookConfigUpdateOptions = {},
+): Promise<HookConfigUpdateResult> {
+  return runHookConfigUpdate(() =>
+    performHookConfigUpdate(
+      operation,
+      configRootUri,
+      hookReadmeUri,
+      options,
+    ),
+  );
+}
+
+async function performHookConfigUpdate(
   operation: "install" | "uninstall",
   configRootUri: vscode.Uri,
   hookReadmeUri: vscode.Uri,
@@ -349,9 +369,11 @@ export async function restoreHookConfigFromBackup(
     return false;
   }
 
-  const content = await vscode.workspace.fs.readFile(result.backupUri);
-  await vscode.workspace.fs.writeFile(result.configUri, content);
-  return true;
+  return runHookConfigUpdate(async () => {
+    const content = await vscode.workspace.fs.readFile(result.backupUri!);
+    await vscode.workspace.fs.writeFile(result.configUri, content);
+    return true;
+  });
 }
 
 export async function getHookConfigDiagnostics(

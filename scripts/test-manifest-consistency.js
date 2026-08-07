@@ -1549,6 +1549,16 @@ test("settings distinguish skill index sync from native non-skill resource paths
     /test-temporary-install-source\.js/,
     "Resource test suite should validate temporary preview or web-search installs without a persisted source entry",
   );
+  assert.match(
+    packageJson.scripts?.["test:resources"] || "",
+    /test-shared-file-serialization\.js/,
+    "Resource test suite should validate that shared-file writers are serialized",
+  );
+  assert.match(
+    packageJson.scripts?.["test:resources"] || "",
+    /test-changelog-hygiene\.js/,
+    "Resource test suite should validate changelog format, version sync, and replacement-character hygiene",
+  );
 });
 
 test("README settings tables stay in sync with package.json order", () => {

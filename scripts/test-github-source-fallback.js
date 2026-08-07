@@ -52,6 +52,12 @@ const githubResponseModule = requireTypeScriptModule(
   path.join(root, "src", "githubResponse.ts"),
 );
 let resolveFallback = async () => undefined;
+const loggedLines = [];
+const loggerSpy = {
+  info: (...args) => loggedLines.push(args.join(" ")),
+  warn: (...args) => loggedLines.push(args.join(" ")),
+  error: (...args) => loggedLines.push(args.join(" ")),
+};
 const {
   fetchGitHubWithOptionalAuthRetry,
   fetchGitHubWithTimeout,
@@ -60,6 +66,7 @@ const {
   path.join(root, "src", "githubFetch.ts"),
   {
     "./githubResponse": githubResponseModule,
+    "./logger": { logger: loggerSpy },
     "./githubAuth": {
       resolveGitHubTokenAfterFailure: async (failedToken) =>
         resolveFallback(failedToken),
@@ -98,8 +105,30 @@ const {
           5,
         ),
       (error) =>
+        error.message === "Request timeout: api.github.com/repos/octo/repo",
+    );
+  });
+
+  await test("keeps query strings out of timeout diagnostics", async () => {
+    global.fetch = async (_url, options = {}) =>
+      new Promise((_resolve, reject) => {
+        options.signal?.addEventListener("abort", () => {
+          const error = new Error("aborted");
+          error.name = "AbortError";
+          reject(error);
+        });
+      });
+
+    await assert.rejects(
+      () =>
+        fetchGitHubWithTimeout(
+          "https://api.github.com/repos/octo/repo/contents/SKILL.md?ref=main",
+          {},
+          5,
+        ),
+      (error) =>
         error.message ===
-        "Request timeout: https://api.github.com/repos/octo/repo",
+        "Request timeout: api.github.com/repos/octo/repo/contents/SKILL.md",
     );
   });
 
@@ -347,6 +376,335 @@ const {
     );
     assert.strictEqual(result.status, 403);
     assert.strictEqual(requests.length, 1);
+  });
+
+  await test("retries a 429 once with an injected clock", async () => {
+    const requests = [];
+    const sleeps = [];
+    global.fetch = async (url, options = {}) => {
+      requests.push({ url: String(url), headers: options.headers || {} });
+      return requests.length === 1
+        ? response(429, "Too Many Requests", { "retry-after": "2" })
+        : response(200, "ok");
+    };
+
+    const result = await fetchGitHubWithOptionalAuthRetry(
+      "https://api.github.com/repos/octo/public",
+      {
+        accept: "application/json",
+        sleep: async (ms) => {
+          sleeps.push(ms);
+        },
+        now: () => 0,
+        random: () => 0,
+      },
+    );
+
+    assert.strictEqual(result.status, 200);
+    assert.strictEqual(requests.length, 2);
+    assert.deepStrictEqual(sleeps, [2000]);
+  });
+
+  await test("gives up instead of waiting out a long rate-limit reset", async () => {
+    const requests = [];
+    const sleeps = [];
+    global.fetch = async (url, options = {}) => {
+      requests.push({ url: String(url), headers: options.headers || {} });
+      return response(429, "Too Many Requests", {
+        "x-ratelimit-remaining": "0",
+        "x-ratelimit-reset": "3600",
+      });
+    };
+
+    const result = await fetchGitHubWithOptionalAuthRetry(
+      "https://api.github.com/repos/octo/public",
+      {
+        accept: "application/json",
+        sleep: async (ms) => {
+          sleeps.push(ms);
+        },
+        now: () => 0,
+        random: () => 0,
+      },
+    );
+
+    assert.strictEqual(result.status, 429);
+    assert.strictEqual(requests.length, 1);
+    assert.deepStrictEqual(sleeps, []);
+  });
+
+  await test("never retries auth or missing statuses", async () => {
+    for (const status of [401, 403, 404]) {
+      const requests = [];
+      global.fetch = async (url, options = {}) => {
+        requests.push({ url: String(url), headers: options.headers || {} });
+        return response(status, "nope");
+      };
+
+      const result = await fetchGitHubWithOptionalAuthRetry(
+        "https://api.github.com/repos/octo/public",
+        {
+          accept: "application/json",
+          sleep: async () => {
+            throw new Error(`status ${status} must not back off`);
+          },
+        },
+      );
+      assert.strictEqual(result.status, status);
+      assert.strictEqual(requests.length, 1);
+    }
+  });
+
+  await test("caps a broken maxAttempts instead of looping forever", async () => {
+    for (const maxAttempts of [
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      -5,
+      0,
+      -0.5,
+      1.9,
+      10.9,
+    ]) {
+      const requests = [];
+      global.fetch = async () => {
+        requests.push(1);
+        return response(503, "Service Unavailable");
+      };
+
+      const result = await fetchGitHubWithOptionalAuthRetry(
+        "https://api.github.com/repos/octo/public",
+        {
+          accept: "application/json",
+          maxAttempts,
+          sleep: async () => undefined,
+          now: () => 0,
+          random: () => 0,
+        },
+      );
+      assert.strictEqual(result.status, 503);
+      assert.ok(
+        requests.length >= 1 && requests.length <= 10,
+        `maxAttempts ${maxAttempts} produced ${requests.length} requests`,
+      );
+      if (maxAttempts === 1.9) {
+        assert.strictEqual(requests.length, 1, "1.9 must floor to 1 attempt");
+      }
+      if (maxAttempts === 10.9) {
+        // The exponential cap stops earlier than the clamp, which is the point.
+        assert.ok(
+          requests.length > 1 && requests.length <= 10,
+          `10.9 produced ${requests.length} requests`,
+        );
+      }
+    }
+  });
+
+  await test("stops retrying when the caller aborts during the backoff", async () => {
+    const controller = new AbortController();
+    const requests = [];
+    global.fetch = async () => {
+      requests.push(1);
+      return response(429, "Too Many Requests");
+    };
+
+    const result = await fetchGitHubWithOptionalAuthRetry(
+      "https://api.github.com/repos/octo/public",
+      {
+        accept: "application/json",
+        signal: controller.signal,
+        sleep: async () => {
+          controller.abort();
+        },
+        now: () => 0,
+        random: () => 0,
+      },
+    );
+
+    assert.strictEqual(result.status, 429);
+    assert.strictEqual(requests.length, 1);
+  });
+
+  await test("bounds the worst case across escalation, anonymous, and credential retries", async () => {
+    const fallbackTokens = ["tok-1", "tok-2", "tok-3", "tok-4", "tok-5"];
+    let fallbackIndex = 0;
+    resolveFallback = async () => {
+      const token = fallbackTokens[fallbackIndex];
+      fallbackIndex += 1;
+      return token ? { token, source: "gh-cli" } : undefined;
+    };
+
+    // Walks raw 404 -> authenticated escalation -> anonymous retry -> credential fallback.
+    const scriptedResponses = [
+      () => response(404, "Not Found"),
+      () => response(401, "Bad credentials"),
+      () => response(503, "Service Unavailable"),
+      () => response(404, "Not Found"),
+    ];
+    const requests = [];
+    global.fetch = async (url, options = {}) => {
+      requests.push({ url: String(url), headers: options.headers || {} });
+      const scripted = scriptedResponses[requests.length - 1];
+      return scripted ? scripted() : response(403, "Forbidden");
+    };
+
+    try {
+      const result = await fetchGitHubWithOptionalAuthRetry(
+        "https://raw.githubusercontent.com/octo/private/main/SKILL.md",
+        {
+          accept: "text/plain",
+          token: "secret-token",
+          sleep: async () => undefined,
+          now: () => 0,
+          random: () => 0,
+        },
+      );
+
+      assert.strictEqual(result.status, 403);
+      assert.strictEqual(requests[0].headers.Authorization, undefined);
+      assert.match(requests[1].url, /^https:\/\/api\.github\.com\/repos\//);
+      assert.strictEqual(requests[1].headers.Authorization, "token secret-token");
+      assert.strictEqual(
+        requests[2].headers.Authorization,
+        undefined,
+        "the authenticated 401 must be retried anonymously",
+      );
+      assert.deepStrictEqual(
+        requests.slice(4).map((request) => request.headers.Authorization),
+        ["token tok-1", "token tok-2", "token tok-3", "token tok-4"],
+        "the credential fallback must stop after every source is tried once",
+      );
+      assert.strictEqual(requests.length, 8);
+      // 3 attempts x (raw + escalation + anonymous + 4 credential retries).
+      assert.ok(
+        requests.length <= 3 * 7,
+        `worst case grew to ${requests.length} requests`,
+      );
+    } finally {
+      resolveFallback = async () => undefined;
+    }
+  });
+
+  await test("retries an internal timeout but not a caller abort", async () => {
+    let timeoutCalls = 0;
+    const timeoutResult = await fetchGitHubWithOptionalAuthRetry(
+      "https://api.github.com/repos/octo/public",
+      {
+        accept: "application/json",
+        sleep: async () => undefined,
+        now: () => 0,
+        random: () => 0,
+        request: async () => {
+          timeoutCalls += 1;
+          if (timeoutCalls === 1) {
+            throw new Error(
+              "Request timeout: https://api.github.com/repos/octo/public",
+            );
+          }
+          return response(200, "ok");
+        },
+      },
+    );
+    assert.strictEqual(timeoutResult.status, 200);
+    assert.strictEqual(timeoutCalls, 2);
+
+    const controller = new AbortController();
+    controller.abort();
+    let abortCalls = 0;
+    await assert.rejects(
+      fetchGitHubWithOptionalAuthRetry(
+        "https://api.github.com/repos/octo/public",
+        {
+          accept: "application/json",
+          signal: controller.signal,
+          sleep: async () => {
+            throw new Error("a caller abort must not back off");
+          },
+          request: async () => {
+            abortCalls += 1;
+            const error = new Error("aborted");
+            error.name = "AbortError";
+            throw error;
+          },
+        },
+      ),
+      /aborted/,
+    );
+    assert.strictEqual(abortCalls, 1);
+  });
+
+  await test("forwards signal and extra headers, and drops auth when retrying anonymously", async () => {
+    const controller = new AbortController();
+    const requests = [];
+    global.fetch = async (url, options = {}) => {
+      requests.push({
+        url: String(url),
+        headers: options.headers || {},
+        signal: options.signal,
+      });
+      return requests.length === 1
+        ? response(401, "Bad credentials")
+        : response(200, "public");
+    };
+
+    const result = await fetchGitHubWithOptionalAuthRetry(
+      "https://api.github.com/repos/octo/public",
+      {
+        accept: "application/json",
+        token: "stale-token",
+        signal: controller.signal,
+        extraHeaders: { "X-Trace": "abc", Authorization: "token leaked" },
+      },
+    );
+
+    assert.strictEqual(result.status, 200);
+    assert.strictEqual(requests.length, 2);
+    assert.strictEqual(requests[0].headers["X-Trace"], "abc");
+    assert.strictEqual(requests[0].headers.Authorization, "token stale-token");
+    assert.strictEqual(requests[1].headers["X-Trace"], "abc");
+    assert.strictEqual(requests[1].headers.Authorization, undefined);
+    assert.ok(requests.every((request) => request.signal !== undefined));
+  });
+
+  await test("logs retries and credential switches without leaking a token", async () => {
+    loggedLines.length = 0;
+    resolveFallback = async () => ({
+      token: "fallback-token",
+      source: "gh-cli",
+    });
+    const requests = [];
+    global.fetch = async (url, options = {}) => {
+      requests.push({ url: String(url), headers: options.headers || {} });
+      if (requests.length === 1) {
+        return response(429, "Too Many Requests", { "retry-after": "1" });
+      }
+      return requests.length === 2 ? response(404, "Not Found") : response(200, "ok");
+    };
+
+    try {
+      const result = await fetchGitHubWithOptionalAuthRetry(
+        "https://api.github.com/repos/octo/private",
+        {
+          accept: "application/json",
+          token: "secret-token",
+          sleep: async () => undefined,
+          now: () => 0,
+          random: () => 0,
+        },
+      );
+
+      assert.strictEqual(result.status, 200);
+      const logged = loggedLines.join("\n");
+      assert.match(logged, /GitHub returned 429 .*retrying in 1000ms/);
+      assert.match(logged, /next credential source: gh-cli/);
+      assert.match(logged, /api\.github\.com\/repos\/octo\/private/);
+      assert.doesNotMatch(
+        logged,
+        /secret-token|fallback-token|Authorization/,
+        "diagnostics must never carry a credential",
+      );
+    } finally {
+      resolveFallback = async () => undefined;
+    }
   });
 
   await test("classifies SAML and rate-limit responses", async () => {

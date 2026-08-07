@@ -3,6 +3,9 @@ import { messages } from "./i18n";
 
 export type GitHubTokenSource = "secret" | "config" | "env" | "gh-cli" | "none";
 
+/** `resolveGitHubToken` が走査する実ソース数（none を除く） */
+const GITHUB_TOKEN_SOURCE_COUNT = 4;
+
 export interface ResolveGitHubTokenOptions {
   excludeSources?: readonly GitHubTokenSource[];
 }
@@ -182,28 +185,31 @@ export async function resolveGitHubToken(
   return { token: undefined, source: "none" };
 }
 
+/**
+ * 失敗したトークンの出所に関係なく、未試行のトークンを全ソースから探す。
+ * `alreadyTried` を渡すと、同じ値へ往復するのを防げる。
+ */
 export async function resolveGitHubTokenAfterFailure(
   failedToken: string,
+  alreadyTried?: Iterable<string>,
 ): Promise<{ token: string; source: GitHubTokenSource } | undefined> {
-  const current = await resolveGitHubToken();
-  if (current.token && current.token !== failedToken) {
-    return { token: current.token, source: current.source };
-  }
-  if (current.source !== "secret") {
-    return undefined;
-  }
+  const triedTokens = new Set<string>(alreadyTried ?? []);
+  triedTokens.add(failedToken);
 
-  const excludeSources: GitHubTokenSource[] = ["secret"];
-  while (true) {
-    const fallback = await resolveGitHubToken({ excludeSources });
-    if (!fallback.token || fallback.source === "none") {
+  const excludeSources: GitHubTokenSource[] = [];
+  // ソース数は有限なので、除外を積み上げれば必ず "none" で停止する。
+  while (excludeSources.length < GITHUB_TOKEN_SOURCE_COUNT) {
+    const candidate = await resolveGitHubToken({ excludeSources });
+    if (!candidate.token || candidate.source === "none") {
       return undefined;
     }
-    if (fallback.token !== failedToken) {
-      return { token: fallback.token, source: fallback.source };
+    if (!triedTokens.has(candidate.token)) {
+      return { token: candidate.token, source: candidate.source };
     }
-    excludeSources.push(fallback.source);
+    excludeSources.push(candidate.source);
   }
+
+  return undefined;
 }
 
 /** トークンのみ取得したい場合のヘルパー */

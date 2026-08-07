@@ -14,6 +14,11 @@ import {
   getResourceKindLabel,
 } from "./skillIndex";
 import { scanLocalSkills } from "./localSkillScanner";
+import {
+  escapeMarkdownLinkDestination,
+  escapeMarkdownTableText as escapeMarkdownCell,
+  INCOMPLETE_ROW_MARKER,
+} from "./instructionManager";
 import { isJapanese } from "./i18n";
 import { logger } from "./logger";
 
@@ -50,10 +55,6 @@ async function getSkillIndex(): Promise<SkillIndex> {
     }
   }
   return cachedIndex;
-}
-
-function escapeMarkdownCell(value: string): string {
-  return value.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
 }
 
 function chatText(en: string, ja: string): string {
@@ -169,7 +170,9 @@ async function handleChatRequest(
     }
   } catch (error) {
     stream.markdown(
-      `${chatText("Error", "エラー")}: ${error instanceof Error ? error.message : String(error)}`,
+      `${chatText("Error", "エラー")}: ${escapeMarkdownCell(
+        error instanceof Error ? error.message : String(error),
+      )}`,
     );
     return { errorDetails: { message: String(error) } };
   }
@@ -226,29 +229,34 @@ async function handleSearch(
 
   for (const resource of results) {
     const kind = getResourceKind(resource);
-    const stars = resource.stars ? ` Star ${resource.stars}` : "";
+    const stars = Number.isFinite(Number(resource.stars))
+      ? ` Star ${Number(resource.stars)}`
+      : "";
     const categories =
       resource.categories
-        ?.map((category: string) => `\`${category}\``)
+        ?.map((category: string) => `\`${escapeMarkdownCell(category)}\``)
         .join(" ") || "";
 
     stream.markdown(
-      `### $(package) ${getResourceKindLabel(kind, isJa)}: ${resource.name}${stars}\n`,
+      `### $(package) ${getResourceKindLabel(kind, isJa)}: ${escapeMarkdownCell(resource.name)}${stars}\n`,
     );
     stream.markdown(
-      `${getLocalizedDescription(resource, isJa) || chatText("No description", "説明なし")}\n`,
+      `${escapeMarkdownCell(getLocalizedDescription(resource, isJa)) || chatText("No description", "説明なし")}\n`,
     );
     stream.markdown(
-      `**${chatText("Source", "ソース")}:** ${resource.source} | ${categories}\n`,
+      `**${chatText("Source", "ソース")}:** ${escapeMarkdownCell(resource.source)} | ${categories}\n`,
     );
     if (resource.url) {
-      stream.markdown(`[GitHub](${resource.url})\n\n`);
+      stream.markdown(
+        `[GitHub](${escapeMarkdownLinkDestination(resource.url)})\n\n`,
+      );
     }
 
     stream.button({
       command: "resourceNinja.install",
       arguments: [resource],
-      title: `$(cloud-download) ${chatText("Install", "インストール")} ${resource.name}`,
+      // A button label is plain text, so it only needs to stay on one line.
+      title: `$(cloud-download) ${chatText("Install", "インストール")} ${resource.name.replace(/\s+/g, " ").trim()}`,
     });
     stream.markdown("\n\n---\n\n");
   }
@@ -313,18 +321,20 @@ async function handleInstall(
   const isJa = isJapanese();
   stream.markdown(
     chatText(
-      `## Installing ${resource.name}\n\n`,
-      `## ${resource.name} をインストール中\n\n`,
+      `## Installing ${escapeMarkdownCell(resource.name)}\n\n`,
+      `## ${escapeMarkdownCell(resource.name)} をインストール中\n\n`,
     ),
   );
   stream.markdown(
     `- **${chatText("Kind", "種別")}:** ${getResourceKindLabel(kind, isJa)}\n`,
   );
   stream.markdown(
-    `- **${chatText("Source", "ソース")}:** ${resource.source}\n`,
+    `- **${chatText("Source", "ソース")}:** ${escapeMarkdownCell(resource.source)}\n`,
   );
   if (resource.url) {
-    stream.markdown(`- **URL:** ${resource.url}\n\n`);
+    stream.markdown(
+      `- **URL:** ${escapeMarkdownLinkDestination(resource.url)}\n\n`,
+    );
   }
 
   stream.progress(chatText("Installing...", "インストール中..."));
@@ -352,8 +362,8 @@ async function handleInstall(
 
   stream.markdown(
     chatText(
-      `**${resource.name}** has been installed successfully.\n\n`,
-      `**${resource.name}** をインストールしました。\n\n`,
+      `**${escapeMarkdownCell(resource.name)}** has been installed successfully.\n\n`,
+      `**${escapeMarkdownCell(resource.name)}** をインストールしました。\n\n`,
     ),
   );
   stream.markdown(
@@ -408,8 +418,9 @@ async function handleList(
 
   for (const resource of resources.slice(0, 100)) {
     const kind = resource.kind || "skill";
+    const marker = resource.incomplete ? `${INCOMPLETE_ROW_MARKER} ` : "";
     stream.markdown(
-      `| ${getResourceKindLabel(kind, isJa)} | ${escapeMarkdownCell(resource.name)} | \`${escapeMarkdownCell(resource.relativePath)}\` |\n`,
+      `| ${getResourceKindLabel(kind, isJa)} | ${marker}${escapeMarkdownCell(resource.name)} | \`${escapeMarkdownCell(resource.relativePath)}\` |\n`,
     );
   }
 
@@ -510,11 +521,11 @@ async function handleRecommend(
     const resource = recommendation.resource;
     const kind = getResourceKind(resource);
     stream.markdown(
-      `### $(lightbulb) ${getResourceKindLabel(kind, isJapanese())}: ${resource.name}\n`,
+      `### $(lightbulb) ${getResourceKindLabel(kind, isJapanese())}: ${escapeMarkdownCell(resource.name)}\n`,
     );
     stream.markdown(`*${recommendation.reason}*\n\n`);
     stream.markdown(
-      `${getLocalizedDescription(resource, isJapanese()) || chatText("No description", "説明なし")}\n\n`,
+      `${escapeMarkdownCell(getLocalizedDescription(resource, isJapanese())) || chatText("No description", "説明なし")}\n\n`,
     );
 
     stream.button({
@@ -543,7 +554,7 @@ async function showPopularResources(
   for (const resource of popular) {
     const kind = getResourceKind(resource);
     stream.markdown(
-      `- **${getResourceKindLabel(kind, isJa)}: ${resource.name}** ${chatText("Star", "スター")} ${resource.stars} - ${getLocalizedDescription(resource, isJa) || chatText("No description", "説明なし")}\n`,
+      `- **${getResourceKindLabel(kind, isJa)}: ${escapeMarkdownCell(resource.name)}** ${chatText("Star", "スター")} ${Number(resource.stars) || 0} - ${escapeMarkdownCell(getLocalizedDescription(resource, isJa)) || chatText("No description", "説明なし")}\n`,
     );
   }
 

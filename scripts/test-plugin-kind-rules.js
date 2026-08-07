@@ -29,8 +29,11 @@ function requireTypeScriptModule(filePath) {
   return loadedModule.exports;
 }
 
-const { detectResourceKindFromPath, detectPluginChildResourceKind } =
-  requireTypeScriptModule(path.join(repoRoot, "src", "resourceKinds.ts"));
+const {
+  detectResourceKindFromPath,
+  detectPluginChildResourceKind,
+  isIncompleteSkillContent,
+} = requireTypeScriptModule(path.join(repoRoot, "src", "resourceKinds.ts"));
 
 function test(name, fn) {
   try {
@@ -205,6 +208,28 @@ test("the preset generator agrees with the runtime kind rules", () => {
       `generator and runtime disagree on "${sample}"`,
     );
   }
+});
+
+test("incomplete skill content detection stays limited to template-only bodies", () => {
+  const template = "# demo-skill\n\nA demo skill\n\nSource: octo/demo\n";
+  assert.strictEqual(isIncompleteSkillContent(template), true);
+  assert.strictEqual(
+    isIncompleteSkillContent(template.replace(/\n/g, "\r\n")),
+    true,
+    "CRLF copies of the generated template must also be detected",
+  );
+  assert.strictEqual(isIncompleteSkillContent(""), true);
+  assert.strictEqual(isIncompleteSkillContent("   \n\n"), true);
+
+  const real = `---\nname: demo\ndescription: Demo\n---\n\n# Demo\n\n${"body ".repeat(30)}`;
+  assert.strictEqual(isIncompleteSkillContent(real), false);
+  assert.strictEqual(
+    isIncompleteSkillContent(
+      `# Demo\n\n${"Long prose without frontmatter. ".repeat(10)}\n`,
+    ),
+    false,
+    "a real skill without frontmatter must not be flagged",
+  );
 });
 
 console.log("\nAll plugin resource kind contract tests passed.");

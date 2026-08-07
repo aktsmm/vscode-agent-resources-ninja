@@ -19,9 +19,6 @@ const MIRROR_DEBT_BUDGET = {
   "test-full-plugin-index.js": 7,
   "test-global-home-routing.js": 5,
   "test-microsoft-install-e2e.js": 1,
-  "test-plugin-manifests.js": 1,
-  "test-resource-kinds.js": 15,
-  "test-resource-targets.js": 1,
   "test-whenToUse.js": 1,
   // +1 on 2026-08-07 for the same reason; that copy is pinned to src by
   // scripts/test-plugin-kind-rules.js so it cannot drift.

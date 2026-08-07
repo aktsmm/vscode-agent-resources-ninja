@@ -8,6 +8,9 @@ const repoRoot = path.resolve(__dirname, "..");
 const packageJson = JSON.parse(
   fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"),
 );
+const bundledIndex = require(
+  path.join(repoRoot, "resources", "skill-index.json"),
+);
 const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
 const readmeJa = fs.readFileSync(path.join(repoRoot, "README_ja.md"), "utf8");
 const toolDetectorSource = fs.readFileSync(
@@ -37,6 +40,109 @@ function test(name, fn) {
     throw error;
   }
 }
+
+// Row builders are split across formats, so a marker added to one path alone
+// would silently leave the other generated lists claiming a broken resource is fine.
+function getFunctionBody(source, functionName) {
+  const normalized = source.replace(/\r\n/g, "\n");
+  const start = normalized.indexOf(`function ${functionName}(`);
+  assert.notStrictEqual(start, -1, `${functionName} not found`);
+  const end = normalized.indexOf("\n}\n", start);
+  assert.notStrictEqual(end, -1, `${functionName} body not terminated`);
+  return normalized.slice(start, end);
+}
+
+test("every generated resource list marks incomplete resources", () => {
+  const converters = [
+    "toSyncResourceFromLocal",
+    "toSyncResourceFromUser",
+    "toSyncResourceFromInstalledMeta",
+  ];
+  // These build both an installed row and a local row, so one call is not enough.
+  const twoRowGenerators = [
+    "generateLegacySection",
+    "generateCompactSection",
+    "generateFullSection",
+  ];
+
+  for (const builder of converters) {
+    assert.match(
+      getFunctionBody(instructionManagerSource, builder),
+      /markIncompleteDescription\(/,
+      `${builder} must mark incomplete resources`,
+    );
+  }
+
+  for (const builder of twoRowGenerators) {
+    const body = getFunctionBody(instructionManagerSource, builder);
+    const calls = body.match(/markIncompleteDescription\(/g);
+    assert.strictEqual(
+      calls?.length,
+      2,
+      `${builder} must mark both its installed and local rows`,
+    );
+    // Without a budget the marker would push the row past the documented limit.
+    const budgets = body.match(/SKILL_DESCRIPTION_LIMITS\.MAX_(TOTAL|EACH)/g);
+    assert.ok(
+      (budgets?.length ?? 0) >= 2,
+      `${builder} must pass a row budget to markIncompleteDescription`,
+    );
+  }
+
+  assert.match(
+    instructionManagerSource,
+    /INCOMPLETE_ROW_MARKER = "\[incomplete\]"/,
+    "the marker text is the contract the generated lists expose to agents",
+  );
+
+  // The converters mark the head, so catalog truncation must cut the tail.
+  assert.match(
+    instructionManagerSource,
+    /const truncateText = [\s\S]*?raw\.substring\(0, limit - 3\) \+ "\.\.\."/,
+    "catalog truncation must keep the row head so the marker survives",
+  );
+});
+
+// The behavioural proof lives in test-coexistence-ref-catalog-cleanup.js, which
+// runs a hostile resource through the real generators. These checks only stop a
+// new row from bypassing the shared helpers.
+test("generated rows neutralize untrusted resource text", () => {
+  // A raw pipe escape bypasses the newline and comment handling in the helper.
+  const rawPipeEscapes = instructionManagerSource
+    .split(/\r?\n/)
+    .filter((line) => /replace\(\/\\\|\/g/.test(line))
+    .filter((line) => !line.includes("sanitizeGeneratedText"));
+  assert.deepStrictEqual(
+    rawPipeEscapes,
+    [],
+    "escape table cells through escapeMarkdownTableText, not a bare pipe replace",
+  );
+
+  const unescapedLinks = instructionManagerSource
+    .split(/\r?\n/)
+    .filter((line) => /\| \[\$\{/.test(line))
+    .filter(
+      (line) =>
+        !line.includes("escapeMarkdownLinkLabel(") ||
+        !line.includes("escapeMarkdownLinkDestination("),
+    );
+  assert.deepStrictEqual(
+    unescapedLinks,
+    [],
+    "build row links from escapeMarkdownLinkLabel and escapeMarkdownLinkDestination",
+  );
+});
+
+test("the bundled index still contains the text this escaping exists for", () => {
+  const resources = bundledIndex.resources || bundledIndex.skills || [];
+  const withNewline = resources.filter((resource) =>
+    /[\r\n]/.test(String(resource.description || "")),
+  );
+  assert.ok(
+    withNewline.length > 0,
+    "if no bundled description has a newline any more, re-check that this guard still covers a real case",
+  );
+});
 
 test("manifest splits Ref mode from inline output format", () => {
   const config = packageJson.contributes.configuration.properties;

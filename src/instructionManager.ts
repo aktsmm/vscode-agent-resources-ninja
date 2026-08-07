@@ -56,6 +56,7 @@ import {
 } from "./skillIndex";
 import { messages } from "./i18n";
 import { logger } from "./logger";
+import { createSerialQueue } from "./serialQueue";
 
 interface MarkerPair {
   start: string;
@@ -213,6 +214,46 @@ function buildDescription(description?: string, whenToUse?: string): string {
   }
 
   return `${shortDesc} | ${shortWhen}`;
+}
+
+/** 壊れたリソースを AI がそのまま信用しないよう、行先頭に付ける警告。 */
+export const INCOMPLETE_ROW_MARKER = "[incomplete]";
+
+function truncateToLimit(text: string | undefined, maxLength: number): string {
+  const value = text || "";
+  return value.length > maxLength
+    ? `${value.substring(0, maxLength - SKILL_DESCRIPTION_LIMITS.ELLIPSIS_LENGTH)}...`
+    : value;
+}
+
+/**
+ * `maxLength` を渡すと、マーカー分を差し引いてから本文を詰めるので、
+ * 行の文字数予算を超えない。後段で詰め直す経路では省略できる。
+ */
+export function markIncompleteDescription(
+  description: string | undefined,
+  incomplete: boolean | undefined,
+  maxLength?: number,
+): string {
+  const text = description || "";
+  if (!incomplete) {
+    return text;
+  }
+
+  const prefix = `${INCOMPLETE_ROW_MARKER} `;
+  if (!Number.isFinite(maxLength)) {
+    return text ? `${prefix}${text}` : INCOMPLETE_ROW_MARKER;
+  }
+
+  const budget = (maxLength as number) - prefix.length;
+  if (budget <= 0) {
+    return INCOMPLETE_ROW_MARKER;
+  }
+  const trimmed =
+    text.length > budget
+      ? `${text.substring(0, Math.max(0, budget - SKILL_DESCRIPTION_LIMITS.ELLIPSIS_LENGTH))}...`
+      : text;
+  return trimmed ? `${prefix}${trimmed}` : INCOMPLETE_ROW_MARKER;
 }
 
 /**
@@ -429,8 +470,44 @@ function getConfiguredRefCatalogFormat(
     : "full";
 }
 
-function escapeMarkdownTableText(value: string): string {
-  return value.replace(/\|/g, "\\|");
+/**
+ * Resource text comes from third-party repositories and lands in an
+ * always-loaded instruction file, so it must never break the row, escape the
+ * managed section, or form an HTML comment.
+ */
+function sanitizeGeneratedText(value: string | undefined): string {
+  return (value || "")
+    // Vertical tab and form feed are line breaks for some renderers.
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\r\n\u000b\u000c\u2028\u2029]/g, " ")
+    .replace(/<!--/g, "&lt;!--")
+    .replace(/-->/g, "--&gt;")
+    .trim();
+}
+
+export function escapeMarkdownTableText(value: string): string {
+  return sanitizeGeneratedText(value).replace(/\|/g, "\\|");
+}
+
+function escapeMarkdownLinkLabel(value: string): string {
+  // Escape existing backslashes first, or `\]` would cancel the escape below.
+  return escapeMarkdownTableText(value)
+    .replace(/\\/g, "\\\\")
+    .replace(/[[\]]/g, "\\$&");
+}
+
+/**
+ * A link destination is not covered by the cell escaping, so a resource path
+ * could otherwise carry a newline or a managed-section marker into the file.
+ */
+export function escapeMarkdownLinkDestination(
+  value: string | undefined,
+): string {
+  return (value || "").replace(
+    /[\s<>()\\[\]"'`]/g,
+    (character) =>
+      `%${character.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`,
+  );
 }
 
 function formatCatalogLinkCell(url: string | undefined, label: string): string {
@@ -440,7 +517,7 @@ function formatCatalogLinkCell(url: string | undefined, label: string): string {
   if (url === "local") {
     return "local";
   }
-  return `[${label}](${url})`;
+  return `[${label}](${escapeMarkdownLinkDestination(url)})`;
 }
 
 function buildRepositoryFileUrl(
@@ -636,7 +713,11 @@ function toSyncResourceFromLocal(
   return {
     kind: resource.kind || "skill",
     name: resource.name,
-    description: resource.description || "",
+    description: markIncompleteDescription(
+      resource.description,
+      resource.incomplete,
+      SKILL_DESCRIPTION_LIMITS.MAX_TOTAL,
+    ),
     source: resource.source || "local",
     relativePath: resource.relativePath,
     linkPath: getResourceLinkPath(instructionUri.fsPath, resource.fullPath),
@@ -652,7 +733,11 @@ function toSyncResourceFromUser(
   return {
     kind: resource.kind,
     name: resource.name,
-    description: resource.description || "",
+    description: markIncompleteDescription(
+      resource.description,
+      resource.incomplete,
+      SKILL_DESCRIPTION_LIMITS.MAX_TOTAL,
+    ),
     source: resource.source || resource.scope,
     relativePath: resource.relativePath,
     linkPath: getResourceLinkPath(instructionUri.fsPath, resource.fullPath),
@@ -675,9 +760,10 @@ function toSyncResourceFromInstalledMeta(
   return {
     kind: "skill",
     name: meta.name,
-    description: buildDescription(
-      meta.description,
-      meta.customWhenToUse || meta.whenToUse,
+    description: markIncompleteDescription(
+      buildDescription(meta.description, meta.customWhenToUse || meta.whenToUse),
+      meta.incomplete,
+      SKILL_DESCRIPTION_LIMITS.MAX_TOTAL,
     ),
     source: meta.source || "local",
     relativePath,
@@ -751,7 +837,7 @@ function createRefCatalogContent(
     lines.push("", "| Resource | Description |", "| --- | --- |");
     for (const resource of resources) {
       lines.push(
-        `| [${resource.name}](${getRelativeFileLinkPath(catalogFilePath, resource.fullPath)}) | ${truncateText(resource.description)} |`,
+        `| [${escapeMarkdownLinkLabel(resource.name)}](${escapeMarkdownLinkDestination(getRelativeFileLinkPath(catalogFilePath, resource.fullPath))}) | ${truncateText(resource.description)} |`,
       );
     }
     return `${lines.join("\n")}\n`;
@@ -761,7 +847,7 @@ function createRefCatalogContent(
     lines.push("", "| Resource | Path | Description |", "| --- | --- | --- |");
     for (const resource of resources) {
       lines.push(
-        `| [${resource.name}](${getRelativeFileLinkPath(catalogFilePath, resource.fullPath)}) | \`${escapeMarkdownTableText(resource.relativePath)}\` | ${truncateText(resource.description, 100)} |`,
+        `| [${escapeMarkdownLinkLabel(resource.name)}](${escapeMarkdownLinkDestination(getRelativeFileLinkPath(catalogFilePath, resource.fullPath))}) | \`${escapeMarkdownTableText(resource.relativePath)}\` | ${truncateText(resource.description, 100)} |`,
       );
     }
     return `${lines.join("\n")}\n`;
@@ -775,7 +861,7 @@ function createRefCatalogContent(
 
   for (const resource of resources) {
     lines.push(
-      `| [${resource.name}](${getRelativeFileLinkPath(catalogFilePath, resource.fullPath)}) | ${escapeMarkdownTableText(resource.source || "local")} | \`${escapeMarkdownTableText(resource.relativePath)}\` | ${formatCatalogLinkCell(resource.repositoryUrl, "repository")} | ${formatCatalogLinkCell(resource.remoteUrl, "remote")} | ${truncateText(resource.description)} |`,
+      `| [${escapeMarkdownLinkLabel(resource.name)}](${escapeMarkdownLinkDestination(getRelativeFileLinkPath(catalogFilePath, resource.fullPath))}) | ${escapeMarkdownTableText(resource.source || "local")} | \`${escapeMarkdownTableText(resource.relativePath)}\` | ${formatCatalogLinkCell(resource.repositoryUrl, "repository")} | ${formatCatalogLinkCell(resource.remoteUrl, "remote")} | ${truncateText(resource.description)} |`,
     );
   }
 
@@ -1183,7 +1269,30 @@ export async function updateInstructionFile(
   );
 }
 
+/**
+ * Commands, config listeners, the chat participant, and the language-model
+ * tools all trigger this independently. Two interleaved read-modify-write
+ * passes would let the later write drop what the earlier one just added.
+ */
+const runInstructionFileUpdate = createSerialQueue();
+
 export async function updateInstructionFileAtUri(
+  workspaceUri: vscode.Uri,
+  context: vscode.ExtensionContext,
+  instructionUri: vscode.Uri,
+  instructionPath: string,
+): Promise<void> {
+  return runInstructionFileUpdate(() =>
+    performInstructionFileUpdate(
+      workspaceUri,
+      context,
+      instructionUri,
+      instructionPath,
+    ),
+  );
+}
+
+async function performInstructionFileUpdate(
   workspaceUri: vscode.Uri,
   context: vscode.ExtensionContext,
   instructionUri: vscode.Uri,
@@ -1494,7 +1603,7 @@ function generateSharedResourceSectionForFormat(
       lines.push("| Resource | Description |", "|----------|-------------|");
       for (const resource of kindResources) {
         lines.push(
-          `| [${resource.name}](${resource.linkPath}) | ${(resource.description || "").replace(/\|/g, "\\|")} |`,
+          `| [${escapeMarkdownLinkLabel(resource.name)}](${escapeMarkdownLinkDestination(resource.linkPath)}) | ${escapeMarkdownTableText(resource.description)} |`,
         );
       }
       continue;
@@ -1509,18 +1618,15 @@ function generateSharedResourceSectionForFormat(
         : "|----------|--------|------|-------------|",
     );
     for (const resource of kindResources) {
-      const safeDescription = (resource.description || "").replace(
-        /\|/g,
-        "\\|",
-      );
+      const safeDescription = escapeMarkdownTableText(resource.description);
       if (format === "compact") {
         lines.push(
-          `| [${resource.name}](${resource.linkPath}) | \`${resource.relativePath}\` | ${safeDescription} |`,
+          `| [${escapeMarkdownLinkLabel(resource.name)}](${escapeMarkdownLinkDestination(resource.linkPath)}) | \`${escapeMarkdownTableText(resource.relativePath)}\` | ${safeDescription} |`,
         );
         continue;
       }
       lines.push(
-        `| [${resource.name}](${resource.linkPath}) | ${resource.source.replace(/\|/g, "\\|")} | \`${resource.relativePath}\` | ${safeDescription} |`,
+        `| [${escapeMarkdownLinkLabel(resource.name)}](${escapeMarkdownLinkDestination(resource.linkPath)}) | ${escapeMarkdownTableText(resource.source)} | \`${escapeMarkdownTableText(resource.relativePath)}\` | ${safeDescription} |`,
       );
     }
   }
@@ -1562,15 +1668,19 @@ ${markerPair.end}`;
     const installedRows = installedSkills
       .map((skill) => {
         // Description + When to Use を連結（合計最大200文字）
-        const desc = buildDescription(
-          skill.description,
-          skill.customWhenToUse || skill.whenToUse,
+        const desc = markIncompleteDescription(
+          buildDescription(
+            skill.description,
+            skill.customWhenToUse || skill.whenToUse,
+          ),
+          skill.incomplete,
+          SKILL_DESCRIPTION_LIMITS.MAX_TOTAL,
         );
         // テーブル内のパイプ文字をエスケープ
-        const safeDesc = desc.replace(/\|/g, "\\|");
+        const safeDesc = escapeMarkdownTableText(desc);
         // relativePath がある場合はそれを使用、なければ name を使用
         const skillPath = skill.relativePath || skill.name;
-        return `| [${skill.name}](${skillsDir}/${skillPath}/SKILL.md) | ${safeDesc} |`;
+        return `| [${escapeMarkdownLinkLabel(skill.name)}](${escapeMarkdownLinkDestination(`${skillsDir}/${skillPath}/SKILL.md`)}) | ${safeDesc} |`;
       })
       .join("\n");
     content += installedRows + "\n";
@@ -1582,10 +1692,18 @@ ${markerPair.end}`;
       .map((skill) => {
         // LocalSkill は description のみ（whenToUse はない）
         const desc = skill.description || "";
-        const truncatedDesc =
-          desc.length > 200 ? desc.substring(0, 197) + "..." : desc;
-        const safeDesc = truncatedDesc.replace(/\|/g, "\\|");
-        return `| [${skill.name}](${skill.relativePath}/SKILL.md) | ${safeDesc} |`;
+        const truncatedDesc = truncateToLimit(
+          desc,
+          SKILL_DESCRIPTION_LIMITS.MAX_TOTAL,
+        );
+        const safeDesc = escapeMarkdownTableText(
+          markIncompleteDescription(
+            truncatedDesc,
+            skill.incomplete,
+            SKILL_DESCRIPTION_LIMITS.MAX_TOTAL,
+          ),
+        );
+        return `| [${escapeMarkdownLinkLabel(skill.name)}](${escapeMarkdownLinkDestination(`${skill.relativePath}/SKILL.md`)}) | ${safeDesc} |`;
       })
       .join("\n");
     content += localRows + "\n";
@@ -1646,6 +1764,14 @@ function removeMarkedSection(content: string): string {
 export async function removeSkillSectionFromFile(
   fileUri: vscode.Uri,
 ): Promise<void> {
+  return runInstructionFileUpdate(() =>
+    performRemoveSkillSectionFromFile(fileUri),
+  );
+}
+
+async function performRemoveSkillSectionFromFile(
+  fileUri: vscode.Uri,
+): Promise<void> {
   try {
     const content = await vscode.workspace.fs.readFile(fileUri);
     let existingContent = Buffer.from(content).toString("utf-8");
@@ -1671,6 +1797,14 @@ export async function removeSkillSectionFromFile(
  * インストラクションファイルからスキルセクションを削除
  */
 export async function removeSkillSection(
+  workspaceUri: vscode.Uri,
+): Promise<void> {
+  return runInstructionFileUpdate(() =>
+    performRemoveSkillSection(workspaceUri),
+  );
+}
+
+async function performRemoveSkillSection(
   workspaceUri: vscode.Uri,
 ): Promise<void> {
   const config = vscode.workspace.getConfiguration("resourceNinja");
@@ -1717,20 +1851,20 @@ function generateCompactSection(
       name: s.name,
       path: s.relativePath || s.name,
       // Description のみ（100文字）
-      description: s.description
-        ? s.description.length > 100
-          ? s.description.substring(0, 97) + "..."
-          : s.description
-        : "",
+      description: markIncompleteDescription(
+        truncateToLimit(s.description, SKILL_DESCRIPTION_LIMITS.MAX_EACH),
+        s.incomplete,
+        SKILL_DESCRIPTION_LIMITS.MAX_EACH,
+      ),
     })),
     ...localSkills.map((s) => ({
       name: s.name,
       path: s.relativePath,
-      description: s.description
-        ? s.description.length > 100
-          ? s.description.substring(0, 97) + "..."
-          : s.description
-        : "",
+      description: markIncompleteDescription(
+        truncateToLimit(s.description, SKILL_DESCRIPTION_LIMITS.MAX_EACH),
+        s.incomplete,
+        SKILL_DESCRIPTION_LIMITS.MAX_EACH,
+      ),
     })),
   ];
 
@@ -1759,8 +1893,8 @@ ${markerPair.end}`;
   // 各スキルのインデックスを生成（テーブル形式）
   for (const skill of allSkills) {
     // パイプをエスケープ
-    const safeDesc = skill.description.replace(/\|/g, "\\|");
-    content += `| [${skill.name}](${skillsDir}/${skill.path}/SKILL.md) | \`${skill.path}\` | ${safeDesc} |\n`;
+    const safeDesc = escapeMarkdownTableText(skill.description);
+    content += `| [${escapeMarkdownLinkLabel(skill.name)}](${escapeMarkdownLinkDestination(`${skillsDir}/${skill.path}/SKILL.md`)}) | \`${escapeMarkdownTableText(skill.path)}\` | ${safeDesc} |\n`;
   }
 
   content += `\n${markerPair.end}`;
@@ -1781,19 +1915,21 @@ function generateFullSection(
     ...installedSkills.map((s) => ({
       name: s.name,
       path: s.relativePath || s.name,
-      description: buildDescription(
-        s.description,
-        s.customWhenToUse || s.whenToUse,
+      description: markIncompleteDescription(
+        buildDescription(s.description, s.customWhenToUse || s.whenToUse),
+        s.incomplete,
+        SKILL_DESCRIPTION_LIMITS.MAX_TOTAL,
       ),
     })),
     ...localSkills.map((s) => ({
       name: s.name,
       path: s.relativePath,
       // LocalSkill は description のみ（whenToUse はない）
-      description:
-        s.description && s.description.length > 200
-          ? s.description.substring(0, 197) + "..."
-          : s.description || "",
+      description: markIncompleteDescription(
+        truncateToLimit(s.description, SKILL_DESCRIPTION_LIMITS.MAX_TOTAL),
+        s.incomplete,
+        SKILL_DESCRIPTION_LIMITS.MAX_TOTAL,
+      ),
     })),
   ];
 
@@ -1820,8 +1956,8 @@ ${markerPair.end}`;
 `;
 
   for (const skill of allSkills) {
-    const safeDesc = skill.description.replace(/\|/g, "\\|");
-    content += `| [${skill.name}](${skillsDir}/${skill.path}/SKILL.md) | ${safeDesc} |\n`;
+    const safeDesc = escapeMarkdownTableText(skill.description);
+    content += `| [${escapeMarkdownLinkLabel(skill.name)}](${escapeMarkdownLinkDestination(`${skillsDir}/${skill.path}/SKILL.md`)}) | ${safeDesc} |\n`;
   }
 
   content += `\n${markerPair.end}`;

@@ -1,44 +1,30 @@
 #!/usr/bin/env node
 
 const assert = require("assert");
+const fs = require("fs");
+const Module = require("module");
+const path = require("path");
+const ts = require("typescript");
 
-function isPluginManifestPath(resourcePath) {
-  const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
-  return (
-    lowerPath === "plugin.json" ||
-    lowerPath === "gemini-extension.json" ||
-    lowerPath === "apm.yml" ||
-    lowerPath === "apm.yaml" ||
-    /(^|\/)\.(?:claude-plugin|codex-plugin|cursor-plugin|plugin)\/(?:plugin|marketplace)\.json$/.test(
-      lowerPath,
-    )
-  );
+// Load the shipped rules instead of copying them.
+function requireTypeScriptModule(filePath) {
+  const transpiled = ts.transpileModule(fs.readFileSync(filePath, "utf8"), {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+    },
+    fileName: filePath,
+  });
+  const loadedModule = new Module(filePath, module);
+  loadedModule.filename = filePath;
+  loadedModule.paths = Module._nodeModulePaths(path.dirname(filePath));
+  loadedModule._compile(transpiled.outputText, filePath);
+  return loadedModule.exports;
 }
 
-function getPluginRootFromManifestPath(resourcePath) {
-  const normalizedPath = String(resourcePath)
-    .replace(/\\/g, "/")
-    .replace(/^\/+/, "");
-  const lowerPath = normalizedPath.toLowerCase();
-  if (!isPluginManifestPath(lowerPath)) {
-    return undefined;
-  }
-  if (
-    lowerPath === "plugin.json" ||
-    lowerPath === "gemini-extension.json" ||
-    lowerPath === "apm.yml" ||
-    lowerPath === "apm.yaml"
-  ) {
-    return ".";
-  }
-  const markerMatch = normalizedPath.match(
-    /^(.*?)(?:^|\/)\.(?:claude-plugin|codex-plugin|cursor-plugin|plugin)\/(?:plugin|marketplace)\.json$/i,
-  );
-  if (!markerMatch) {
-    return ".";
-  }
-  return markerMatch[1].replace(/\/+$/, "") || ".";
-}
+const { getPluginRootFromManifestPath } = requireTypeScriptModule(
+  path.join(__dirname, "..", "src", "resourceKinds.ts"),
+);
 
 function getPluginManifestKind(filePath) {
   const lowerPath = filePath.toLowerCase().replace(/\\/g, "/");

@@ -238,11 +238,18 @@ Cursor 公式 plugins と Superpowers は、plugin manifest リソースとし�
 | -------------- | -------------------------------------------------- |
 | check (緑)     | インストール済みリソース                           |
 | circle (黄)    | ローカルリソース（instruction file 未登録）        |
+| warning (赤)   | 不完全なリソース（実体を取得できていない）       |
 | NEW badge      | 最近インストール（一時的なバッジ）                 |
-| star-full (黄) | お気に入りセクション                               |
+| star-full (黄) | お気に入りセクション                                 |
 | verified (青)  | 公式ソース（Anthropic, OpenAI, GitHub, Microsoft） |
 | star (黄)      | キュレーション awesome-list                        |
 | repo           | コミュニティリポジトリ                             |
+
+### 不完全なリソース
+
+実体を取得できず生成テンプレートだけが残ったインストールは、成功ではなく失敗として扱います。一覧に出る場所では `不完全` と表示されます。対象はワークスペースツリー、ユーザー/グローバルリソースツリー、再インストールピッカー、`/list` のチャット応答、言語モデル用ツールが返すワークスペースリソース表で、モデルには内容を信用しないよう伝えます。生成される instruction file と ref カタログでは、同じ理由で説明欄の先頭に `[incomplete]` を付けます。
+
+インストールに失敗したときは **再インストール**、**インデックス更新**（index の path が移動した可能性）、**バグ報告**、**削除** を選べます。この状態が導入される前にインストールした skill も、次回のスキャン時に本文から判定します。
 
 ### コマンドパレット
 
@@ -434,11 +441,12 @@ workspace skill を主 Workspace Skill Directory 以外に置く場合は、`add
 
 明示的な **Update Index** は、設定済み source をすべて force scan します。進捗は各 source の処理完了後に進み、結果は **Agent Resources Ninja** Output Channel に `OK` / `FAILED` / `SKIPPED` として記録されます。失敗した source の既存 entry は保持し、GitHub rate limit を検出した場合は残りの request を停止して未試行として報告します。通知と `#updateResourceIndex` tool は、部分成功を全成功と表示せず、日英の1件の結果 summary に統合します。summary の **GitHub 認証を設定** は、2つ目のエラーダイアログを表示せず該当設定を直接開きます。
 
-更新が index を黙って壊さないよう、3 つの保護が入っています。
+更新が index を黙って壊さないよう、4 つの保護が入っています。
 
 - **空スキャン保護** - スキャンは成功したがリソースが 0 件だった場合、既存のリソースを削除しません。全体更新はそのまま保持して Output Channel に記録し、単一 source の更新は結果を報告して **空の結果を反映** を提示します。縮退は意図的な操作のときだけ起きます。
 - **リポジトリ同一性** - source は index した GitHub repository id を覚えています。後からその URL が別 repository に解決された場合は更新を拒否するため、削除や rename で空いた名前が第三者に再登録されて同じ source として配信されることがありません。同じ source を再追加すると **別リポジトリへの差し替えを承認** を選べます。repository の rename では id が変わらないため、rename は自動で追従し URL も更新されます。
 - **起動時の上限** - 起動時の更新は 1 回あたり最大 5 source までとし、開始位置をローテーションします。GitHub の quota を一度に使い切らず、失敗し続ける source が後続を止めることもありません。繰り越した source は Output Channel に出力され、次回以降の起動で処理されます。
+- **レート制限バックオフ** - `429` / `502` / `503` / `504` は上限付きのバックオフで再試行します。`Retry-After` と rate limit の reset を尊重し、20 秒を超える待機は諦めます。待機、次の認証ソースへの切り替え、再試行の打ち切りはいずれも Output Channel に記録されます。記録するのは host と path だけで、トークンや query string は出力しません。
 
 > 設定画面では上記の順序で表示されます
 

@@ -290,6 +290,165 @@ test("resource rows expose installed mcp and hook lifecycle states", () => {
   assert.match(extensionSource, /Hook config:/);
 });
 
+test("every surface that lists an installed resource shows the incomplete state", () => {
+  const mcpToolsSource = fs.readFileSync(
+    path.join(repoRoot, "src", "mcpTools.ts"),
+    "utf8",
+  );
+  const chatParticipantSource = fs.readFileSync(
+    path.join(repoRoot, "src", "chatParticipant.ts"),
+    "utf8",
+  );
+
+  // Bind each assertion to the expression that reads the flag, so a decorative
+  // mention of "incomplete" elsewhere in the file cannot satisfy the guard.
+  assert.match(
+    treeProviderSource,
+    /skill\.incomplete\s*\n?\s*\?\s*new vscode\.ThemeIcon\(\s*\n?\s*"warning"/,
+    "treeProvider must pick the warning icon from skill.incomplete",
+  );
+  assert.match(
+    treeProviderSource,
+    /skill\.incomplete\s*\n?\s*\?\s*\[baseDescription, incompleteLabel\]/,
+    "treeProvider must append the incomplete label to the row description",
+  );
+  assert.match(
+    treeProviderSource,
+    /skill\.incomplete[\s\S]{0,200}?⚠ (Incomplete|不完全)/,
+    "treeProvider must explain the incomplete state in the tooltip",
+  );
+
+  assert.match(
+    userResourcesProviderSource,
+    /resource\.incomplete\s*\n?\s*\?\s*new vscode\.ThemeIcon\(\s*\n?\s*"warning"/,
+    "userResourcesProvider must pick the warning icon from resource.incomplete",
+  );
+  assert.match(
+    userResourcesProviderSource,
+    /const incompleteLabel = resource\.incomplete/,
+    "userResourcesProvider must derive the row label from resource.incomplete",
+  );
+  // The read-only branch is a separate description path and dropped the label once.
+  assert.match(
+    userResourcesProviderSource,
+    /isReadOnly\s*\n?\s*\?\s*\[[\s\S]{0,200}?incompleteLabel,/,
+    "the read-only description branch must keep the incomplete label",
+  );
+  assert.match(
+    userResourcesProviderSource,
+    /resource\.incomplete[\s\S]{0,200}?⚠ (Incomplete|不完全)/,
+    "userResourcesProvider must explain the incomplete state in the tooltip",
+  );
+
+  // The language-model surfaces are where a silently broken resource does the most damage.
+  for (const [label, source] of [
+    ["mcpTools.ts", mcpToolsSource],
+    ["chatParticipant.ts", chatParticipantSource],
+  ]) {
+    assert.match(
+      source,
+      /resource\.incomplete\s*\n?\s*\?\s*`\$\{INCOMPLETE_ROW_MARKER\} `/,
+      `${label} must mark an incomplete row from resource.incomplete`,
+    );
+  }
+  assert.match(
+    mcpToolsSource,
+    /do not rely on its contents/,
+    "the resource list tool must tell the model not to trust an incomplete resource",
+  );
+
+  assert.match(
+    extensionSource,
+    /meta\.incomplete\s*\n?\s*\?\s*`\$\(warning\) \$\{meta\.name\}`/,
+    "the reinstall picker must flag an incomplete resource",
+  );
+});
+
+test("docs explain the incomplete resource state and its recovery", () => {
+  assert.match(readme, /### Incomplete Resources/);
+  assert.match(readme, /warning \(red\)\s*\|\s*Incomplete resource/);
+  assert.match(readme, /\*\*Reinstall\*\*, \*\*Update Index\*\*/);
+  assert.match(readmeJa, /### 不完全なリソース/);
+  assert.match(readmeJa, /warning \(赤\)\s*\|\s*不完全なリソース/);
+  assert.match(readmeJa, /\*\*再インストール\*\*、\*\*インデックス更新\*\*/);
+});
+
+// Chat output is model context too, so third-party text must not shape it.
+test("chat output escapes third-party resource text", () => {
+  const chatParticipantSource = fs.readFileSync(
+    path.join(repoRoot, "src", "chatParticipant.ts"),
+    "utf8",
+  );
+
+  // Analyse whole `stream.markdown(...)` calls, not lines, so splitting an
+  // interpolation and its escape across two lines cannot hide a regression.
+  const calls = [];
+  const marker = "stream.markdown(";
+  let cursor = chatParticipantSource.indexOf(marker);
+  while (cursor !== -1) {
+    let depth = 0;
+    let index = cursor + marker.length - 1;
+    for (; index < chatParticipantSource.length; index += 1) {
+      const character = chatParticipantSource[index];
+      if (character === "(") depth += 1;
+      if (character === ")") {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+    }
+    calls.push(chatParticipantSource.slice(cursor, index + 1));
+    assert.strictEqual(
+      depth,
+      0,
+      "found an unbalanced stream.markdown call; the guard cannot analyse it",
+    );
+    cursor = chatParticipantSource.indexOf(marker, index + 1);
+  }
+  assert.ok(calls.length > 5, "expected to find the chat markdown calls");
+
+  // Everything here originates in a third-party repository or an error path.
+  const untrustedValues = [
+    "resource.name",
+    "resource.source",
+    "resource.url",
+    "resource.stars",
+    "category",
+    "getLocalizedDescription(",
+    "error.message",
+  ];
+
+  const unescaped = [];
+  for (const call of calls) {
+    for (const value of untrustedValues) {
+      if (!call.includes(value)) {
+        continue;
+      }
+      const interpolations = call.match(/\$\{[\s\S]*?\}/g) || [];
+      const offending = interpolations.filter((fragment) => {
+        if (!fragment.includes(value)) {
+          return false;
+        }
+        // Numeric coercion only proves anything for a value that is a number.
+        if (fragment.includes("Number(")) {
+          return value !== "resource.stars";
+        }
+        return !/escapeMarkdownCell\(|escapeMarkdownLinkDestination\(/.test(
+          fragment,
+        );
+      });
+      if (offending.length > 0) {
+        unescaped.push(`${value}: ${offending[0].replace(/\s+/g, " ")}`);
+      }
+    }
+  }
+
+  assert.deepStrictEqual(
+    unescaped,
+    [],
+    "wrap third-party chat values in escapeMarkdownCell or escapeMarkdownLinkDestination",
+  );
+});
+
 test("recently installed tree badges have textual status alternatives", () => {
   assert.match(treeProviderSource, /const recentLabel = isRecent/);
   assert.match(

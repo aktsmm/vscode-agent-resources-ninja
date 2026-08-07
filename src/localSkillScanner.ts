@@ -11,6 +11,7 @@ import {
   getFallbackResourceName,
   getResourceMetadataPath,
   isBuiltInResourcePath,
+  isIncompleteSkillContent,
 } from "./resourceKinds";
 import { updateInstructionFile } from "./instructionManager";
 import {
@@ -46,6 +47,7 @@ interface ResourceInstallMeta {
   description_ja?: string;
   categories?: string[];
   remotePath?: string;
+  incomplete?: boolean;
   pluginRoot?: string;
   pluginManifestPath?: string;
   pluginManifestKind?: string;
@@ -281,6 +283,7 @@ export interface LocalSkill extends Skill {
   relativePath: string; // ワークスペース相対パス
   isRegistered: boolean; // AGENTS.md に登録済みか
   isBuiltIn?: boolean; // VS Code / Copilot Chat built-in resource
+  incomplete?: boolean; // 実体を取得できず、生成テンプレートだけが残っている
   registrationFile?: string; // 登録されているファイル (AGENTS.md など)
 }
 
@@ -625,6 +628,13 @@ async function parseLocalSkillFile(
     relativePath: skillDir,
     isRegistered: false,
     isBuiltIn,
+    // フラグ導入前のインストールも、既に読み込み済みの本文から判定する。
+    incomplete:
+      kind === "skill" &&
+      !isBuiltIn &&
+      (installMeta?.incomplete === true || isIncompleteSkillContent(text))
+        ? true
+        : undefined,
   };
 }
 

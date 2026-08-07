@@ -45,6 +45,7 @@ async function main() {
     path.join(__dirname, "..", "src", "githubFetch.ts"),
     {
       "./githubResponse": githubResponseModule,
+      "./logger": { logger: { info() {}, warn() {}, error() {} } },
       "./githubAuth": {
         resolveGitHubTokenAfterFailure: async () => undefined,
       },

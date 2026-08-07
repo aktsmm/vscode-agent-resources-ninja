@@ -579,18 +579,30 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
     const pluginLabel = pluginId
       ? `${isJapanese() ? "プラグイン" : "Plugin"}: ${pluginId}`
       : undefined;
-    const description = resource.isBuiltIn
-      ? `${isJapanese() ? "組み込み" : "Built-in"} · ${resource.tool}`
+    const incompleteLabel = resource.incomplete
+      ? isJapanese()
+        ? "不完全"
+        : "Incomplete"
+      : undefined;
+    // An extension-packaged resource can be incomplete too, so the label cannot live in one branch.
+    const descriptionParts = resource.isBuiltIn
+      ? [`${isJapanese() ? "組み込み" : "Built-in"} · ${resource.tool}`]
       : resource.isReadOnly
-        ? `${isJapanese() ? "拡張同梱" : "Extension-packaged"} · ${resource.tool} · ${resource.description || resource.relativePath}`
+        ? [
+            `${isJapanese() ? "拡張同梱" : "Extension-packaged"} · ${resource.tool}`,
+            incompleteLabel,
+            resource.description || resource.relativePath,
+          ]
         : [
             recentLabel,
+            incompleteLabel,
             pluginLabel,
             resource.lifecycleLabel,
             resource.description || resource.relativePath,
-          ]
-            .filter((part): part is string => !!part)
-            .join(" · ");
+          ];
+    const description = descriptionParts
+      .filter((part): part is string => !!part)
+      .join(" · ");
     return new UserResourceTreeItem(
       `${isRecent ? "🆕 " : ""}${resource.name}`,
       description,
@@ -634,7 +646,12 @@ export class UserResourceTreeItem extends vscode.TreeItem {
 
     if (resource) {
       this.resourceUri = vscode.Uri.file(resource.fullPath);
-      this.iconPath = new vscode.ThemeIcon(getResourceKindIcon(resource.kind));
+      this.iconPath = resource.incomplete
+        ? new vscode.ThemeIcon(
+            "warning",
+            new vscode.ThemeColor("errorForeground"),
+          )
+        : new vscode.ThemeIcon(getResourceKindIcon(resource.kind));
       const status = resource.isBuiltIn
         ? `${isJapanese() ? "組み込み" : "Built-in"} · ${resource.tool}`
         : resource.isReadOnly
@@ -653,7 +670,12 @@ export class UserResourceTreeItem extends vscode.TreeItem {
       const recentLine = isRecent
         ? `\n${isJapanese() ? "状態" : "Status"}: ${isJapanese() ? "最近インストール" : "Recently installed"}`
         : "";
-      this.tooltip = `${resource.name}\n${resource.description || "No description"}${pluginLine}${lifecycleLines}${recentLine}\n${status}\n${resource.relativePath}\n${resource.fullPath}`;
+      const incompleteLine = resource.incomplete
+        ? isJapanese()
+          ? `\n⚠ 不完全: SKILL.md の実体を取得できていません。再インストールしてください。`
+          : `\n⚠ Incomplete: SKILL.md content was not downloaded. Reinstall this resource.`
+        : "";
+      this.tooltip = `${resource.name}\n${resource.description || "No description"}${pluginLine}${lifecycleLines}${incompleteLine}${recentLine}\n${status}\n${resource.relativePath}\n${resource.fullPath}`;
       this.command = {
         command: "resourceNinja.openUserResource",
         title: isJapanese() ? "リソースを開く" : "Open Resource",

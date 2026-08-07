@@ -24,7 +24,11 @@ import {
   uninstallSkillByPath,
 } from "./skillInstaller";
 import { formatHookConfigUpdateSummary } from "./hookConfigManager";
-import { updateInstructionFile } from "./instructionManager";
+import {
+  escapeMarkdownTableText as escapeMarkdownCell,
+  INCOMPLETE_ROW_MARKER,
+  updateInstructionFile,
+} from "./instructionManager";
 import { getConfiguredInstructionFilePath } from "./customizationPaths";
 import {
   searchGitHub,
@@ -396,9 +400,9 @@ ${updateInfo.warning}
         const trust = getTrustBadge(skill.source || "");
         const desc = getLocalizedDescription(skill, isJa);
         const kind = getResourceKind(skill);
-        return `| ${getResourceKindLabel(kind, isJa)} | ${skill.name} | ${
-          desc || (isJa ? "説明なし" : "No description")
-        } | ${categories} | ${trust} |${stars}`;
+        return `| ${getResourceKindLabel(kind, isJa)} | ${escapeMarkdownCell(skill.name)} | ${escapeMarkdownCell(
+          desc || (isJa ? "説明なし" : "No description"),
+        )} | ${escapeMarkdownCell(categories)} | ${trust} |${stars}`;
       })
       .join("\n");
 
@@ -545,6 +549,8 @@ class SkillInstallTool implements vscode.LanguageModelTool<{
         skill,
         workspaceFolder.uri,
         context,
+        // 対話ユーザーがいない経路なので復旧ダイアログは出さず、失敗は例外で返す。
+        { suppressRecoveryPrompt: true },
       );
       const hookConfigSummary = formatHookConfigUpdateSummary(
         installResult.hookConfigUpdate,
@@ -575,9 +581,9 @@ class SkillInstallTool implements vscode.LanguageModelTool<{
 
 | 項目 | 内容 |
 |-----------|------|
-| Resource | ${skill.name} |
+| Resource | ${escapeMarkdownCell(skill.name)} |
 | Kind | ${getResourceKindLabel(kind, isJa)} |
-| 説明 | ${desc || (isJa ? "説明なし" : "No description")} |
+| 説明 | ${escapeMarkdownCell(desc || (isJa ? "説明なし" : "No description"))} |
 | 信頼度 | ${trust} |
 | インストール先 | ${escapeMarkdownCell(toDisplayPath(workspaceFolder, targetUri))} |
 ${hookConfigSummary ? `| hooks.json | ${hookConfigSummary} |` : ""}
@@ -613,10 +619,6 @@ ${hookConfigSummary ? `| hooks.json | ${hookConfigSummary} |` : ""}
       ]);
     }
   }
-}
-
-function escapeMarkdownCell(value: string): string {
-  return value.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
 }
 
 /**
@@ -665,7 +667,8 @@ class SkillListTool implements vscode.LanguageModelTool<Record<string, never>> {
     const list = visibleResources
       .map((resource, i) => {
         const kind = resource.kind || "skill";
-        return `| ${i + 1} | ${getResourceKindLabel(kind, false)} | ${escapeMarkdownCell(resource.name)} | \`${escapeMarkdownCell(resource.relativePath)}\` |`;
+        const marker = resource.incomplete ? `${INCOMPLETE_ROW_MARKER} ` : "";
+        return `| ${i + 1} | ${getResourceKindLabel(kind, false)} | ${marker}${escapeMarkdownCell(resource.name)} | \`${escapeMarkdownCell(resource.relativePath)}\` |`;
       })
       .join("\n");
     const overflowNote =
@@ -686,6 +689,7 @@ ${overflowNote}
 **Agent Instructions:**
 - Show the table in clean format
 - Offer to open or preview any listed resource
+- A name prefixed with \`${INCOMPLETE_ROW_MARKER}\` was never downloaded fully; do not rely on its contents and suggest reinstalling it
 
 **📋 Next Actions (show to user):**
 1. 📄 View details? → Ask which resource
@@ -785,7 +789,7 @@ class SkillRecommendTool implements vscode.LanguageModelTool<
       const list = popular
         .map(
           (s: Skill) =>
-            `| ${getResourceKindLabel(getResourceKind(s), false)} | ${s.name} | ${s.description || ""} | ${getTrustBadge(
+            `| ${getResourceKindLabel(getResourceKind(s), false)} | ${escapeMarkdownCell(s.name)} | ${escapeMarkdownCell(s.description || "")} | ${getTrustBadge(
               s.source || "",
             )} | ${s.stars} |`,
         )
@@ -956,7 +960,10 @@ class SkillUninstallTool implements vscode.LanguageModelTool<{
         .slice(0, 20)
         .map((resource) => {
           const kind = resource.kind || "skill";
-          return `| ${getResourceKindLabel(kind, false)} | ${escapeMarkdownCell(resource.name)} | \`${escapeMarkdownCell(resource.relativePath)}\` |`;
+          const marker = resource.incomplete
+            ? `${INCOMPLETE_ROW_MARKER} `
+            : "";
+          return `| ${getResourceKindLabel(kind, false)} | ${marker}${escapeMarkdownCell(resource.name)} | \`${escapeMarkdownCell(resource.relativePath)}\` |`;
         })
         .join("\n");
 
@@ -1024,7 +1031,7 @@ Installed skills: ${installed.length > 0 ? installed.join(", ") : "none"}
 
 | 項目 | 内容 |
 |-----------|------|
-| Resource | ${removedName} |
+| Resource | ${escapeMarkdownCell(removedName)} |
 | Kind | ${getResourceKindLabel(removedKind, false)} |
 | ステータス | 削除完了 |
 | Instruction File | ${removedKind === "skill" ? (instructionTarget === "none" ? "無効" : "更新済み") : "変更なし"} |
@@ -1544,7 +1551,7 @@ Try searching for the resource first with #searchResources.`,
 
 | Field | Value |
           |-------|-------|
-| Resource | ${skillName} |
+| Resource | ${escapeMarkdownCell(skillName)} |
 | English | ${skill.description || "(not set)"} |
 | Japanese | ${skill.description_ja || "(not set)"} |
 

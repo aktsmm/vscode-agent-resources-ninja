@@ -242,6 +242,49 @@ const tests = [
     },
   },
   {
+    name: "Stale env token falls back even without a SecretStorage token",
+    run: async () => {
+      process.env.GITHUB_TOKEN = "env-tok";
+      execHandler = (_command, _options, callback) => {
+        callback(null, "gh-tok\n", "");
+      };
+
+      const result = await githubAuth.resolveGitHubTokenAfterFailure("env-tok");
+      assert.deepStrictEqual(result, { token: "gh-tok", source: "gh-cli" });
+    },
+  },
+  {
+    name: "Already tried tokens are excluded from the fallback walk",
+    run: async () => {
+      process.env.GITHUB_TOKEN = "env-tok";
+      execHandler = (_command, _options, callback) => {
+        callback(null, "gh-tok\n", "");
+      };
+      configState.githubToken = "cfg-tok";
+
+      const result = await githubAuth.resolveGitHubTokenAfterFailure(
+        "env-tok",
+        ["gh-tok"],
+      );
+      assert.deepStrictEqual(result, { token: "cfg-tok", source: "config" });
+    },
+  },
+  {
+    name: "Exhausting every source returns undefined instead of looping",
+    run: async () => {
+      secretMap.set(SECRET_KEY, "same-tok");
+      process.env.GITHUB_TOKEN = "same-tok";
+      execHandler = (_command, _options, callback) => {
+        callback(null, "same-tok\n", "");
+      };
+      configState.githubToken = "same-tok";
+
+      const result =
+        await githubAuth.resolveGitHubTokenAfterFailure("same-tok");
+      assert.strictEqual(result, undefined);
+    },
+  },
+  {
     name: "Legacy config token is migrated into SecretStorage (idempotent)",
     run: async () => {
       configState.githubToken = "cfg-tok";

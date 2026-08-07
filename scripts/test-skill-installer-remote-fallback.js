@@ -132,7 +132,10 @@ function createVscodeStub(writes, options = {}) {
         errorMessages.push(args);
         return options.errorMessageChoice;
       },
-      showWarningMessage: async () => undefined,
+      showWarningMessage: async (...args) => {
+        (options.warningMessages || []).push(args);
+        return options.warningMessageChoice;
+      },
     },
     commands: {
       executeCommand: async (...args) => {
@@ -154,6 +157,7 @@ function loadInstaller(writes, options = {}) {
     path.join(srcDir, "githubFetch.ts"),
     {
       "./githubResponse": githubResponse,
+      "./logger": { logger: { info() {}, warn() {}, error() {} } },
       "./githubAuth": {
         resolveGitHubTokenAfterFailure: async () => undefined,
       },
@@ -956,6 +960,118 @@ async function run() {
       );
       passed++;
     }
+
+    // --- Test 11: template だけの install は成功として返さない ---
+    {
+      writes.clear();
+      const warnings = [];
+      const { installSkill, isSkillInstallIncompleteError } = loadInstaller(
+        writes,
+        {
+          skillIndex: privateSourceIndex,
+          warningMessages: warnings,
+        },
+      );
+      global.fetch = async () => ({
+        ok: false,
+        status: 500,
+        statusText: "Internal Server Error",
+        text: async () => "boom",
+      });
+
+      let thrown;
+      try {
+        await installSkill(privateSkill, makeUri("/tmp/workspace"), {});
+      } catch (error) {
+        thrown = error;
+      }
+
+      assert.ok(thrown, "a template-only install must not resolve");
+      assert.strictEqual(isSkillInstallIncompleteError(thrown), true);
+      assert.strictEqual(thrown.skillName, "private-demo");
+
+      const metaPath = [...writes.keys()].find((key) =>
+        key.endsWith(".skill-meta.json"),
+      );
+      assert.ok(metaPath, "install metadata must still be written");
+      assert.strictEqual(JSON.parse(writes.get(metaPath)).incomplete, true);
+      assert.strictEqual(
+        warnings.some((args) => /was not installed correctly/.test(args[0])),
+        true,
+        "an interactive install must surface the recovery dialog",
+      );
+      passed++;
+    }
+
+    // --- Test 12: bulk 経路は dialog を出さずに例外だけ返す ---
+    {
+      writes.clear();
+      const warnings = [];
+      const { installSkill, isSkillInstallIncompleteError } = loadInstaller(
+        writes,
+        {
+          skillIndex: privateSourceIndex,
+          warningMessages: warnings,
+        },
+      );
+      global.fetch = async () => ({
+        ok: false,
+        status: 500,
+        statusText: "Internal Server Error",
+        text: async () => "boom",
+      });
+
+      let thrown;
+      try {
+        await installSkill(
+          privateSkill,
+          makeUri("/tmp/workspace"),
+          {},
+          { suppressRecoveryPrompt: true },
+        );
+      } catch (error) {
+        thrown = error;
+      }
+
+      assert.strictEqual(isSkillInstallIncompleteError(thrown), true);
+      assert.deepStrictEqual(warnings, []);
+      passed++;
+    }
+
+    // --- Test 13: 入れ直しに成功したら incomplete フラグが消える ---
+    {
+      writes.clear();
+      const { installSkill } = loadInstaller(writes, {
+        skillIndex: privateSourceIndex,
+      });
+      global.fetch = async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        text: async () => realSkillMd,
+      });
+
+      const result = await installSkill(
+        privateSkill,
+        makeUri("/tmp/workspace"),
+        {},
+      );
+
+      assert.deepStrictEqual(result, {});
+      const metaPath = [...writes.keys()].find((key) =>
+        key.endsWith(".skill-meta.json"),
+      );
+      assert.ok(metaPath, "install metadata must be written");
+      assert.strictEqual(
+        Object.prototype.hasOwnProperty.call(
+          JSON.parse(writes.get(metaPath)),
+          "incomplete",
+        ),
+        false,
+        "a healthy install must not keep the incomplete flag",
+      );
+      passed++;
+    }
   } finally {
     if (originalFetch) {
       global.fetch = originalFetch;
@@ -965,7 +1081,7 @@ async function run() {
   }
 
   console.log(
-    `PASS: test-skill-installer-remote-fallback.js (${passed}/17 cases)`,
+    `PASS: test-skill-installer-remote-fallback.js (${passed}/20 cases)`,
   );
 }
 

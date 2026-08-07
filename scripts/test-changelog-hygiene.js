@@ -125,6 +125,40 @@ test("unreleased work is not written into a published section", () => {
   );
 });
 
+// A forgotten version bump only shows up at publish time, so pin the newest
+// released heading to package.json here instead.
+test("the newest released section matches the package version", () => {
+  const newestReleased = sections[1];
+  assert.ok(newestReleased, "CHANGELOG has no released section");
+  assert.strictEqual(
+    newestReleased.version,
+    packageJson.version,
+    `CHANGELOG newest release ${newestReleased.version} does not match package.json ${packageJson.version}`,
+  );
+});
+
+test("release-facing documents carry no replacement characters", () => {
+  const guardedFiles = [
+    "CHANGELOG.md",
+    "README.md",
+    "README_ja.md",
+    "package.nls.json",
+    "package.nls.ja.json",
+  ];
+
+  for (const fileName of guardedFiles) {
+    const text = fs.readFileSync(path.join(repoRoot, fileName), "utf8");
+    const index = text.indexOf("\uFFFD");
+    assert.strictEqual(
+      index,
+      -1,
+      `${fileName} contains U+FFFD near: ${JSON.stringify(
+        text.slice(Math.max(0, index - 40), index + 40),
+      )}`,
+    );
+  }
+});
+
 test("every entry is bilingual", () => {
   const monolingual = [];
   for (const section of sections) {

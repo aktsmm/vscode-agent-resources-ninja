@@ -125,6 +125,22 @@ function isResourceMetadataSidecarPath(lowerPath: string): boolean {
   );
 }
 
+/**
+ * 生成テンプレートだけの SKILL.md を判定する。
+ * frontmatter を持たない resource kind へ広げると誤検知するため skill 専用。
+ */
+export function isIncompleteSkillContent(text: string): boolean {
+  const normalized = text.replace(/\r\n/g, "\n").trim();
+  if (normalized.length < 50) {
+    return true;
+  }
+  if (normalized.startsWith("---\n")) {
+    return false;
+  }
+  const lines = normalized.split("\n").filter((line) => line.trim());
+  return lines.length <= 5 && /^Source:\s+\S+$/.test(lines[lines.length - 1]);
+}
+
 export function isHookConfigFilePath(resourcePath: string): boolean {
   const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
   if (!/(^|\/)(?:\.github\/)?hooks\/[^/]+\.json$/i.test(lowerPath)) {

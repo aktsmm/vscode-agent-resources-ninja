@@ -243,11 +243,18 @@ Generic MCP config file names such as `mcp.json` and `.mcp.json` are installed w
 | ------------------ | ------------------------------------------------------ |
 | check (green)      | Installed resource                                     |
 | circle (yellow)    | Local resource (not registered in instruction file)    |
+| warning (red)      | Incomplete resource - its content was never downloaded |
 | NEW badge          | Recently installed (temporary badge)                   |
 | star-full (yellow) | Favorites section                                      |
 | verified (blue)    | Official source (Anthropic, OpenAI, GitHub, Microsoft) |
 | star (yellow)      | Curated awesome-list                                   |
 | repo               | Community repository                                   |
+
+### Incomplete Resources
+
+An install that could not fetch the real content leaves only a generated template. That is reported as a failure rather than a success, and the resource is marked `Incomplete` wherever it is listed: the workspace tree, the user and global resource tree, the reinstall picker, the `/list` chat reply, and the workspace resource tables the language-model tools return, which are also told not to rely on the contents. In the generated instruction file and ref catalogs the description cell is prefixed with `[incomplete]` for the same reason.
+
+When the install fails you can pick **Reinstall**, **Update Index** (the indexed path may have moved), **Report Bug**, or **Delete**. Skills installed before this state existed are detected from their content during the next scan.
 
 ### Command Palette
 
@@ -439,11 +446,12 @@ Use `additionalSkillRoots` when workspace skills are stored outside the primary 
 
 An explicit **Update Index** force-scans every configured source. Progress advances after each source finishes, and each result is logged as `OK`, `FAILED`, or `SKIPPED` in the **Agent Resources Ninja** Output Channel. Existing entries are preserved for failed sources; a GitHub rate-limit failure stops the remaining requests and reports them as not attempted. The notification and `#updateResourceIndex` tool return one localized summary instead of reporting a partial update as full success. From that summary, **Configure GitHub Authentication** opens the relevant setting directly without showing a second error dialog.
 
-Three safeguards keep a refresh from quietly damaging the index:
+Four safeguards keep a refresh from quietly damaging the index:
 
 - **Empty scan protection** - A scan that succeeds but finds no resources does not delete the ones you already have. A full refresh keeps them and records it in the Output Channel; a single-source refresh reports the result and offers **Apply Empty Result** so shrinking a source stays a deliberate choice.
 - **Repository identity** - A source remembers the GitHub repository id it was indexed from. If the URL later resolves to a different repository, the update is refused so a name that was deleted or renamed away cannot be re-registered by someone else and served as the same source. Re-adding the source offers **Approve Repository Change**. A repository rename keeps the same id, so renames are followed automatically and the stored URL is updated.
 - **Startup budget** - The startup refresh handles at most 5 stale sources per launch and rotates where it starts, so a large workspace does not spend its GitHub quota at once and a repeatedly failing source cannot block the ones behind it. Deferred sources are listed in the Output Channel and picked up on a later launch.
+- **Rate-limit backoff** - A `429`, `502`, `503`, or `504` is retried with a bounded backoff that honors `Retry-After` and the rate-limit reset, and gives up rather than waiting more than 20 seconds. Each wait, each switch to the next credential source, and each abandoned retry is written to the Output Channel with the host and path only, never a token or a query string.
 
 > Settings are displayed in the order above
 

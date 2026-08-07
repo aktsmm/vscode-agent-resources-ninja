@@ -40,6 +40,11 @@ test("SkillMeta exposes the shared coexistence metadata contracts", () => {
     /\[key: string\]: unknown;/,
     "SkillMeta should allow forward-compatible fields",
   );
+  assert.match(
+    skillInstallerSource,
+    /incomplete\?: boolean; \/\//,
+    "SkillMeta must expose incomplete as a first-class field so the sibling extension can read it",
+  );
 });
 
 test("installSkill preserves existing skill metadata fields on rewrite", () => {

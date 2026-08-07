@@ -80,6 +80,26 @@ export interface InstallSkillResult {
   mcpConfigUpdate?: McpConfigUpdateResult;
 }
 
+/**
+ * SKILL.md の実体を取得できず、生成テンプレートだけが残った状態。
+ * 呼び出し元の既存 try/catch がそのまま失敗として数えられるように例外で表す。
+ */
+export class SkillInstallIncompleteError extends Error {
+  constructor(
+    public readonly skillName: string,
+    public readonly skillPath: string,
+  ) {
+    super(`Skill install incomplete: ${skillName}`);
+    this.name = "SkillInstallIncompleteError";
+  }
+}
+
+export function isSkillInstallIncompleteError(
+  error: unknown,
+): error is SkillInstallIncompleteError {
+  return error instanceof SkillInstallIncompleteError;
+}
+
 export interface UninstallSkillResult {
   hookConfigUpdate?: HookConfigUpdateResult;
 }
@@ -385,6 +405,7 @@ interface ResourceInstallMeta {
   categories?: string[];
   remotePath: string;
   installedAt: string;
+  incomplete?: boolean;
   pluginRoot?: string;
   pluginManifestPath?: string;
   pluginManifestKind?: string;
@@ -952,9 +973,13 @@ export async function installSkill(
   // GitHub Token を取得
   const token = await getGitHubToken();
 
+  // テンプレートで代替した時点を記録する。後段で frontmatter から再推定しない。
+  let usedFallbackTemplate = false;
+
   if (!repositoryRef) {
     if (resourceKind === "skill") {
       await createFallbackSkillMd(skillPath, skill);
+      usedFallbackTemplate = true;
     } else {
       throw new Error(`Source not found for ${resourceKind}: ${skill.source}`);
     }
@@ -1141,6 +1166,7 @@ export async function installSkill(
           );
         }
         await createFallbackSkillMd(skillPath, skill);
+        usedFallbackTemplate = true;
       }
     } else {
       // フォルダ全体をダウンロード
@@ -1172,6 +1198,7 @@ export async function installSkill(
           );
           if (!recovered) {
             await createFallbackSkillMd(skillPath, skill);
+            usedFallbackTemplate = true;
           }
         }
 
@@ -1238,6 +1265,7 @@ export async function installSkill(
           );
           if (!recovered) {
             await createFallbackSkillMd(skillPath, skill);
+            usedFallbackTemplate = true;
           }
         } else {
           logger.info(
@@ -1271,6 +1299,11 @@ export async function installSkill(
   const skillMdPath = vscode.Uri.joinPath(skillPath, "SKILL.md");
   const whenToUse = await extractWhenToUseFromSkillMd(skillMdPath);
 
+  // ここへ到達するのは resourceKind === "skill" だけ。
+  // hook / mcp / plugin は上で早期 return しており、その戻り値は失われない。
+  const incomplete =
+    usedFallbackTemplate || (await isSkillContentIncomplete(skillMdPath));
+
   const metaPath = vscode.Uri.joinPath(skillPath, ".skill-meta.json");
   const existingMeta = await readSkillMetaIfExists(metaPath);
   const meta: SkillMeta = mergeSkillMeta(existingMeta, {
@@ -1286,107 +1319,153 @@ export async function installSkill(
     categories: skill.categories,
     remotePath: skill.path,
     installedAt: new Date().toISOString(),
+    // 正常に入れ直せたら undefined になり、JSON からフラグごと消える。
+    incomplete: incomplete ? true : undefined,
   });
   await vscode.workspace.fs.writeFile(
     metaPath,
     Buffer.from(JSON.stringify(meta, null, 2), "utf-8"),
   );
 
-  // インストール後の検証: SKILL.md が空またはフォールバック版かチェック
-  if (!options.suppressRecoveryPrompt) {
-    await validateInstalledSkill(skillPath, skill, source);
+  if (!incomplete) {
+    return {};
   }
-  return {};
+
+  if (!options.suppressRecoveryPrompt) {
+    const choice = await promptIncompleteSkillInstall(skillPath, skill, source);
+    if (choice === "reinstall") {
+      // 部分ダウンロードの残骸を持ち越さないよう、Reinstall コマンドと同じく消してから入れ直す。
+      // 削除に失敗したら半削除の上へ書かず、不完全のまま失敗を返す。
+      if (await deleteIncompleteSkillDirectory(skillPath)) {
+        // 再試行では prompt を抑制するので、失敗しても再帰的にダイアログが出ない。
+        return await installSkill(skill, workspaceUri, context, {
+          ...options,
+          suppressRecoveryPrompt: true,
+        });
+      }
+    }
+    if (choice === "delete") {
+      await deleteIncompleteSkillDirectory(skillPath);
+    }
+  }
+
+  throw new SkillInstallIncompleteError(skill.name, skillPath.fsPath);
+}
+
+/** SKILL.md が無い、または実体と呼べない小ささなら不完全とみなす。 */
+async function isSkillContentIncomplete(
+  skillMdPath: vscode.Uri,
+): Promise<boolean> {
+  try {
+    const stat = await vscode.workspace.fs.stat(skillMdPath);
+    return stat.size < 50;
+  } catch {
+    return true;
+  }
+}
+
+async function deleteIncompleteSkillDirectory(
+  skillPath: vscode.Uri,
+): Promise<boolean> {
+  try {
+    await vscode.workspace.fs.delete(skillPath, { recursive: true });
+    return true;
+  } catch (error) {
+    logger.error(
+      `[Resource Ninja] Failed to delete incomplete skill at ${skillPath.fsPath}:`,
+      error,
+    );
+    return false;
+  }
 }
 
 /**
- * インストールされたスキルを検証し、問題があればバグレポートを提案
+ * 不完全なインストールをユーザーへ提示し、選んだ復旧手段を返す。
  */
-async function validateInstalledSkill(
+async function promptIncompleteSkillInstall(
+  skillPath: vscode.Uri,
+  skill: Skill,
+  source?: Source,
+): Promise<"reinstall" | "delete" | undefined> {
+  logger.warn(
+    `[Resource Ninja] Resource "${skill.name}" appears to be a fallback or empty`,
+  );
+
+  const reinstall = isJapanese() ? "再インストール" : "Reinstall";
+  const updateIndex = isJapanese() ? "インデックス更新" : "Update Index";
+  const reportBug = isJapanese() ? "バグ報告" : "Report Bug";
+  const remove = isJapanese() ? "削除" : "Delete";
+
+  const choice = await vscode.window.showWarningMessage(
+    isJapanese()
+      ? `スキル "${skill.name}" のインストールに失敗しました。\nSKILL.md の内容が不完全です。`
+      : `Skill "${skill.name}" was not installed correctly.\nSKILL.md content is incomplete.`,
+    reinstall,
+    updateIndex,
+    reportBug,
+    remove,
+  );
+
+  if (choice === reinstall) {
+    return "reinstall";
+  }
+  if (choice === remove) {
+    return "delete";
+  }
+  if (choice === updateIndex) {
+    await vscode.commands.executeCommand("resourceNinja.updateSourceIndex", {
+      source: source,
+    });
+    return undefined;
+  }
+  if (choice === reportBug) {
+    await reportIncompleteSkillInstall(skillPath, skill, source);
+  }
+  return undefined;
+}
+
+async function reportIncompleteSkillInstall(
   skillPath: vscode.Uri,
   skill: Skill,
   source?: Source,
 ): Promise<void> {
   const skillMdPath = vscode.Uri.joinPath(skillPath, "SKILL.md");
-
+  let text = "";
   try {
     const content = await vscode.workspace.fs.readFile(skillMdPath);
-    const text = Buffer.from(content).toString("utf-8");
-
-    // フォールバック版の検出（テンプレート形式）
-    const isFallback =
-      text.includes(`Source: ${skill.source}`) &&
-      !text.includes("---") && // frontmatter がない
-      text.split("\n").filter((l) => l.trim()).length <= 5; // 5行以下
-
-    // 空または非常に短いコンテンツ
-    const isEmpty = text.trim().length < 50;
-
-    if (isFallback || isEmpty) {
-      logger.warn(
-        `[Resource Ninja] Resource "${skill.name}" appears to be a fallback or empty`,
-      );
-
-      const updateIndex = isJapanese() ? "インデックス更新" : "Update Index";
-      const reportBug = isJapanese() ? "バグ報告" : "Report Bug";
-      const ignore = isJapanese() ? "無視" : "Ignore";
-
-      const choice = await vscode.window.showWarningMessage(
-        isJapanese()
-          ? `スキル "${skill.name}" のインストールに問題がある可能性があります。\nSKILL.md の内容が不完全です。`
-          : `Skill "${skill.name}" may not have installed correctly.\nSKILL.md content appears incomplete.`,
-        updateIndex,
-        reportBug,
-        ignore,
-      );
-
-      if (choice === updateIndex) {
-        await vscode.commands.executeCommand(
-          "resourceNinja.updateSourceIndex",
-          {
-            source: source,
-          },
-        );
-      } else if (choice === reportBug) {
-        // GitHub Issue 作成リンクを開く
-        const extensionVersion =
-          vscode.extensions.getExtension("yamapan.agent-resources-ninja")
-            ?.packageJSON?.version || "unknown";
-
-        // ソース情報を取得
-        const repoUrl = source?.url || "unknown";
-        const branch = source?.branch || "default";
-
-        const issueTitle = `[Bug] Skill install incomplete: ${skill.name}`;
-        const issueBody =
-          `**Issue**\n` +
-          `Skill "${skill.name}" from source "${skill.source}" was not installed correctly.\n\n` +
-          `**Expected**\n` +
-          `SKILL.md should contain the full skill content.\n\n` +
-          `**Actual**\n` +
-          `SKILL.md contains only fallback/template content (${text.length} bytes).\n\n` +
-          `**Skill Details**\n` +
-          `- Name: ${skill.name}\n` +
-          `- Source ID: ${skill.source}\n` +
-          `- Path: ${skill.path || "unknown"}\n` +
-          `- Repository: ${repoUrl}\n` +
-          `- Branch: ${branch}\n\n` +
-          `**Environment**\n` +
-          `- Extension Version: ${extensionVersion}\n` +
-          `- VS Code: ${vscode.version}\n` +
-          `- OS: ${process.platform}\n\n` +
-          `**SKILL.md Content (first 200 chars)**\n` +
-          `\`\`\`\n${text.substring(0, 200)}\n\`\`\``;
-
-        await openBugReportIssue(issueTitle, issueBody);
-      }
-    }
-  } catch (error) {
-    logger.error(
-      `[Resource Ninja] Failed to validate skill "${skill.name}":`,
-      error,
-    );
+    text = Buffer.from(content).toString("utf-8");
+  } catch {
+    text = "(SKILL.md not found)";
   }
+
+  const extensionVersion =
+    vscode.extensions.getExtension("yamapan.agent-resources-ninja")?.packageJSON
+      ?.version || "unknown";
+  const repoUrl = source?.url || "unknown";
+  const branch = source?.branch || "default";
+
+  const issueTitle = `[Bug] Skill install incomplete: ${skill.name}`;
+  const issueBody =
+    `**Issue**\n` +
+    `Skill "${skill.name}" from source "${skill.source}" was not installed correctly.\n\n` +
+    `**Expected**\n` +
+    `SKILL.md should contain the full skill content.\n\n` +
+    `**Actual**\n` +
+    `SKILL.md contains only fallback/template content (${text.length} bytes).\n\n` +
+    `**Skill Details**\n` +
+    `- Name: ${skill.name}\n` +
+    `- Source ID: ${skill.source}\n` +
+    `- Path: ${skill.path || "unknown"}\n` +
+    `- Repository: ${repoUrl}\n` +
+    `- Branch: ${branch}\n\n` +
+    `**Environment**\n` +
+    `- Extension Version: ${extensionVersion}\n` +
+    `- VS Code: ${vscode.version}\n` +
+    `- OS: ${process.platform}\n\n` +
+    `**SKILL.md Content (first 200 chars)**\n` +
+    `\`\`\`\n${text.substring(0, 200)}\n\`\`\``;
+
+  await openBugReportIssue(issueTitle, issueBody);
 }
 
 /**
@@ -1551,6 +1630,7 @@ export interface SkillMeta {
   whenToUse?: string; // SKILL.md の "When to Use" セクションから抽出
   customWhenToUse?: string; // ユーザーがカスタマイズした説明（最優先）
   registrationDisabled?: boolean; // skill-only sibling extension と共有する登録状態フラグ
+  incomplete?: boolean; // SKILL.md がテンプレートのみ、または実体を欠いた状態
   categories: string[];
   installedAt: string;
   relativePath?: string; // ネストされたスキルのパス（例: "document-skills/docx"）

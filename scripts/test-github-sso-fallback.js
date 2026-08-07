@@ -48,6 +48,7 @@ const githubFetch = requireTypeScriptModule(
   path.join(repoRoot, "src", "githubFetch.ts"),
   {
     "./githubResponse": githubResponse,
+    "./logger": { logger: { info() {}, warn() {}, error() {} } },
     "./githubAuth": { resolveGitHubTokenAfterFailure: async () => undefined },
   },
 );

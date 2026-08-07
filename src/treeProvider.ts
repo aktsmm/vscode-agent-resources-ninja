@@ -138,6 +138,7 @@ export interface WorkspaceSkill {
   isInstalled: boolean; // configured skills directory 配下か
   isRegistered: boolean; // instruction file に登録済みか
   isBuiltIn?: boolean; // VS Code / Copilot Chat built-in resource
+  incomplete?: boolean; // 実体を取得できず、生成テンプレートだけが残っている
   source?: string; // インストール元ソース
   remotePath?: string;
   categories?: string[];
@@ -452,22 +453,27 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
           ? "localSkill"
           : "localResource";
     const labelPrefix = statusIcon ? `${newBadge}${statusIcon} ` : newBadge;
+    const incompleteLabel = isJapanese() ? "不完全" : "Incomplete";
+    const baseDescription = skill.isBuiltIn
+      ? `built-in · ${sourceLabel || "Built-in"}`
+      : skill.isInstalled
+        ? [
+            recentLabel,
+            sourceLabel ? `installed from ${sourceLabel}` : "installed",
+            skill.lifecycleLabel,
+            workspacePluginLabel,
+          ]
+            .filter((part): part is string => !!part)
+            .join(" · ")
+        : [skill.lifecycleLabel, skill.relativePath]
+            .filter((part): part is string => !!part)
+            .join(" · ");
+    const itemDescription = skill.incomplete
+      ? [baseDescription, incompleteLabel].filter(Boolean).join(" · ")
+      : baseDescription;
     const item = new SkillTreeItem(
       `${labelPrefix}${skill.name}`,
-      skill.isBuiltIn
-        ? `built-in · ${sourceLabel || "Built-in"}`
-        : skill.isInstalled
-          ? [
-              recentLabel,
-              sourceLabel ? `installed from ${sourceLabel}` : "installed",
-              skill.lifecycleLabel,
-              workspacePluginLabel,
-            ]
-              .filter((part): part is string => !!part)
-              .join(" · ")
-          : [skill.lifecycleLabel, skill.relativePath]
-              .filter((part): part is string => !!part)
-              .join(" · "),
+      itemDescription,
       vscode.TreeItemCollapsibleState.None,
       contextValue,
       {
@@ -493,7 +499,12 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
       parent,
     );
 
-    item.iconPath = new vscode.ThemeIcon(iconId, iconColor);
+    item.iconPath = skill.incomplete
+      ? new vscode.ThemeIcon(
+          "warning",
+          new vscode.ThemeColor("errorForeground"),
+        )
+      : new vscode.ThemeIcon(iconId, iconColor);
     item.resourceUri = vscode.Uri.file(skill.fullPath);
 
     const statusText = skill.isBuiltIn
@@ -536,7 +547,12 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
     const lifecycleInfo = skill.lifecycleTooltipLines?.length
       ? `\n${skill.lifecycleTooltipLines.join("\n")}`
       : "";
-    item.tooltip = `${skill.name}\n${descText}${pluginInfo}${lifecycleInfo}\n${pathLabel}: ${skill.relativePath}\n${statusLabel}: ${accessibleStatusText}${metaInfo}`;
+    const incompleteInfo = skill.incomplete
+      ? isJapanese()
+        ? `\n⚠ 不完全: SKILL.md の実体を取得できていません。再インストールしてください。`
+        : `\n⚠ Incomplete: SKILL.md content was not downloaded. Reinstall this resource.`
+      : "";
+    item.tooltip = `${skill.name}\n${descText}${pluginInfo}${lifecycleInfo}${incompleteInfo}\n${pathLabel}: ${skill.relativePath}\n${statusLabel}: ${accessibleStatusText}${metaInfo}`;
     item.command = {
       command: "vscode.open",
       title: isJapanese() ? "リソースを開く" : "Open Resource",
@@ -600,6 +616,7 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
         source: local.source || (isInstalled ? undefined : "local"),
         remotePath: local.remotePath,
         categories: local.categories,
+        incomplete: local.incomplete,
       });
     }
 
@@ -627,6 +644,7 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
         existing.license = meta.license;
         existing.author = meta.author;
         existing.version = meta.version;
+        existing.incomplete = meta.incomplete || existing.incomplete;
         existing.fullPath = meta.skillFilePath || existing.fullPath;
       } else if (meta.skillFilePath) {
         skillMap.set(metaKey, {
@@ -644,6 +662,7 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
           license: meta.license,
           author: meta.author,
           version: meta.version,
+          incomplete: meta.incomplete,
         });
       }
     }

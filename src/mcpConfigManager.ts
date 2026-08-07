@@ -1,5 +1,6 @@
 import * as path from "path";
 import * as vscode from "vscode";
+import { createSerialQueue } from "./serialQueue";
 import {
   getMcpConfigConflictServerKeys,
   getMcpConfigServerKeys,
@@ -307,7 +308,20 @@ export async function getMcpConfigLifecycleStatus(
   };
 }
 
+// mcp.json is rewritten in full, so overlapping installs must not interleave.
+const runMcpConfigUpdate = createSerialQueue();
+
 export async function updateMcpConfigForInstall(
+  workspaceUri: vscode.Uri,
+  installedMcpConfigUri: vscode.Uri,
+  options: McpConfigUpdateOptions = {},
+): Promise<McpConfigUpdateResult> {
+  return runMcpConfigUpdate(() =>
+    performMcpConfigInstall(workspaceUri, installedMcpConfigUri, options),
+  );
+}
+
+async function performMcpConfigInstall(
   workspaceUri: vscode.Uri,
   installedMcpConfigUri: vscode.Uri,
   options: McpConfigUpdateOptions = {},
@@ -364,6 +378,22 @@ export async function updateMcpConfigForInstall(
 }
 
 export async function updateMcpConfigForUninstall(
+  workspaceUri: vscode.Uri,
+  installedMcpConfigUri: vscode.Uri,
+  serverKeysToRemove: string[],
+  options: Pick<McpConfigUpdateOptions, "dryRun"> = {},
+): Promise<McpConfigUpdateResult> {
+  return runMcpConfigUpdate(() =>
+    performMcpConfigUninstall(
+      workspaceUri,
+      installedMcpConfigUri,
+      serverKeysToRemove,
+      options,
+    ),
+  );
+}
+
+async function performMcpConfigUninstall(
   workspaceUri: vscode.Uri,
   installedMcpConfigUri: vscode.Uri,
   serverKeysToRemove: string[],

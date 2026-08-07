@@ -17,6 +17,7 @@ import {
   getFallbackResourceName,
   getResourceMetadataPath,
   isBuiltInResourcePath,
+  isIncompleteSkillContent,
   shouldReplaceBuiltInResourcePath,
 } from "./resourceKinds";
 import { isJapanese } from "./i18n";
@@ -54,6 +55,7 @@ export interface UserResource {
   rootFsPath: string;
   isBuiltIn?: boolean;
   isReadOnly?: boolean;
+  incomplete?: boolean;
   lifecycleLabel?: string;
   lifecycleTooltipLines?: string[];
 }
@@ -65,6 +67,7 @@ interface ResourceInstallMeta {
   description_ja?: string;
   categories?: string[];
   remotePath?: string;
+  incomplete?: boolean;
   pluginRoot?: string;
   pluginManifestPath?: string;
   pluginManifestKind?: string;
@@ -563,9 +566,11 @@ async function parseResourceFile(
 
   let name = "";
   let description = "";
+  let bodyText = "";
   try {
     const document = await vscode.workspace.openTextDocument(fileUri);
     const text = document.getText().replace(/\r\n/g, "\n");
+    bodyText = text;
     const frontmatterMatch = text.match(/^---\n([\s\S]*?)\n---/);
     if (frontmatterMatch) {
       name = parseFrontmatterValue(frontmatterMatch[1], "name");
@@ -613,6 +618,12 @@ async function parseResourceFile(
     rootFsPath: root.uri.fsPath,
     isBuiltIn,
     isReadOnly,
+    incomplete:
+      kind === "skill" &&
+      !isBuiltIn &&
+      (installMeta?.incomplete === true || isIncompleteSkillContent(bodyText))
+        ? true
+        : undefined,
   };
 }
 

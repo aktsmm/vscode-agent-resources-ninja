@@ -3907,8 +3907,12 @@ export async function activate(
 
       const selected = await vscode.window.showQuickPick(
         installedMeta.map((meta) => ({
-          label: meta.name,
-          description: meta.source,
+          label: meta.incomplete
+            ? `$(warning) ${meta.name}`
+            : meta.name,
+          description: meta.incomplete
+            ? `${meta.source} · ${isJapanese() ? "不完全" : "Incomplete"}`
+            : meta.source,
           picked: false,
           meta,
         })),

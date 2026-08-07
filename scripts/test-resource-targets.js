@@ -1,7 +1,31 @@
 #!/usr/bin/env node
 
 const assert = require("assert");
+const fs = require("fs");
+const Module = require("module");
 const path = require("path");
+const ts = require("typescript");
+
+// Load the shipped rule instead of copying it; the local copy had already lost
+// the metadata-sidecar exclusion that src applies.
+function requireTypeScriptModule(filePath) {
+  const transpiled = ts.transpileModule(fs.readFileSync(filePath, "utf8"), {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+    },
+    fileName: filePath,
+  });
+  const loadedModule = new Module(filePath, module);
+  loadedModule.filename = filePath;
+  loadedModule.paths = Module._nodeModulePaths(path.dirname(filePath));
+  loadedModule._compile(transpiled.outputText, filePath);
+  return loadedModule.exports;
+}
+
+const { isHookConfigFilePath } = requireTypeScriptModule(
+  path.join(__dirname, "..", "src", "resourceKinds.ts"),
+);
 
 function sanitizeResourceName(name) {
   return name
@@ -29,12 +53,6 @@ function getInstallFileName(skill, fileName) {
 
 function getPluginInstallRootName(skill) {
   return sanitizeResourceName(skill.name || skill.pluginRoot || "plugin");
-}
-
-function isHookConfigFilePath(resourcePath) {
-  return /(^|\/)(?:\.github\/)?hooks\/[^/]+\.json$/i.test(
-    resourcePath.replace(/\\/g, "/"),
-  );
 }
 
 function targetPath(
@@ -632,6 +650,23 @@ test("uninstall by path avoids duplicating configured skills directory", () => {
       "/external/hooks/copilot-cli-policy.json",
     ),
     "/external/hooks/copilot-cli-policy.json",
+  );
+});
+
+// The copy this file used to carry had lost this exclusion, so pin it directly.
+test("hook config detection excludes resource metadata sidecars", () => {
+  assert.strictEqual(isHookConfigFilePath("hooks/copilot-cli-policy.json"), true);
+  assert.strictEqual(
+    isHookConfigFilePath(".github/hooks/copilot-cli-policy.json"),
+    true,
+  );
+  assert.strictEqual(
+    isHookConfigFilePath("hooks/pre-review/.resource-ninja.json"),
+    false,
+  );
+  assert.strictEqual(
+    isHookConfigFilePath("hooks/pre-review.resource-ninja.json"),
+    false,
   );
 });
 
