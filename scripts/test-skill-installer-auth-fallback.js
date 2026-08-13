@@ -98,6 +98,10 @@ async function main() {
           path.join(__dirname, "..", "src", "skillInstaller.ts"),
           {
             vscode: {},
+            "./pathSafety": requireTypeScriptModule(
+              path.join(__dirname, "..", "src", "pathSafety.ts"),
+              {},
+            ),
             "./skillIndex": {
               loadSkillIndex: async () => ({ sources: [] }),
               getSourceBranch: async () => "main",
@@ -140,6 +144,10 @@ async function main() {
               }),
             },
             "./resourceKinds": {
+              ...requireTypeScriptModule(
+                path.join(__dirname, "..", "src", "resourceKinds.ts"),
+                {},
+              ),
               detectResourceKindFromPath: () => "skill",
             },
             "./userDataPaths": {

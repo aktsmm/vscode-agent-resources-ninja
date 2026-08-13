@@ -137,6 +137,10 @@ async function main() {
     path.join(__dirname, "..", "src", "skillInstaller.ts"),
     {
       vscode: vscodeStub,
+      "./pathSafety": requireTypeScriptModule(
+        path.join(__dirname, "..", "src", "pathSafety.ts"),
+        {},
+      ),
       "./skillIndex": {
         getResourceKind: (resource) => resource.kind || "skill",
         loadSkillIndex: async () => ({ sources: [] }),
@@ -179,6 +183,10 @@ async function main() {
         }),
       },
       "./resourceKinds": {
+        ...requireTypeScriptModule(
+          path.join(__dirname, "..", "src", "resourceKinds.ts"),
+          {},
+        ),
         detectResourceKindFromPath: () => "skill",
         getPluginRootFromManifestPath: () => undefined,
         getResourceMetadataPath: () => path.join(workspaceRoot, "meta.json"),

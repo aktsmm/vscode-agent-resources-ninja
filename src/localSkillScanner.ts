@@ -14,6 +14,7 @@ import {
   isIncompleteSkillContent,
 } from "./resourceKinds";
 import { updateInstructionFile } from "./instructionManager";
+import { stripSkillMetaLocalPaths } from "./skillInstaller";
 import {
   DISABLED_INSTRUCTION_FILE,
   DEFAULT_WORKSPACE_AGENTS_DIRECTORY,
@@ -171,7 +172,11 @@ async function readResourceInstallMetadata(
       getResourceMetadataPath(fileUri.fsPath, kind),
     );
     const content = await vscode.workspace.fs.readFile(metadataUri);
-    return JSON.parse(Buffer.from(content).toString("utf8"));
+    const parsed = JSON.parse(Buffer.from(content).toString("utf8"));
+    // The sidecar can arrive from a third-party repository, so a path found
+    // inside it never becomes a location this extension acts on.
+    stripSkillMetaLocalPaths(parsed);
+    return parsed;
   } catch {
     return undefined;
   }

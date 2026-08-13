@@ -28,6 +28,13 @@ const { partitionGitHubDirectoryEntries, resolveSymlinkTargetPath } =
     path.join(__dirname, "..", "src", "githubDirectoryTraversal.ts"),
   );
 
+const {
+  isSafePathSegment,
+  isContainedPath,
+  isContainedPathOnPlatform,
+  shouldFoldPathCase,
+} = requireTypeScriptModule(path.join(__dirname, "..", "src", "pathSafety.ts"));
+
 function test(name, fn) {
   try {
     fn();
@@ -110,6 +117,131 @@ function collectInstalledFiles(tree, remotePath, localPath, output = []) {
 
   return output;
 }
+
+test("isSafePathSegment accepts ordinary resource file names", () => {
+  for (const segment of [
+    "SKILL.md",
+    "my-skill",
+    "a.b.c",
+    "README",
+    ".mcp.json",
+  ]) {
+    assert.strictEqual(
+      isSafePathSegment(segment),
+      true,
+      `${JSON.stringify(segment)} must stay installable`,
+    );
+  }
+});
+
+test("isSafePathSegment rejects every unsafe remote entry name", () => {
+  for (const segment of [
+    "..",
+    ".",
+    "",
+    "   ",
+    "a/b",
+    "..\\..\\evil.txt",
+    "a\\b",
+    "c:",
+    "a\u0000b",
+    "a\u0007b",
+    "trailing.",
+    "trailing ",
+    "CON",
+    "con.txt",
+    "COM1",
+    "lpt9.md",
+    // Console devices and the superscript forms Win32 resolves to COM1/LPT1.
+    "CONIN$",
+    "CONOUT$",
+    "conin$.txt",
+    "COM\u00b9",
+    "COM\u00b2.txt",
+    "COM\u00b3",
+    "LPT\u00b9",
+    "LPT\u00b2.md",
+  ]) {
+    assert.strictEqual(
+      isSafePathSegment(segment),
+      false,
+      `${JSON.stringify(segment)} must be rejected`,
+    );
+  }
+});
+
+test("isContainedPath accepts the root itself and nested children", () => {
+  const root = path.resolve("install-root");
+  assert.strictEqual(isContainedPath(root, root), true);
+  assert.strictEqual(
+    isContainedPath(root, path.join(root, "nested", "SKILL.md")),
+    true,
+  );
+});
+
+test("isContainedPath rejects prefix siblings, parents, and traversal", () => {
+  const root = path.resolve("install-root", "b");
+  assert.strictEqual(
+    isContainedPath(root, path.resolve("install-root", "bcd")),
+    false,
+    "a sibling that merely shares a prefix is not contained",
+  );
+  assert.strictEqual(
+    isContainedPath(root, path.resolve("install-root")),
+    false,
+    "the parent is not contained",
+  );
+  assert.strictEqual(
+    isContainedPath(root, `${root}${path.sep}..${path.sep}..${path.sep}x`),
+    false,
+    "traversal out of the root is not contained",
+  );
+});
+
+test("the case-folding policy follows the platform", () => {
+  assert.strictEqual(shouldFoldPathCase("win32"), true);
+  assert.strictEqual(shouldFoldPathCase("linux"), false);
+  assert.strictEqual(shouldFoldPathCase("darwin"), false);
+});
+
+test("both platform branches of containment run on this host", () => {
+  const root = path.resolve("Install-Root");
+  const child = path.join(root, "Nested", "SKILL.md");
+  const differentlyCasedChild = child.toLowerCase();
+
+  for (const platform of ["win32", "linux"]) {
+    assert.strictEqual(
+      isContainedPathOnPlatform(root, child, platform),
+      true,
+      `an exact-case child stays contained on ${platform}`,
+    );
+    assert.strictEqual(
+      isContainedPathOnPlatform(
+        root,
+        `${root}${path.sep}..${path.sep}..${path.sep}x`,
+        platform,
+      ),
+      false,
+      `traversal escapes the root on ${platform}`,
+    );
+  }
+
+  assert.strictEqual(
+    isContainedPathOnPlatform(root, differentlyCasedChild, "win32"),
+    true,
+    "win32 compares case-insensitively",
+  );
+  assert.strictEqual(
+    isContainedPathOnPlatform(root, differentlyCasedChild, "linux"),
+    false,
+    "a case-sensitive platform treats a differently cased path as outside",
+  );
+  assert.strictEqual(
+    isContainedPath(root, child),
+    true,
+    "the two-argument form keeps working on the host platform",
+  );
+});
 
 test("resolveSymlinkTargetPath handles parent segments and backslashes", () => {
   assert.strictEqual(

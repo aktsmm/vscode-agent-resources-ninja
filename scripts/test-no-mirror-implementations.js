@@ -15,14 +15,12 @@ const repoRoot = path.resolve(__dirname, "..");
 // exporting its counterpart, and the reason must be recorded here.
 const MIRROR_DEBT_BUDGET = {
   "audit-resource-installability.js": 3,
-  // +1 on 2026-08-07: src/resourceKinds.ts now exports detectPluginChildResourceKind.
-  "test-full-plugin-index.js": 7,
   "test-global-home-routing.js": 5,
   "test-microsoft-install-e2e.js": 1,
   "test-whenToUse.js": 1,
-  // +1 on 2026-08-07 for the same reason; that copy is pinned to src by
-  // scripts/test-plugin-kind-rules.js so it cannot drift.
-  "update-preset-index.js": 11,
+  // getFallbackResourceName keeps a generator-only dotfile fallback, and
+  // getResourceKind lives in src/skillIndex.ts which cannot load outside VS Code.
+  "update-preset-index.js": 2,
 };
 
 // This guard reads its own budget, so scanning itself would be self-referential.

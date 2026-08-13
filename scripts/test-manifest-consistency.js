@@ -131,6 +131,19 @@ const vscodeignore = fs.readFileSync(
   path.join(repoRoot, ".vscodeignore"),
   "utf8",
 );
+const resourceTestRunner = require("./run-resource-tests.js");
+const discoveredResourceTests = resourceTestRunner.discoverTestScripts();
+const skippedResourceTests = Object.keys(resourceTestRunner.NETWORK_TESTS);
+const executedResourceTests = discoveredResourceTests.filter(
+  (fileName) => !skippedResourceTests.includes(fileName),
+);
+
+function assertResourceSuiteRuns(fileName, message) {
+  assert.ok(
+    executedResourceTests.includes(fileName),
+    message || `Resource test suite should execute scripts/${fileName} offline`,
+  );
+}
 
 function readRuntimeSources() {
   const srcRoot = path.join(repoRoot, "src");
@@ -593,9 +606,14 @@ test("bundled Microsoft Azure Skills plugin source is complete", () => {
   assert.match(presetIndexUpdaterSource, /kind === "mcp"/);
   assert.match(presetIndexUpdaterSource, /mcpServers/);
   assert.match(presetIndexUpdaterSource, /MCP configuration for/);
-  assert.match(
-    packageJson.scripts?.["test:resources"] || "",
-    /test-azure-skills-source\.js/,
+  assert.ok(
+    skippedResourceTests.includes("test-azure-skills-source.js"),
+    "Azure Skills upstream comparison should stay declared as a network test",
+  );
+  assert.strictEqual(
+    packageJson.scripts?.["test:upstream"],
+    "node scripts/run-resource-tests.js --include-network",
+    "Network tests should stay reachable through an opt-in npm script",
   );
 });
 
@@ -1048,12 +1066,17 @@ test("github token setting is password-style and excluded from standard reset", 
 });
 
 test("plugin resources remain browsable from raw plugin paths", () => {
-  assert.match(presetIndexUpdaterSource, /plugin:\$\{pluginId\}/);
-  assert.match(presetIndexUpdaterSource, /pluginPrefix/);
-  assert.match(
-    presetIndexUpdaterSource,
-    /detectPluginChildResourceKind[\s\S]*agents/,
+  // The generator imports the real rules, so assert behaviour instead of its source shape.
+  const generator = require("./update-preset-index.js");
+  assert.strictEqual(
+    generator.detectResourceKindFromPath("plugins/foo/agents/reviewer.md"),
+    "agent",
   );
+  assert.strictEqual(
+    generator.detectPluginChildResourceKind("agents/reviewer.md"),
+    "agent",
+  );
+  assert.match(presetIndexUpdaterSource, /plugin:\$\{pluginId\}/);
   assert.match(presetIndexUpdaterSource, /detectResourceKindWithPluginRoots/);
   assert.match(resourceKindsSource, /getPluginIdFromPath/);
   assert.match(resourceKindsSource, /pluginPrefix/);
@@ -1321,14 +1344,8 @@ test("source freshness metadata is preserved and stamped only on successful scan
     indexUpdaterSource,
     /updateSharedScanMetadata\([\s\S]*indexedAt/,
   );
-  assert.match(
-    packageJson.scripts?.["test:resources"] || "",
-    /test-source-index-freshness\.js/,
-  );
-  assert.match(
-    packageJson.scripts?.["test:resources"] || "",
-    /test-shared-sources-manifest\.js/,
-  );
+  assertResourceSuiteRuns("test-source-index-freshness.js");
+  assertResourceSuiteRuns("test-shared-sources-manifest.js");
 });
 
 test("startup stale update flow avoids duplicate missing-index prompts", () => {
@@ -1460,83 +1477,65 @@ test("settings distinguish skill index sync from native non-skill resource paths
     /isSameOrInside\(globalHomeUri, instructionUri\)/,
   );
   assert.match(instructionManagerSource, /skillSource\.scope === "workspace"/);
-  assert.match(
-    packageJson.scripts?.["test:resources"] || "",
-    /test-global-home-routing\.js/,
-  );
-  assert.match(
-    packageJson.scripts?.["test:resources"] || "",
-    /test-instruction-block-policy\.js/,
+  assertResourceSuiteRuns("test-global-home-routing.js");
+  assertResourceSuiteRuns(
+    "test-instruction-block-policy.js",
     "Resource test suite should validate instruction block policy defaults and overrides",
   );
-  assert.match(
-    packageJson.scripts?.["test:resources"] || "",
-    /test-create-resource-templates\.js/,
+  assertResourceSuiteRuns(
+    "test-create-resource-templates.js",
     "Resource test suite should validate generated Create Resource templates",
   );
-  assert.match(
-    packageJson.scripts?.["test:resources"] || "",
-    /test-create-resource-flow\.js/,
+  assertResourceSuiteRuns(
+    "test-create-resource-flow.js",
     "Resource test suite should validate Create Resource cancellation, preview, and write-error flow",
   );
-  assert.match(
-    packageJson.scripts?.["test:resources"] || "",
-    /test-create-resource-validation\.js/,
+  assertResourceSuiteRuns(
+    "test-create-resource-validation.js",
     "Resource test suite should validate Create Resource input and path limits",
   );
-  assert.match(
-    packageJson.scripts?.["test:resources"] || "",
-    /test-instruction-target-ux\.js/,
+  assertResourceSuiteRuns(
+    "test-instruction-target-ux.js",
     "Resource test suite should validate instruction target UX wording",
   );
-  assert.match(
-    packageJson.scripts?.["test:resources"] || "",
-    /test-localization-ux\.js/,
+  assertResourceSuiteRuns(
+    "test-localization-ux.js",
     "Resource test suite should validate localization and command label UX",
   );
-  assert.match(
-    packageJson.scripts?.["test:resources"] || "",
-    /test-readme-release-ux\.js/,
+  assertResourceSuiteRuns(
+    "test-readme-release-ux.js",
     "Resource test suite should validate README and Marketplace-facing release UX",
   );
-  assert.match(
-    packageJson.scripts?.["test:resources"] || "",
-    /test-view-welcome-ux\.js/,
+  assertResourceSuiteRuns(
+    "test-view-welcome-ux.js",
     "Resource test suite should validate empty-state view welcome UX",
   );
-  assert.match(
-    packageJson.scripts?.["test:resources"] || "",
-    /test-activation-ux\.js/,
+  assertResourceSuiteRuns(
+    "test-activation-ux.js",
     "Resource test suite should validate lazy activation UX and performance",
   );
-  assert.match(
-    packageJson.scripts?.["test:resources"] || "",
-    /test-release-hygiene\.js/,
+  assertResourceSuiteRuns(
+    "test-release-hygiene.js",
     "Resource test suite should validate release hygiene and packaged payload exclusions",
   );
-  assert.match(
-    packageJson.scripts?.["test:resources"] || "",
-    /test-mcp-config-merge\.js/,
+  assertResourceSuiteRuns(
+    "test-mcp-config-merge.js",
     "Resource test suite should validate MCP config merge behavior",
   );
-  assert.match(
-    packageJson.scripts?.["test:resources"] || "",
-    /test-coexistence-ref-catalog-cleanup\.js/,
+  assertResourceSuiteRuns(
+    "test-coexistence-ref-catalog-cleanup.js",
     "Resource test suite should validate stale sibling coexistence catalog cleanup against a real compressed README fixture",
   );
-  assert.match(
-    packageJson.scripts?.["test:resources"] || "",
-    /test-skill-installer-auth-fallback\.js/,
+  assertResourceSuiteRuns(
+    "test-skill-installer-auth-fallback.js",
     "Resource test suite should validate installer auth fallback and runtime GitHub resolution behavior",
   );
-  assert.match(
-    packageJson.scripts?.["test:resources"] || "",
-    /test-audit-resource-installability\.js/,
+  assertResourceSuiteRuns(
+    "test-audit-resource-installability.js",
     "Resource test suite should validate bundled remote installability audit coverage",
   );
-  assert.match(
-    packageJson.scripts?.["test:resources"] || "",
-    /test-update-preset-index-fallback\.js/,
+  assertResourceSuiteRuns(
+    "test-update-preset-index-fallback.js",
     "Resource test suite should validate preset updater rate-limit fallback and source-synchronized bundles",
   );
   assert.strictEqual(
@@ -1544,20 +1543,124 @@ test("settings distinguish skill index sync from native non-skill resource paths
     "npm audit --omit=dev --audit-level=moderate",
     "Runtime dependency audit should remain an explicit release gate",
   );
-  assert.match(
-    packageJson.scripts?.["test:resources"] || "",
-    /test-temporary-install-source\.js/,
+  assertResourceSuiteRuns(
+    "test-temporary-install-source.js",
     "Resource test suite should validate temporary preview or web-search installs without a persisted source entry",
   );
-  assert.match(
-    packageJson.scripts?.["test:resources"] || "",
-    /test-shared-file-serialization\.js/,
+  assertResourceSuiteRuns(
+    "test-shared-file-serialization.js",
     "Resource test suite should validate that shared-file writers are serialized",
   );
-  assert.match(
-    packageJson.scripts?.["test:resources"] || "",
-    /test-changelog-hygiene\.js/,
+  assertResourceSuiteRuns(
+    "test-changelog-hygiene.js",
     "Resource test suite should validate changelog format, version sync, and replacement-character hygiene",
+  );
+});
+
+test("every scripts/test-*.js is either executed or explicitly declared as a network test", () => {
+  assert.strictEqual(
+    packageJson.scripts?.["test:resources"],
+    "node scripts/run-resource-tests.js",
+    "test:resources should stay the single aggregate entry point",
+  );
+
+  const runnerSource = fs.readFileSync(
+    path.join(repoRoot, "scripts", "run-resource-tests.js"),
+    "utf8",
+  );
+  assert.match(
+    runnerSource,
+    /readdirSync\(scriptsDir[\s\S]*\/\^test-\.\*\\\.js\$\//,
+    "The runner must discover scripts/test-*.js at run time, not from a hard-coded list",
+  );
+
+  // A reintroduced hard-coded list would show up as script names baked into the runner.
+  const literalScriptNames = new Set(
+    Array.from(runnerSource.matchAll(/"(test-[a-z0-9-]+\.js)"/g)).map(
+      (match) => match[1],
+    ),
+  );
+  for (const fileName of literalScriptNames) {
+    assert.ok(
+      skippedResourceTests.includes(fileName),
+      `${fileName} is hard-coded in the runner but is not a declared network test`,
+    );
+  }
+
+  const covered = new Set([...executedResourceTests, ...skippedResourceTests]);
+  // Enumerated here rather than through the runner so a narrowed discovery
+  // filter cannot hide a script from its own guard.
+  const testScriptsOnDisk = fs
+    .readdirSync(path.join(repoRoot, "scripts"))
+    .filter((fileName) => /^test-.*\.js$/.test(fileName))
+    .sort();
+  for (const fileName of testScriptsOnDisk) {
+    assert.ok(
+      covered.has(fileName),
+      `scripts/${fileName} would be neither executed nor explicitly skipped`,
+    );
+  }
+  assert.strictEqual(
+    covered.size,
+    testScriptsOnDisk.length,
+    "Executed plus skipped must equal every scripts/test-*.js on disk",
+  );
+
+  // Widening this set hides a gate, so it stays a ratchet against an explicit
+  // baseline: membership was measured by preloading a module that throws from
+  // fetch/http/https and seeing which scripts fail. Adding an entry must be a
+  // deliberate edit here, and removing one must shrink this list.
+  const JUSTIFIED_NETWORK_TESTS = [
+    "test-azure-skills-source.js",
+    "test-microsoft-install-e2e.js",
+  ];
+  assert.deepStrictEqual(
+    [...skippedResourceTests].sort(),
+    [...JUSTIFIED_NETWORK_TESTS].sort(),
+    "Network skip allowlist changed; only measured network tests may be skipped",
+  );
+  for (const fileName of skippedResourceTests) {
+    assert.ok(
+      discoveredResourceTests.includes(fileName),
+      `${fileName} is declared as a network test but does not exist`,
+    );
+    assert.ok(
+      String(resourceTestRunner.NETWORK_TESTS[fileName] || "").length > 20,
+      `${fileName} must document why it needs the network`,
+    );
+  }
+  assert.match(
+    runnerSource,
+    /SKIP \$\{fileName\}: \$\{NETWORK_TESTS\[fileName\]\}/,
+    "Skips must be printed with their reason so they can never be silent",
+  );
+});
+
+test("a filtered index regeneration does not claim the untouched sources are fresh", () => {
+  const generator = require("./update-preset-index.js");
+  assert.strictEqual(
+    generator.resolveIndexLastUpdated("2026-07-30", true, "2026-08-13"),
+    "2026-07-30",
+    "A filtered scan must keep the previous index-wide date",
+  );
+  assert.strictEqual(
+    generator.resolveIndexLastUpdated("2026-07-30", false, "2026-08-13"),
+    "2026-08-13",
+    "A full scan must advance the index-wide date",
+  );
+
+  // No source carries its own timestamp yet, so the index-wide date is the only
+  // freshness signal and must never run ahead of the last full scan.
+  const index = JSON.parse(
+    fs.readFileSync(
+      path.join(repoRoot, "resources", "skill-index.json"),
+      "utf8",
+    ),
+  );
+  assert.strictEqual(
+    index.sources.filter((source) => source.lastIndexedAt).length,
+    0,
+    "Add per-source freshness handling here once sources carry lastIndexedAt",
   );
 });
 
@@ -2354,17 +2457,21 @@ test("install target picker offers workspace and global scopes", () => {
 });
 
 test("preset index updater discovers every supported resource kind", () => {
-  for (const marker of [
-    ".agent.md",
-    ".instructions.md",
-    ".prompt.md",
-    "hooks",
-    "mcp.json",
+  // The generator imports the real rules, so assert behaviour instead of its source shape.
+  const generator = require("./update-preset-index.js");
+  for (const [samplePath, expectedKind] of [
+    ["skills/reviewer/SKILL.md", "skill"],
+    ["agents/reviewer.agent.md", "agent"],
+    ["instructions/style.instructions.md", "instruction"],
+    ["prompts/refine.prompt.md", "prompt"],
+    ["hooks/format.json", "hook"],
+    ["mcp.json", "mcp"],
+    ["plugin.json", "plugin"],
   ]) {
-    assert.match(
-      presetIndexUpdaterSource,
-      new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
-      `Preset updater should discover ${marker}`,
+    assert.strictEqual(
+      generator.detectResourceKindFromPath(samplePath),
+      expectedKind,
+      `Preset updater should discover ${samplePath} as ${expectedKind}`,
     );
   }
   assert.doesNotMatch(

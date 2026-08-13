@@ -22,6 +22,7 @@ import {
 } from "./resourceKinds";
 import { isJapanese } from "./i18n";
 import { getVsCodeUserDataPath } from "./userDataPaths";
+import { stripSkillMetaLocalPaths } from "./skillInstaller";
 
 export type UserResourceScope = "userData" | "globalHome" | "extension";
 
@@ -542,7 +543,11 @@ async function readResourceInstallMetadata(
       getResourceMetadataPath(fileUri.fsPath, kind),
     );
     const document = await vscode.workspace.openTextDocument(metadataUri);
-    return JSON.parse(document.getText());
+    const parsed = JSON.parse(document.getText());
+    // The sidecar can arrive from a third-party repository, so a path found
+    // inside it never becomes a location this extension acts on.
+    stripSkillMetaLocalPaths(parsed);
+    return parsed;
   } catch {
     return undefined;
   }

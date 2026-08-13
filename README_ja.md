@@ -190,6 +190,32 @@ Cursor 公式 plugins と Superpowers は、plugin manifest リソースとし�
 > `github/awesome-copilot` では、`plugins/` から公開されたリソースも、利用可能な場合は重複する raw plugin path ではなく配布向け top-level resource path から収録します。
 > ディレクトリ型の `SKILL.md` root 配下のファイルは skill 内部の構成要素として扱い、`templates` 配下の補助 prompt / instruction などは Remote Resources に別リソースとして表示しません。
 
+### 🧩 プラグイン形式
+
+plugin manifest は 4 つの形式を判別し、どの形式かを index した manifest に記録します。
+
+| 形式              | Manifest                     | 判別方法                                                                                                                                                                  |
+| ----------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agent Plugins 1.0 | `plugin.json`                | `$schema` が `https://agent-plugins.org/schemas/1.0.0/plugin.schema.json` と完全一致し、かつ下記のチェックをすべて満たす                                                  |
+| Copilot           | `plugin.json`                | それ以外の `plugin.json`。Agent Plugins の `$schema` を持たない場合、将来バージョンなど別の `$schema` の場合、canonical な `$schema` を持つが下記のチェックに違反する場合 |
+| Claude            | `.claude-plugin/plugin.json` | plugin root 内のマーカーディレクトリ                                                                                                                                      |
+| Legacy OpenPlugin | `.plugin/plugin.json`        | plugin root 内のマーカーディレクトリ                                                                                                                                      |
+
+`$schema` は文字列の完全一致だけで判定します。仕様は plugin 読み込み時に schema を取得することを禁じているため取得は行わず、将来の Agent Plugins schema バージョンを宣言した manifest は一致しないため通常の plugin として記録します。
+
+`agent-plugins` は仕様適合を示すラベルのため、仕様が fatal とするルールを満たすことも条件になります。`name` は小文字英字・数字・ハイフン・ピリオドで 1〜64 文字、先頭と末尾は英数字、`--` と `..` を含まないこと。`version` / `description` / `homepage` / `repository` / `license` は存在する場合は文字列、`keywords` は文字列の配列、`author` は `name` / `email` / `url` だけを持ち各値が文字列のオブジェクトであることが必要です。これ以外は検査しません。未知のトップレベルフィールドと非オブジェクトの `extensions` は仕様どおり無視し、`extensions` の中身は検査せず、`version` が SemVer でない、`license` が SPDX 識別子でない、URL や email の形式が認識できないといった理由だけで拒否することもありません。
+
+schema を宣言していても上記のルールに違反する manifest は通常の plugin として記録します。仕様に準拠したクライアントは plugin 全体を拒否し、その plugin は表示されないためです。この場合は description の先頭に `[Agent Plugins 1.0.0: <理由>]` を付けてリソース一覧のどこからでも理由が見えるようにし、同じ理由を **Agent Resources Ninja** Output Channel にも出力します。
+
+manifest はファイル名で任意の階層から検出するため、`plugins/<name>/plugin.json` 形式は `plugins/<name>` を root とする独立した plugin package として index されます。`.codex-plugin/plugin.json`、`.cursor-plugin/plugin.json`、`gemini-extension.json`、`apm.yml`、`apm.yaml` もクライアント固有の manifest として認識し、それぞれの manifest kind を保ちます。
+
+Agent Plugins 1.0 では構成要素の場所が固定されており、manifest 側から変更できません。plugin ランタイムが skills として読み込むのは `skills/` の直下ディレクトリのうち `SKILL.md` を持つものだけで、それ以上の再帰は行わない、というのが仕様側の要件です。本拡張は plugin ランタイムではなく index / install を行うツールのため、より深い階層で見つかった `SKILL.md` も独立した skill として表示します（公開されている skill リポジトリの多くがこの構成のためです）。MCP サーバーは `mcp.json` で宣言します。Copilot / Claude 形式の plugin は MCP 設定を `.mcp.json` に置くため、こちらも受け付けます。plugin root の `hooks.json` は `hooks/<name>.json` 配置と同様に hook リソースとして扱います。
+
+v1 で可搬なのは skills と MCP サーバーだけです。agents、hooks、slash commands、rules、LSP はクライアント固有と明示されているため、plugin 内にあってもクライアント固有の付随物として扱います。index と確認用コピーの対象にはしますが、自動実行や自動有効化は行いません。
+
+- 仕様: https://agent-plugins.org/specification
+- VS Code ドキュメント: https://code.visualstudio.com/docs/agent-customization/agent-plugins
+
 ## 🥷 Usage
 
 ### サイドバーから操作
@@ -238,9 +264,9 @@ Cursor 公式 plugins と Superpowers は、plugin manifest リソースとし�
 | -------------- | -------------------------------------------------- |
 | check (緑)     | インストール済みリソース                           |
 | circle (黄)    | ローカルリソース（instruction file 未登録）        |
-| warning (赤)   | 不完全なリソース（実体を取得できていない）       |
+| warning (赤)   | 不完全なリソース（実体を取得できていない）         |
 | NEW badge      | 最近インストール（一時的なバッジ）                 |
-| star-full (黄) | お気に入りセクション                                 |
+| star-full (黄) | お気に入りセクション                               |
 | verified (青)  | 公式ソース（Anthropic, OpenAI, GitHub, Microsoft） |
 | star (黄)      | キュレーション awesome-list                        |
 | repo           | コミュニティリポジトリ                             |

@@ -38,6 +38,7 @@ import {
   normalizeSkillMetaSource,
   refreshSkillMetadata,
   refreshSingleSkillMetadata,
+  stripSkillMetaLocalPaths,
 } from "./skillInstaller";
 import {
   formatHookConfigUpdateSummary,
@@ -131,6 +132,7 @@ import {
   resolveInstructionFileUri,
 } from "./customizationPaths";
 import { getVsCodeUserDataPath } from "./userDataPaths";
+import { isContainedPath } from "./pathSafety";
 import {
   normalizeInlineOutputFormat,
   resolveOutputFormat,
@@ -305,6 +307,7 @@ function collectMissingIndexedInstalledSkillSources(
 async function deleteInstalledResourceByPath(
   kind: ResourceKind,
   fullPath: string,
+  allowedRootFsPath: string,
 ): Promise<void> {
   const isDirectoryBackedHook =
     kind === "hook" && !isHookConfigFilePath(fullPath);
@@ -313,6 +316,11 @@ async function deleteInstalledResourceByPath(
       ? path.dirname(fullPath)
       : fullPath,
   );
+  if (!isContainedPath(allowedRootFsPath, targetUri.fsPath)) {
+    throw new Error(
+      `Refused to delete ${targetUri.fsPath} outside ${allowedRootFsPath}`,
+    );
+  }
   await vscode.workspace.fs.delete(targetUri, {
     recursive: kind === "skill" || isDirectoryBackedHook,
     useTrash: true,
@@ -1574,6 +1582,11 @@ export async function activate(
         | undefined;
       let hookConfigSummary: string | undefined;
       try {
+        if (!isContainedPath(resource.rootFsPath, targetUri.fsPath)) {
+          throw new Error(
+            `Refused to delete ${targetUri.fsPath} outside ${resource.rootFsPath}`,
+          );
+        }
         if (isDirectoryBackedHook) {
           hookConfigUpdate = await updateHookConfigForUninstall(
             wsFolder.uri,
@@ -1742,6 +1755,7 @@ export async function activate(
             await deleteInstalledResourceByPath(
               resource.kind,
               resource.fullPath,
+              resource.rootFsPath,
             );
             await installSkill(fullSkill, wsFolder.uri, context, {
               targetScope,
@@ -2002,11 +2016,13 @@ export async function activate(
           kind: resource.kind || ("skill" as ResourceKind),
           name: resource.name,
           fullPath: resource.fullPath,
+          rootFsPath: wsFolder?.uri.fsPath || path.dirname(resource.fullPath),
         })),
         ...userPluginResources.map((resource) => ({
           kind: resource.kind,
           name: resource.name,
           fullPath: resource.fullPath,
+          rootFsPath: resource.rootFsPath,
         })),
       ];
 
@@ -2034,7 +2050,11 @@ export async function activate(
       let deletedSkills = 0;
       for (const resource of resources) {
         try {
-          await deleteInstalledResourceByPath(resource.kind, resource.fullPath);
+          await deleteInstalledResourceByPath(
+            resource.kind,
+            resource.fullPath,
+            resource.rootFsPath,
+          );
           if (resource.kind === "skill") {
             deletedSkills++;
           }
@@ -2170,6 +2190,9 @@ export async function activate(
       try {
         const content = await vscode.workspace.fs.readFile(metaPath);
         meta = JSON.parse(Buffer.from(content).toString("utf-8"));
+        // The sidecar can arrive from a third-party repository, so a path found
+        // inside it is dropped instead of being written back.
+        stripSkillMetaLocalPaths(meta as unknown as Record<string, unknown>);
       } catch {
         // メタデータがない場合は SKILL.md から生成
         try {
@@ -3907,9 +3930,7 @@ export async function activate(
 
       const selected = await vscode.window.showQuickPick(
         installedMeta.map((meta) => ({
-          label: meta.incomplete
-            ? `$(warning) ${meta.name}`
-            : meta.name,
+          label: meta.incomplete ? `$(warning) ${meta.name}` : meta.name,
           description: meta.incomplete
             ? `${meta.source} · ${isJapanese() ? "不完全" : "Incomplete"}`
             : meta.source,

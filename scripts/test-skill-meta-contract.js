@@ -98,6 +98,19 @@ test("retired source metadata migrates to the canonical source", () => {
 test("mergeSkillMeta keeps unknown fields while applying latest values", () => {
   assert.match(
     skillInstallerSource,
-    /function mergeSkillMeta\([\s\S]*return \{[\s\S]*\.\.\.\(existingMeta \?\? \{}\),[\s\S]*\.\.\.nextMeta,[\s\S]*\};[\s\S]*\}/,
+    /function mergeSkillMeta\([\s\S]*const carriedOverMeta: Partial<SkillMeta> = \{ \.\.\.\(existingMeta \?\? \{\}\) \};[\s\S]*return \{[\s\S]*\.\.\.carriedOverMeta,[\s\S]*\.\.\.nextMeta,[\s\S]*\};[\s\S]*\}/,
+  );
+});
+
+test("mergeSkillMeta never carries a filesystem path back from the sidecar", () => {
+  assert.match(
+    skillInstallerSource,
+    /const SKILL_META_LOCAL_PATH_FIELDS = \[\s*"skillFilePath",\s*"relativePath",\s*\] as const;/,
+    "every SkillMeta field that names a local path must be listed",
+  );
+  assert.match(
+    skillInstallerSource,
+    /for \(const field of SKILL_META_LOCAL_PATH_FIELDS\) \{\s*delete carriedOverMeta\[field\];\s*\}/,
+    "the listed path fields must be dropped before the merge",
   );
 });

@@ -194,6 +194,32 @@ Generic MCP config file names such as `mcp.json` and `.mcp.json` are installed w
 > For `github/awesome-copilot`, resources published from `plugins/` are indexed from distribution-ready top-level resource paths when available, avoiding duplicate raw plugin paths.
 > Files nested under a directory-based `SKILL.md` root are treated as internal skill contents, so helper prompts or instructions in a skill's `templates` folder do not appear as separate Remote Resources.
 
+### 🧩 Plugin Formats
+
+Four plugin manifest formats are detected, and the format a plugin uses is recorded with the indexed manifest.
+
+| Format            | Manifest                     | How it is told apart                                                                                                                                                                      |
+| ----------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agent Plugins 1.0 | `plugin.json`                | `$schema` is exactly `https://agent-plugins.org/schemas/1.0.0/plugin.schema.json` and the manifest passes the checks below                                                                |
+| Copilot           | `plugin.json`                | Any other `plugin.json`: no Agent Plugins `$schema`, a different `$schema` such as a future Agent Plugins version, or the canonical `$schema` with a manifest that fails the checks below |
+| Claude            | `.claude-plugin/plugin.json` | Marker directory inside the plugin root                                                                                                                                                   |
+| Legacy OpenPlugin | `.plugin/plugin.json`        | Marker directory inside the plugin root                                                                                                                                                   |
+
+The `$schema` value is compared as an exact string only. The specification forbids retrieving the schema while a plugin is loaded, so it is never fetched, and a manifest that declares a future Agent Plugins schema version does not match and is recorded as a plain plugin.
+
+The `agent-plugins` label is a conformance claim, so it is only granted when the manifest also satisfies the rules the specification makes fatal. `name` must be 1-64 characters of lowercase letters, digits, hyphens, and periods, starting and ending with a letter or digit, with no `--` or `..`. `version`, `description`, `homepage`, `repository`, and `license` must be strings when present, `keywords` must be an array of strings, and `author` must be an object whose only fields are `name`, `email`, and `url`, each a string. Nothing else is checked: an unknown top-level field and a non-object `extensions` are ignored as the specification requires, the contents of `extensions` members are never inspected, and a manifest is never rejected merely because `version` is not SemVer, `license` is not an SPDX identifier, or a URL or email field is not in a recognized format.
+
+A manifest that declares the schema but breaks one of those rules is recorded as a plain plugin, because a conformant client would reject the whole plugin and it would simply not appear. Its description is prefixed with `[Agent Plugins 1.0.0: <reason>]` so the reason is visible wherever the resource is listed, and the same reason is written to the **Agent Resources Ninja** Output Channel.
+
+Manifests are matched by file name at any depth, so `plugins/<name>/plugin.json` is indexed as its own plugin package rooted at `plugins/<name>`. `.codex-plugin/plugin.json`, `.cursor-plugin/plugin.json`, `gemini-extension.json`, `apm.yml`, and `apm.yaml` are recognized as additional client-specific manifests and keep their own manifest kind.
+
+In Agent Plugins 1.0 the component locations are fixed and a manifest cannot override them: a plugin runtime is required to load skills only from the immediate child directories of `skills/` that contain a `SKILL.md`, with no deeper recursion, and MCP servers are declared in `mcp.json`. This extension is an indexer and installer rather than a plugin runtime, so it also surfaces `SKILL.md` files it finds at deeper levels as their own skills, which is how many published skill repositories are laid out. `.mcp.json` is also accepted, because Copilot and Claude plugins put their MCP configuration there, and a `hooks.json` at the plugin root is treated as a hook resource next to the `hooks/<name>.json` layout.
+
+Only skills and MCP servers are portable in v1. Agents, hooks, slash commands, rules, and LSP entries are explicitly client-specific, so when they are found inside a plugin they are surfaced as client-specific extras: indexed and copied for review, never run or activated automatically.
+
+- Specification: https://agent-plugins.org/specification
+- VS Code documentation: https://code.visualstudio.com/docs/agent-customization/agent-plugins
+
 ## 🥷 Usage
 
 ### Sidebar Operations

@@ -9,8 +9,44 @@
 
 const { execFileSync } = require("child_process");
 const fs = require("fs");
+const Module = require("module");
 const os = require("os");
 const path = require("path");
+const ts = require("typescript");
+
+// Load the shipped rules instead of copying them.
+function requireTypeScriptModule(filePath) {
+  const transpiled = ts.transpileModule(fs.readFileSync(filePath, "utf8"), {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+    },
+    fileName: filePath,
+  });
+  const loadedModule = new Module(filePath, module);
+  loadedModule.filename = filePath;
+  loadedModule.paths = Module._nodeModulePaths(path.dirname(filePath));
+  loadedModule._compile(transpiled.outputText, filePath);
+  return loadedModule.exports;
+}
+
+const {
+  AGENT_PLUGINS_MANIFEST_KIND,
+  detectPluginChildResourceKind,
+  detectResourceKindFromPath,
+  getAgentPluginsConformanceIssue,
+  getDefaultResourceCategories,
+  getPluginIdFromPath,
+  getPluginRootFromManifestPath,
+  getResourceInstallPath,
+  getSkillRootDirectoriesFromPaths,
+  isAgentPluginsManifest,
+  isHookConfigFilePath,
+  isNestedResourcePathUnderSkillRoot,
+  markAgentPluginsIssueDescription,
+} = requireTypeScriptModule(
+  path.join(__dirname, "..", "src", "resourceKinds.ts"),
+);
 
 const INDEX_PATH = path.join(__dirname, "..", "resources", "skill-index.json");
 const FETCH_TIMEOUT = 15000;
@@ -394,184 +430,9 @@ async function scanRepositoryForSkills(source) {
   );
 }
 
-/**
- * パスからリソース種別を判定
- */
-function detectResourceKindFromPath(resourcePath) {
-  const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
-  if (isResourceMetadataSidecarPath(lowerPath)) {
-    return undefined;
-  }
-  if (isPluginManifestPath(lowerPath)) {
-    return "plugin";
-  }
-  const pluginPrefix = "(?:\\.github/)?plugins/[^/]+/";
-  if (new RegExp(`^(?:${pluginPrefix})?rules/[^/]+\\.mdc$`).test(lowerPath)) {
-    return "cursor-rule";
-  }
-  if (new RegExp(`^${pluginPrefix}agents/[^/]+\\.md$`).test(lowerPath)) {
-    return "agent";
-  }
-  if (new RegExp(`^${pluginPrefix}instructions/[^/]+\\.md$`).test(lowerPath)) {
-    return "instruction";
-  }
-  if (new RegExp(`^${pluginPrefix}prompts/[^/]+\\.md$`).test(lowerPath)) {
-    return "prompt";
-  }
-  if (new RegExp(`^${pluginPrefix}hooks/[^/]+/readme\\.md$`).test(lowerPath)) {
-    return "hook";
-  }
-  if (isHookConfigFilePath(lowerPath)) {
-    return "hook";
-  }
-  if (
-    new RegExp(
-      `^${pluginPrefix}(?:mcp\\.json|\\.vscode/mcp\\.json|mcp/[^/]+\\.json)$`,
-    ).test(lowerPath)
-  ) {
-    return "mcp";
-  }
-  if (lowerPath === "skill.md" || lowerPath.endsWith("/skill.md")) {
-    return "skill";
-  }
-  if (/(^|\/)skills\/[^/]+\//.test(lowerPath)) {
-    return undefined;
-  }
-  if (lowerPath.endsWith(".agent.md")) {
-    return "agent";
-  }
-  if (lowerPath.endsWith(".instructions.md")) {
-    return "instruction";
-  }
-  if (lowerPath.endsWith(".prompt.md")) {
-    return "prompt";
-  }
-  if (/^(?:\.github\/)?hooks\/[^/]+\/readme\.md$/i.test(lowerPath)) {
-    return "hook";
-  }
-  if (isHookConfigFilePath(lowerPath)) {
-    return "hook";
-  }
-  if (
-    lowerPath === "mcp.json" ||
-    lowerPath === "mcp-config.json" ||
-    lowerPath === ".mcp.json" ||
-    lowerPath === ".vscode/mcp.json" ||
-    /^(?:\.github\/)?mcp\/[^/]+\.json$/i.test(lowerPath)
-  ) {
-    return "mcp";
-  }
-  return undefined;
-}
-
-function isResourceMetadataSidecarPath(lowerPath) {
-  return (
-    lowerPath.endsWith("/.skill-meta.json") ||
-    lowerPath.endsWith("/.resource-ninja.json") ||
-    lowerPath.endsWith(".resource-ninja.json")
-  );
-}
-
-function isHookConfigFilePath(resourcePath) {
-  const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
-  if (!/(^|\/)(?:\.github\/)?hooks\/[^/]+\.json$/i.test(lowerPath)) {
-    return false;
-  }
-  return !isResourceMetadataSidecarPath(lowerPath);
-}
-
-function isPluginManifestPath(lowerPath) {
-  return (
-    lowerPath === "plugin.json" ||
-    lowerPath === "gemini-extension.json" ||
-    lowerPath === "apm.yml" ||
-    lowerPath === "apm.yaml" ||
-    /(^|\/)\.(?:claude-plugin|codex-plugin|cursor-plugin|plugin)\/(?:plugin|marketplace)\.json$/.test(
-      lowerPath,
-    )
-  );
-}
-
-function getPluginRootFromManifestPath(resourcePath) {
-  const normalizedPath = String(resourcePath)
-    .replace(/\\/g, "/")
-    .replace(/^\/+/, "");
-  const lowerPath = normalizedPath.toLowerCase();
-  if (!isPluginManifestPath(lowerPath)) {
-    return undefined;
-  }
-  if (
-    lowerPath === "plugin.json" ||
-    lowerPath === "gemini-extension.json" ||
-    lowerPath === "apm.yml" ||
-    lowerPath === "apm.yaml"
-  ) {
-    return ".";
-  }
-  const markerMatch = normalizedPath.match(
-    /^(.*?)(?:^|\/)\.(?:claude-plugin|codex-plugin|cursor-plugin|plugin)\/(?:plugin|marketplace)\.json$/i,
-  );
-  if (!markerMatch) {
-    return ".";
-  }
-  return markerMatch[1].replace(/\/+$/, "") || ".";
-}
-
-function normalizeResourcePath(resourcePath) {
-  return String(resourcePath)
-    .replace(/\\/g, "/")
-    .replace(/^\/+/, "")
-    .toLowerCase();
-}
-
-function getSkillRootDirectoryFromPath(resourcePath) {
-  const normalizedPath = normalizeResourcePath(resourcePath);
-  if (normalizedPath !== "skill.md" && !normalizedPath.endsWith("/skill.md")) {
-    return undefined;
-  }
-  const slashIndex = normalizedPath.lastIndexOf("/");
-  return slashIndex === -1 ? "" : normalizedPath.slice(0, slashIndex);
-}
-
-function getSkillRootDirectoriesFromPaths(resourcePaths) {
-  const rootDirectories = new Set();
-  for (const resourcePath of resourcePaths) {
-    const rootDirectory = getSkillRootDirectoryFromPath(resourcePath);
-    if (rootDirectory !== undefined) {
-      rootDirectories.add(rootDirectory);
-    }
-  }
-  return rootDirectories;
-}
-
-function isNestedResourcePathUnderSkillRoot(
-  resourcePath,
-  kind,
-  skillRootDirectories,
-) {
-  if (kind === "skill") {
-    return false;
-  }
-  const normalizedPath = normalizeResourcePath(resourcePath);
-  for (const rootDirectory of skillRootDirectories) {
-    if (rootDirectory && normalizedPath.startsWith(`${rootDirectory}/`)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function getResourceInstallPath(filePath, kind) {
-  const normalizedPath = filePath.replace(/\\/g, "/");
-  if (kind === "skill") {
-    return normalizedPath.replace(/\/SKILL\.md$/i, "");
-  }
-  if (kind === "plugin") {
-    return getPluginRootFromManifestPath(normalizedPath) || normalizedPath;
-  }
-  return normalizedPath;
-}
-
+// The path/kind rules live in src/resourceKinds.ts and are imported above.
+// Only getFallbackResourceName stays local: the generator needs a non-empty name
+// for dotfiles such as `.mcp.json`, where the shipped helper returns "".
 function getFallbackResourceName(filePath, kind) {
   const pathParts = filePath.replace(/\\/g, "/").split("/");
   if (kind === "skill") {
@@ -598,30 +459,18 @@ function getFallbackResourceName(filePath, kind) {
   return fallbackName || fileName.replace(/^\./, "").replace(/\.json$/i, "");
 }
 
-function getDefaultResourceCategories(kind) {
-  switch (kind) {
-    case "agent":
-      return ["agents"];
-    case "instruction":
-      return ["instructions"];
-    case "prompt":
-      return ["prompts"];
-    case "hook":
-      return ["hooks"];
-    case "mcp":
-      return ["mcp"];
-    case "plugin":
-      return ["plugins"];
-    case "cursor-rule":
-      return ["cursor-rules"];
-    case "skill":
-    default:
-      return [];
-  }
-}
-
 function getResourceKind(resource) {
   return resource.kind || "skill";
+}
+
+/**
+ * No source carries its own timestamp, so this one date is the only freshness
+ * signal for every source. A filtered run rescans a subset, so advancing it
+ * would claim the untouched sources were rescanned too and would suppress their
+ * stale-source prompts.
+ */
+function resolveIndexLastUpdated(previousLastUpdated, isPartialScan, today) {
+  return isPartialScan && previousLastUpdated ? previousLastUpdated : today;
 }
 
 function getPluginManifestKind(filePath) {
@@ -679,15 +528,28 @@ function parsePluginManifestMetadata(content, filePath) {
     manifest.interface && typeof manifest.interface === "object"
       ? manifest.interface
       : {};
+  const agentPluginsIssue = getAgentPluginsConformanceIssue(filePath, manifest);
+  if (agentPluginsIssue) {
+    console.warn(
+      `  ⚠️  ${filePath} declares the Agent Plugins 1.0.0 schema but ${agentPluginsIssue}; indexing it as a plain plugin manifest because a conformant client would reject it`,
+    );
+  }
+  const resolvedManifestKind = isAgentPluginsManifest(filePath, manifest)
+    ? AGENT_PLUGINS_MANIFEST_KIND
+    : manifestKind;
   const name =
     stringifyManifestValue(manifest.name) ||
     stringifyManifestValue(interfaceMetadata.displayName) ||
     getFallbackResourceName(filePath, "plugin");
-  const description =
+  const description = markAgentPluginsIssueDescription(
     stringifyManifestValue(manifest.description) ||
-    stringifyManifestValue(interfaceMetadata.shortDescription) ||
-    stringifyManifestValue(interfaceMetadata.longDescription) ||
-    `Plugin manifest for ${name}`;
+      stringifyManifestValue(interfaceMetadata.shortDescription) ||
+      stringifyManifestValue(interfaceMetadata.longDescription) ||
+      (resolvedManifestKind === AGENT_PLUGINS_MANIFEST_KIND
+        ? `Agent Plugins 1.0.0 manifest for ${name}`
+        : `Plugin manifest for ${name}`),
+    agentPluginsIssue,
+  );
 
   return {
     name,
@@ -699,7 +561,7 @@ function parsePluginManifestMetadata(content, filePath) {
     version: stringifyManifestValue(manifest.version),
     pluginRoot,
     pluginManifestPath: filePath.replace(/\\/g, "/"),
-    pluginManifestKind: manifestKind,
+    pluginManifestKind: resolvedManifestKind,
   };
 }
 
@@ -735,15 +597,6 @@ function createResourceDisplayKey(resource) {
       .toLowerCase(),
     description,
   ].join(":");
-}
-
-function getPluginIdFromPath(resourcePath) {
-  const normalizedPath = String(resourcePath || "").replace(/\\/g, "/");
-  const match = normalizedPath.match(/^plugins\/([^/]+)\//i);
-  if (match?.[1]) {
-    return match[1];
-  }
-  return normalizedPath.match(/^\.github\/plugins\/([^/]+)\//i)?.[1];
 }
 
 function shouldPreferResource(candidate, existing) {
@@ -899,24 +752,27 @@ function getOwningPluginManifestInfo(filePath, kind, pluginManifestInfoByRoot) {
   return undefined;
 }
 
-function detectPluginChildResourceKind(relativePath) {
-  const lowerPath = relativePath.toLowerCase();
-  if (/^agents\/[^/]+\.md$/.test(lowerPath)) return "agent";
-  if (/^instructions\/[^/]+\.md$/.test(lowerPath)) return "instruction";
-  if (/^prompts\/[^/]+\.md$/.test(lowerPath)) return "prompt";
-  if (/^rules\/[^/]+\.mdc$/.test(lowerPath)) return "cursor-rule";
-  if (/^hooks\/[^/]+\/readme\.md$/.test(lowerPath)) return "hook";
-  if (
-    /^hooks\/[^/]+\.json$/.test(lowerPath) &&
-    !isResourceMetadataSidecarPath(lowerPath)
-  ) {
-    return "hook";
+// Mirrors src/indexUpdater.ts: the manifest resource itself keeps the parsed
+// metadata, because only the parser sees `$schema` and therefore the
+// agent-plugins kind. Path-derived pluginInfo is for child resources only.
+function resolveResourcePluginFields(kind, skillInfo, pluginInfo) {
+  if (kind === "plugin") {
+    return {
+      pluginRoot: skillInfo.pluginRoot,
+      pluginManifestPath: skillInfo.pluginManifestPath,
+      pluginManifestKind: skillInfo.pluginManifestKind,
+    };
   }
-  if (/^(?:mcp\.json|\.vscode\/mcp\.json|mcp\/[^/]+\.json)$/.test(lowerPath)) {
-    return "mcp";
+
+  if (!pluginInfo) {
+    return {};
   }
-  if (/^skills\/[^/]+\/skill\.md$/.test(lowerPath)) return "skill";
-  return undefined;
+
+  return {
+    pluginRoot: pluginInfo.pluginRoot,
+    pluginManifestPath: pluginInfo.pluginManifestPath,
+    pluginManifestKind: pluginInfo.pluginManifestKind,
+  };
 }
 
 function detectResourceKindWithPluginRoots(filePath, pluginRoots) {
@@ -1031,13 +887,7 @@ async function processTree(data, owner, repoName, branch, source) {
             license: skillInfo.license,
             author: skillInfo.author,
             version: skillInfo.version,
-            ...(pluginInfo
-              ? {
-                  pluginRoot: pluginInfo.pluginRoot,
-                  pluginManifestPath: pluginInfo.pluginManifestPath,
-                  pluginManifestKind: pluginInfo.pluginManifestKind,
-                }
-              : {}),
+            ...resolveResourcePluginFields(kind, skillInfo, pluginInfo),
           };
         } catch (error) {
           return null;
@@ -1327,7 +1177,11 @@ async function main() {
   // インデックスを更新
   const newIndex = {
     version: index.version,
-    lastUpdated: getLocalDateString(),
+    lastUpdated: resolveIndexLastUpdated(
+      index.lastUpdated,
+      SOURCE_FILTER.length > 0,
+      getLocalDateString(),
+    ),
     sources: index.sources,
     categories: index.categories,
     bundles: synchronizeSourceBundles(index.bundles, uniqueSkills),
@@ -1349,10 +1203,14 @@ async function main() {
 
 module.exports = {
   assertSupportedSourceScanners,
+  resolveIndexLastUpdated,
   detectPluginChildResourceKind,
   detectResourceKindFromPath,
+  getPluginManifestInfoByRoot,
   loadRepositoryTree,
+  parsePluginManifestMetadata,
   readRepositoryTreeWithGit,
+  resolveResourcePluginFields,
   shouldUseGitTreeFallback,
   synchronizeSourceBundles,
 };

@@ -24,6 +24,7 @@ import {
 } from "./githubDirectoryTraversal";
 import {
   DEFAULT_GLOBAL_HOME_DIRECTORY,
+  getConfiguredAdditionalSkillRoots,
   getConfiguredSkillsDirectory,
   getConfiguredGlobalHomeDirectory,
   getConfiguredUserAgentsDirectory,
@@ -43,8 +44,10 @@ import {
   getPluginRootFromManifestPath,
   getResourceMetadataPath,
   isHookConfigFilePath,
+  isOwnMetadataSidecarFileName,
 } from "./resourceKinds";
 import { getVsCodeUserDataPath } from "./userDataPaths";
+import { isContainedPath, isSafePathSegment } from "./pathSafety";
 import { logger } from "./logger";
 import { openBugReport as openBugReportIssue } from "./bugReport";
 import {
@@ -117,12 +120,34 @@ async function uriExists(uri: vscode.Uri): Promise<boolean> {
   }
 }
 
+/**
+ * Deleting the wrong directory is worse than a failed cleanup, so a target that
+ * escapes the root the caller is allowed to touch is refused instead of deleted.
+ */
+function isDeleteTargetAllowed(
+  targetUri: vscode.Uri,
+  allowedRootUri: vscode.Uri,
+  operation: string,
+): boolean {
+  if (isContainedPath(allowedRootUri.fsPath, targetUri.fsPath)) {
+    return true;
+  }
+  logger.error(
+    `[Resource Ninja] Refused ${operation}: ${targetUri.fsPath} resolves outside ${allowedRootUri.fsPath}`,
+  );
+  return false;
+}
+
 async function deleteUriIfCreated(
   uri: vscode.Uri,
   existedBeforeInstall: boolean,
   recursive: boolean,
+  allowedRootUri: vscode.Uri,
 ): Promise<void> {
   if (existedBeforeInstall) {
+    return;
+  }
+  if (!isDeleteTargetAllowed(uri, allowedRootUri, "install rollback delete")) {
     return;
   }
   try {
@@ -308,16 +333,19 @@ function buildSkillNotFoundPossibleCause(hasToken: boolean): string {
 
 async function handleSkillNotFound(
   skillPath: vscode.Uri,
+  allowedRootUri: vscode.Uri,
   skill: Skill,
   source: Source | undefined,
   failedUrl: string,
   token: string | undefined,
   suppressRecoveryPrompt: boolean,
 ): Promise<never> {
-  try {
-    await vscode.workspace.fs.delete(skillPath, { recursive: true });
-  } catch {
-    // Cleanup failure should not hide the original download error.
+  if (isDeleteTargetAllowed(skillPath, allowedRootUri, "install cleanup")) {
+    try {
+      await vscode.workspace.fs.delete(skillPath, { recursive: true });
+    } catch {
+      // Cleanup failure should not hide the original download error.
+    }
   }
 
   if (!suppressRecoveryPrompt) {
@@ -378,20 +406,58 @@ async function readSkillMetaIfExists(
 ): Promise<Partial<SkillMeta> | undefined> {
   try {
     const existingContent = await vscode.workspace.fs.readFile(metaPath);
-    return JSON.parse(
+    const parsed = JSON.parse(
       Buffer.from(existingContent).toString("utf-8"),
     ) as Partial<SkillMeta>;
+    stripSkillMetaLocalPaths(parsed);
+    return parsed;
   } catch {
     return undefined;
   }
+}
+
+/**
+ * `.skill-meta.json` fields that name a location on this machine. They are
+ * recomputed on every scan, so a value read back from the file is never merged:
+ * the file itself can arrive from a third-party repository.
+ */
+export const SKILL_META_LOCAL_PATH_FIELDS = [
+  "skillFilePath",
+  "relativePath",
+] as const;
+
+/**
+ * Drops every field listed above from a sidecar that was just read. A path only
+ * ever comes from where the scan actually found the file, never from content.
+ * Returns whether anything had to be removed.
+ */
+export function stripSkillMetaLocalPaths(
+  meta: Record<string, unknown> | undefined,
+): boolean {
+  if (!meta) {
+    return false;
+  }
+  let removed = false;
+  for (const field of SKILL_META_LOCAL_PATH_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(meta, field)) {
+      delete meta[field];
+      removed = true;
+    }
+  }
+  return removed;
 }
 
 function mergeSkillMeta(
   existingMeta: Partial<SkillMeta> | undefined,
   nextMeta: SkillMeta,
 ): SkillMeta {
+  const carriedOverMeta: Partial<SkillMeta> = { ...(existingMeta ?? {}) };
+  for (const field of SKILL_META_LOCAL_PATH_FIELDS) {
+    delete carriedOverMeta[field];
+  }
+
   return {
-    ...(existingMeta ?? {}),
+    ...carriedOverMeta,
     ...nextMeta,
   };
 }
@@ -730,6 +796,99 @@ export function getResourceTargetUri(
 }
 
 /**
+ * 再帰削除を許してよい範囲。`getResourceTargetUri` が最終セグメントを足す前に使う
+ * 親ディレクトリと同じ式で、リソース名に依存せず求める。
+ */
+function getResourceInstallRootUri(
+  workspaceUri: vscode.Uri,
+  config: vscode.WorkspaceConfiguration,
+  skill: Skill,
+  options: InstallSkillOptions = {},
+): vscode.Uri {
+  const kind = getResourceKind(skill);
+  const targetScope = options.targetScope || "workspace";
+
+  if (targetScope === "custom" && options.customTargetUri) {
+    return options.customTargetUri;
+  }
+
+  if (targetScope === "globalHome" || targetScope === "userData") {
+    const root = resolveConfiguredUri(
+      workspaceUri,
+      getConfiguredGlobalHomeDirectory(config),
+      DEFAULT_GLOBAL_HOME_DIRECTORY,
+    );
+    return vscode.Uri.joinPath(root, kind === "plugin" ? "plugins" : "skills");
+  }
+
+  if (kind === "plugin") {
+    return vscode.Uri.joinPath(workspaceUri, ".github", "plugins");
+  }
+
+  return resolveSkillsDirectoryUri(workspaceUri, config);
+}
+
+/**
+ * 絶対パス指定のアンインストールが触れてよい root。`getResourceTargetUri` が
+ * 書き込み先に使う root と、scanner が列挙する root を同じ設定解決で並べる。
+ * ここに含まれない絶対パスは、削除対象の親を root にすると必ず通ってしまうため
+ * 拒否する。
+ */
+function getUninstallAllowedRootUris(
+  workspaceUri: vscode.Uri,
+  config: vscode.WorkspaceConfiguration,
+): vscode.Uri[] {
+  const userDataUri = vscode.Uri.file(
+    getVsCodeUserDataPath({ appName: vscode.env.appName }),
+  );
+
+  const roots: vscode.Uri[] = [
+    workspaceUri,
+    resolveSkillsDirectoryUri(workspaceUri, config),
+    resolveConfiguredUri(
+      workspaceUri,
+      getConfiguredGlobalHomeDirectory(config),
+      DEFAULT_GLOBAL_HOME_DIRECTORY,
+    ),
+    userDataUri,
+  ];
+
+  for (const additionalRoot of getConfiguredAdditionalSkillRoots(config)) {
+    roots.push(resolveConfiguredUri(workspaceUri, additionalRoot, ""));
+  }
+
+  const configuredDirectories: Array<[string | undefined, string]> = [
+    [
+      getConfiguredUserAgentsDirectory(config),
+      path.join(userDataUri.fsPath, "prompts"),
+    ],
+    [
+      getConfiguredUserInstructionsDirectory(config),
+      path.join(userDataUri.fsPath, "instructions"),
+    ],
+    [
+      getConfiguredUserPromptsDirectory(config),
+      path.join(userDataUri.fsPath, "prompts"),
+    ],
+    [getConfiguredWorkspaceAgentsDirectory(config), ".github/agents"],
+    [getConfiguredWorkspaceHooksDirectory(config), ".github/hooks"],
+    [
+      getConfiguredWorkspaceInstructionsDirectory(config),
+      ".github/instructions",
+    ],
+    [getConfiguredWorkspaceMcpDirectory(config), ".github/mcp"],
+    [getConfiguredWorkspacePromptsDirectory(config), ".github/prompts"],
+  ];
+  for (const [configuredPath, fallbackPath] of configuredDirectories) {
+    roots.push(
+      resolveConfiguredUri(workspaceUri, configuredPath, fallbackPath),
+    );
+  }
+
+  return roots.filter((root) => root.fsPath.length > 0);
+}
+
+/**
  * GitHub API でフォルダ内のファイル一覧を取得
  */
 async function listGitHubDirectoryInternal(
@@ -814,6 +973,12 @@ export async function listGitHubDirectory(
  */
 const MAX_SUBDIRECTORY_DOWNLOADS = 300;
 
+interface DownloadDirectoryResult {
+  errors: string[];
+  /** Entries the path guard refused; the resource is incomplete without them. */
+  rejectedEntries: string[];
+}
+
 /**
  * フォルダを再帰的にダウンロード
  * ファイルをディレクトリより先にダウンロードし、
@@ -827,8 +992,52 @@ async function downloadDirectory(
   branch: string = "main",
   token?: string,
   depth: number = 0,
-): Promise<{ errors: string[] }> {
+  downloadRootPath: vscode.Uri = localPath,
+): Promise<DownloadDirectoryResult> {
   const errors: string[] = [];
+  // A rejected entry means the resource is missing a file the repository ships,
+  // so it has to reach the caller instead of looking like a clean install.
+  const rejectedEntries: string[] = [];
+
+  // Entry names come from a third-party repository, so one rejected name only
+  // skips that entry and leaves the rest of the resource installable.
+  const resolveSafeLocalPath = (
+    entry: GitHubDirectoryEntry,
+  ): vscode.Uri | undefined => {
+    // Our own metadata sidecar decides where a later uninstall deletes, so a
+    // remote copy is dropped rather than merged into the install. Only the two
+    // exact names we write are skipped; other `*.resource-ninja.json` files a
+    // repository ships are installed normally.
+    if (isOwnMetadataSidecarFileName(entry.name)) {
+      logger.warn(
+        `[Resource Ninja] Skipped remote metadata sidecar "${entry.name}" from ${owner}/${repo}/${remotePath}`,
+      );
+      return undefined;
+    }
+
+    if (!isSafePathSegment(entry.name)) {
+      const msg = `Rejected unsafe entry name "${entry.name}"`;
+      logger.warn(
+        `[Resource Ninja] Skipped unsafe entry name "${entry.name}" from ${owner}/${repo}/${remotePath}`,
+      );
+      rejectedEntries.push(msg);
+      errors.push(msg);
+      return undefined;
+    }
+
+    const localFilePath = vscode.Uri.joinPath(localPath, entry.name);
+    if (!isContainedPath(downloadRootPath.fsPath, localFilePath.fsPath)) {
+      const msg = `Rejected entry "${entry.name}": resolves outside ${downloadRootPath.fsPath}`;
+      logger.warn(
+        `[Resource Ninja] Skipped entry "${entry.name}" from ${owner}/${repo}/${remotePath}: resolves outside ${downloadRootPath.fsPath}`,
+      );
+      rejectedEntries.push(msg);
+      errors.push(msg);
+      return undefined;
+    }
+
+    return localFilePath;
+  };
 
   const downloadFileEntry = async (
     entry: GitHubDirectoryEntry,
@@ -837,7 +1046,11 @@ async function downloadDirectory(
       return;
     }
 
-    const localFilePath = vscode.Uri.joinPath(localPath, entry.name);
+    const localFilePath = resolveSafeLocalPath(entry);
+    if (!localFilePath) {
+      return;
+    }
+
     logger.info(`[Resource Ninja] Downloading file: ${entry.name}`);
     const content = await fetchFileContent(entry.download_url, token);
     await vscode.workspace.fs.writeFile(
@@ -891,7 +1104,10 @@ async function downloadDirectory(
   );
 
   for (const entry of dirsToDownload) {
-    const localFilePath = vscode.Uri.joinPath(localPath, entry.name);
+    const localFilePath = resolveSafeLocalPath(entry);
+    if (!localFilePath) {
+      continue;
+    }
     try {
       await vscode.workspace.fs.createDirectory(localFilePath);
       const subResult = await downloadDirectory(
@@ -902,8 +1118,10 @@ async function downloadDirectory(
         branch,
         token,
         depth + 1,
+        downloadRootPath,
       );
       errors.push(...subResult.errors);
+      rejectedEntries.push(...subResult.rejectedEntries);
     } catch (error) {
       const msg = `Failed to download directory ${entry.name}: ${error instanceof Error ? error.message : String(error)}`;
       logger.error(`[Resource Ninja] ${msg}`);
@@ -912,7 +1130,7 @@ async function downloadDirectory(
     }
   }
 
-  return { errors };
+  return { errors, rejectedEntries };
 }
 
 /**
@@ -941,6 +1159,12 @@ export async function installSkill(
   const config = vscode.workspace.getConfiguration("resourceNinja");
   const resourceKind = getResourceKind(skill);
   const skillPath = getResourceTargetUri(workspaceUri, config, skill, options);
+  const installRootUri = getResourceInstallRootUri(
+    workspaceUri,
+    config,
+    skill,
+    options,
+  );
 
   if (resourceKind === "skill") {
     await vscode.workspace.fs.createDirectory(skillPath);
@@ -975,6 +1199,8 @@ export async function installSkill(
 
   // テンプレートで代替した時点を記録する。後段で frontmatter から再推定しない。
   let usedFallbackTemplate = false;
+  // 経路ガードが弾いた entry。SKILL.md が取れていても実体は欠けている。
+  const rejectedRemoteEntries: string[] = [];
 
   if (!repositoryRef) {
     if (resourceKind === "skill") {
@@ -1029,7 +1255,7 @@ export async function installSkill(
       const pluginPathExisted = await uriExists(skillPath);
       await vscode.workspace.fs.createDirectory(pluginParentUri);
       await vscode.workspace.fs.createDirectory(skillPath);
-      let result: { errors: string[] };
+      let result: DownloadDirectoryResult;
       try {
         result = await downloadDirectory(
           owner,
@@ -1044,7 +1270,12 @@ export async function installSkill(
         if (!pluginPathExisted) {
           await deleteResourceInstallMetadata(skillPath, resourceKind);
         }
-        await deleteUriIfCreated(skillPath, pluginPathExisted, true);
+        await deleteUriIfCreated(
+          skillPath,
+          pluginPathExisted,
+          true,
+          installRootUri,
+        );
         await deleteDirectoryIfCreatedAndEmpty(
           pluginParentUri,
           pluginParentExisted,
@@ -1090,7 +1321,12 @@ export async function installSkill(
         if (!resourcePathExisted) {
           await deleteResourceInstallMetadata(skillPath, resourceKind);
         }
-        await deleteUriIfCreated(skillPath, resourcePathExisted, false);
+        await deleteUriIfCreated(
+          skillPath,
+          resourcePathExisted,
+          false,
+          resourceParentUri,
+        );
         await deleteDirectoryIfCreatedAndEmpty(
           resourceParentUri,
           resourceParentExisted,
@@ -1149,6 +1385,7 @@ export async function installSkill(
         if (errorMsg.includes("404")) {
           await handleSkillNotFound(
             skillPath,
+            installRootUri,
             skill,
             sourceForBranch,
             rawUrl,
@@ -1179,6 +1416,7 @@ export async function installSkill(
           branch,
           token,
         );
+        rejectedRemoteEntries.push(...result.rejectedEntries);
 
         // SKILL.md がなければ作成
         try {
@@ -1234,6 +1472,7 @@ export async function installSkill(
           const repoTreeUrl = `https://github.com/${owner}/${repo}/tree/${branch}/${remotePath}`;
           await handleSkillNotFound(
             skillPath,
+            installRootUri,
             skill,
             sourceForBranch,
             repoTreeUrl,
@@ -1302,7 +1541,9 @@ export async function installSkill(
   // ここへ到達するのは resourceKind === "skill" だけ。
   // hook / mcp / plugin は上で早期 return しており、その戻り値は失われない。
   const incomplete =
-    usedFallbackTemplate || (await isSkillContentIncomplete(skillMdPath));
+    usedFallbackTemplate ||
+    rejectedRemoteEntries.length > 0 ||
+    (await isSkillContentIncomplete(skillMdPath));
 
   const metaPath = vscode.Uri.joinPath(skillPath, ".skill-meta.json");
   const existingMeta = await readSkillMetaIfExists(metaPath);
@@ -1336,7 +1577,7 @@ export async function installSkill(
     if (choice === "reinstall") {
       // 部分ダウンロードの残骸を持ち越さないよう、Reinstall コマンドと同じく消してから入れ直す。
       // 削除に失敗したら半削除の上へ書かず、不完全のまま失敗を返す。
-      if (await deleteIncompleteSkillDirectory(skillPath)) {
+      if (await deleteIncompleteSkillDirectory(skillPath, installRootUri)) {
         // 再試行では prompt を抑制するので、失敗しても再帰的にダイアログが出ない。
         return await installSkill(skill, workspaceUri, context, {
           ...options,
@@ -1345,7 +1586,7 @@ export async function installSkill(
       }
     }
     if (choice === "delete") {
-      await deleteIncompleteSkillDirectory(skillPath);
+      await deleteIncompleteSkillDirectory(skillPath, installRootUri);
     }
   }
 
@@ -1366,7 +1607,13 @@ async function isSkillContentIncomplete(
 
 async function deleteIncompleteSkillDirectory(
   skillPath: vscode.Uri,
+  allowedRootUri: vscode.Uri,
 ): Promise<boolean> {
+  if (
+    !isDeleteTargetAllowed(skillPath, allowedRootUri, "incomplete skill delete")
+  ) {
+    return false;
+  }
   try {
     await vscode.workspace.fs.delete(skillPath, { recursive: true });
     return true;
@@ -1490,6 +1737,11 @@ export async function uninstallSkill(
   }
 
   try {
+    if (!isDeleteTargetAllowed(skillPath, skillsRootUri, "skill uninstall")) {
+      throw new Error(
+        `Refused to delete ${skillPath.fsPath} outside ${skillsRootUri.fsPath}`,
+      );
+    }
     await vscode.workspace.fs.delete(skillPath, { recursive: true });
   } catch (error) {
     throw new Error(`Failed to delete skill directory: ${error}`);
@@ -1512,12 +1764,23 @@ export async function uninstallSkillByPath(
     kind === "hook" && isHookConfigFilePath(normalizedPath);
 
   let skillPath: vscode.Uri;
+  // The root each branch joined against; a `..` segment in relativePath would
+  // otherwise let the join escape it.
+  let deleteRootUri: vscode.Uri;
   if (isAbsoluteResourcePath) {
     const absoluteUri = vscode.Uri.file(path.normalize(relativePath));
     skillPath =
       kind === "skill" || (kind === "hook" && !isHookConfigFile)
         ? getParentDirectoryUri(absoluteUri)
         : absoluteUri;
+    // The absolute path can come from `.skill-meta.json`, so it is bounded by
+    // the roots this extension installs into, not by the target's own parent.
+    const config = vscode.workspace.getConfiguration("resourceNinja");
+    const allowedRoots = getUninstallAllowedRootUris(workspaceUri, config);
+    deleteRootUri =
+      allowedRoots.find((root) =>
+        isContainedPath(root.fsPath, skillPath.fsPath),
+      ) ?? workspaceUri;
   } else if (kind === "skill") {
     const folderPath = normalizedPath.replace(/\/SKILL\.md$/i, "");
     const config = vscode.workspace.getConfiguration("resourceNinja");
@@ -1535,11 +1798,13 @@ export async function uninstallSkillByPath(
         workspaceUri,
         ...folderPath.split("/").filter(Boolean),
       );
+      deleteRootUri = workspaceUri;
     } else {
       skillPath = vscode.Uri.joinPath(
         skillsRootUri,
         ...folderPath.split("/").filter(Boolean),
       );
+      deleteRootUri = skillsRootUri;
     }
   } else if (kind === "hook") {
     const hookFile = vscode.Uri.joinPath(
@@ -1547,11 +1812,13 @@ export async function uninstallSkillByPath(
       ...normalizedPath.split("/").filter(Boolean),
     );
     skillPath = isHookConfigFile ? hookFile : getParentDirectoryUri(hookFile);
+    deleteRootUri = workspaceUri;
   } else {
     skillPath = vscode.Uri.joinPath(
       workspaceUri,
       ...normalizedPath.split("/").filter(Boolean),
     );
+    deleteRootUri = workspaceUri;
   }
 
   let hookConfigUpdate: HookConfigUpdateResult | undefined;
@@ -1569,6 +1836,13 @@ export async function uninstallSkillByPath(
       );
     }
 
+    if (
+      !isDeleteTargetAllowed(skillPath, deleteRootUri, "resource uninstall")
+    ) {
+      throw new Error(
+        `Refused to delete ${skillPath.fsPath} outside ${deleteRootUri.fsPath}`,
+      );
+    }
     await vscode.workspace.fs.delete(skillPath, { recursive: true });
     if (kind !== "skill") {
       const resourceUri = isAbsoluteResourcePath
@@ -1780,11 +2054,13 @@ export async function refreshSkillMetadata(
         const meta = JSON.parse(Buffer.from(content).toString("utf-8"));
         const normalizedSource = normalizeSkillMetaSource(meta);
 
+        // The sidecar can arrive from a third-party repository, so a path found
+        // inside it is dropped instead of being written back.
+        let updated = stripSkillMetaLocalPaths(meta);
+
         // SKILL.md から description と whenToUse を再抽出
         const newDescription = await extractDescriptionFromSkillMd(skillMdPath);
         const newWhenToUse = await extractWhenToUseFromSkillMd(skillMdPath);
-
-        let updated = false;
 
         // description が変更された場合
         if (newDescription && meta.description !== newDescription) {
@@ -1866,12 +2142,14 @@ export async function refreshSingleSkillMetadata(
     const content = await vscode.workspace.fs.readFile(metaPath);
     const meta = JSON.parse(Buffer.from(content).toString("utf-8"));
 
+    // The sidecar can arrive from a third-party repository, so a path found
+    // inside it is dropped instead of being written back.
+    let updated = stripSkillMetaLocalPaths(meta);
+
     // SKILL.md から description と whenToUse を再抽出
     const newDescription = await extractDescriptionFromSkillMd(skillMdUri);
     const newWhenToUse = await extractWhenToUseFromSkillMd(skillMdUri);
     const normalizedSource = normalizeSkillMetaSource(meta);
-
-    let updated = false;
 
     // description が変更された場合
     if (newDescription && meta.description !== newDescription) {
@@ -1946,13 +2224,11 @@ export async function getInstalledSkillsWithMetaFromRoot(
         const content = await vscode.workspace.fs.readFile(entry.metaPath);
         const meta = JSON.parse(Buffer.from(content).toString("utf-8"));
         meta.source = normalizeSkillMetaSource(meta);
-        // relativePath を追加（メタデータにない場合）
-        if (!meta.relativePath) {
-          meta.relativePath = entry.relativePath;
-        }
-        if (!meta.skillFilePath) {
-          meta.skillFilePath = entry.skillMdPath.fsPath;
-        }
+        // The sidecar can arrive from a third-party repository, so its path
+        // fields are replaced by where this scan actually found the resource.
+        stripSkillMetaLocalPaths(meta);
+        meta.relativePath = entry.relativePath;
+        meta.skillFilePath = entry.skillMdPath.fsPath;
         metas.push(meta);
       } catch {
         // メタデータがない場合は SKILL.md から name と description を読み取る

@@ -50,7 +50,15 @@ export function detectPluginChildResourceKind(
   ) {
     return "hook";
   }
-  if (/^(?:mcp\.json|\.vscode\/mcp\.json|mcp\/[^/]+\.json)$/.test(lowerPath)) {
+  // Copilot plugin format keeps hooks in a root-level hooks.json.
+  if (lowerPath === "hooks.json") {
+    return "hook";
+  }
+  if (
+    /^(?:mcp\.json|\.mcp\.json|\.vscode\/mcp\.json|mcp\/[^/]+\.json)$/.test(
+      lowerPath,
+    )
+  ) {
     return "mcp";
   }
   if (/^skills\/[^/]+\/skill\.md$/.test(lowerPath)) {
@@ -117,12 +125,29 @@ export function detectResourceKindFromPath(
   return undefined;
 }
 
-function isResourceMetadataSidecarPath(lowerPath: string): boolean {
+/** Accepts a full path or a bare entry name, in any casing. */
+export function isResourceMetadataSidecarPath(resourcePath: string): boolean {
+  const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
   return (
+    lowerPath === ".skill-meta.json" ||
     lowerPath.endsWith("/.skill-meta.json") ||
     lowerPath.endsWith("/.resource-ninja.json") ||
     lowerPath.endsWith(".resource-ninja.json")
   );
+}
+
+/** The sidecar file names this extension writes itself. */
+const OWN_METADATA_SIDECAR_FILE_NAMES = [
+  ".skill-meta.json",
+  ".resource-ninja.json",
+];
+
+/**
+ * Matches only the two sidecar names the extension writes, so a repository file
+ * such as `payload.resource-ninja.json` is still installed like any other file.
+ */
+export function isOwnMetadataSidecarFileName(fileName: string): boolean {
+  return OWN_METADATA_SIDECAR_FILE_NAMES.includes(fileName.toLowerCase());
 }
 
 /**
@@ -161,15 +186,21 @@ function isNativeInstructionFilePath(lowerPath: string): boolean {
   );
 }
 
+const PLUGIN_MARKER_MANIFEST_PATTERN =
+  /^(.*?)(?:^|\/)\.(?:claude-plugin|codex-plugin|cursor-plugin|plugin)\/(?:plugin|marketplace)\.json$/i;
+
+const PLUGIN_ROOT_MANIFEST_FILE_NAMES = new Set([
+  "plugin.json",
+  "gemini-extension.json",
+  "apm.yml",
+  "apm.yaml",
+]);
+
 function isPluginManifestPath(lowerPath: string): boolean {
+  const fileName = lowerPath.slice(lowerPath.lastIndexOf("/") + 1);
   return (
-    lowerPath === "plugin.json" ||
-    lowerPath === "gemini-extension.json" ||
-    lowerPath === "apm.yml" ||
-    lowerPath === "apm.yaml" ||
-    /(^|\/)\.(?:claude-plugin|codex-plugin|cursor-plugin|plugin)\/(?:plugin|marketplace)\.json$/.test(
-      lowerPath,
-    )
+    PLUGIN_ROOT_MANIFEST_FILE_NAMES.has(fileName) ||
+    PLUGIN_MARKER_MANIFEST_PATTERN.test(lowerPath)
   );
 }
 
@@ -182,23 +213,212 @@ export function getPluginRootFromManifestPath(
     return undefined;
   }
 
-  if (
-    lowerPath === "plugin.json" ||
-    lowerPath === "gemini-extension.json" ||
-    lowerPath === "apm.yml" ||
-    lowerPath === "apm.yaml"
-  ) {
-    return ".";
+  // `.claude-plugin/plugin.json` and friends describe the directory above the marker.
+  const markerMatch = normalizedPath.match(PLUGIN_MARKER_MANIFEST_PATTERN);
+  if (markerMatch) {
+    return markerMatch[1].replace(/\/+$/, "") || ".";
   }
 
-  const markerMatch = normalizedPath.match(
-    /^(.*?)(?:^|\/)\.(?:claude-plugin|codex-plugin|cursor-plugin|plugin)\/(?:plugin|marketplace)\.json$/i,
-  );
-  if (!markerMatch) {
+  const slashIndex = normalizedPath.lastIndexOf("/");
+  if (slashIndex === -1) {
     return ".";
   }
-  const root = markerMatch[1].replace(/\/+$/, "");
-  return root || ".";
+  return normalizedPath.slice(0, slashIndex).replace(/\/+$/, "") || ".";
+}
+
+export const AGENT_PLUGINS_MANIFEST_SCHEMA =
+  "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
+export const AGENT_PLUGINS_MANIFEST_KIND = "agent-plugins";
+
+export const AGENT_PLUGINS_NAME_MAX_LENGTH = 64;
+
+/**
+ * Agent Plugins 1.0.0 identifies itself through the `$schema` value of a root
+ * `plugin.json`. The spec forbids fetching the schema, so only the string is compared.
+ */
+export function declaresAgentPluginsSchema(
+  filePath: string,
+  manifest: Record<string, unknown>,
+): boolean {
+  const lowerPath = filePath.toLowerCase().replace(/\\/g, "/");
+  const fileName = lowerPath.slice(lowerPath.lastIndexOf("/") + 1);
+  if (fileName !== "plugin.json") {
+    return false;
+  }
+  // Client-specific marker directories keep their path-derived kind.
+  if (
+    /(^|\/)\.(?:claude-plugin|codex-plugin|cursor-plugin|plugin)\/plugin\.json$/.test(
+      lowerPath,
+    )
+  ) {
+    return false;
+  }
+  return manifest.$schema === AGENT_PLUGINS_MANIFEST_SCHEMA;
+}
+
+/**
+ * Agent Plugins 1.0.0 §5.3 / §5.5 require `name`, and a conformant client rejects the
+ * whole plugin when it breaks these rules. Returns the violated constraint, or
+ * `undefined` when the value is valid.
+ */
+export function getAgentPluginsNameIssue(name: unknown): string | undefined {
+  if (name === undefined || name === null) {
+    return "missing";
+  }
+  if (typeof name !== "string") {
+    return "not a string";
+  }
+  if (name.length === 0) {
+    return "empty";
+  }
+  if (name.length > AGENT_PLUGINS_NAME_MAX_LENGTH) {
+    return `longer than ${AGENT_PLUGINS_NAME_MAX_LENGTH} characters`;
+  }
+  if (!/^[a-z0-9.-]+$/.test(name)) {
+    return "must use lowercase letters, digits, hyphens, and periods only";
+  }
+  if (!/^[a-z0-9]/.test(name) || !/[a-z0-9]$/.test(name)) {
+    return "must start and end with a letter or digit";
+  }
+  if (name.includes("--") || name.includes("..")) {
+    return 'must not contain "--" or ".."';
+  }
+  return undefined;
+}
+
+/** Agent Plugins 1.0.0 §5.2: the permitted top-level fields. */
+export const AGENT_PLUGINS_MANIFEST_FIELDS = [
+  "$schema",
+  "name",
+  "version",
+  "description",
+  "author",
+  "homepage",
+  "repository",
+  "license",
+  "keywords",
+  "extensions",
+] as const;
+
+/** Agent Plugins 1.0.0 §5.4: the permitted `author` fields. */
+export const AGENT_PLUGINS_AUTHOR_FIELDS = ["name", "email", "url"] as const;
+
+const AGENT_PLUGINS_STRING_FIELDS = [
+  "version",
+  "description",
+  "homepage",
+  "repository",
+  "license",
+] as const;
+
+/**
+ * Agent Plugins 1.0.0 §5.2-§5.4 fatal manifest rules, excluding `name`, which
+ * `getAgentPluginsNameIssue` owns. Returns the violated rule, or `undefined`.
+ *
+ * Non-fatal by specification and therefore never reported here: an unknown
+ * top-level field and a non-object `extensions` are reported and ignored, and
+ * §8.1 forbids validating the contents of `extensions` members. §5.3 also forbids
+ * rejecting a manifest solely because `version` is not SemVer, a URL field is not
+ * a recognized URL, `author.email` is not a recognized email, or `license` is not
+ * an SPDX identifier, so none of those are checked.
+ */
+export function getAgentPluginsManifestIssue(
+  manifest: Record<string, unknown>,
+): string | undefined {
+  for (const field of AGENT_PLUGINS_STRING_FIELDS) {
+    const value = manifest[field];
+    if (value !== undefined && typeof value !== "string") {
+      return `"${field}" must be a string`;
+    }
+  }
+
+  const keywords = manifest.keywords;
+  if (keywords !== undefined) {
+    if (!Array.isArray(keywords)) {
+      return '"keywords" must be an array of strings';
+    }
+    for (let index = 0; index < keywords.length; index++) {
+      if (typeof keywords[index] !== "string") {
+        return `"keywords[${index}]" must be a string`;
+      }
+    }
+  }
+
+  const author = manifest.author;
+  if (author !== undefined) {
+    if (
+      typeof author !== "object" ||
+      author === null ||
+      Array.isArray(author)
+    ) {
+      return '"author" must be an object';
+    }
+    for (const [field, value] of Object.entries(
+      author as Record<string, unknown>,
+    )) {
+      if (!(AGENT_PLUGINS_AUTHOR_FIELDS as readonly string[]).includes(field)) {
+        return `"author.${field}" is not a permitted field`;
+      }
+      if (typeof value !== "string") {
+        return `"author.${field}" must be a string`;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * The single reason a `plugin.json` that declares the Agent Plugins schema is not
+ * treated as conformant. Both index paths call this so their user-visible text and
+ * their manifest kind can never disagree.
+ */
+export function getAgentPluginsConformanceIssue(
+  filePath: string,
+  manifest: Record<string, unknown>,
+): string | undefined {
+  if (!declaresAgentPluginsSchema(filePath, manifest)) {
+    return undefined;
+  }
+  const nameIssue = getAgentPluginsNameIssue(manifest.name);
+  if (nameIssue) {
+    // The name issues are a mix of states ("missing") and rules ("must ...").
+    return nameIssue.startsWith("must")
+      ? `"name" ${nameIssue}`
+      : `"name" is ${nameIssue}`;
+  }
+  return getAgentPluginsManifestIssue(manifest);
+}
+
+/**
+ * The Output Channel is not a surface end users read, so the reason a package was
+ * denied the conformance label is prepended to the description itself. It goes in
+ * front because every row builder truncates from the end.
+ */
+export function markAgentPluginsIssueDescription(
+  description: string,
+  issue: string | undefined,
+): string {
+  if (!issue) {
+    return description;
+  }
+  const marker = `[Agent Plugins 1.0.0: ${issue}]`;
+  return description ? `${marker} ${description}` : marker;
+}
+
+/**
+ * The `agent-plugins` label is a conformance claim, so it is only granted when the
+ * manifest also satisfies the specification rules a conformant client treats as fatal.
+ */
+export function isAgentPluginsManifest(
+  filePath: string,
+  manifest: Record<string, unknown>,
+): boolean {
+  return (
+    declaresAgentPluginsSchema(filePath, manifest) &&
+    getAgentPluginsNameIssue(manifest.name) === undefined &&
+    getAgentPluginsManifestIssue(manifest) === undefined
+  );
 }
 
 function normalizeResourcePath(resourcePath: string): string {

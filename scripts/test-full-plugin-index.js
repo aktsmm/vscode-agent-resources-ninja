@@ -1,85 +1,43 @@
 #!/usr/bin/env node
 
+// The full-plugin index model must be checked against the shipped kind rules.
+// Copies of src/resourceKinds.ts went stale here once already, so load the real
+// module and keep only the helpers that src does not export.
+
 const assert = require("assert");
+const fs = require("fs");
+const Module = require("module");
+const path = require("path");
+const ts = require("typescript");
 
-function isPluginManifestPath(resourcePath) {
-  const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
-  return (
-    lowerPath === "plugin.json" ||
-    lowerPath === "gemini-extension.json" ||
-    lowerPath === "apm.yml" ||
-    lowerPath === "apm.yaml" ||
-    /(^|\/)\.(?:claude-plugin|codex-plugin|cursor-plugin|plugin)\/(?:plugin|marketplace)\.json$/.test(
-      lowerPath,
-    )
-  );
+function requireTypeScriptModule(filePath) {
+  const transpiled = ts.transpileModule(fs.readFileSync(filePath, "utf8"), {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+    },
+    fileName: filePath,
+  });
+  const loadedModule = new Module(filePath, module);
+  loadedModule.filename = filePath;
+  loadedModule.paths = Module._nodeModulePaths(path.dirname(filePath));
+  loadedModule._compile(transpiled.outputText, filePath);
+  return loadedModule.exports;
 }
 
-function detectResourceKindFromPath(resourcePath) {
-  const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
-  if (isResourceMetadataSidecarPath(lowerPath)) return undefined;
-  if (isPluginManifestPath(lowerPath)) return "plugin";
-  if (/^(?:plugins\/[^/]+\/)?rules\/[^/]+\.mdc$/.test(lowerPath)) {
-    return "cursor-rule";
-  }
-  if (/^plugins\/[^/]+\/agents\/[^/]+\.md$/.test(lowerPath)) return "agent";
-  if (/^plugins\/[^/]+\/hooks\/[^/]+\/readme\.md$/.test(lowerPath)) {
-    return "hook";
-  }
-  if (/^plugins\/[^/]+\/hooks\/[^/]+\.json$/.test(lowerPath)) {
-    return "hook";
-  }
-  if (/^plugins\/[^/]+\/skills\/[^/]+\/skill\.md$/.test(lowerPath)) {
-    return "skill";
-  }
-  if (
-    /^plugins\/[^/]+\/(?:mcp\.json|\.vscode\/mcp\.json|mcp\/[^/]+\.json)$/.test(
-      lowerPath,
-    )
-  ) {
-    return "mcp";
-  }
-  if (lowerPath === "skill.md" || lowerPath.endsWith("/skill.md")) {
-    return "skill";
-  }
-  if (/(^|\/)skills\/[^/]+\//.test(lowerPath)) return undefined;
-  if (lowerPath.endsWith(".agent.md")) return "agent";
-  if (lowerPath.endsWith(".instructions.md")) return "instruction";
-  if (lowerPath.endsWith(".prompt.md")) return "prompt";
-  if (/^(?:\.github\/)?hooks\/[^/]+\/readme\.md$/i.test(lowerPath)) {
-    return "hook";
-  }
-  if (isHookConfigFilePath(lowerPath)) {
-    return "hook";
-  }
-  if (
-    lowerPath === "mcp.json" ||
-    lowerPath === "mcp-config.json" ||
-    lowerPath === ".mcp.json" ||
-    lowerPath === ".vscode/mcp.json" ||
-    /^(?:\.github\/)?mcp\/[^/]+\.json$/i.test(lowerPath)
-  ) {
-    return "mcp";
-  }
-  return undefined;
-}
+const {
+  detectPluginChildResourceKind,
+  detectResourceKindFromPath,
+  getDefaultResourceCategories,
+  getFallbackResourceName,
+  getPluginRootFromManifestPath,
+  getResourceInstallPath,
+} = requireTypeScriptModule(
+  path.join(__dirname, "..", "src", "resourceKinds.ts"),
+);
 
-function isResourceMetadataSidecarPath(lowerPath) {
-  return (
-    lowerPath.endsWith("/.skill-meta.json") ||
-    lowerPath.endsWith("/.resource-ninja.json") ||
-    lowerPath.endsWith(".resource-ninja.json")
-  );
-}
-
-function isHookConfigFilePath(resourcePath) {
-  const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
-  if (!/(^|\/)(?:\.github\/)?hooks\/[^/]+\.json$/i.test(lowerPath)) {
-    return false;
-  }
-  return !isResourceMetadataSidecarPath(lowerPath);
-}
-
+// src/indexUpdater.ts keeps the next three private and imports vscode, so plain
+// Node cannot load them from there.
 function getPluginRootsFromPaths(paths) {
   return Array.from(
     new Set(
@@ -103,21 +61,6 @@ function getRelativePathFromPluginRoot(filePath, pluginRoot) {
     : undefined;
 }
 
-function detectPluginChildResourceKind(relativePath) {
-  const lowerPath = relativePath.toLowerCase();
-  if (/^agents\/[^/]+\.md$/.test(lowerPath)) return "agent";
-  if (/^instructions\/[^/]+\.md$/.test(lowerPath)) return "instruction";
-  if (/^prompts\/[^/]+\.md$/.test(lowerPath)) return "prompt";
-  if (/^rules\/[^/]+\.mdc$/.test(lowerPath)) return "cursor-rule";
-  if (/^hooks\/[^/]+\/readme\.md$/.test(lowerPath)) return "hook";
-  if (/^hooks\/[^/]+\.json$/.test(lowerPath)) return "hook";
-  if (/^(?:mcp\.json|\.vscode\/mcp\.json|mcp\/[^/]+\.json)$/.test(lowerPath)) {
-    return "mcp";
-  }
-  if (/^skills\/[^/]+\/skill\.md$/.test(lowerPath)) return "skill";
-  return undefined;
-}
-
 function detectResourceKindWithPluginRoots(resourcePath, pluginRoots) {
   const kind = detectResourceKindFromPath(resourcePath);
   if (kind) return kind;
@@ -133,73 +76,7 @@ function detectResourceKindWithPluginRoots(resourcePath, pluginRoots) {
   return undefined;
 }
 
-function getPluginRootFromManifestPath(resourcePath) {
-  const normalizedPath = String(resourcePath)
-    .replace(/\\/g, "/")
-    .replace(/^\/+/, "");
-  const lowerPath = normalizedPath.toLowerCase();
-  if (!isPluginManifestPath(lowerPath)) return undefined;
-  if (
-    lowerPath === "plugin.json" ||
-    lowerPath === "gemini-extension.json" ||
-    lowerPath === "apm.yml" ||
-    lowerPath === "apm.yaml"
-  ) {
-    return ".";
-  }
-  const markerMatch = normalizedPath.match(
-    /^(.*?)(?:^|\/)\.(?:claude-plugin|codex-plugin|cursor-plugin|plugin)\/(?:plugin|marketplace)\.json$/i,
-  );
-  return markerMatch ? markerMatch[1].replace(/\/+$/, "") || "." : ".";
-}
-
-function getResourceInstallPath(filePath, kind) {
-  const normalizedPath = filePath.replace(/\\/g, "/");
-  if (kind === "skill") return normalizedPath.replace(/\/SKILL\.md$/i, "");
-  if (kind === "plugin") {
-    return getPluginRootFromManifestPath(normalizedPath) || normalizedPath;
-  }
-  return normalizedPath;
-}
-
-function getFallbackResourceName(filePath, kind) {
-  const pathParts = filePath.replace(/\\/g, "/").split("/");
-  if (kind === "skill") {
-    return pathParts[pathParts.length - 2] || "Unknown";
-  }
-  if (kind === "hook" && !isHookConfigFilePath(filePath)) {
-    return pathParts[pathParts.length - 2] || "Unknown";
-  }
-  if (kind === "plugin") {
-    const pluginRoot = getPluginRootFromManifestPath(filePath);
-    if (pluginRoot && pluginRoot !== ".") {
-      const rootParts = pluginRoot.split("/");
-      return rootParts[rootParts.length - 1] || "plugin";
-    }
-    return "plugin";
-  }
-  return (pathParts[pathParts.length - 1] || "Unknown")
-    .replace(/\.(agent|instructions|prompt)\.md$/i, "")
-    .replace(/\.mdc$/i, "")
-    .replace(/\.mcp\.json$/i, "")
-    .replace(/\.json$/i, "");
-}
-
-function getDefaultResourceCategories(kind) {
-  switch (kind) {
-    case "plugin":
-      return ["plugins"];
-    case "cursor-rule":
-      return ["cursor-rules"];
-    case "agent":
-      return ["agents"];
-    case "mcp":
-      return ["mcp"];
-    default:
-      return [];
-  }
-}
-
+// Install-set shaping models the installer contract and has no src counterpart.
 function createPluginInstallSet(pluginResource, childResources) {
   const installOrder = [
     pluginResource.path,
@@ -225,7 +102,24 @@ function createPluginInstallSet(pluginResource, childResources) {
   };
 }
 
-const treePaths = [
+function indexTree(treePaths) {
+  const pluginRoots = getPluginRootsFromPaths(treePaths);
+  return treePaths
+    .map((resourcePath) => {
+      const kind = detectResourceKindWithPluginRoots(resourcePath, pluginRoots);
+      if (!kind) return undefined;
+      return {
+        kind,
+        name: getFallbackResourceName(resourcePath, kind),
+        source: "sample-plugin-source",
+        path: getResourceInstallPath(resourcePath, kind),
+        categories: getDefaultResourceCategories(kind),
+      };
+    })
+    .filter(Boolean);
+}
+
+const resources = indexTree([
   "feature-dev/.claude-plugin/plugin.json",
   "feature-dev/skills/planning/SKILL.md",
   "feature-dev/agents/code-reviewer.md",
@@ -233,22 +127,7 @@ const treePaths = [
   "feature-dev/mcp.json",
   "feature-dev/hooks/session-start/README.md",
   "feature-dev/hooks/session-start/run.sh",
-];
-const pluginRoots = getPluginRootsFromPaths(treePaths);
-
-const resources = treePaths
-  .map((resourcePath) => {
-    const kind = detectResourceKindWithPluginRoots(resourcePath, pluginRoots);
-    if (!kind) return undefined;
-    return {
-      kind,
-      name: getFallbackResourceName(resourcePath, kind),
-      source: "sample-plugin-source",
-      path: getResourceInstallPath(resourcePath, kind),
-      categories: getDefaultResourceCategories(kind),
-    };
-  })
-  .filter(Boolean);
+]);
 
 const plugin = resources.find((resource) => resource.kind === "plugin");
 assert.ok(plugin, "Expected plugin manifest resource");
@@ -278,5 +157,47 @@ assert.ok(
 
 console.log(
   "PASS full plugin index model keeps plugin, child resources, and safety boundary aligned",
+);
+
+// A bare manifest name marks a plugin at any depth, and the plugin root is the
+// directory that holds the manifest rather than the repository root.
+assert.strictEqual(
+  getPluginRootFromManifestPath("plugins/foo/plugin.json"),
+  "plugins/foo",
+);
+assert.strictEqual(getPluginRootFromManifestPath("plugin.json"), ".");
+assert.strictEqual(
+  getPluginRootFromManifestPath("packages/foo/gemini-extension.json"),
+  "packages/foo",
+);
+
+// Copilot-format plugin children the stale copy did not know about.
+assert.strictEqual(detectPluginChildResourceKind(".mcp.json"), "mcp");
+assert.strictEqual(detectPluginChildResourceKind("hooks.json"), "hook");
+
+const nestedResources = indexTree([
+  "plugins/foo/plugin.json",
+  "plugins/foo/.mcp.json",
+  "plugins/foo/hooks.json",
+]);
+
+const nestedPlugin = nestedResources.find(
+  (resource) => resource.kind === "plugin",
+);
+assert.ok(nestedPlugin, "Expected nested plugin manifest resource");
+assert.strictEqual(nestedPlugin.path, "plugins/foo");
+assert.strictEqual(nestedPlugin.name, "foo");
+assert.strictEqual(
+  nestedResources.find((resource) => resource.path.endsWith("/.mcp.json")).kind,
+  "mcp",
+);
+assert.strictEqual(
+  nestedResources.find((resource) => resource.path.endsWith("/hooks.json"))
+    .kind,
+  "hook",
+);
+
+console.log(
+  "PASS nested plugin manifests keep their own root and Copilot-format children",
 );
 console.log("RESULT=PASS");

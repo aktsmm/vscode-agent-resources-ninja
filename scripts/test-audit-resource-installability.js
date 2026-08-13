@@ -1,9 +1,235 @@
 #!/usr/bin/env node
 
 const assert = require("assert");
+const fs = require("fs");
+const Module = require("module");
+const path = require("path");
+const ts = require("typescript");
 const audit = require("./audit-resource-installability.js");
 
+const repoRoot = path.resolve(__dirname, "..");
+const INDEX_PATH = path.join(repoRoot, "resources", "skill-index.json");
+
+function requireTypeScriptModule(filePath) {
+  const source = fs.readFileSync(filePath, "utf8");
+  const transpiled = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+    },
+    fileName: filePath,
+  });
+
+  const loadedModule = new Module(filePath, module);
+  loadedModule.filename = filePath;
+  loadedModule.paths = Module._nodeModulePaths(path.dirname(filePath));
+  loadedModule._compile(transpiled.outputText, filePath);
+  return loadedModule.exports;
+}
+
+const {
+  AGENT_PLUGINS_MANIFEST_KIND,
+  getAgentPluginsNameIssue,
+  isHookConfigFilePath,
+} = requireTypeScriptModule(path.join(repoRoot, "src", "resourceKinds.ts"));
+
+// Mirrors the private sanitizeSkillName in src/skillInstaller.ts, which is not
+// exported and cannot be loaded outside VS Code.
+function sanitizeInstallName(name) {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[()[\]{}]/g, "")
+    .replace(/[^a-z0-9\-_]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+// The destination model follows getResourceTargetUri in src/skillInstaller.ts:
+// skills and plugins land in a folder named after the resource, mcp.json is
+// namespaced by source, non-config hooks collapse into <folder>/README.md, and
+// every other file kind keeps only its basename inside the kind's directory.
+function getInstallDestinationSlot(resource) {
+  const kind = resource.kind || "skill";
+  const remotePath = String(resource.path || "").replace(/\\/g, "/");
+  const baseName = path.posix.basename(remotePath);
+
+  if (kind === "skill") {
+    return `skill:${sanitizeInstallName(resource.name)}`;
+  }
+  if (kind === "plugin") {
+    return `plugin:${sanitizeInstallName(
+      resource.name || resource.pluginRoot || "plugin",
+    )}`;
+  }
+  if (kind === "mcp") {
+    const normalized = baseName.replace(/^\./, "");
+    return `mcp:${
+      normalized.toLowerCase() === "mcp.json"
+        ? `${sanitizeInstallName(resource.source)}-${normalized}`
+        : baseName
+    }`;
+  }
+  if (kind === "hook") {
+    if (isHookConfigFilePath(remotePath)) {
+      return `hook:${baseName}`;
+    }
+    return `hook:${sanitizeInstallName(
+      path.posix.basename(path.posix.dirname(remotePath)) || resource.name,
+    )}/README.md`;
+  }
+  if (
+    kind === "agent" ||
+    kind === "instruction" ||
+    kind === "prompt" ||
+    kind === "cursor-rule"
+  ) {
+    return `${kind}:${baseName}`;
+  }
+  // Unknown kinds fall through to the verbatim-path branch of getResourceTargetUri.
+  return `${kind}:${remotePath}`;
+}
+
+function findCrossSourceInstallCollisions(index) {
+  const sourcesBySlot = new Map();
+
+  for (const resource of index.skills || []) {
+    const slot = getInstallDestinationSlot(resource);
+    if (!sourcesBySlot.has(slot)) {
+      sourcesBySlot.set(slot, new Set());
+    }
+    sourcesBySlot.get(slot).add(resource.source);
+  }
+
+  const collisions = new Map();
+  for (const [slot, sources] of sourcesBySlot) {
+    if (sources.size > 1) {
+      collisions.set(slot, [...sources].sort());
+    }
+  }
+
+  return collisions;
+}
+
+// slot -> the sources that already ship it. Two entries from different sources
+// that install to the same destination cannot be told apart once installed, so
+// this list may only shrink; never add a slot to make a new collision pass.
+// Grandfathered because they predate this guard and pruning them needs an index
+// regeneration (network + token), which is a separate change:
+// - hook:hooks.json ........ four vendors each ship their own hooks/hooks.json.
+// - instruction:*.instructions.md ... code-and-sorts republishes the four
+//   language instruction files that github-awesome-copilot also ships.
+// - skill:* ................ the same skill name is vendored by two catalogs
+//   (Azure skills duplicated between microsoft-azure-skills, microsoftdocs and
+//   awesome-copilot; agent skills duplicated between anthropic, aws, openai and
+//   oh-my-codex forks).
+const GRANDFATHERED_INSTALL_COLLISIONS = {
+  "hook:hooks.json": [
+    "anthropic-claude-code",
+    "aws-agent-plugins",
+    "compound-engineering",
+    "oh-my-codex",
+  ],
+  "instruction:csharp.instructions.md": [
+    "code-and-sorts-awesome-copilot-agents",
+    "github-awesome-copilot",
+  ],
+  "instruction:go.instructions.md": [
+    "code-and-sorts-awesome-copilot-agents",
+    "github-awesome-copilot",
+  ],
+  "instruction:rust.instructions.md": [
+    "code-and-sorts-awesome-copilot-agents",
+    "github-awesome-copilot",
+  ],
+  "instruction:terraform.instructions.md": [
+    "code-and-sorts-awesome-copilot-agents",
+    "github-awesome-copilot",
+  ],
+  "skill:appinsights-instrumentation": [
+    "github-awesome-copilot",
+    "microsoft-azure-skills",
+  ],
+  "skill:autoresearch": ["github-awesome-copilot", "oh-my-codex"],
+  "skill:azure-quotas": [
+    "microsoft-azure-skills",
+    "microsoftdocs-agent-skills",
+  ],
+  "skill:azure-reliability": [
+    "microsoft-azure-skills",
+    "microsoftdocs-agent-skills",
+  ],
+  "skill:azure-resource-visualizer": [
+    "github-awesome-copilot",
+    "microsoft-azure-skills",
+  ],
+  "skill:code-review": ["oh-my-codex", "openai-codex"],
+  "skill:deploy": ["aws-agent-plugins", "microsoft-azure-skills"],
+  "skill:finetuning": ["aws-agent-plugins", "microsoft-azure-skills"],
+  "skill:frontend-design": ["anthropic-claude-code", "anthropics-skills"],
+  "skill:webapp-testing": ["anthropics-skills", "github-awesome-copilot"],
+};
+
+function assertNoNewInstallCollisions() {
+  const index = JSON.parse(fs.readFileSync(INDEX_PATH, "utf8"));
+  const collisions = findCrossSourceInstallCollisions(index);
+
+  const unexpected = [...collisions.entries()]
+    .filter(([slot, sources]) => {
+      const allowed = GRANDFATHERED_INSTALL_COLLISIONS[slot];
+      return !allowed || allowed.join(",") !== sources.join(",");
+    })
+    .map(([slot, sources]) => `${slot} <- ${sources.join(", ")}`)
+    .sort();
+
+  assert.deepStrictEqual(
+    unexpected,
+    [],
+    "Two sources install to the same destination; namespace or drop one of them",
+  );
+
+  const stale = Object.keys(GRANDFATHERED_INSTALL_COLLISIONS)
+    .filter((slot) => !collisions.has(slot))
+    .sort();
+
+  assert.deepStrictEqual(
+    stale,
+    [],
+    "Remove the grandfathered entry so the ratchet keeps its value",
+  );
+}
+
+// The `agent-plugins` manifest kind claims Agent Plugins 1.0.0 conformance, and a
+// conformant client rejects a plugin whose `name` breaks the spec. Shipping such an
+// entry would offer an install that the user's client silently refuses to load.
+function assertShippedAgentPluginsNamesAreValid() {
+  const index = JSON.parse(fs.readFileSync(INDEX_PATH, "utf8"));
+
+  const invalid = (index.skills || [])
+    .filter(
+      (resource) =>
+        resource.pluginManifestKind === AGENT_PLUGINS_MANIFEST_KIND &&
+        getAgentPluginsNameIssue(resource.name) !== undefined,
+    )
+    .map(
+      (resource) =>
+        `${resource.source}:${resource.path} name "${resource.name}" is ${getAgentPluginsNameIssue(
+          resource.name,
+        )}`,
+    )
+    .sort();
+
+  assert.deepStrictEqual(
+    invalid,
+    [],
+    "An agent-plugins entry must carry a specification-valid name; record it as a plain plugin instead",
+  );
+}
+
 async function main() {
+  assertNoNewInstallCollisions();
+  assertShippedAgentPluginsNamesAreValid();
+
   assert.deepStrictEqual(
     audit.resolveSourceFilter(["--sources", "pai-packs, octo-demo"], {
       RESOURCE_NINJA_SOURCES: "ignored-source",
@@ -238,7 +464,14 @@ async function main() {
   console.log("RESULT=PASS");
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.stack : String(error));
-  process.exit(1);
-});
+module.exports = {
+  findCrossSourceInstallCollisions,
+  getInstallDestinationSlot,
+};
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.stack : String(error));
+    process.exit(1);
+  });
+}

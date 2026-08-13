@@ -30,12 +30,14 @@ function requireTypeScriptModule(filePath) {
 // Only bind what the assertions exercise; an unused import could go undefined
 // after a rename and still let the file pass.
 const {
+  detectPluginChildResourceKind,
   detectResourceKindFromPath,
   getBuiltInResourceDedupeKey,
   getBuiltInResourceSourceLabel,
   getFallbackResourceName,
   getPluginPackageCandidates,
   getPluginPackageId,
+  getPluginRootFromManifestPath,
   getResourceInstallPath,
   getResourceMetadataPath,
   getSkillRootDirectoriesFromPaths,
@@ -204,6 +206,55 @@ test("detects plugin manifests and Cursor rules", () => {
       "cursor-rule",
     ),
     "typescript-exhaustive-switch",
+  );
+});
+
+test("detects Agent Plugins 1.0.0 layouts at any depth", () => {
+  assert.strictEqual(
+    detectResourceKindFromPath("plugins/foo/plugin.json"),
+    "plugin",
+  );
+  assert.strictEqual(
+    getPluginRootFromManifestPath("plugins/foo/plugin.json"),
+    "plugins/foo",
+  );
+  assert.strictEqual(getPluginRootFromManifestPath("plugin.json"), ".");
+  assert.strictEqual(
+    getPluginRootFromManifestPath("plugins/foo/.claude-plugin/plugin.json"),
+    "plugins/foo",
+  );
+  assert.strictEqual(
+    getPluginRootFromManifestPath("gemini-extension.json"),
+    ".",
+  );
+  assert.strictEqual(
+    getPluginRootFromManifestPath("x/y/gemini-extension.json"),
+    "x/y",
+  );
+  assert.strictEqual(getPluginRootFromManifestPath("apm.yml"), ".");
+  assert.strictEqual(getPluginRootFromManifestPath("x/apm.yml"), "x");
+
+  assert.strictEqual(
+    detectResourceKindFromPath("plugins/foo/.mcp.json"),
+    "mcp",
+  );
+  assert.strictEqual(
+    detectResourceKindFromPath("plugins/foo/hooks.json"),
+    "hook",
+  );
+  assert.strictEqual(
+    detectResourceKindFromPath("plugins/foo/skills/bar/SKILL.md"),
+    "skill",
+  );
+  assert.strictEqual(
+    detectPluginChildResourceKind("skills/bar/SKILL.md"),
+    "skill",
+  );
+  // Agent Plugins 1.0.0 only exposes the immediate child directory of skills/.
+  assert.strictEqual(
+    detectPluginChildResourceKind("skills/bar/references/SKILL.md"),
+    undefined,
+    "Agent Plugins skills must not recurse below the immediate child directory",
   );
 });
 

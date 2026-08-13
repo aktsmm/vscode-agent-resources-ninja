@@ -147,6 +147,10 @@ function createVscodeStub(writes, options = {}) {
 
 function loadInstaller(writes, options = {}) {
   const srcDir = path.join(__dirname, "..", "src");
+  const resourceKindsModule = requireTypeScriptModule(
+    path.join(srcDir, "resourceKinds.ts"),
+    {},
+  );
 
   // githubFetch は実装をそのまま使い、復旧経路が共通 helper を通ることを検証する。
   const githubResponse = requireTypeScriptModule(
@@ -166,6 +170,10 @@ function loadInstaller(writes, options = {}) {
 
   return requireTypeScriptModule(path.join(srcDir, "skillInstaller.ts"), {
     vscode: createVscodeStub(writes, options),
+    "./pathSafety": requireTypeScriptModule(
+      path.join(srcDir, "pathSafety.ts"),
+      {},
+    ),
     "./githubFetch": githubFetch,
     "./skillIndex": {
       loadSkillIndex: async () => options.skillIndex || { sources: [] },
@@ -224,6 +232,7 @@ function loadInstaller(writes, options = {}) {
       resolveSkillsDirectoryUri: () => makeUri("/tmp/.github/skills"),
     },
     "./resourceKinds": {
+      ...resourceKindsModule,
       detectResourceKindFromPath: () => "skill",
       getPluginRootFromManifestPath: () => undefined,
       getResourceMetadataPath: (resourcePath) =>
@@ -246,6 +255,216 @@ function loadInstaller(writes, options = {}) {
         (options.bugReports || []).push(args);
       },
     },
+  });
+}
+
+/**
+ * Windows 相当の Uri を再現するハーネス。
+ * - joinPath は本物と同じ `path.posix.join` セマンティクスで URI path を伸ばす
+ * - fsPath は `/` を `\` に変換するので、entry.name 内のバックスラッシュがそのまま
+ *   区切り文字になる（実機で escape が成立する条件）
+ * - filesystem stub は `path.win32.normalize` した実際の書き込み先を記録するので、
+ *   ガードが無ければ root の外への書き込みがそのまま観測される
+ */
+function makeWindowsUri(uriPath) {
+  return {
+    path: uriPath,
+    get fsPath() {
+      const windowsPath = uriPath.replace(/\//g, "\\");
+      return /^\\[A-Za-z]:/.test(windowsPath)
+        ? windowsPath.slice(1)
+        : windowsPath;
+    },
+    toString: () => uriPath,
+  };
+}
+
+/** Splits a recorded write path into the segments below `parentPath`. */
+function recordedChildSegments(recordedPath, parentPath) {
+  const prefix = `${parentPath}${path.win32.sep}`;
+  if (!recordedPath.startsWith(prefix)) {
+    return undefined;
+  }
+  return recordedPath.slice(prefix.length).split(path.win32.sep);
+}
+
+function hasRecordedChild(recorded, parentPath) {
+  for (const recordedPath of recorded.writes.keys()) {
+    if (recordedChildSegments(recordedPath, parentPath)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** `[name, FileType]` pairs, matching what `workspace.fs.readDirectory` returns. */
+function listRecordedChildren(recorded, parentPath) {
+  const children = new Map();
+  for (const recordedPath of recorded.writes.keys()) {
+    const segments = recordedChildSegments(recordedPath, parentPath);
+    if (!segments || !segments[0]) {
+      continue;
+    }
+    children.set(segments[0], segments.length > 1 ? 2 : 1);
+  }
+  return [...children.entries()];
+}
+
+function loadWindowsInstaller(recorded) {
+  const srcDir = path.join(__dirname, "..", "src");
+  const realDestination = (uri) => path.win32.normalize(uri.fsPath);
+  const resourceKindsModule = requireTypeScriptModule(
+    path.join(srcDir, "resourceKinds.ts"),
+    {},
+  );
+
+  const githubResponse = requireTypeScriptModule(
+    path.join(srcDir, "githubResponse.ts"),
+    {},
+  );
+  const githubFetch = requireTypeScriptModule(
+    path.join(srcDir, "githubFetch.ts"),
+    {
+      "./githubResponse": githubResponse,
+      "./logger": { logger: { info() {}, warn() {}, error() {} } },
+      "./githubAuth": { resolveGitHubTokenAfterFailure: async () => undefined },
+    },
+  );
+
+  const vscodeStub = {
+    version: "test",
+    env: { appName: "Visual Studio Code" },
+    extensions: { getExtension: () => ({ packageJSON: { version: "test" } }) },
+    FileType: { Unknown: 0, File: 1, Directory: 2, SymbolicLink: 64 },
+    Uri: {
+      joinPath: (base, ...segments) =>
+        makeWindowsUri(path.posix.join(base.path, ...segments)),
+      file: (fsPath) =>
+        makeWindowsUri(`/${fsPath.replace(/\\/g, "/").replace(/^\/+/, "")}`),
+    },
+    workspace: {
+      getConfiguration: () => ({ get: () => undefined }),
+      fs: {
+        createDirectory: async (uri) => {
+          recorded.directories.push(realDestination(uri));
+        },
+        delete: async (uri) => {
+          recorded.deleted.push(realDestination(uri));
+        },
+        writeFile: async (uri, content) => {
+          recorded.writes.set(
+            realDestination(uri),
+            Buffer.from(content).toString("utf-8"),
+          );
+        },
+        readFile: async (uri) => {
+          const content = recorded.writes.get(realDestination(uri));
+          if (content === undefined) {
+            throw new Error("not found");
+          }
+          return Buffer.from(content, "utf-8");
+        },
+        stat: async (uri) => {
+          const target = realDestination(uri);
+          const content = recorded.writes.get(target);
+          if (content !== undefined) {
+            return { size: Buffer.byteLength(content, "utf-8"), type: 1 };
+          }
+          // Install tests keep the default: only written files exist. Scan tests
+          // opt in so a directory holding a recorded write also resolves.
+          if (recorded.enumerateWrites && hasRecordedChild(recorded, target)) {
+            return { size: 0, type: 2 };
+          }
+          throw new Error("not found");
+        },
+        readDirectory: async (uri) => {
+          if (!recorded.enumerateWrites) {
+            return [];
+          }
+          return listRecordedChildren(recorded, realDestination(uri));
+        },
+      },
+    },
+    window: {
+      showErrorMessage: async () => undefined,
+      showWarningMessage: async () => undefined,
+    },
+    commands: { executeCommand: async () => undefined },
+  };
+
+  return requireTypeScriptModule(path.join(srcDir, "skillInstaller.ts"), {
+    vscode: vscodeStub,
+    "./pathSafety": requireTypeScriptModule(
+      path.join(srcDir, "pathSafety.ts"),
+      {},
+    ),
+    "./githubFetch": githubFetch,
+    "./githubDirectoryTraversal": requireTypeScriptModule(
+      path.join(srcDir, "githubDirectoryTraversal.ts"),
+      {},
+    ),
+    "./skillIndex": {
+      loadSkillIndex: async () => ({
+        sources: [
+          {
+            id: "traversal-source",
+            url: "https://github.com/owner/evil-repo",
+            branch: "main",
+          },
+        ],
+      }),
+      getSourceBranch: async () => "main",
+      getResourceKind: () => "skill",
+    },
+    "./i18n": { isJapanese: () => false, messages: {} },
+    "./githubAuth": {
+      getGitHubToken: async () => undefined,
+      hasStoredGitHubToken: async () => false,
+      resolveGitHubToken: async () => ({ token: undefined, source: "none" }),
+    },
+    "./hookConfigManager": {
+      restoreHookConfigFromBackup: async () => undefined,
+      updateHookConfigForInstall: async () => undefined,
+      updateHookConfigForUninstall: async () => undefined,
+    },
+    "./mcpConfigManager": { updateMcpConfigForInstall: async () => undefined },
+    "./customizationPaths": {
+      DEFAULT_GLOBAL_HOME_DIRECTORY: "~/.copilot",
+      getConfiguredGlobalHomeDirectory: () => "~/.copilot",
+      getConfiguredSkillsDirectory: () => ".github/skills",
+      getConfiguredUserAgentsDirectory: () => "",
+      getConfiguredUserInstructionsDirectory: () => "",
+      getConfiguredUserPromptsDirectory: () => "",
+      getConfiguredWorkspaceAgentsDirectory: () => ".github/agents",
+      getConfiguredWorkspaceHooksDirectory: () => ".github/hooks",
+      getConfiguredWorkspaceInstructionsDirectory: () => ".github/instructions",
+      getConfiguredWorkspaceMcpDirectory: () => ".github/mcp",
+      getConfiguredWorkspacePromptsDirectory: () => ".github/prompts",
+      getRelativeSkillsPathForWorkspace: () => ".github/skills",
+      isSameOrChildWorkspacePath: () => true,
+      resolveConfiguredUri: () => makeWindowsUri("/C:/ws/.github/skills"),
+      resolveSkillsDirectoryUri: () => makeWindowsUri("/C:/ws/.github/skills"),
+    },
+    "./resourceKinds": {
+      ...resourceKindsModule,
+      detectResourceKindFromPath: () => "skill",
+      getPluginRootFromManifestPath: () => undefined,
+      getResourceMetadataPath: (resourcePath) =>
+        `${resourcePath}.resource-meta.json`,
+      isHookConfigFilePath: () => false,
+    },
+    "./userDataPaths": {
+      getCopilotHomePath: () => "C:\\Users\\test\\.copilot",
+      getVsCodeUserDataPath: () => "C:\\Users\\test\\AppData\\Roaming\\Code",
+    },
+    "./logger": {
+      logger: {
+        info: () => undefined,
+        warn: (...args) => recorded.warnings.push(args.join(" ")),
+        error: () => undefined,
+      },
+    },
+    "./bugReport": { openBugReport: async () => undefined },
   });
 }
 
@@ -1072,6 +1291,403 @@ async function run() {
       );
       passed++;
     }
+
+    // --- Test 14: 悪意ある entry.name は install root の外へ書けない ---
+    {
+      const recorded = {
+        writes: new Map(),
+        directories: [],
+        deleted: [],
+        warnings: [],
+      };
+      const { installSkill, isSkillInstallIncompleteError } =
+        loadWindowsInstaller(recorded);
+
+      const listing = [
+        { name: "SKILL.md", type: "file", download_url: "https://raw/skill" },
+        {
+          name: "..\\..\\..\\evil.txt",
+          type: "file",
+          download_url: "https://raw/evil",
+        },
+        { name: "CON", type: "file", download_url: "https://raw/con" },
+        {
+          name: "..\\..\\..\\evil-dir",
+          type: "dir",
+          download_url: null,
+        },
+      ];
+
+      const fetchedUrls = [];
+      global.fetch = async (url) => {
+        fetchedUrls.push(url);
+        if (url.startsWith("https://api.github.com/")) {
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            json: async () => (url.includes("evil-dir") ? [] : listing),
+            text: async () => "",
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          text: async () => realSkillMd,
+        };
+      };
+
+      let thrown;
+      try {
+        await installSkill(
+          {
+            name: "traversal-demo",
+            source: "traversal-source",
+            path: "skills/traversal-demo",
+            categories: [],
+            description: "Traversal demo",
+          },
+          makeWindowsUri("/C:/ws"),
+          {},
+        );
+      } catch (error) {
+        thrown = error;
+      }
+
+      assert.strictEqual(
+        isSkillInstallIncompleteError(thrown),
+        true,
+        "a rejected dependent file must not be reported as a clean install",
+      );
+
+      const installRoot = "C:\\ws\\.github\\skills\\traversal-demo";
+      assert.deepStrictEqual(
+        [...recorded.writes.keys()].sort(),
+        [`${installRoot}\\.skill-meta.json`, `${installRoot}\\SKILL.md`],
+        "only the safe entry and its metadata may be written",
+      );
+
+      // The raw-URL recovery path would also produce SKILL.md, so assert the
+      // safe entry actually came through the directory listing.
+      assert.ok(
+        fetchedUrls.includes("https://raw/skill"),
+        "the safe entry must be downloaded through its directory-listing download_url",
+      );
+      assert.deepStrictEqual(
+        fetchedUrls.filter((url) =>
+          url.startsWith("https://raw.githubusercontent.com/"),
+        ),
+        [],
+        "the safe entry must not depend on the raw-URL recovery path",
+      );
+      assert.strictEqual(
+        recorded.writes.get(`${installRoot}\\SKILL.md`),
+        realSkillMd,
+        "the safe entry must be written with the content the listing pointed at",
+      );
+      assert.strictEqual(
+        JSON.parse(recorded.writes.get(`${installRoot}\\.skill-meta.json`))
+          .incomplete,
+        true,
+        "the stored metadata must record the resource as incomplete",
+      );
+
+      const touched = [...recorded.writes.keys(), ...recorded.directories];
+      const outside = touched.filter(
+        (target) =>
+          target !== installRoot &&
+          !target.startsWith(`${installRoot}${path.win32.sep}`),
+      );
+      assert.deepStrictEqual(
+        outside,
+        [],
+        `nothing may be written outside ${installRoot}`,
+      );
+
+      assert.ok(
+        recorded.warnings.some((line) => line.includes("..\\..\\..\\evil.txt")),
+        "the rejected entry name must be logged",
+      );
+      passed++;
+    }
+
+    // --- Test 15: リモート由来の .skill-meta.json は保存メタデータに入らない ---
+    {
+      const recorded = {
+        writes: new Map(),
+        directories: [],
+        deleted: [],
+        warnings: [],
+      };
+      const { installSkill } = loadWindowsInstaller(recorded);
+
+      const installRoot = "C:\\ws\\.github\\skills\\meta-demo";
+      const metaFilePath = `${installRoot}\\.skill-meta.json`;
+      const attackerPath = "C:\\Users\\victim\\Documents";
+
+      // 以前のインストールで持ち込まれた sidecar が既に置かれている状態。
+      recorded.writes.set(
+        metaFilePath,
+        JSON.stringify({
+          name: "meta-demo",
+          source: "traversal-source",
+          description: "Metadata demo",
+          categories: [],
+          installedAt: "2020-01-01T00:00:00.000Z",
+          customWhenToUse: "user edited note",
+          skillFilePath: `${attackerPath}\\SKILL.md`,
+          relativePath: "..\\..\\..\\victim",
+        }),
+      );
+
+      const listing = [
+        { name: "SKILL.md", type: "file", download_url: "https://raw/skill" },
+        {
+          name: ".skill-meta.json",
+          type: "file",
+          download_url: "https://raw/remote-meta",
+        },
+      ];
+
+      global.fetch = async (url) => {
+        if (url.startsWith("https://api.github.com/")) {
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            json: async () => listing,
+            text: async () => "",
+          };
+        }
+        if (url === "https://raw/remote-meta") {
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            text: async () =>
+              JSON.stringify({
+                name: "meta-demo",
+                skillFilePath: `${attackerPath}\\SKILL.md`,
+              }),
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          text: async () => realSkillMd,
+        };
+      };
+
+      const result = await installSkill(
+        {
+          name: "meta-demo",
+          source: "traversal-source",
+          path: "skills/meta-demo",
+          categories: [],
+          description: "Metadata demo",
+        },
+        makeWindowsUri("/C:/ws"),
+        {},
+      );
+
+      assert.deepStrictEqual(
+        result,
+        {},
+        "a sanitized sidecar must not make the install incomplete",
+      );
+
+      const storedMeta = JSON.parse(recorded.writes.get(metaFilePath));
+      assert.strictEqual(
+        Object.prototype.hasOwnProperty.call(storedMeta, "skillFilePath"),
+        false,
+        "a remote-supplied skillFilePath must never reach the stored metadata",
+      );
+      assert.strictEqual(
+        Object.prototype.hasOwnProperty.call(storedMeta, "relativePath"),
+        false,
+        "a remote-supplied relativePath must never reach the stored metadata",
+      );
+      assert.strictEqual(
+        storedMeta.customWhenToUse,
+        "user edited note",
+        "additive non-path fields must still survive the merge",
+      );
+      assert.strictEqual(storedMeta.name, "meta-demo");
+      assert.ok(
+        recorded.warnings.some((line) => line.includes(".skill-meta.json")),
+        "the skipped remote sidecar must be logged",
+      );
+      passed++;
+    }
+
+    // --- Test 16: ディスク上の .skill-meta.json が主張するパスは走査結果に持ち込まれない ---
+    {
+      const recorded = {
+        writes: new Map(),
+        directories: [],
+        deleted: [],
+        warnings: [],
+        // このテストだけ recorded.writes を実ファイルシステムとして列挙させる。
+        enumerateWrites: true,
+      };
+      const { getInstalledSkillsWithMetaFromRoot } =
+        loadWindowsInstaller(recorded);
+
+      const skillsRoot = "C:\\ws\\.github\\skills";
+      const installRoot = `${skillsRoot}\\poisoned-demo`;
+      const attackerPath = "C:\\ws\\src";
+
+      recorded.writes.set(`${installRoot}\\SKILL.md`, realSkillMd);
+      // 攻撃者の repository が置いた（あるいは backup から戻った）sidecar が
+      // 既にディスク上にある状態。走査より前に write 済みなので、
+      // download 時の skip では防げない。
+      recorded.writes.set(
+        `${installRoot}\\.skill-meta.json`,
+        JSON.stringify({
+          name: "poisoned-demo",
+          source: "traversal-source",
+          description: "Poisoned demo",
+          categories: [],
+          installedAt: "2020-01-01T00:00:00.000Z",
+          skillFilePath: `${attackerPath}\\SKILL.md`,
+          relativePath: "..\\..\\..\\victim",
+        }),
+      );
+
+      const metas = await getInstalledSkillsWithMetaFromRoot(
+        makeWindowsUri("/C:/ws/.github/skills"),
+      );
+
+      assert.strictEqual(metas.length, 1, "the scan must find the resource");
+      assert.strictEqual(
+        metas[0].skillFilePath,
+        `${installRoot}\\SKILL.md`,
+        "skillFilePath must be where the scan actually found SKILL.md",
+      );
+      assert.strictEqual(
+        metas[0].relativePath,
+        "poisoned-demo",
+        "relativePath must be where the scan actually found the folder",
+      );
+      assert.ok(
+        !metas.some(
+          (meta) =>
+            meta.skillFilePath === `${attackerPath}\\SKILL.md` ||
+            meta.relativePath === "..\\..\\..\\victim",
+        ),
+        "no scanned resource may carry a path taken from the sidecar content",
+      );
+      assert.strictEqual(
+        metas[0].name,
+        "poisoned-demo",
+        "non-path fields must still be read from the sidecar",
+      );
+      passed++;
+    }
+
+    // --- Test 17: 自前 sidecar 名だけを skip し、同名でないファイルは入れる ---
+    {
+      const recorded = {
+        writes: new Map(),
+        directories: [],
+        deleted: [],
+        warnings: [],
+      };
+      const { installSkill } = loadWindowsInstaller(recorded);
+
+      const installRoot = "C:\\ws\\.github\\skills\\sidecar-demo";
+      const payloadContent = '{"payload":"needed by the resource"}';
+
+      const listing = [
+        { name: "SKILL.md", type: "file", download_url: "https://raw/skill" },
+        {
+          name: ".skill-meta.json",
+          type: "file",
+          download_url: "https://raw/own-skill-meta",
+        },
+        {
+          name: ".resource-ninja.json",
+          type: "file",
+          download_url: "https://raw/own-resource-ninja",
+        },
+        {
+          name: "payload.resource-ninja.json",
+          type: "file",
+          download_url: "https://raw/payload",
+        },
+      ];
+
+      global.fetch = async (url) => {
+        if (url.startsWith("https://api.github.com/")) {
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            json: async () => listing,
+            text: async () => "",
+          };
+        }
+        if (url === "https://raw/payload") {
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            text: async () => payloadContent,
+          };
+        }
+        if (url.startsWith("https://raw/own-")) {
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            text: async () => '{"skillFilePath":"C:\\\\ws\\\\src\\\\SKILL.md"}',
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          text: async () => realSkillMd,
+        };
+      };
+
+      const result = await installSkill(
+        {
+          name: "sidecar-demo",
+          source: "traversal-source",
+          path: "skills/sidecar-demo",
+          categories: [],
+          description: "Sidecar demo",
+        },
+        makeWindowsUri("/C:/ws"),
+        {},
+      );
+
+      assert.deepStrictEqual(
+        result,
+        {},
+        "skipping only our own sidecars must not make the install incomplete",
+      );
+      assert.strictEqual(
+        recorded.writes.get(`${installRoot}\\payload.resource-ninja.json`),
+        payloadContent,
+        "a repository file that merely ends with .resource-ninja.json must be installed",
+      );
+      assert.strictEqual(
+        recorded.writes.has(`${installRoot}\\.resource-ninja.json`),
+        false,
+        "the exact .resource-ninja.json sidecar name must still be skipped",
+      );
+      assert.strictEqual(
+        JSON.parse(recorded.writes.get(`${installRoot}\\.skill-meta.json`))
+          .skillFilePath,
+        undefined,
+        "the exact .skill-meta.json sidecar name must still be skipped",
+      );
+      passed++;
+    }
   } finally {
     if (originalFetch) {
       global.fetch = originalFetch;
@@ -1081,7 +1697,7 @@ async function run() {
   }
 
   console.log(
-    `PASS: test-skill-installer-remote-fallback.js (${passed}/20 cases)`,
+    `PASS: test-skill-installer-remote-fallback.js (${passed}/24 cases)`,
   );
 }
 

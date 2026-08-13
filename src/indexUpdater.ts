@@ -14,6 +14,10 @@ import {
   saveSkillIndex,
 } from "./skillIndex";
 import {
+  AGENT_PLUGINS_MANIFEST_KIND,
+  getAgentPluginsConformanceIssue,
+  isAgentPluginsManifest,
+  markAgentPluginsIssueDescription,
   detectResourceKindFromPath,
   detectPluginChildResourceKind,
   getDefaultResourceCategories,
@@ -23,6 +27,16 @@ import {
   getResourceInstallPath,
   getSkillRootDirectoriesFromPaths,
   isNestedResourcePathUnderSkillRoot,
+} from "./resourceKinds";
+export {
+  AGENT_PLUGINS_MANIFEST_SCHEMA,
+  AGENT_PLUGINS_MANIFEST_KIND,
+  declaresAgentPluginsSchema,
+  getAgentPluginsNameIssue,
+  getAgentPluginsManifestIssue,
+  getAgentPluginsConformanceIssue,
+  markAgentPluginsIssueDescription,
+  isAgentPluginsManifest,
 } from "./resourceKinds";
 import { messages } from "./i18n";
 import { getGitHubToken, hasStoredGitHubToken } from "./githubAuth";
@@ -190,6 +204,16 @@ function parsePluginManifestMetadata(
     manifest = parseSimpleYamlObject(content);
   }
 
+  const agentPluginsIssue = getAgentPluginsConformanceIssue(filePath, manifest);
+  if (agentPluginsIssue) {
+    logger.warn(
+      `${filePath} declares the Agent Plugins 1.0.0 schema but ${agentPluginsIssue}; indexing it as a plain plugin manifest because a conformant client would reject it`,
+    );
+  }
+  const resolvedManifestKind = isAgentPluginsManifest(filePath, manifest)
+    ? AGENT_PLUGINS_MANIFEST_KIND
+    : manifestKind;
+
   const interfaceMetadata =
     manifest.interface && typeof manifest.interface === "object"
       ? (manifest.interface as Record<string, unknown>)
@@ -198,11 +222,15 @@ function parsePluginManifestMetadata(
     stringifyManifestValue(manifest.name) ||
     stringifyManifestValue(interfaceMetadata.displayName) ||
     getFallbackResourceName(filePath, "plugin");
-  const description =
+  const description = markAgentPluginsIssueDescription(
     stringifyManifestValue(manifest.description) ||
-    stringifyManifestValue(interfaceMetadata.shortDescription) ||
-    stringifyManifestValue(interfaceMetadata.longDescription) ||
-    `Plugin manifest for ${name}`;
+      stringifyManifestValue(interfaceMetadata.shortDescription) ||
+      stringifyManifestValue(interfaceMetadata.longDescription) ||
+      (resolvedManifestKind === AGENT_PLUGINS_MANIFEST_KIND
+        ? `Agent Plugins 1.0.0 manifest for ${name}`
+        : `Plugin manifest for ${name}`),
+    agentPluginsIssue,
+  );
 
   return {
     name,
@@ -213,7 +241,7 @@ function parsePluginManifestMetadata(
     version: stringifyManifestValue(manifest.version),
     pluginRoot,
     pluginManifestPath: filePath.replace(/\\/g, "/"),
-    pluginManifestKind: manifestKind,
+    pluginManifestKind: resolvedManifestKind,
   };
 }
 

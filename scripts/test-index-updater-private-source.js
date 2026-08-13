@@ -37,8 +37,36 @@ function requireTypeScriptModule(filePath, stubs = {}) {
   return loadedModule.exports;
 }
 
+const INDEX_UPDATER_PATH = path.join(__dirname, "..", "src", "indexUpdater.ts");
+const RESOURCE_KINDS_PATH = path.join(
+  __dirname,
+  "..",
+  "src",
+  "resourceKinds.ts",
+);
+
+// src/resourceKinds.ts has no vscode dependency, so the real module is loaded
+// instead of a hand-written stub that would drift from production behavior.
+function collectResourceKindsImportNames() {
+  const source = fs.readFileSync(INDEX_UPDATER_PATH, "utf8");
+  const names = new Set();
+  const pattern =
+    /(?:import|export)\s*\{([^}]*)\}\s*from\s*"\.\/resourceKinds"/g;
+  let match;
+  while ((match = pattern.exec(source)) !== null) {
+    for (const entry of match[1].split(",")) {
+      const tokens = entry.trim().split(/\s+/);
+      if (tokens.length === 0 || !tokens[0]) continue;
+      if (tokens[0] === "type") continue;
+      names.add(tokens[0]);
+    }
+  }
+  return [...names];
+}
+
 function createModule() {
   const writes = [];
+  const resourceKindsModule = requireTypeScriptModule(RESOURCE_KINDS_PATH);
   const githubResponseModule = requireTypeScriptModule(
     path.join(__dirname, "..", "src", "githubResponse.ts"),
   );
@@ -81,108 +109,77 @@ function createModule() {
     },
   };
 
-  const moduleExports = requireTypeScriptModule(
-    path.join(__dirname, "..", "src", "indexUpdater.ts"),
-    {
-      vscode: vscodeStub,
-      "./skillIndex": {
-        getResourceKind: (resource) => resource.kind || "skill",
-        createBundleKey: (bundle) => `${bundle.source}:${bundle.id}`,
-        normalizeGitHubRepoUrl: (url) => {
-          const trimmed = url
-            .trim()
-            .replace(/\.git$/i, "")
-            .replace(/\/$/, "");
-          const match = trimmed.match(
-            /^(https:\/\/github\.com\/[^/]+\/[^/]+)(?:\/(?:tree|blob)\/.*)?$/i,
-          );
-          return match ? match[1] : trimmed;
-        },
-        saveSkillIndex: async (_context, index) => {
-          writes.push({
-            path: "skill-index.json",
-            content: JSON.stringify(index, null, 2),
-          });
-        },
+  const moduleExports = requireTypeScriptModule(INDEX_UPDATER_PATH, {
+    vscode: vscodeStub,
+    "./skillIndex": {
+      getResourceKind: (resource) => resource.kind || "skill",
+      createBundleKey: (bundle) => `${bundle.source}:${bundle.id}`,
+      normalizeGitHubRepoUrl: (url) => {
+        const trimmed = url
+          .trim()
+          .replace(/\.git$/i, "")
+          .replace(/\/$/, "");
+        const match = trimmed.match(
+          /^(https:\/\/github\.com\/[^/]+\/[^/]+)(?:\/(?:tree|blob)\/.*)?$/i,
+        );
+        return match ? match[1] : trimmed;
       },
-      "./githubAuth": {
-        getGitHubToken: async () => "test-token",
-        checkGitHubAuth: async () => ({
-          authenticated: true,
-          method: "config",
-          message: "ok",
-        }),
+      saveSkillIndex: async (_context, index) => {
+        writes.push({
+          path: "skill-index.json",
+          content: JSON.stringify(index, null, 2),
+        });
       },
-      "./resourceKinds": {
-        detectResourceKindFromPath: (filePath) => {
-          const lower = filePath.toLowerCase();
-          if (lower.endsWith("/skill.md")) return "skill";
-          if (lower.endsWith(".agent.md")) return "agent";
-          if (lower.endsWith(".prompt.md")) return "prompt";
-          if (lower.endsWith(".instructions.md")) return "instruction";
-          if (lower.endsWith("/readme.md") && lower.includes("hooks/")) {
-            return "hook";
-          }
-          if (lower.endsWith(".json") && lower.includes("mcp")) return "mcp";
-          if (lower.endsWith("plugin.json")) return "plugin";
-          return undefined;
-        },
-        getDefaultResourceCategories: (kind) => [kind || "skill"],
-        getFallbackResourceName: (filePath) =>
-          path.basename(path.dirname(filePath)) || path.basename(filePath),
-        getPluginIdFromPath: () => undefined,
-        getPluginRootFromManifestPath: () => undefined,
-        getResourceInstallPath: (filePath) =>
-          filePath.endsWith("/SKILL.md")
-            ? filePath.replace(/\/SKILL\.md$/i, "")
-            : filePath,
-        getSkillRootDirectoriesFromPaths: (paths) =>
-          paths
-            .filter((filePath) => filePath.toLowerCase().endsWith("/skill.md"))
-            .map((filePath) => filePath.replace(/\/SKILL\.md$/i, "")),
-        isNestedResourcePathUnderSkillRoot: () => false,
-      },
-      "./constants": {
-        LICENSE_EXTRACTION: {
-          FILE_NAMES: ["LICENSE", "LICENSE.txt"],
-          SCAN_LENGTH: 2000,
-        },
-        INDEX_LIMITS: {
-          SHORT_DESCRIPTION: 200,
-          PREVIEW_LENGTH: 200,
-        },
-      },
-      "./i18n": {
-        messages: {
-          authRequired: () => "GitHub authentication required",
-          updatingSource: (name) => `Updating ${name}...`,
-          sourceIndexResourcesUpdatedProgress: (count) =>
-            `Updated ${count} resource(s)`,
-        },
-      },
-      "./sharedResourceIndexStore": {
-        shouldRunSharedScan: async () => true,
-        updateSharedScanMetadata: async () => undefined,
-        loadSharedStoresIntoSkillIndex: async (_context, index) => index,
-        syncSharedStoresFromSkillIndex: async () => undefined,
-      },
-      "./sourceFreshness": {
-        stampIndexedSources: (sources) => sources,
-      },
-      "./logger": {
-        logger: {
-          info: () => undefined,
-          warn: () => undefined,
-          error: () => undefined,
-        },
-      },
-      "./githubFetch": githubFetchModule,
-      "./githubResponse": githubResponseModule,
-      "./sourceUpdateReconcile": sourceUpdateReconcileModule,
     },
-  );
+    "./githubAuth": {
+      getGitHubToken: async () => "test-token",
+      checkGitHubAuth: async () => ({
+        authenticated: true,
+        method: "config",
+        message: "ok",
+      }),
+    },
+    "./resourceKinds": resourceKindsModule,
+    "./constants": {
+      LICENSE_EXTRACTION: {
+        FILE_NAMES: ["LICENSE", "LICENSE.txt"],
+        SCAN_LENGTH: 2000,
+      },
+      INDEX_LIMITS: {
+        SHORT_DESCRIPTION: 200,
+        PREVIEW_LENGTH: 200,
+      },
+    },
+    "./i18n": {
+      messages: {
+        authRequired: () => "GitHub authentication required",
+        updatingSource: (name) => `Updating ${name}...`,
+        sourceIndexResourcesUpdatedProgress: (count) =>
+          `Updated ${count} resource(s)`,
+      },
+    },
+    "./sharedResourceIndexStore": {
+      shouldRunSharedScan: async () => true,
+      updateSharedScanMetadata: async () => undefined,
+      loadSharedStoresIntoSkillIndex: async (_context, index) => index,
+      syncSharedStoresFromSkillIndex: async () => undefined,
+    },
+    "./sourceFreshness": {
+      stampIndexedSources: (sources) => sources,
+    },
+    "./logger": {
+      logger: {
+        info: () => undefined,
+        warn: () => undefined,
+        error: () => undefined,
+      },
+    },
+    "./githubFetch": githubFetchModule,
+    "./githubResponse": githubResponseModule,
+    "./sourceUpdateReconcile": sourceUpdateReconcileModule,
+  });
 
-  return { moduleExports, writes };
+  return { moduleExports, writes, resourceKindsModule };
 }
 
 function response(status, body, headers = {}) {
@@ -796,6 +793,23 @@ async function testRootResourceLicensePathIsNormalized() {
   );
 }
 
+async function testSuppliedResourceKindsCoversIndexUpdaterImports() {
+  const { resourceKindsModule } = createModule();
+  const importedNames = collectResourceKindsImportNames();
+  assert.ok(
+    importedNames.length > 0,
+    "src/indexUpdater.ts should import named bindings from ./resourceKinds",
+  );
+  const missing = importedNames.filter(
+    (name) => resourceKindsModule[name] === undefined,
+  );
+  assert.deepStrictEqual(
+    missing,
+    [],
+    `./resourceKinds supplied to src/indexUpdater.ts is missing: ${missing.join(", ")}`,
+  );
+}
+
 async function main() {
   await testPrivateSourceUsesContentsFallback();
   await testPublicRawDoesNotAttachToken();
@@ -806,6 +820,7 @@ async function main() {
   await testSaveSkillIndexSyncsSharedStores();
   await testTruncatedTreeFailsExplicitly();
   await testRootResourceLicensePathIsNormalized();
+  await testSuppliedResourceKindsCoversIndexUpdaterImports();
   console.log("PASS index updater private source auth");
 }
 
