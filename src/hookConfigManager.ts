@@ -254,12 +254,7 @@ async function updateHookConfig(
   options: HookConfigUpdateOptions = {},
 ): Promise<HookConfigUpdateResult> {
   return runHookConfigUpdate(() =>
-    performHookConfigUpdate(
-      operation,
-      configRootUri,
-      hookReadmeUri,
-      options,
-    ),
+    performHookConfigUpdate(operation, configRootUri, hookReadmeUri, options),
   );
 }
 

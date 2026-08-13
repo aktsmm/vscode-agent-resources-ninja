@@ -348,7 +348,9 @@ const tests = [
         assert.strictEqual(githubAuth.GITHUB_AUTH_TIMEOUT_MS, 5000);
         assert.strictEqual(requests.length, 2);
         assert.ok(
-          requests.every(({ options }) => options.signal instanceof AbortSignal),
+          requests.every(
+            ({ options }) => options.signal instanceof AbortSignal,
+          ),
         );
       } finally {
         global.fetch = originalFetch;

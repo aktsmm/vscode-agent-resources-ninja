@@ -5,7 +5,9 @@ const fs = require("fs");
 const path = require("path");
 
 const repoRoot = path.resolve(__dirname, "..");
-const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
+const packageJson = JSON.parse(
+  fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"),
+);
 
 function test(name, fn) {
   try {
@@ -38,7 +40,10 @@ function languageModelTools() {
 }
 
 function assertHasActivation(event) {
-  assert.ok(activationEvents().includes(event), `Missing activation event: ${event}`);
+  assert.ok(
+    activationEvents().includes(event),
+    `Missing activation event: ${event}`,
+  );
 }
 
 test("activation avoids startup activation", () => {
@@ -71,7 +76,9 @@ test("every language model tool activates when invoked", () => {
 });
 
 test("activation events do not redundantly list contributed commands", () => {
-  assert.ok(!activationEvents().some((entry) => entry.startsWith("onCommand:")));
+  assert.ok(
+    !activationEvents().some((entry) => entry.startsWith("onCommand:")),
+  );
 });
 
 test("activation events do not redundantly list contributed views", () => {
@@ -79,23 +86,38 @@ test("activation events do not redundantly list contributed views", () => {
 });
 
 test("activation events do not reference unknown chat participants", () => {
-  const contributed = new Set(chatParticipants().map((participant) => participant.id));
-  for (const event of activationEvents().filter((entry) => entry.startsWith("onChatParticipant:"))) {
+  const contributed = new Set(
+    chatParticipants().map((participant) => participant.id),
+  );
+  for (const event of activationEvents().filter((entry) =>
+    entry.startsWith("onChatParticipant:"),
+  )) {
     const participant = event.slice("onChatParticipant:".length);
-    assert.ok(contributed.has(participant), `Unknown chat participant activation: ${participant}`);
+    assert.ok(
+      contributed.has(participant),
+      `Unknown chat participant activation: ${participant}`,
+    );
   }
 });
 
 test("activation events do not reference unknown language model tools", () => {
   const contributed = new Set(languageModelTools().map((tool) => tool.name));
-  for (const event of activationEvents().filter((entry) => entry.startsWith("onLanguageModelTool:"))) {
+  for (const event of activationEvents().filter((entry) =>
+    entry.startsWith("onLanguageModelTool:"),
+  )) {
     const tool = event.slice("onLanguageModelTool:".length);
-    assert.ok(contributed.has(tool), `Unknown language model tool activation: ${tool}`);
+    assert.ok(
+      contributed.has(tool),
+      `Unknown language model tool activation: ${tool}`,
+    );
   }
 });
 
 test("activation events are unique", () => {
-  assert.strictEqual(new Set(activationEvents()).size, activationEvents().length);
+  assert.strictEqual(
+    new Set(activationEvents()).size,
+    activationEvents().length,
+  );
 });
 
 test("resource namespace activation remains scoped", () => {
@@ -112,14 +134,21 @@ test("hidden context-menu commands are contributed for VS Code auto-activation",
       .filter((item) => item.when === "false")
       .map((item) => item.command),
   );
-  const contributedCommands = new Set(commands().map((command) => command.command));
+  const contributedCommands = new Set(
+    commands().map((command) => command.command),
+  );
   for (const command of hiddenCommands) {
-    assert.ok(contributedCommands.has(command), `Hidden command is not contributed: ${command}`);
+    assert.ok(
+      contributedCommands.has(command),
+      `Hidden command is not contributed: ${command}`,
+    );
   }
 });
 
 test("global instruction toolbar entry points are contributed", () => {
-  const contributedCommands = new Set(commands().map((command) => command.command));
+  const contributedCommands = new Set(
+    commands().map((command) => command.command),
+  );
   const contributedViews = new Set(views().map((view) => view.id));
   assert.ok(contributedCommands.has("resourceNinja.openGlobalInstructionFile"));
   assert.ok(contributedCommands.has("resourceNinja.updateGlobalInstruction"));
@@ -127,7 +156,9 @@ test("global instruction toolbar entry points are contributed", () => {
 });
 
 test("activation covers explicit agent-mode entry points", () => {
-  const contributedCommands = new Set(commands().map((command) => command.command));
+  const contributedCommands = new Set(
+    commands().map((command) => command.command),
+  );
   const contributedViews = new Set(views().map((view) => view.id));
   assert.ok(contributedViews.has("resourceNinja.browseView"));
   assert.ok(contributedCommands.has("resourceNinja.search"));

@@ -655,7 +655,10 @@ test("uninstall by path avoids duplicating configured skills directory", () => {
 
 // The copy this file used to carry had lost this exclusion, so pin it directly.
 test("hook config detection excludes resource metadata sidecars", () => {
-  assert.strictEqual(isHookConfigFilePath("hooks/copilot-cli-policy.json"), true);
+  assert.strictEqual(
+    isHookConfigFilePath("hooks/copilot-cli-policy.json"),
+    true,
+  );
   assert.strictEqual(
     isHookConfigFilePath(".github/hooks/copilot-cli-policy.json"),
     true,

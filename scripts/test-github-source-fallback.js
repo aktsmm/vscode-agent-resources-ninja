@@ -62,17 +62,14 @@ const {
   fetchGitHubWithOptionalAuthRetry,
   fetchGitHubWithTimeout,
   GITHUB_REQUEST_TIMEOUT_MS,
-} = requireTypeScriptModule(
-  path.join(root, "src", "githubFetch.ts"),
-  {
-    "./githubResponse": githubResponseModule,
-    "./logger": { logger: loggerSpy },
-    "./githubAuth": {
-      resolveGitHubTokenAfterFailure: async (failedToken) =>
-        resolveFallback(failedToken),
-    },
+} = requireTypeScriptModule(path.join(root, "src", "githubFetch.ts"), {
+  "./githubResponse": githubResponseModule,
+  "./logger": { logger: loggerSpy },
+  "./githubAuth": {
+    resolveGitHubTokenAfterFailure: async (failedToken) =>
+      resolveFallback(failedToken),
   },
-);
+});
 const {
   classifyGitHubFailure,
   createGitHubResponseError,
@@ -99,11 +96,7 @@ const {
 
     await assert.rejects(
       () =>
-        fetchGitHubWithTimeout(
-          "https://api.github.com/repos/octo/repo",
-          {},
-          5,
-        ),
+        fetchGitHubWithTimeout("https://api.github.com/repos/octo/repo", {}, 5),
       (error) =>
         error.message === "Request timeout: api.github.com/repos/octo/repo",
     );
@@ -262,7 +255,10 @@ const {
       assert.strictEqual(result.status, 200);
       assert.strictEqual(requests.length, 3);
       assert.strictEqual(requests[0].headers.Authorization, undefined);
-      assert.strictEqual(requests[1].headers.Authorization, "token secret-token");
+      assert.strictEqual(
+        requests[1].headers.Authorization,
+        "token secret-token",
+      );
       assert.strictEqual(requests[2].headers.Authorization, "token env-token");
       assert.strictEqual(requests[2].url, requests[1].url);
     } finally {
@@ -343,7 +339,10 @@ const {
       );
       assert.strictEqual(result.status, 200);
       assert.strictEqual(requests.length, 3);
-      assert.strictEqual(requests[0].headers.Authorization, "token secret-token");
+      assert.strictEqual(
+        requests[0].headers.Authorization,
+        "token secret-token",
+      );
       assert.strictEqual(requests[1].headers.Authorization, undefined);
       assert.strictEqual(requests[2].headers.Authorization, "token gh-token");
     } finally {
@@ -562,7 +561,10 @@ const {
       assert.strictEqual(result.status, 403);
       assert.strictEqual(requests[0].headers.Authorization, undefined);
       assert.match(requests[1].url, /^https:\/\/api\.github\.com\/repos\//);
-      assert.strictEqual(requests[1].headers.Authorization, "token secret-token");
+      assert.strictEqual(
+        requests[1].headers.Authorization,
+        "token secret-token",
+      );
       assert.strictEqual(
         requests[2].headers.Authorization,
         undefined,
@@ -677,7 +679,9 @@ const {
       if (requests.length === 1) {
         return response(429, "Too Many Requests", { "retry-after": "1" });
       }
-      return requests.length === 2 ? response(404, "Not Found") : response(200, "ok");
+      return requests.length === 2
+        ? response(404, "Not Found")
+        : response(200, "ok");
     };
 
     try {

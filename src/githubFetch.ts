@@ -221,7 +221,10 @@ function buildRequestHeaders(
   extraHeaders: Record<string, string> | undefined,
   anonymous: boolean,
 ): Record<string, string> {
-  const merged: Record<string, string> = { ...(extraHeaders ?? {}), ...headers };
+  const merged: Record<string, string> = {
+    ...(extraHeaders ?? {}),
+    ...headers,
+  };
   if (anonymous) {
     for (const key of Object.keys(merged)) {
       if (key.toLowerCase() === "authorization") {

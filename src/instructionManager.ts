@@ -476,13 +476,15 @@ function getConfiguredRefCatalogFormat(
  * managed section, or form an HTML comment.
  */
 function sanitizeGeneratedText(value: string | undefined): string {
-  return (value || "")
-    // Vertical tab and form feed are line breaks for some renderers.
-    // eslint-disable-next-line no-control-regex
-    .replace(/[\r\n\u000b\u000c\u2028\u2029]/g, " ")
-    .replace(/<!--/g, "&lt;!--")
-    .replace(/-->/g, "--&gt;")
-    .trim();
+  return (
+    (value || "")
+      // Vertical tab and form feed are line breaks for some renderers.
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\r\n\u000b\u000c\u2028\u2029]/g, " ")
+      .replace(/<!--/g, "&lt;!--")
+      .replace(/-->/g, "--&gt;")
+      .trim()
+  );
 }
 
 export function escapeMarkdownTableText(value: string): string {
@@ -761,7 +763,10 @@ function toSyncResourceFromInstalledMeta(
     kind: "skill",
     name: meta.name,
     description: markIncompleteDescription(
-      buildDescription(meta.description, meta.customWhenToUse || meta.whenToUse),
+      buildDescription(
+        meta.description,
+        meta.customWhenToUse || meta.whenToUse,
+      ),
       meta.incomplete,
       SKILL_DESCRIPTION_LIMITS.MAX_TOTAL,
     ),

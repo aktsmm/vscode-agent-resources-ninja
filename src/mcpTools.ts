@@ -960,9 +960,7 @@ class SkillUninstallTool implements vscode.LanguageModelTool<{
         .slice(0, 20)
         .map((resource) => {
           const kind = resource.kind || "skill";
-          const marker = resource.incomplete
-            ? `${INCOMPLETE_ROW_MARKER} `
-            : "";
+          const marker = resource.incomplete ? `${INCOMPLETE_ROW_MARKER} ` : "";
           return `| ${getResourceKindLabel(kind, false)} | ${marker}${escapeMarkdownCell(resource.name)} | \`${escapeMarkdownCell(resource.relativePath)}\` |`;
         })
         .join("\n");
