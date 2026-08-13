@@ -132,6 +132,48 @@ test("workspace usage includes MCP config grouping and creation", () => {
   assert.match(readmeJa, /MCP config リソースを新規作成/);
 });
 
+test("both READMEs explain how an installed plugin becomes loadable", () => {
+  // Substring checks alone would pass on a settings table, so this pins the
+  // section itself and the safety warning that registration is what loads it.
+  for (const [name, text, heading, trustWarning] of [
+    [
+      "README.md",
+      readme,
+      "### Installing an Agent Plugin",
+      /implicitly trusted/,
+    ],
+    [
+      "README_ja.md",
+      readmeJa,
+      "### Agent Plugin のインストール",
+      /暗黙的に信頼/,
+    ],
+  ]) {
+    const sectionStart = text.indexOf(heading);
+    assert.ok(
+      sectionStart >= 0,
+      `${name} must keep the section explaining how a plugin becomes loadable`,
+    );
+    const section = text.slice(sectionStart, sectionStart + 3000);
+    for (const needle of [
+      "chat.pluginLocations",
+      "resourceNinja.registerPluginLocation",
+      "1.116",
+      "chat.plugins.enabled",
+    ]) {
+      assert.ok(
+        section.includes(needle),
+        `${name} section must explain ${needle}, not only list it in a table`,
+      );
+    }
+    assert.match(
+      section,
+      trustWarning,
+      `${name} must warn that a registered plugin's MCP servers are trusted without a separate prompt`,
+    );
+  }
+});
+
 test("remote layout docs include MCP config resources", () => {
   assert.match(
     readme,

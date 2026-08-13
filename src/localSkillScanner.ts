@@ -6,9 +6,11 @@ import * as vscode from "vscode";
 import { Skill } from "./skillIndex";
 import {
   detectResourceKindFromPath,
+  dedupePluginManifestsByRoot,
   getBuiltInResourceSourceLabel,
   getDefaultResourceCategories,
   getFallbackResourceName,
+  getPluginManifestScanGlobs,
   getResourceMetadataPath,
   isBuiltInResourcePath,
   isIncompleteSkillContent,
@@ -21,6 +23,7 @@ import {
   DEFAULT_WORKSPACE_HOOKS_DIRECTORY,
   DEFAULT_WORKSPACE_INSTRUCTIONS_DIRECTORY,
   DEFAULT_WORKSPACE_MCP_DIRECTORY,
+  DEFAULT_WORKSPACE_PLUGINS_DIRECTORY,
   DEFAULT_WORKSPACE_PROMPTS_DIRECTORY,
   DEFAULT_SKILLS_DIRECTORY,
   getConfiguredAdditionalSkillRoots,
@@ -87,7 +90,7 @@ function getWorkspaceRelativeOrAbsolutePath(
   return normalizeSeparators(fileUri.fsPath);
 }
 
-function getConfiguredWorkspaceResourceRoots(
+export function getConfiguredWorkspaceResourceRoots(
   workspaceUri: vscode.Uri,
   config: vscode.WorkspaceConfiguration,
 ): ConfiguredResourceRoot[] {
@@ -160,6 +163,18 @@ function getConfiguredWorkspaceResourceRoots(
       glob: "**/*.json",
       detectionBase: "mcp",
     },
+    // Only the manifest of each installed plugin. A plugin also ships skills, agents
+    // and an MCP config, and those keep their own kind, so a wider glob here would
+    // list every one of them twice.
+    ...getPluginManifestScanGlobs().map((glob) => ({
+      rootUri: resolveConfiguredUri(
+        workspaceUri,
+        DEFAULT_WORKSPACE_PLUGINS_DIRECTORY,
+        DEFAULT_WORKSPACE_PLUGINS_DIRECTORY,
+      ),
+      glob,
+      detectionBase: "plugins",
+    })),
   ];
 }
 
@@ -250,7 +265,7 @@ async function findConfiguredWorkspaceCandidates(
         WORKSPACE_SCAN_EXCLUDE_PATTERN,
         MAX_LOCAL_RESOURCE_FILES,
       );
-      return files.map((uri): ScanCandidate => {
+      const candidates = files.map((uri): ScanCandidate => {
         const relativeToRoot = normalizeSeparators(
           path.relative(root.rootUri.fsPath, uri.fsPath),
         );
@@ -260,10 +275,28 @@ async function findConfiguredWorkspaceCandidates(
           displayPath: getWorkspaceRelativeOrAbsolutePath(workspaceUri, uri),
         };
       });
+      return { detectionBase: root.detectionBase, candidates };
     }),
   );
 
-  return configuredRootFiles.flat();
+  // Only the plugins roots describe whole packages, and a package may ship several
+  // accepted manifests at once, so those roots collapse to one manifest per package
+  // here — after both globs have run, because the forms they match are split across
+  // them. A manifest-looking file under any other configured root is a resource of
+  // that root and is left alone.
+  const isPluginRoot = (detectionBase: string): boolean =>
+    detectionBase === "plugins";
+  return [
+    ...configuredRootFiles
+      .filter((group) => !isPluginRoot(group.detectionBase))
+      .flatMap((group) => group.candidates),
+    ...dedupePluginManifestsByRoot(
+      configuredRootFiles
+        .filter((group) => isPluginRoot(group.detectionBase))
+        .flatMap((group) => group.candidates),
+      (candidate) => candidate.uri.fsPath,
+    ),
+  ];
 }
 
 function shouldUseWorkspaceFallback(

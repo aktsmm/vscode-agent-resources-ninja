@@ -9,6 +9,7 @@ export const DEFAULT_WORKSPACE_INSTRUCTIONS_DIRECTORY = ".github/instructions";
 export const DEFAULT_WORKSPACE_PROMPTS_DIRECTORY = ".github/prompts";
 export const DEFAULT_WORKSPACE_HOOKS_DIRECTORY = ".github/hooks";
 export const DEFAULT_WORKSPACE_MCP_DIRECTORY = ".github/mcp";
+export const DEFAULT_WORKSPACE_PLUGINS_DIRECTORY = ".github/plugins";
 export const DEFAULT_GLOBAL_HOME_DIRECTORY = "~/.copilot";
 export const DEFAULT_GLOBAL_RESOURCE_HOME_PRESET = "copilot";
 export const DEFAULT_INSTRUCTION_FILE = "AGENTS.md";

@@ -174,6 +174,10 @@ function loadInstaller(writes, options = {}) {
       path.join(srcDir, "pathSafety.ts"),
       {},
     ),
+    "./pluginLocations": requireTypeScriptModule(
+      path.join(srcDir, "pluginLocations.ts"),
+      {},
+    ),
     "./githubFetch": githubFetch,
     "./skillIndex": {
       loadSkillIndex: async () => options.skillIndex || { sources: [] },
@@ -310,7 +314,7 @@ function listRecordedChildren(recorded, parentPath) {
   return [...children.entries()];
 }
 
-function loadWindowsInstaller(recorded) {
+function loadWindowsInstaller(recorded, options = {}) {
   const srcDir = path.join(__dirname, "..", "src");
   const realDestination = (uri) => path.win32.normalize(uri.fsPath);
   const resourceKindsModule = requireTypeScriptModule(
@@ -387,7 +391,10 @@ function loadWindowsInstaller(recorded) {
     },
     window: {
       showErrorMessage: async () => undefined,
-      showWarningMessage: async () => undefined,
+      showWarningMessage: async (...args) => {
+        (recorded.uiWarnings || []).push(args);
+        return undefined;
+      },
     },
     commands: { executeCommand: async () => undefined },
   };
@@ -396,6 +403,10 @@ function loadWindowsInstaller(recorded) {
     vscode: vscodeStub,
     "./pathSafety": requireTypeScriptModule(
       path.join(srcDir, "pathSafety.ts"),
+      {},
+    ),
+    "./pluginLocations": requireTypeScriptModule(
+      path.join(srcDir, "pluginLocations.ts"),
       {},
     ),
     "./githubFetch": githubFetch,
@@ -414,7 +425,7 @@ function loadWindowsInstaller(recorded) {
         ],
       }),
       getSourceBranch: async () => "main",
-      getResourceKind: () => "skill",
+      getResourceKind: () => options.resourceKind || "skill",
     },
     "./i18n": { isJapanese: () => false, messages: {} },
     "./githubAuth": {
@@ -870,7 +881,12 @@ async function run() {
         {},
       );
 
-      assert.deepStrictEqual(result, {});
+      assert.deepStrictEqual(Object.keys(result), ["destinationUri"]);
+      assert.strictEqual(
+        result.destinationUri.fsPath,
+        "/tmp/resource/private-agent.agent.md",
+        "the install must report the file it actually wrote",
+      );
       assert.strictEqual(requested.length, 2);
       assert.strictEqual(requested[0].headers.Authorization, undefined);
       assert.strictEqual(
@@ -1276,7 +1292,12 @@ async function run() {
         {},
       );
 
-      assert.deepStrictEqual(result, {});
+      assert.deepStrictEqual(Object.keys(result), ["destinationUri"]);
+      assert.strictEqual(
+        result.destinationUri.fsPath,
+        "/tmp/.github/skills/private-demo",
+        "the install must report the directory it actually wrote to",
+      );
       const metaPath = [...writes.keys()].find((key) =>
         key.endsWith(".skill-meta.json"),
       );
@@ -1493,8 +1514,8 @@ async function run() {
       );
 
       assert.deepStrictEqual(
-        result,
-        {},
+        Object.keys(result),
+        ["destinationUri"],
         "a sanitized sidecar must not make the install incomplete",
       );
 
@@ -1666,8 +1687,8 @@ async function run() {
       );
 
       assert.deepStrictEqual(
-        result,
-        {},
+        Object.keys(result),
+        ["destinationUri"],
         "skipping only our own sidecars must not make the install incomplete",
       );
       assert.strictEqual(
@@ -1688,6 +1709,110 @@ async function run() {
       );
       passed++;
     }
+
+    // --- Test 25: プラグインの部分失敗は result.errors で呼び出し元に伝わる ---
+    {
+      const listing = [
+        { name: "SKILL.md", type: "file", download_url: "https://raw/skill" },
+        {
+          name: "..\\..\\..\\evil.txt",
+          type: "file",
+          download_url: "https://raw/evil",
+        },
+      ];
+      global.fetch = async (url) => {
+        if (url.startsWith("https://api.github.com/")) {
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            json: async () => listing,
+            text: async () => "",
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          text: async () => realSkillMd,
+        };
+      };
+
+      const pluginSkill = {
+        name: "partial-plugin",
+        kind: "plugin",
+        source: "traversal-source",
+        path: "plugins/partial-plugin",
+        categories: [],
+        description: "Partial plugin",
+      };
+
+      const partial = {
+        writes: new Map(),
+        directories: [],
+        deleted: [],
+        warnings: [],
+        uiWarnings: [],
+      };
+      const partialResult = await loadWindowsInstaller(partial, {
+        resourceKind: "plugin",
+      }).installSkill(pluginSkill, makeWindowsUri("/C:/ws"), {});
+
+      assert.deepStrictEqual(
+        Object.keys(partialResult),
+        ["destinationUri", "errors"],
+        "a plugin install that lost a file must say so on its result",
+      );
+      assert.strictEqual(
+        partialResult.errors.length,
+        1,
+        "the rejected entry must be the only reported error",
+      );
+      assert.ok(
+        partial.uiWarnings.some((args) =>
+          /could not be downloaded/.test(args[0]),
+        ),
+        "the existing warning must still reach the user",
+      );
+
+      // The same install with nothing rejected must stay indistinguishable from
+      // any other clean install, so callers keep registering it.
+      const clean = {
+        writes: new Map(),
+        directories: [],
+        deleted: [],
+        warnings: [],
+        uiWarnings: [],
+      };
+      global.fetch = async (url) => {
+        if (url.startsWith("https://api.github.com/")) {
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            json: async () => [listing[0]],
+            text: async () => "",
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          text: async () => realSkillMd,
+        };
+      };
+      const cleanResult = await loadWindowsInstaller(clean, {
+        resourceKind: "plugin",
+      }).installSkill(pluginSkill, makeWindowsUri("/C:/ws"), {});
+
+      assert.deepStrictEqual(
+        Object.keys(cleanResult),
+        ["destinationUri"],
+        "a clean plugin install must not carry an errors field",
+      );
+      assert.deepStrictEqual(clean.uiWarnings, []);
+      passed++;
+    }
   } finally {
     if (originalFetch) {
       global.fetch = originalFetch;
@@ -1697,7 +1822,7 @@ async function run() {
   }
 
   console.log(
-    `PASS: test-skill-installer-remote-fallback.js (${passed}/24 cases)`,
+    `PASS: test-skill-installer-remote-fallback.js (${passed}/25 cases)`,
   );
 }
 

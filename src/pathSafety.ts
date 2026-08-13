@@ -87,6 +87,38 @@ export function isContainedPath(
 }
 
 /**
+ * Containment is not enough for a recursive delete: `isContainedPath` accepts a
+ * candidate equal to the root, which would wipe the whole allowed root instead
+ * of one resource inside it.
+ */
+export function isDeletableWithin(
+  rootFsPath: string,
+  candidateFsPath: string,
+): boolean {
+  return isDeletableWithinOnPlatform(
+    rootFsPath,
+    candidateFsPath,
+    process.platform,
+  );
+}
+
+export function isDeletableWithinOnPlatform(
+  rootFsPath: string,
+  candidateFsPath: string,
+  platform: string,
+): boolean {
+  if (!isContainedPathOnPlatform(rootFsPath, candidateFsPath, platform)) {
+    return false;
+  }
+  const fold = shouldFoldPathCase(platform);
+  const root = path.resolve(rootFsPath);
+  const candidate = path.resolve(candidateFsPath);
+  return fold
+    ? root.toLowerCase() !== candidate.toLowerCase()
+    : root !== candidate;
+}
+
+/**
  * `isContainedPath` with the platform supplied, so the case-sensitive branch is
  * reachable from a test without reassigning `process.platform`.
  */

@@ -166,6 +166,21 @@ const jaMessages = {
   installResourcesHint: "「{0}」でインストールしてください",
   instructionFileUpdatedOnSettingChange:
     "✅ 設定変更によりリソース出力を更新しました",
+  pluginLocationRegisterPrompt:
+    'plugin "{0}" のフォルダーのパスを、ユーザー設定 (settings.json) の chat.pluginLocations に追加してよいですか？登録しないと VS Code はこの plugin を読み込みません。',
+  pluginLocationRegisterPromptMultiple:
+    "インストールした {0} 個の plugin フォルダーのパスを、ユーザー設定 (settings.json) の chat.pluginLocations に追加してよいですか？登録しないと VS Code はこれらの plugin を読み込みません。",
+  pluginLocationRegisterAction: "chat.pluginLocations に登録",
+  pluginLocationSkipAction: "登録しない",
+  pluginLocationRegistered:
+    "✅ {0} 個の plugin フォルダーのパスをユーザー設定の chat.pluginLocations に追加しました",
+  pluginLocationOpenSettingAction: "chat.pluginLocations を開く",
+  pluginLocationRegisterFailed:
+    "chat.pluginLocations の更新に失敗しました: {0}",
+  pluginLocationUnsupportedVersion:
+    "plugin フォルダーを登録できませんでした: この VS Code ({0}) には chat.pluginLocations 設定がありません。VS Code 1.116 以降へ更新するまで、この plugin は読み込まれません。",
+  pluginsDisabledNote:
+    "chat.plugins.enabled が false のため、有効化するまで plugin は読み込まれません。",
 } as const;
 
 type MessageKey = keyof typeof jaMessages;
@@ -332,6 +347,20 @@ const enMessages: MessageDictionary = {
   installResourcesHint: "Use '{0}' to install resources",
   instructionFileUpdatedOnSettingChange:
     "✅ Resource output updated due to setting change",
+  pluginLocationRegisterPrompt:
+    'Add the folder path of plugin "{0}" to chat.pluginLocations in your user settings (settings.json)? VS Code does not load the plugin until it is registered.',
+  pluginLocationRegisterPromptMultiple:
+    "Add the folder paths of {0} installed plugins to chat.pluginLocations in your user settings (settings.json)? VS Code does not load these plugins until they are registered.",
+  pluginLocationRegisterAction: "Register in chat.pluginLocations",
+  pluginLocationSkipAction: "Skip",
+  pluginLocationRegistered:
+    "✅ Added {0} plugin folder paths to chat.pluginLocations in your user settings",
+  pluginLocationOpenSettingAction: "Open chat.pluginLocations",
+  pluginLocationRegisterFailed: "Failed to update chat.pluginLocations: {0}",
+  pluginLocationUnsupportedVersion:
+    "Could not register the plugin folder: this VS Code ({0}) has no chat.pluginLocations setting. The plugin will not load until you update to VS Code 1.116 or newer.",
+  pluginsDisabledNote:
+    "chat.plugins.enabled is false, so the plugin will not load until it is enabled.",
 };
 
 /**
@@ -462,8 +491,7 @@ export const messages = {
   githubAuthRequiredReason: () => localize("githubAuthRequiredReason"),
   actionShowDetails: () => localize("actionShowDetails"),
   actionConfigureGitHubAuth: () => localize("actionConfigureGitHubAuth"),
-  actionClearStoredGitHubToken: () =>
-    localize("actionClearStoredGitHubToken"),
+  actionClearStoredGitHubToken: () => localize("actionClearStoredGitHubToken"),
   updating: (name: string) => localize("updating", name),
   updateSourceSelectRequired: () => localize("updateSourceSelectRequired"),
   sourceIdNotFound: () => localize("sourceIdNotFound"),
@@ -603,6 +631,23 @@ export const messages = {
   // 設定変更時の自動更新
   instructionFileUpdatedOnSettingChange: () =>
     localize("instructionFileUpdatedOnSettingChange"),
+
+  // plugin の chat.pluginLocations 登録
+  pluginLocationRegisterPrompt: (name: string) =>
+    localize("pluginLocationRegisterPrompt", name),
+  pluginLocationRegisterPromptMultiple: (count: number) =>
+    localize("pluginLocationRegisterPromptMultiple", count),
+  pluginLocationRegisterAction: () => localize("pluginLocationRegisterAction"),
+  pluginLocationSkipAction: () => localize("pluginLocationSkipAction"),
+  pluginLocationRegistered: (count: number) =>
+    localize("pluginLocationRegistered", count),
+  pluginLocationOpenSettingAction: () =>
+    localize("pluginLocationOpenSettingAction"),
+  pluginLocationRegisterFailed: (error: string) =>
+    localize("pluginLocationRegisterFailed", error),
+  pluginLocationUnsupportedVersion: (version: string) =>
+    localize("pluginLocationUnsupportedVersion", version),
+  pluginsDisabledNote: () => localize("pluginsDisabledNote"),
 };
 
 export default messages;

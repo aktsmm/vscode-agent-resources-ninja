@@ -23,8 +23,19 @@ function requireTypeScriptModule(filePath) {
   return loadedModule.exports;
 }
 
-const { isHookConfigFilePath } = requireTypeScriptModule(
-  path.join(__dirname, "..", "src", "resourceKinds.ts"),
+const { isHookConfigFilePath, getPluginRootFsPathFromManifestPath } =
+  requireTypeScriptModule(
+    path.join(__dirname, "..", "src", "resourceKinds.ts"),
+  );
+
+const extensionSource = fs.readFileSync(
+  path.join(__dirname, "..", "src", "extension.ts"),
+  "utf8",
+);
+
+const skillInstallerSource = fs.readFileSync(
+  path.join(__dirname, "..", "src", "skillInstaller.ts"),
+  "utf8",
 );
 
 function sanitizeResourceName(name) {
@@ -670,6 +681,314 @@ test("hook config detection excludes resource metadata sidecars", () => {
   assert.strictEqual(
     isHookConfigFilePath("hooks/pre-review.resource-ninja.json"),
     false,
+  );
+});
+
+// A plugin is scanned by its manifest, so a delete that stops at the manifest would
+// leave the copied package behind as an orphaned directory.
+test("plugin manifests resolve to the plugin root directory", () => {
+  const pluginRoot = "/repo/.github/plugins/demo";
+  for (const manifest of [
+    "plugin.json",
+    ".claude-plugin/plugin.json",
+    ".codex-plugin/plugin.json",
+    ".cursor-plugin/plugin.json",
+    ".plugin/plugin.json",
+    ".claude-plugin/marketplace.json",
+    "gemini-extension.json",
+    "apm.yml",
+    "apm.yaml",
+  ]) {
+    assert.strictEqual(
+      getPluginRootFsPathFromManifestPath(`${pluginRoot}/${manifest}`),
+      pluginRoot,
+      `expected ${manifest} to resolve to ${pluginRoot}`,
+    );
+  }
+});
+
+test("plugin root resolution keeps Windows separators and the drive prefix", () => {
+  assert.strictEqual(
+    getPluginRootFsPathFromManifestPath(
+      "D:\\repo\\.github\\plugins\\demo\\plugin.json",
+    ),
+    "D:\\repo\\.github\\plugins\\demo",
+  );
+  assert.strictEqual(
+    getPluginRootFsPathFromManifestPath(
+      "D:\\repo\\.github\\plugins\\demo\\.claude-plugin\\plugin.json",
+    ),
+    "D:\\repo\\.github\\plugins\\demo",
+  );
+});
+
+test("non-manifest paths are not treated as plugin manifests", () => {
+  for (const notAManifest of [
+    "/repo/.github/plugins/demo/README.md",
+    "/repo/.github/plugins/demo/agents/planner.agent.md",
+    "/repo/.github/skills/demo/SKILL.md",
+    "/repo/.github/plugins/demo/marketplace.json",
+    "/repo/.github/plugins/demo/plugin.json.bak",
+    // Nothing above the manifest means there is no plugin root to remove.
+    "/plugin.json",
+    "plugin.json",
+    // `D:` is drive-RELATIVE on Windows: path.resolve would expand it to that
+    // drive's current directory, so a recursive delete must never receive it.
+    "D:\\plugin.json",
+    "D:/plugin.json",
+    "D:\\.claude-plugin\\plugin.json",
+    // A filesystem root or a bare UNC share is never one plugin's folder.
+    "//server/share/plugin.json",
+    "\\\\server\\share\\plugin.json",
+    // A relative path resolves against the process working directory, not the
+    // install location, so it must never reach a recursive delete.
+    "demo/plugin.json",
+    "./demo/plugin.json",
+  ]) {
+    assert.strictEqual(
+      getPluginRootFsPathFromManifestPath(notAManifest),
+      undefined,
+      `expected ${notAManifest} to resolve to undefined`,
+    );
+  }
+});
+
+test("deleteInstalledResourceByPath removes the plugin root recursively", () => {
+  const startIndex = extensionSource.indexOf(
+    "async function deleteInstalledResourceByPath(",
+  );
+  assert.ok(startIndex !== -1, "deleteInstalledResourceByPath not found");
+  const body = extensionSource.slice(startIndex, startIndex + 2000);
+
+  const resolutionIndex = body.indexOf("getPluginRootFsPathFromManifestPath(");
+  // Containment alone would accept the allowed root itself as the target, which
+  // a recursive delete would then wipe, so the stricter check is pinned here.
+  const guardIndex = body.indexOf("isDeletableWithin(allowedRootFsPath");
+  const deleteIndex = body.indexOf("vscode.workspace.fs.delete(targetUri");
+  assert.ok(resolutionIndex !== -1, "plugin root is never resolved");
+  assert.ok(
+    guardIndex !== -1,
+    "the delete must refuse a target equal to the allowed root, not only one outside it",
+  );
+  assert.ok(deleteIndex !== -1, "delete call is missing");
+
+  // Deleting a directory is more dangerous than deleting a file, so the guard has
+  // to see the resolved root rather than the manifest it came from.
+  assert.ok(
+    resolutionIndex < guardIndex && guardIndex < deleteIndex,
+    "containment check must run after root resolution and before the delete",
+  );
+  assert.ok(
+    /recursive:\s*isDirectoryTarget/.test(body),
+    "plugin delete must be recursive",
+  );
+  assert.ok(
+    /isDirectoryTarget\s*=[^;]*pluginRootFsPath !== undefined/.test(body),
+    "a resolved plugin root must count as a directory target",
+  );
+  assert.ok(
+    /targetUri\s*=\s*vscode\.Uri\.file\(\s*pluginRootFsPath \?\?/.test(body),
+    "the delete target must be the resolved plugin root",
+  );
+  assert.ok(
+    /if \(!isDirectoryTarget\) \{/.test(body),
+    "sidecar delete must be skipped once the whole directory is removed",
+  );
+});
+
+test("a plugin reinstall unregisters where it was and registers where it lands", () => {
+  // A user-resource directory is an arbitrary configured path, but a plugin's
+  // install target is fixed to the Global Home `plugins` directory for both
+  // globalHome and userData, so a reinstall can move the folder.
+  const pluginBranch = skillInstallerSource.slice(
+    skillInstallerSource.indexOf('if (kind === "plugin") {'),
+    skillInstallerSource.indexOf('if (kind === "cursor-rule") {'),
+  );
+  assert.ok(pluginBranch, "plugin branch of getResourceTargetUri not found");
+  assert.match(
+    pluginBranch,
+    /targetScope === "globalHome" \|\| targetScope === "userData"[\s\S]*?joinPath\(root, "plugins", pluginFolderName\)/,
+    "a userData plugin must install into the same fixed Global Home plugins directory as globalHome",
+  );
+
+  // The removal keys off the folder it actually deleted, which is the old
+  // location, so the stale entry goes even when the reinstall lands elsewhere.
+  const deleteStart = extensionSource.indexOf(
+    "async function deleteInstalledResourceByPath(",
+  );
+  const deleteBody = extensionSource.slice(
+    deleteStart,
+    extensionSource.indexOf(
+      "async function offerPluginLocationRegistration(",
+      deleteStart,
+    ),
+  );
+  assert.match(
+    deleteBody,
+    /unregisterPluginLocations\(\s*\[targetUri\.fsPath\],\s*path\.basename\(pluginRootFsPath\),?\s*\)/,
+    "the shared delete helper must unregister the folder it removed",
+  );
+
+  const entryPoints = [
+    [
+      "reinstallUserResourceCmd",
+      "const reinstallUserResourceCmd = vscode.commands.registerCommand(",
+      "const reinstallUserResourceGroupCmd = vscode.commands.registerCommand(",
+      "const installOptions = { targetScope, suppressRecoveryPrompt };",
+    ],
+    [
+      "reinstallCmd",
+      "const reinstallCmd = vscode.commands.registerCommand(",
+      "const reinstallResourceGroupCmd = vscode.commands.registerCommand(",
+      "const installOptions = { suppressRecoveryPrompt };",
+    ],
+  ];
+
+  for (const [
+    label,
+    startMarker,
+    endMarker,
+    optionsDeclaration,
+  ] of entryPoints) {
+    const start = extensionSource.indexOf(startMarker);
+    assert.ok(start !== -1, `${label} not found`);
+    const body = extensionSource.slice(
+      start,
+      extensionSource.indexOf(endMarker, start),
+    );
+    assert.ok(
+      body.includes(optionsDeclaration),
+      `${label} must pin one install options object`,
+    );
+    // The registration target is whatever the install reported writing to. A
+    // destination computed before the install goes stale the moment a setting
+    // changes while the progress notification is up, and would register a folder
+    // that was never created.
+    assert.match(
+      body,
+      /installResult = await installSkill\(\s*fullSkill,\s*wsFolder\.uri,\s*context,\s*installOptions,?\s*\)/,
+      `${label} must capture what the install reported`,
+    );
+    assert.match(
+      body,
+      /installResult &&\s*installWasClean\(installResult\)\s*\)\s*\{\s*await offerPluginLocationRegistration\(\[installResult\.destinationUri\]\)/,
+      `${label} must re-register the destination the install reported, through the normal install path`,
+    );
+    assert.ok(
+      !/getResourceTargetUri\(/.test(body),
+      `${label} must not register a destination it computed itself`,
+    );
+    // A thrown install leaves the capture unset, so the registration must be
+    // reachable only once there is a result.
+    assert.match(
+      body,
+      /let installResult:[^;]*\|\s*undefined;/,
+      `${label} must leave the capture unset until the install succeeds`,
+    );
+    // An install that could not download every file leaves a partial folder;
+    // it must not be registered, and the caller must report it as a failure so
+    // the group reinstall does not count it as a success.
+    assert.match(
+      body,
+      /if \(!installWasClean\(installResult\)\) \{[\s\S]{0,400}?return false;/,
+      `${label} must report an install that was not clean as a failure`,
+    );
+  }
+});
+
+// The batch install runs many installs under one progress notification, so the
+// configuration it reads can change between iterations.
+test("the batch install registers what each install reported, and only when clean", () => {
+  const start = extensionSource.indexOf(
+    "const installBundleCmd = vscode.commands.registerCommand(",
+  );
+  assert.ok(start !== -1, "installBundleCmd not found");
+  const body = extensionSource.slice(
+    start,
+    extensionSource.indexOf(
+      "const installPluginResourcesCmd = vscode.commands.registerCommand(",
+      start,
+    ),
+  );
+
+  assert.match(
+    body,
+    /const installResult = await installSkill\(/,
+    "the batch must capture what each install reported",
+  );
+  assert.match(
+    body,
+    /if \(installWasClean\(installResult\)\) \{\s*installedPluginUris\.push\(installResult\.destinationUri\);/,
+    "the batch must register the destination the install reported",
+  );
+  assert.ok(
+    !/getResourceTargetUri\(/.test(body),
+    "the batch must not recompute a destination after the install await",
+  );
+  // The per-install warning is suppressed in a batch, so an unclean install has
+  // to reach the user through the batch failure summary instead.
+  assert.match(
+    body,
+    /\} else \{\s*failed\+\+;\s*failedResources\.push\(skill\.name\);\s*\}/,
+    "an install that was not clean must be counted with the batch failures",
+  );
+});
+
+// A single install shows the install's own warning, but the partial folder still
+// must not become an active plugin location.
+test("the single install registers only what a clean install reported", () => {
+  const start = extensionSource.indexOf("async function installResource(");
+  assert.ok(start !== -1, "installResource not found");
+  const body = extensionSource.slice(
+    start,
+    extensionSource.indexOf(
+      "const searchCmd = vscode.commands.registerCommand(",
+      start,
+    ),
+  );
+
+  assert.match(
+    body,
+    /installResult &&\s*installWasClean\(installResult\)\s*\)\s*\{\s*await offerPluginLocationRegistration\(\[installResult\.destinationUri\]\)/,
+    "the single install must register the reported destination only when clean",
+  );
+});
+
+// Whatever a caller checks, the fact an install was not clean has to come from
+// the install result rather than a second look at the filesystem or settings.
+test("every plugin registration site is gated on a clean install", () => {
+  assert.match(
+    extensionSource,
+    /function installWasClean\(\s*installResult: InstallSkillResult \| undefined,\s*\): boolean \{\s*return !!installResult && !installResult\.errors\?\.length;/,
+    "the clean-install check must read the errors the install reported",
+  );
+
+  const registrationSites = extensionSource.match(
+    /offerPluginLocationRegistration\(\[[^\]]*\]\)/g,
+  );
+  assert.ok(
+    registrationSites,
+    "no single-destination registration sites found",
+  );
+  for (const site of registrationSites) {
+    assert.strictEqual(
+      site,
+      "offerPluginLocationRegistration([installResult.destinationUri])",
+      "a single-destination registration must come from the install result",
+    );
+  }
+
+  // The batch prompt takes the collected list, which is only appended to for a
+  // clean install.
+  assert.match(
+    extensionSource,
+    /await offerPluginLocationRegistration\(installedPluginUris\);/,
+    "the batch must keep its single collected prompt",
+  );
+  assert.strictEqual(
+    (extensionSource.match(/installedPluginUris\.push\(/g) || []).length,
+    1,
+    "the collected batch list must have exactly one append site",
   );
 });
 

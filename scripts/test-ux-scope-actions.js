@@ -595,8 +595,9 @@ test("hook plugin cleanup removes folders but keeps JSON configs file-scoped", (
   );
   assert.match(
     extensionSource,
-    /recursive: kind === "skill" \|\| isDirectoryBackedHook/,
+    /isDirectoryTarget\s*=[\s\S]{0,80}isDirectoryBackedHook/,
   );
+  assert.match(extensionSource, /recursive: isDirectoryTarget/);
 });
 
 test("install set success reports skipped resources", () => {

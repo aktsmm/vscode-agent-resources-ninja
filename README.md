@@ -327,6 +327,37 @@ View toolbars and empty-state links keep their current-scope behavior: the works
 
 The install picker shows a destination preview for the selected resource kind before writing files. Built-in VS Code / Copilot resources are scan-only and are never used as install targets.
 
+A `plugin` resource is installed as a whole package: Workspace puts it in `.github/plugins/<name>/`, User Profile and Global Resource Home put it in `<Global Resource Home>/plugins/<name>/`, and Custom puts it in `<chosen folder>/<name>/`.
+
+### Installing an Agent Plugin
+
+VS Code loads a local Agent Plugin only from a folder listed in its `chat.pluginLocations` setting, so copying the files is not enough on its own. After a plugin finishes installing, this extension offers to add that folder for you.
+
+| Step | What happens                                                                                                          |
+| ---- | --------------------------------------------------------------------------------------------------------------------- |
+| 1    | The plugin package is copied to the install target you picked.                                                        |
+| 2    | You are asked whether to add the folder to `chat.pluginLocations`. Installing several plugins at once asks only once. |
+| 3    | The entry is written to your **user** settings, because the key is a machine-specific absolute path.                  |
+| 4    | Deleting the plugin from this extension removes the entry again.                                                      |
+
+Control it with `resourceNinja.registerPluginLocation`: `prompt` asks each time (default), `always` registers silently, and `never` turns the behavior off.
+
+Two things are outside this extension's control:
+
+- **VS Code 1.116 or newer is required.** Agent Plugins do not exist in earlier builds. Unless you set `never`, the offer is skipped and you are told why.
+- **`chat.plugins.enabled` must be `true`.** This extension never changes it. When it is off, the notification you see says so: the prompt, or the confirmation alone when the setting is `always`. If every folder is already registered, nothing is shown at all.
+
+> [!IMPORTANT]
+> Registering a folder is what makes VS Code load the plugin. Once the folder is listed and `chat.plugins.enabled` is on, VS Code loads the plugin's skills and starts the MCP servers declared in it, and VS Code treats a plugin's MCP servers as implicitly trusted rather than prompting for each one. Review a plugin's contents before you register it, especially one from a community source.
+
+To review or undo, open `chat.pluginLocations` in your user settings; the confirmation notification has a button that takes you straight there. Removing an entry there stops VS Code loading that plugin without deleting any files.
+
+A few edges worth knowing:
+
+- Re-installing a plugin whose folder is already registered and enabled does not ask again.
+- Moving or deleting the folder outside this extension leaves the entry behind. Nothing repairs it automatically, so remove it yourself.
+- This setting is VS Code only. Plugins installed with the GitHub Copilot CLI live elsewhere and are managed with `copilot plugin`.
+
 ### Search Tips 💡
 
 | Example            | Effect                                 |
@@ -418,7 +449,7 @@ Settings are ordered by the workflow users usually follow:
 
 | Group                   | Settings                                                                                                                                                                                                                                                                                                   | Purpose                                                                   |
 | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Install behavior        | `defaultInstallTarget`, `singleClickInstall`                                                                                                                                                                                                                                                               | Decide where click installs go                                            |
+| Install behavior        | `defaultInstallTarget`, `singleClickInstall`, `registerPluginLocation`                                                                                                                                                                                                                                     | Decide where click installs go                                            |
 | Workspace roots         | `resourcesDirectory`, `additionalSkillRoots`, `workspace*Directory`                                                                                                                                                                                                                                        | Project-specific resources tracked with the workspace                     |
 | User roots              | `user*Directory`                                                                                                                                                                                                                                                                                           | VS Code User Profile agents, prompts, and instructions                    |
 | Global Resource Home    | `globalResourceHomePreset`, `globalHomeDirectory`                                                                                                                                                                                                                                                          | Shared resources for Copilot CLI, Claude-compatible tools, or open agents |
@@ -430,43 +461,44 @@ Settings are ordered by the workflow users usually follow:
 
 Use `additionalSkillRoots` when workspace skills are stored outside the primary Workspace Skill Directory, for example `copilot-skills/skills` or `copilot-skills/m-skills`. Entries are root directories, not glob patterns. They affect discovery and generated instruction output only; installs still go to `resourcesDirectory`. For coexistence with the skill-only sibling extension, `skillNinja.additionalSkillRoots` is honored as a compatibility fallback.
 
-| Order | Setting                                                         | Default                | Description                                                                                     |
-| :---: | --------------------------------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------- |
-|   0   | `resourceNinja.defaultInstallTarget`                            | `workspace`            | Default target for click/double-click installs                                                  |
-|   1   | `resourceNinja.singleClickInstall`                              | `false`                | Install resources with single click                                                             |
-|   2   | `resourceNinja.resourcesDirectory`                              | `.github/skills`       | Workspace skill directory                                                                       |
-|   3   | `resourceNinja.additionalSkillRoots`                            | `[]`                   | Extra workspace skill discovery roots                                                           |
-|   4   | `resourceNinja.workspaceAgentsDirectory`                        | `.github/agents`       | Workspace agent directory                                                                       |
-|   5   | `resourceNinja.workspaceInstructionsDirectory`                  | `.github/instructions` | Workspace instruction directory                                                                 |
-|   6   | `resourceNinja.workspacePromptsDirectory`                       | `.github/prompts`      | Workspace prompt directory                                                                      |
-|   7   | `resourceNinja.workspaceHooksDirectory`                         | `.github/hooks`        | Workspace hook directory                                                                        |
-|   8   | `resourceNinja.workspaceMcpDirectory`                           | `.github/mcp`          | Safe workspace MCP config staging directory before optional `.vscode/mcp.json` merge            |
-|   9   | `resourceNinja.userAgentsDirectory`                             | `""`                   | Optional User Profile agent override; empty stores `.agent.md` in VS Code User `prompts`        |
-|  10   | `resourceNinja.userInstructionsDirectory`                       | `""`                   | Optional User Profile instruction directory override                                            |
-|  11   | `resourceNinja.userPromptsDirectory`                            | `""`                   | Optional User Profile prompt directory override                                                 |
-|  12   | `resourceNinja.globalResourceHomePreset`                        | `copilot`              | Known Global Resource Home preset (`~/.copilot`, `~/.claude`, `~/.agents`)                      |
-|  13   | `resourceNinja.globalHomeDirectory`                             | `""`                   | Optional custom Global Resource Home override                                                   |
-|  14   | `resourceNinja.autoUpdateInstruction`                           | `true`                 | Auto-update the generated instruction block after resource changes                              |
-|  15   | `resourceNinja.instructionFile`                                 | `AGENTS.md`            | Generated instruction block sync target _(requires Auto Update)_                                |
-|  16   | `resourceNinja.customInstructionPath`                           | `""`                   | Custom generated instruction block path _(only when 'custom' selected)_                         |
-|  17   | `resourceNinja.includeLocalResources`                           | `false`                | Include workspace-wide fallback `SKILL.md` files in the generated instruction block             |
-|  18   | `resourceNinja.autoUpdateResourcesOnUpgrade`                    | `prompt`               | Update installed remote skills on extension upgrade                                             |
-|  19   | `resourceNinja.coexistenceMode`                                 | `auto`                 | Shared marker ownership mode (`auto` / `independent`)                                           |
-|  20   | `resourceNinja.kindsExcluded`                                   | `[]`                   | Legacy standalone compatibility exclusions for shared instruction blocks                        |
-|  21   | `resourceNinja.useSharedSourcesManifest`                        | `false`                | Enable shared `sources.json` SSOT for coexistence with the skill-only sibling extension         |
-|  22   | `resourceNinja.useSharedResourceIndex`                          | `false`                | Enable shared `index.json` SSOT for coexistence with the skill-only sibling extension           |
-|  23   | `resourceNinja.staleSourceIndexUpdateMode`                      | `prompt`               | Startup handling for source indexes stale for more than 30 days (`always` / `prompt` / `never`) |
-|  24   | `resourceNinja.useRefOutput`                                    | `true`                 | Keep managed output lightweight by linking to per-kind catalogs                                 |
-|  25   | `resourceNinja.outputFormat`                                    | `full`                 | Inline output format used when Ref output is off (`full` / `compact` / `legacy`)                |
-|  26   | `resourceNinja.refCatalogFormat`                                | `full`                 | README index detail format used when Ref output is on (`full` / `compact` / `legacy`)           |
-|  27   | `resourceNinja.showBuiltInResources`                            | `true`                 | Show built-in resources in User / Global Resource Home                                          |
-|  28   | `resourceNinja.remoteResourceViewMode`                          | `repositoryFirst`      | Remote Resources layout (repository-first / resource-type-first)                                |
-|  29   | `resourceNinja.language`                                        | `auto`                 | UI language (auto / en / ja)                                                                    |
-|  30   | `resourceNinja.githubToken`                                     | `""`                   | GitHub Token (API rate limits and private source repositories)                                  |
-|  31   | `resourceNinja.instructionBlock.includeAgents`                  | `false`                | Include `agent` resources in workspace instruction blocks                                       |
-|  32   | `resourceNinja.instructionBlock.includeInstructions`            | `false`                | Include `instruction` resources in workspace instruction blocks                                 |
-|  33   | `resourceNinja.instructionBlock.globalHome.includeAgents`       | `inherit`              | Override Global Resource Home agent listing policy (`inherit` / `on` / `off`)                   |
-|  34   | `resourceNinja.instructionBlock.globalHome.includeInstructions` | `inherit`              | Override Global Resource Home instruction listing policy (`inherit` / `on` / `off`)             |
+| Order | Setting                                                         | Default                | Description                                                                                                  |
+| :---: | --------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------ |
+|   0   | `resourceNinja.defaultInstallTarget`                            | `workspace`            | Default target for click/double-click installs                                                               |
+|   1   | `resourceNinja.singleClickInstall`                              | `false`                | Install resources with single click                                                                          |
+|   2   | `resourceNinja.resourcesDirectory`                              | `.github/skills`       | Workspace skill directory                                                                                    |
+|   3   | `resourceNinja.additionalSkillRoots`                            | `[]`                   | Extra workspace skill discovery roots                                                                        |
+|   4   | `resourceNinja.workspaceAgentsDirectory`                        | `.github/agents`       | Workspace agent directory                                                                                    |
+|   5   | `resourceNinja.workspaceInstructionsDirectory`                  | `.github/instructions` | Workspace instruction directory                                                                              |
+|   6   | `resourceNinja.workspacePromptsDirectory`                       | `.github/prompts`      | Workspace prompt directory                                                                                   |
+|   7   | `resourceNinja.workspaceHooksDirectory`                         | `.github/hooks`        | Workspace hook directory                                                                                     |
+|   8   | `resourceNinja.workspaceMcpDirectory`                           | `.github/mcp`          | Safe workspace MCP config staging directory before optional `.vscode/mcp.json` merge                         |
+|   9   | `resourceNinja.userAgentsDirectory`                             | `""`                   | Optional User Profile agent override; empty stores `.agent.md` in VS Code User `prompts`                     |
+|  10   | `resourceNinja.userInstructionsDirectory`                       | `""`                   | Optional User Profile instruction directory override                                                         |
+|  11   | `resourceNinja.userPromptsDirectory`                            | `""`                   | Optional User Profile prompt directory override                                                              |
+|  12   | `resourceNinja.globalResourceHomePreset`                        | `copilot`              | Known Global Resource Home preset (`~/.copilot`, `~/.claude`, `~/.agents`)                                   |
+|  13   | `resourceNinja.globalHomeDirectory`                             | `""`                   | Optional custom Global Resource Home override                                                                |
+|  14   | `resourceNinja.autoUpdateInstruction`                           | `true`                 | Auto-update the generated instruction block after resource changes                                           |
+|  15   | `resourceNinja.instructionFile`                                 | `AGENTS.md`            | Generated instruction block sync target _(requires Auto Update)_                                             |
+|  16   | `resourceNinja.customInstructionPath`                           | `""`                   | Custom generated instruction block path _(only when 'custom' selected)_                                      |
+|  17   | `resourceNinja.includeLocalResources`                           | `false`                | Include workspace-wide fallback `SKILL.md` files in the generated instruction block                          |
+|  18   | `resourceNinja.autoUpdateResourcesOnUpgrade`                    | `prompt`               | Update installed remote skills on extension upgrade                                                          |
+|  19   | `resourceNinja.coexistenceMode`                                 | `auto`                 | Shared marker ownership mode (`auto` / `independent`)                                                        |
+|  20   | `resourceNinja.kindsExcluded`                                   | `[]`                   | Legacy standalone compatibility exclusions for shared instruction blocks                                     |
+|  21   | `resourceNinja.useSharedSourcesManifest`                        | `false`                | Enable shared `sources.json` SSOT for coexistence with the skill-only sibling extension                      |
+|  22   | `resourceNinja.useSharedResourceIndex`                          | `false`                | Enable shared `index.json` SSOT for coexistence with the skill-only sibling extension                        |
+|  23   | `resourceNinja.staleSourceIndexUpdateMode`                      | `prompt`               | Startup handling for source indexes stale for more than 30 days (`always` / `prompt` / `never`)              |
+|  24   | `resourceNinja.useRefOutput`                                    | `true`                 | Keep managed output lightweight by linking to per-kind catalogs                                              |
+|  25   | `resourceNinja.outputFormat`                                    | `full`                 | Inline output format used when Ref output is off (`full` / `compact` / `legacy`)                             |
+|  26   | `resourceNinja.refCatalogFormat`                                | `full`                 | README index detail format used when Ref output is on (`full` / `compact` / `legacy`)                        |
+|  27   | `resourceNinja.showBuiltInResources`                            | `true`                 | Show built-in resources in User / Global Resource Home                                                       |
+|  28   | `resourceNinja.remoteResourceViewMode`                          | `repositoryFirst`      | Remote Resources layout (repository-first / resource-type-first)                                             |
+|  29   | `resourceNinja.language`                                        | `auto`                 | UI language (auto / en / ja)                                                                                 |
+|  30   | `resourceNinja.githubToken`                                     | `""`                   | GitHub Token (API rate limits and private source repositories)                                               |
+|  31   | `resourceNinja.instructionBlock.includeAgents`                  | `false`                | Include `agent` resources in workspace instruction blocks                                                    |
+|  32   | `resourceNinja.instructionBlock.includeInstructions`            | `false`                | Include `instruction` resources in workspace instruction blocks                                              |
+|  33   | `resourceNinja.instructionBlock.globalHome.includeAgents`       | `inherit`              | Override Global Resource Home agent listing policy (`inherit` / `on` / `off`)                                |
+|  34   | `resourceNinja.instructionBlock.globalHome.includeInstructions` | `inherit`              | Override Global Resource Home instruction listing policy (`inherit` / `on` / `off`)                          |
+|  35   | `resourceNinja.registerPluginLocation`                          | `prompt`               | Add an installed plugin folder to the VS Code `chat.pluginLocations` setting (`always` / `prompt` / `never`) |
 
 `staleSourceIndexUpdateMode` refreshes remote source indexes only. It does not reinstall installed files, and sources that fail to refresh keep their previous timestamp so they can be retried later.
 

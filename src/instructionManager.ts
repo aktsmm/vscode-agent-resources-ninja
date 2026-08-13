@@ -22,6 +22,7 @@ import {
   DEFAULT_WORKSPACE_HOOKS_DIRECTORY,
   DEFAULT_WORKSPACE_INSTRUCTIONS_DIRECTORY,
   DEFAULT_WORKSPACE_MCP_DIRECTORY,
+  DEFAULT_WORKSPACE_PLUGINS_DIRECTORY,
   DEFAULT_WORKSPACE_PROMPTS_DIRECTORY,
   DEFAULT_GLOBAL_HOME_DIRECTORY,
   getConfiguredCoexistenceMode,
@@ -355,8 +356,8 @@ function resolveWorkspaceResourceDirectoryUri(
     case "plugin":
       return resolveConfiguredUri(
         workspaceUri,
-        ".github/plugins",
-        ".github/plugins",
+        DEFAULT_WORKSPACE_PLUGINS_DIRECTORY,
+        DEFAULT_WORKSPACE_PLUGINS_DIRECTORY,
       );
     case "cursor-rule":
       return resolveConfiguredUri(

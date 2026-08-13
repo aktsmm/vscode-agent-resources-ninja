@@ -28,11 +28,13 @@ import {
 } from "./githubAuth";
 import {
   installSkill,
+  InstallSkillResult,
   InstallTargetScope,
   getResourceTargetUri,
   SkillMeta,
   uninstallSkill,
   uninstallSkillByPath,
+  unregisterPluginLocations,
   getInstalledSkills,
   getInstalledSkillsWithMeta,
   normalizeSkillMetaSource,
@@ -99,6 +101,7 @@ import {
 import {
   detectResourceKindFromPath,
   getPluginIdFromPath,
+  getPluginRootFsPathFromManifestPath,
   getResourceIdentityKeys,
   getResourceMetadataPath,
   isHookConfigFilePath,
@@ -132,7 +135,13 @@ import {
   resolveInstructionFileUri,
 } from "./customizationPaths";
 import { getVsCodeUserDataPath } from "./userDataPaths";
-import { isContainedPath } from "./pathSafety";
+import { isDeletableWithin } from "./pathSafety";
+import {
+  getPluginLocationsToRegister,
+  mergePluginLocations,
+  supportsPluginLocations,
+  toPluginLocationKey,
+} from "./pluginLocations";
 import {
   normalizeInlineOutputFormat,
   resolveOutputFormat,
@@ -311,22 +320,39 @@ async function deleteInstalledResourceByPath(
 ): Promise<void> {
   const isDirectoryBackedHook =
     kind === "hook" && !isHookConfigFilePath(fullPath);
+  // A plugin is scanned by its manifest, but the installed unit is the whole folder.
+  const pluginRootFsPath =
+    kind === "plugin"
+      ? getPluginRootFsPathFromManifestPath(fullPath)
+      : undefined;
+  const isDirectoryTarget =
+    kind === "skill" || isDirectoryBackedHook || pluginRootFsPath !== undefined;
   const targetUri = vscode.Uri.file(
-    kind === "skill" || isDirectoryBackedHook
-      ? path.dirname(fullPath)
-      : fullPath,
+    pluginRootFsPath ??
+      (kind === "skill" || isDirectoryBackedHook
+        ? path.dirname(fullPath)
+        : fullPath),
   );
-  if (!isContainedPath(allowedRootFsPath, targetUri.fsPath)) {
+  if (!isDeletableWithin(allowedRootFsPath, targetUri.fsPath)) {
     throw new Error(
       `Refused to delete ${targetUri.fsPath} outside ${allowedRootFsPath}`,
     );
   }
   await vscode.workspace.fs.delete(targetUri, {
-    recursive: kind === "skill" || isDirectoryBackedHook,
+    recursive: isDirectoryTarget,
     useTrash: true,
   });
 
-  if (kind !== "skill" && !isDirectoryBackedHook) {
+  // Keyed off the folder that was actually removed, so a caller that reinstalls
+  // elsewhere drops the entry for the location the plugin left.
+  if (pluginRootFsPath) {
+    await unregisterPluginLocations(
+      [targetUri.fsPath],
+      path.basename(pluginRootFsPath),
+    );
+  }
+
+  if (!isDirectoryTarget) {
     try {
       await vscode.workspace.fs.delete(
         vscode.Uri.file(getResourceMetadataPath(fullPath, kind)),
@@ -335,6 +361,134 @@ async function deleteInstalledResourceByPath(
     } catch {
       // Sidecar metadata may not exist for older installs.
     }
+  }
+}
+
+/**
+ * Whether an install wrote everything it was asked to. An install that reported
+ * download errors leaves a partial folder behind, and registering that folder in
+ * `chat.pluginLocations` would activate a plugin whose files are missing. The
+ * errors themselves were already reported to the user by the install.
+ */
+function installWasClean(
+  installResult: InstallSkillResult | undefined,
+): boolean {
+  return !!installResult && !installResult.errors?.length;
+}
+
+/**
+ * VS Code loads local Agent Plugins only from folders listed in
+ * `chat.pluginLocations`, so an installed plugin stays inactive until its folder
+ * is registered there.
+ */
+async function offerPluginLocationRegistration(
+  pluginUris: vscode.Uri[],
+): Promise<void> {
+  if (pluginUris.length === 0) {
+    return;
+  }
+
+  // Checked before any configuration read and before any prompt: on a build
+  // without the setting the answer cannot be honored, so the question is never
+  // worth asking. The user still has to be told, or the plugin silently never
+  // loads and only a log they never read explains why.
+  if (!supportsPluginLocations(vscode.version)) {
+    const notice = messages.pluginLocationUnsupportedVersion(vscode.version);
+    logger.info(`[Resource Ninja] ${notice}`);
+    if (
+      vscode.workspace
+        .getConfiguration("resourceNinja")
+        .get<string>("registerPluginLocation", "prompt") !== "never"
+    ) {
+      vscode.window.showWarningMessage(notice);
+    }
+    return;
+  }
+
+  const mode = vscode.workspace
+    .getConfiguration("resourceNinja")
+    .get<string>("registerPluginLocation", "prompt");
+  if (mode === "never") {
+    return;
+  }
+
+  const chatConfig = vscode.workspace.getConfiguration("chat");
+  const pluginsDisabled =
+    chatConfig.get<boolean>("plugins.enabled", true) === false;
+  const disabledNote = pluginsDisabled
+    ? ` ${messages.pluginsDisabledNote()}`
+    : "";
+  const keys = Array.from(
+    new Set(pluginUris.map((uri) => toPluginLocationKey(uri.fsPath))),
+  );
+
+  // Nothing to offer when every folder is already registered and enabled.
+  if (
+    getPluginLocationsToRegister(
+      chatConfig.get<Record<string, boolean>>("pluginLocations"),
+      keys,
+    ).length === 0
+  ) {
+    logger.info(
+      `[Resource Ninja] Plugin locations already registered: ${keys.join(", ")}`,
+    );
+    return;
+  }
+
+  if (mode !== "always") {
+    const registerAction = messages.pluginLocationRegisterAction();
+    const prompt =
+      keys.length === 1
+        ? messages.pluginLocationRegisterPrompt(path.basename(keys[0]))
+        : messages.pluginLocationRegisterPromptMultiple(keys.length);
+    const choice = await vscode.window.showInformationMessage(
+      `${prompt}${disabledNote}`,
+      registerAction,
+      messages.pluginLocationSkipAction(),
+    );
+    if (choice !== registerAction) {
+      return;
+    }
+  }
+
+  try {
+    // Re-read here, never before the prompt: the user may have sat on the dialog
+    // while another window or install changed the setting, and a stale snapshot
+    // would silently discard that change.
+    const writeConfig = vscode.workspace.getConfiguration("chat");
+    const merged = mergePluginLocations(
+      writeConfig.get<Record<string, boolean>>("pluginLocations"),
+      keys,
+    );
+    // The key is a machine-specific absolute path, so it must never be written
+    // into shared workspace settings.
+    await writeConfig.update(
+      "pluginLocations",
+      merged,
+      vscode.ConfigurationTarget.Global,
+    );
+    logger.info(
+      `[Resource Ninja] Registered plugin locations: ${keys.join(", ")}`,
+    );
+    const openSettingAction = messages.pluginLocationOpenSettingAction();
+    const choice = await vscode.window.showInformationMessage(
+      `${messages.pluginLocationRegistered(keys.length)}${disabledNote}`,
+      openSettingAction,
+    );
+    if (choice === openSettingAction) {
+      await vscode.commands.executeCommand(
+        "workbench.action.openSettings",
+        "chat.pluginLocations",
+      );
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error(
+      `[Resource Ninja] Failed to register plugin locations: ${errorMessage}`,
+    );
+    vscode.window.showErrorMessage(
+      messages.pluginLocationRegisterFailed(errorMessage),
+    );
   }
 }
 
@@ -355,6 +509,7 @@ const RESETTABLE_RESOURCE_NINJA_SETTINGS = [
   "instructionBlock.globalHome.includeAgents",
   "instructionBlock.globalHome.includeInstructions",
   "kindsExcluded",
+  "registerPluginLocation",
   "resourcesDirectory",
   "additionalSkillRoots",
   "workspaceAgentsDirectory",
@@ -1572,8 +1727,18 @@ export async function activate(
       const resourceUri = vscode.Uri.file(resource.fullPath);
       const isDirectoryBackedHook =
         resource.kind === "hook" && !isHookConfigFilePath(resource.fullPath);
-      const targetUri =
-        resource.kind === "skill" || isDirectoryBackedHook
+      // A plugin is scanned by its manifest, but the installed unit is the whole folder.
+      const pluginRootFsPath =
+        resource.kind === "plugin"
+          ? getPluginRootFsPathFromManifestPath(resource.fullPath)
+          : undefined;
+      const isDirectoryTarget =
+        resource.kind === "skill" ||
+        isDirectoryBackedHook ||
+        pluginRootFsPath !== undefined;
+      const targetUri = pluginRootFsPath
+        ? vscode.Uri.file(pluginRootFsPath)
+        : resource.kind === "skill" || isDirectoryBackedHook
           ? vscode.Uri.file(path.dirname(resource.fullPath))
           : resourceUri;
 
@@ -1582,7 +1747,7 @@ export async function activate(
         | undefined;
       let hookConfigSummary: string | undefined;
       try {
-        if (!isContainedPath(resource.rootFsPath, targetUri.fsPath)) {
+        if (!isDeletableWithin(resource.rootFsPath, targetUri.fsPath)) {
           throw new Error(
             `Refused to delete ${targetUri.fsPath} outside ${resource.rootFsPath}`,
           );
@@ -1596,11 +1761,18 @@ export async function activate(
         }
 
         await vscode.workspace.fs.delete(targetUri, {
-          recursive: resource.kind === "skill" || isDirectoryBackedHook,
+          recursive: isDirectoryTarget,
           useTrash: true,
         });
 
-        if (resource.kind !== "skill" && !isDirectoryBackedHook) {
+        if (pluginRootFsPath) {
+          await unregisterPluginLocations(
+            [targetUri.fsPath],
+            path.basename(pluginRootFsPath),
+          );
+        }
+
+        if (!isDirectoryTarget) {
           try {
             await vscode.workspace.fs.delete(
               vscode.Uri.file(
@@ -1742,7 +1914,16 @@ export async function activate(
         }
       }
 
+      const installOptions = { targetScope, suppressRecoveryPrompt };
+
       try {
+        // A plugin always installs into the fixed Global Home `plugins`
+        // directory, so a plugin scanned from a configured user-data path is
+        // recreated somewhere other than it was removed from. The destination is
+        // taken from the install itself, because a setting that changes while the
+        // progress notification is up would make a precomputed one name a folder
+        // that was never created.
+        let installResult: Awaited<ReturnType<typeof installSkill>> | undefined;
         await vscode.window.withProgress(
           {
             location: vscode.ProgressLocation.Notification,
@@ -1757,10 +1938,12 @@ export async function activate(
               resource.fullPath,
               resource.rootFsPath,
             );
-            await installSkill(fullSkill, wsFolder.uri, context, {
-              targetScope,
-              suppressRecoveryPrompt,
-            });
+            installResult = await installSkill(
+              fullSkill,
+              wsFolder.uri,
+              context,
+              installOptions,
+            );
 
             const config = vscode.workspace.getConfiguration("resourceNinja");
             if (
@@ -1783,10 +1966,30 @@ export async function activate(
           },
         );
 
+        // The delete above dropped the registration for the folder it removed, so
+        // the destination the install reported goes back through the same path a
+        // normal install uses and keeps honouring `registerPluginLocation` and the
+        // version guard. A failed install leaves `installResult` unset, and an
+        // install that could not download every file must not be registered
+        // either, so nothing is put back for a folder with missing content.
+        if (
+          resource.kind === "plugin" &&
+          installResult &&
+          installWasClean(installResult)
+        ) {
+          await offerPluginLocationRegistration([installResult.destinationUri]);
+        }
+
         markRecentlyInstalled(fullSkill);
         userResourcesProvider.refresh();
         browseProvider.refresh();
         workspaceProvider.refresh();
+
+        if (!installWasClean(installResult)) {
+          // The install already warned about the files it could not download;
+          // reporting failure here is what the group reinstall aggregates.
+          return false;
+        }
 
         if (!suppressSuccessMessage) {
           vscode.window.showInformationMessage(
@@ -2048,6 +2251,7 @@ export async function activate(
 
       let failed = 0;
       let deletedSkills = 0;
+      const deletedFsPaths: string[] = [];
       for (const resource of resources) {
         try {
           await deleteInstalledResourceByPath(
@@ -2055,6 +2259,7 @@ export async function activate(
             resource.fullPath,
             resource.rootFsPath,
           );
+          deletedFsPaths.push(resource.fullPath);
           if (resource.kind === "skill") {
             deletedSkills++;
           }
@@ -2066,6 +2271,8 @@ export async function activate(
           );
         }
       }
+
+      await unregisterPluginLocations(deletedFsPaths, pluginId);
 
       workspaceProvider.refresh();
       userResourcesProvider.refresh();
@@ -2638,6 +2845,15 @@ export async function activate(
       if (hookConfigSummary) {
         logger.info(`[Resource Ninja] Hook config: ${hookConfigSummary}`);
         vscode.window.showInformationMessage(hookConfigSummary);
+      }
+      // An install that could not download every file leaves a partial folder,
+      // and the warning the install already showed is the user's notice of it.
+      if (
+        resourceKind === "plugin" &&
+        installResult &&
+        installWasClean(installResult)
+      ) {
+        await offerPluginLocationRegistration([installResult.destinationUri]);
       }
       const mcpConfigSummary = formatMcpConfigUpdateSummary(
         installResult?.mcpConfigUpdate,
@@ -3269,7 +3485,14 @@ export async function activate(
         }
       }
 
+      const installOptions = { suppressRecoveryPrompt };
+
       try {
+        // The uninstall below removes the plugin folder and its registration. The
+        // destination is taken from the install itself, because a setting that
+        // changes while the progress notification is up would make a precomputed
+        // one name a folder that was never created.
+        let installResult: Awaited<ReturnType<typeof installSkill>> | undefined;
         await vscode.window.withProgress(
           {
             location: vscode.ProgressLocation.Notification,
@@ -3290,9 +3513,12 @@ export async function activate(
             } else {
               uninstallResult = await uninstallSkill(skill.name, wsFolder.uri);
             }
-            await installSkill(fullSkill, wsFolder.uri, context, {
-              suppressRecoveryPrompt,
-            });
+            installResult = await installSkill(
+              fullSkill,
+              wsFolder.uri,
+              context,
+              installOptions,
+            );
 
             const config = vscode.workspace.getConfiguration("resourceNinja");
             if (
@@ -3310,7 +3536,29 @@ export async function activate(
           },
         );
 
+        // The uninstall above dropped the registration for the folder it removed,
+        // so the destination the install reported goes back through the same path
+        // a normal install uses and keeps honouring `registerPluginLocation` and
+        // the version guard. A failed install leaves `installResult` unset, and an
+        // install that could not download every file must not be registered
+        // either, so nothing is put back for a folder with missing content.
+        if (
+          resourceKind === "plugin" &&
+          installResult &&
+          installWasClean(installResult)
+        ) {
+          await offerPluginLocationRegistration([installResult.destinationUri]);
+        }
+
         markRecentlyInstalled(fullSkill);
+
+        if (!installWasClean(installResult)) {
+          // The install already warned about the files it could not download;
+          // reporting failure here is what the group reinstall aggregates.
+          workspaceProvider.refresh();
+          browseProvider.refresh();
+          return false;
+        }
 
         // ステータスバーに表示
         statusBarItem.text = `$(sync) ${skill.name} ${
@@ -3684,6 +3932,7 @@ export async function activate(
       let installedSkills = 0;
       const failedResources: string[] = [];
       const mcpConfigSummaries: string[] = [];
+      const installedPluginUris: vscode.Uri[] = [];
 
       await vscode.window.withProgress(
         {
@@ -3725,6 +3974,21 @@ export async function activate(
               markRecentlyInstalled(skill);
               if (getResourceKind(skill) === "skill") {
                 installedSkills++;
+              }
+              if (getResourceKind(skill) === "plugin") {
+                // The destination comes from the install itself: the
+                // configuration is read again on every iteration, so a setting
+                // changed during the batch would otherwise register a folder that
+                // was never created. An install that could not download every
+                // file is counted with the failures instead, which is what the
+                // batch summary below reports, because the per-install warning is
+                // suppressed here.
+                if (installWasClean(installResult)) {
+                  installedPluginUris.push(installResult.destinationUri);
+                } else {
+                  failed++;
+                  failedResources.push(skill.name);
+                }
               }
             } catch (error) {
               logger.error(`Failed to install ${skill.name}:`, error);
@@ -3798,6 +4062,9 @@ export async function activate(
       if (mcpConfigSummaries.length > 0) {
         vscode.window.showInformationMessage(mcpConfigSummaries.join("\n"));
       }
+
+      // One prompt for the whole batch instead of one per installed plugin.
+      await offerPluginLocationRegistration(installedPluginUris);
 
       // Instruction ファイルを更新
       const config = vscode.workspace.getConfiguration("resourceNinja");

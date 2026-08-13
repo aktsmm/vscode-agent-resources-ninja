@@ -41,6 +41,7 @@ const {
   getResourceInstallPath,
   getResourceMetadataPath,
   getSkillRootDirectoriesFromPaths,
+  toPluginRootIdentityKey,
   isBuiltInResourcePath,
   isNestedResourcePathUnderSkillRoot,
   shouldReplaceBuiltInResourcePath,
@@ -645,6 +646,52 @@ test("normalizes windows paths", () => {
     getResourceInstallPath("skills\\code-tour\\SKILL.md", "skill"),
     "skills/code-tour",
   );
+});
+
+test("plugin package identity follows the filesystem, not a fixed case rule", () => {
+  // Folding case everywhere would merge two genuinely different packages on a
+  // case-sensitive filesystem, and not folding would split one on Windows.
+  const demo = "/home/u/.copilot/plugins/demo";
+  const upperDemo = "/home/u/.copilot/plugins/Demo";
+  assert.notStrictEqual(
+    toPluginRootIdentityKey(demo, "linux"),
+    toPluginRootIdentityKey(upperDemo, "linux"),
+    "plugins/demo and plugins/Demo are two packages on a case-sensitive filesystem",
+  );
+  assert.strictEqual(
+    toPluginRootIdentityKey(demo, "win32"),
+    toPluginRootIdentityKey(upperDemo, "win32"),
+    "the same folder served as Demo on Windows is one package",
+  );
+  assert.strictEqual(
+    toPluginRootIdentityKey("D:\\ws\\.github\\plugins\\demo", "win32"),
+    toPluginRootIdentityKey("D:/ws/.github/plugins/demo", "win32"),
+    "separator style must not split a package",
+  );
+  assert.notStrictEqual(
+    toPluginRootIdentityKey(demo, "linux"),
+    toPluginRootIdentityKey(`${demo}-extra`, "linux"),
+    "a sibling sharing a prefix is a different package",
+  );
+});
+
+test("a plugin sidecar resolves the same whether the caller has the root or the manifest", () => {
+  // The installer writes from the plugin root while a scanner reads from the
+  // manifest it found; a mismatch here makes the tree show a bare folder name.
+  const expected = "/ws/.github/plugins/demo/.resource-ninja.json";
+  for (const input of [
+    "/ws/.github/plugins/demo",
+    "/ws/.github/plugins/demo/",
+    "/ws/.github/plugins/demo/plugin.json",
+    "/ws/.github/plugins/demo/.claude-plugin/plugin.json",
+    "/ws/.github/plugins/demo/gemini-extension.json",
+  ]) {
+    assert.strictEqual(
+      getResourceMetadataPath(input, "plugin"),
+      expected,
+      `plugin sidecar must resolve to the plugin root for ${input}`,
+    );
+  }
 });
 
 test("resource metadata sidecars sit next to installed resources", () => {

@@ -1277,6 +1277,7 @@ test("settings order keeps install and destination paths first", () => {
     "resourceNinja.instructionBlock.includeInstructions",
     "resourceNinja.instructionBlock.globalHome.includeAgents",
     "resourceNinja.instructionBlock.globalHome.includeInstructions",
+    "resourceNinja.registerPluginLocation",
   ];
 
   for (let index = 1; index < orderedSettings.length; index += 1) {
@@ -1329,6 +1330,381 @@ test("stale source index freshness setting is wired through manifest docs and co
     /getConfiguredStaleSourceIndexUpdateMode/,
   );
   assert.match(sourceFreshnessSource, /STALE_SOURCE_INDEX_DAYS\s*=\s*30/);
+});
+
+test("plugin location registration setting is wired through manifest and code", () => {
+  const config = packageJson.contributes?.configuration?.properties || {};
+  const setting = config["resourceNinja.registerPluginLocation"];
+  assert.ok(setting, "Missing plugin location registration setting");
+  assert.strictEqual(setting.type, "string");
+  assert.strictEqual(setting.default, "prompt");
+  assert.deepStrictEqual(setting.enum, ["always", "prompt", "never"]);
+  assert.strictEqual(setting.order, 35);
+  for (const key of [
+    "config.registerPluginLocation.markdownDescription",
+    "config.registerPluginLocation.always",
+    "config.registerPluginLocation.prompt",
+    "config.registerPluginLocation.never",
+  ]) {
+    assert.ok(nls[key], `Missing English NLS key: ${key}`);
+    assert.ok(nlsJa[key], `Missing Japanese NLS key: ${key}`);
+  }
+  assert.match(extensionSource, /offerPluginLocationRegistration/);
+  assert.match(
+    extensionSource,
+    /update\(\s*"pluginLocations"[\s\S]*?ConfigurationTarget\.Global/,
+    "Plugin locations must be written to user settings, not workspace settings",
+  );
+  assert.match(
+    extensionSource,
+    /if \(choice !== registerAction\) \{\s*return;\s*\}\s*\}\s*try \{[\s\S]*?getConfiguration\("chat"\);\s*const merged = mergePluginLocations\(/,
+    "The setting must be re-read after the prompt so user think time cannot discard a concurrent change",
+  );
+  assert.match(
+    extensionSource,
+    /getPluginLocationsToRegister\([\s\S]*?\)\.length === 0/,
+    "Registration must skip the prompt when every key is already enabled",
+  );
+  assert.match(
+    skillInstallerSource,
+    /collectPluginLocationKeysForRemoval\(\s*existing,\s*deletedFsPaths,\s*pluginFolderName,\s*isContainedPath,?\s*\)/,
+    "Removal must derive keys from the deleted paths, bounded upwards by the plugin folder and downwards by real path containment",
+  );
+});
+
+test("plugin location registration is gated on a VS Code that has the setting", () => {
+  const offerStart = extensionSource.indexOf(
+    "async function offerPluginLocationRegistration(",
+  );
+  const unregisterStart = skillInstallerSource.indexOf(
+    "export async function unregisterPluginLocations(",
+  );
+  assert.ok(offerStart > -1, "Missing offerPluginLocationRegistration");
+  assert.ok(unregisterStart > -1, "Missing unregisterPluginLocations");
+  const offerSource = extensionSource.slice(
+    offerStart,
+    extensionSource.indexOf("type CreateResourceScope", offerStart),
+  );
+  const unregisterSource = skillInstallerSource.slice(
+    unregisterStart,
+    skillInstallerSource.indexOf(
+      "export async function uninstallSkill(",
+      unregisterStart,
+    ),
+  );
+
+  for (const [label, body] of [
+    ["offerPluginLocationRegistration", offerSource],
+    ["unregisterPluginLocations", unregisterSource],
+  ]) {
+    const guardIndex = body.indexOf(
+      "if (!supportsPluginLocations(vscode.version))",
+    );
+    assert.ok(
+      guardIndex > -1,
+      `${label} must check the VS Code version before touching chat.pluginLocations`,
+    );
+    const configIndex = body.indexOf('getConfiguration("chat")');
+    assert.ok(
+      configIndex > guardIndex,
+      `${label} must run the version guard before reading the chat configuration`,
+    );
+    assert.ok(
+      body.indexOf("update(") > guardIndex,
+      `${label} must run the version guard before writing the setting`,
+    );
+  }
+
+  const promptIndex = offerSource.indexOf("showInformationMessage");
+  assert.ok(
+    promptIndex >
+      offerSource.indexOf("if (!supportsPluginLocations(vscode.version))"),
+    "The version guard must run before the user is prompted",
+  );
+  assert.ok(
+    offerSource.indexOf('getConfiguration("resourceNinja")') >
+      offerSource.indexOf("if (!supportsPluginLocations(vscode.version))"),
+    "The version guard must run before the registerPluginLocation mode is read",
+  );
+
+  // A log line is not a signal the user reads, so the unsupported build has to
+  // surface a notification unless the user opted out with `never`.
+  const unsupportedBlock = offerSource.slice(
+    offerSource.indexOf("if (!supportsPluginLocations(vscode.version))"),
+    promptIndex,
+  );
+  assert.match(
+    unsupportedBlock,
+    /showWarningMessage\(/,
+    "An unsupported VS Code build must warn the user, not only write a log line",
+  );
+  assert.match(
+    unsupportedBlock,
+    /!==\s*"never"/,
+    "The unsupported-build warning must respect the never opt-out",
+  );
+
+  assert.match(
+    offerSource,
+    /messages\.pluginLocationOpenSettingAction\(\)/,
+    "The success notification must offer a way to reach the setting",
+  );
+  assert.match(
+    offerSource,
+    /"workbench\.action\.openSettings",\s*"chat\.pluginLocations",/,
+    "The success action must open the setting it wrote",
+  );
+
+  const jaStart = i18nSource.indexOf("const jaMessages");
+  const enStart = i18nSource.indexOf("const enMessages");
+  const enEnd = i18nSource.indexOf("function getCurrentLanguage");
+  assert.ok(
+    jaStart > -1 && enStart > jaStart && enEnd > enStart,
+    "Could not locate the i18n message dictionaries",
+  );
+  const dictionaries = [
+    ["Japanese", i18nSource.slice(jaStart, enStart)],
+    ["English", i18nSource.slice(enStart, enEnd)],
+  ];
+  for (const [language, dictionary] of dictionaries) {
+    for (const key of [
+      "pluginLocationOpenSettingAction",
+      "pluginLocationUnsupportedVersion",
+      "pluginLocationRegisterPrompt",
+      "pluginLocationRegisterPromptMultiple",
+      "pluginLocationRegistered",
+    ]) {
+      assert.ok(
+        dictionary.includes(`${key}:`),
+        `Missing ${language} i18n key: ${key}`,
+      );
+    }
+    // The prompt has to say which setting it writes and that it is the user's.
+    for (const promptKey of [
+      "pluginLocationRegisterPrompt",
+      "pluginLocationRegisterPromptMultiple",
+      "pluginLocationRegistered",
+    ]) {
+      const keyIndex = dictionary.indexOf(`${promptKey}:`);
+      const messageText = dictionary.slice(keyIndex, keyIndex + 400);
+      assert.ok(
+        messageText.includes("chat.pluginLocations"),
+        `${language} ${promptKey} must name the setting it changes`,
+      );
+      assert.ok(
+        /user settings|ユーザー設定/.test(messageText),
+        `${language} ${promptKey} must say the write goes to user settings`,
+      );
+    }
+
+    // An unsupported build must tell the user the consequence and the remedy,
+    // not just that something was skipped.
+    const unsupportedIndex = dictionary.indexOf(
+      "pluginLocationUnsupportedVersion:",
+    );
+    const unsupportedText = dictionary.slice(
+      unsupportedIndex,
+      unsupportedIndex + 400,
+    );
+    assert.ok(
+      unsupportedText.includes("1.116"),
+      `${language} pluginLocationUnsupportedVersion must name the version that fixes it`,
+    );
+    assert.ok(
+      /will not load|読み込まれません/.test(unsupportedText),
+      `${language} pluginLocationUnsupportedVersion must state that the plugin will not load`,
+    );
+  }
+});
+
+test("every delete path that can remove a plugin folder unregisters it, and a reinstall re-registers", () => {
+  // The delete paths are enumerated from the source instead of being listed
+  // here, so a new one added without unregistration fails this guard.
+  const files = [
+    ["src/extension.ts", extensionSource],
+    ["src/skillInstaller.ts", skillInstallerSource],
+  ];
+  // Plugin-aware: the unit resolves the plugin root from the manifest path, or
+  // delegates to a helper that does, so the folder it removes IS the plugin.
+  const pluginAwareDeleteMarkers = [
+    "getPluginRootFsPathFromManifestPath(",
+    "deleteInstalledResourceByPath(",
+    "uninstallSkillByPath(",
+  ];
+  // Collateral: `uninstallSkill` deletes `<skillsRoot>/<name>` recursively
+  // without looking at the resource kind, and the skills root is a configurable
+  // path, so a plugin folder can be removed through it. Its callers still owe
+  // the unregistration, but what they reinstall is a skill, not a plugin.
+  const collateralDeleteMarkers = ["uninstallSkill("];
+  const pluginDeleteMarkers = [
+    ...pluginAwareDeleteMarkers,
+    ...collateralDeleteMarkers,
+  ];
+  // `uninstallSkill(` ends with `installSkill(`, so a plain substring test reads
+  // every uninstall as a reinstall — which is how a reinstall that never
+  // re-registers stayed invisible.
+  const reinstallCallPattern = /(?<![A-Za-z0-9_$.])installSkill\(/;
+  const unitStartPattern =
+    /^(?:export )?(?:async )?function (\w+)\s*\(|^\s*(?:const|let) (\w+) = vscode\.commands\.registerCommand\(/;
+
+  const units = [];
+  for (const [file, source] of files) {
+    const lines = source.split("\n");
+    let offset = 0;
+    for (const line of lines) {
+      const match = unitStartPattern.exec(line);
+      if (match) {
+        units.push({
+          file,
+          name: match[1] || match[2],
+          start: offset,
+          source,
+        });
+      }
+      offset += line.length + 1;
+    }
+  }
+
+  function findUnit(file, index) {
+    const candidates = units.filter(
+      (unit) => unit.file === file && unit.start <= index,
+    );
+    return candidates[candidates.length - 1];
+  }
+
+  const unitBody = (unit) => {
+    const next = units
+      .filter((other) => other.file === unit.file && other.start > unit.start)
+      .map((other) => other.start)
+      .sort((left, right) => left - right)[0];
+    return unit.source.slice(unit.start, next ?? unit.source.length);
+  };
+
+  // A unit is a delete path when it calls a marker, and also when it IS the
+  // helper a marker names: a helper that performs the delete itself owes the
+  // unregistration in its own body instead of being exempted as a primitive.
+  const deletePaths = new Map();
+  const recordDeletePath = (unit, marker) => {
+    const key = `${unit.file}:${unit.name}`;
+    const entry = deletePaths.get(key) || { unit, markers: new Set() };
+    entry.markers.add(marker);
+    deletePaths.set(key, entry);
+  };
+
+  for (const [file, source] of files) {
+    for (const marker of pluginDeleteMarkers) {
+      let index = source.indexOf(marker);
+      while (index !== -1) {
+        const lineStart = source.lastIndexOf("\n", index) + 1;
+        const lineEnd = source.indexOf("\n", index);
+        const line = source.slice(
+          lineStart,
+          lineEnd === -1 ? source.length : lineEnd,
+        );
+        const isDeclaration = /function \w+\s*\($/.test(line.trimEnd());
+        const unit = findUnit(file, index);
+        assert.ok(
+          unit,
+          `Could not attribute ${marker} at ${file}:${index} to a function`,
+        );
+        if (!isDeclaration || unit.name === marker.slice(0, -1)) {
+          recordDeletePath(unit, marker);
+        }
+        index = source.indexOf(marker, index + marker.length);
+      }
+    }
+  }
+
+  assert.ok(
+    deletePaths.size >= 8,
+    `Expected the plugin delete paths to be discovered, found ${deletePaths.size}`,
+  );
+  for (const required of [
+    "src/extension.ts:deleteInstalledResourceByPath",
+    "src/skillInstaller.ts:uninstallSkill",
+    "src/skillInstaller.ts:uninstallSkillByPath",
+  ]) {
+    assert.ok(
+      deletePaths.has(required),
+      `${required} deletes a folder that can be a plugin and must be enumerated, found ${Array.from(
+        deletePaths.keys(),
+      ).join(", ")}`,
+    );
+  }
+
+  // Which helpers a caller may lean on is read out of the source, so a helper
+  // that stops unregistering pushes the obligation back onto every caller
+  // instead of leaving a hand-written exemption behind.
+  const unitByName = new Map(units.map((unit) => [unit.name, unit]));
+  const delegatesUnregistration = new Set();
+  for (const marker of pluginDeleteMarkers) {
+    const helper = unitByName.get(marker.slice(0, -1));
+    if (helper && unitBody(helper).includes("unregisterPluginLocations(")) {
+      delegatesUnregistration.add(marker);
+    }
+  }
+
+  const covered = [];
+  const reinstallCovered = [];
+  // Every violation is reported, not only the first: a helper that stops
+  // unregistering fails its callers too, and the helper is the one to fix.
+  const missingUnregistration = [];
+  const missingReregistration = [];
+  for (const [key, { unit, markers }] of deletePaths) {
+    const body = unitBody(unit);
+    const ownMarker = `${unit.name}(`;
+    const unregisters =
+      body.includes("unregisterPluginLocations(") ||
+      Array.from(delegatesUnregistration).some(
+        (marker) => marker !== ownMarker && body.includes(marker),
+      );
+    if (!unregisters) {
+      missingUnregistration.push(key);
+    }
+    covered.push(key);
+
+    // A reinstall recreates the folder, but the destination is computed from the
+    // install options and is not required to be where the resource was removed
+    // from, so the registration has to be offered again rather than assumed.
+    const isPluginAware = pluginAwareDeleteMarkers.some((marker) =>
+      markers.has(marker),
+    );
+    if (isPluginAware && reinstallCallPattern.test(body)) {
+      if (!body.includes("offerPluginLocationRegistration(")) {
+        missingReregistration.push(key);
+      }
+      reinstallCovered.push(key);
+    }
+  }
+
+  assert.strictEqual(
+    missingUnregistration.join(", "),
+    "",
+    `these remove a plugin folder but neither call unregisterPluginLocations nor delegate to a helper that does: ${missingUnregistration.join(", ")}`,
+  );
+  assert.strictEqual(
+    missingReregistration.join(", "),
+    "",
+    `these remove a plugin folder and reinstall it, but never re-register the destination through offerPluginLocationRegistration: ${missingReregistration.join(", ")}`,
+  );
+
+  assert.ok(
+    covered.length >= 8,
+    `Expected at least 8 covered plugin delete paths, found ${covered.length}: ${covered.join(", ")}`,
+  );
+  assert.ok(
+    covered.some((key) => key.startsWith("src/skillInstaller.ts:")),
+    `The uninstall path in skillInstaller must be covered, found ${covered.join(", ")}`,
+  );
+  for (const required of [
+    "src/extension.ts:reinstallCmd",
+    "src/extension.ts:reinstallUserResourceCmd",
+  ]) {
+    assert.ok(
+      reinstallCovered.includes(required),
+      `${required} must be checked for re-registration, found ${reinstallCovered.join(", ")}`,
+    );
+  }
 });
 
 test("source freshness metadata is preserved and stamped only on successful scans", () => {

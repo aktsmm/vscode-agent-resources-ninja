@@ -42,12 +42,22 @@ import {
 import {
   detectResourceKindFromPath,
   getPluginRootFromManifestPath,
+  getPluginRootFsPathFromManifestPath,
   getResourceMetadataPath,
   isHookConfigFilePath,
   isOwnMetadataSidecarFileName,
 } from "./resourceKinds";
 import { getVsCodeUserDataPath } from "./userDataPaths";
-import { isContainedPath, isSafePathSegment } from "./pathSafety";
+import {
+  isContainedPath,
+  isDeletableWithin,
+  isSafePathSegment,
+} from "./pathSafety";
+import {
+  collectPluginLocationKeysForRemoval,
+  removePluginLocations,
+  supportsPluginLocations,
+} from "./pluginLocations";
 import { logger } from "./logger";
 import { openBugReport as openBugReportIssue } from "./bugReport";
 import {
@@ -79,6 +89,18 @@ export interface InstallSkillOptions {
 }
 
 export interface InstallSkillResult {
+  /**
+   * Where the install actually wrote. Callers that register the destination read
+   * it from here instead of recomputing it, because the configuration can change
+   * while the install is in progress.
+   */
+  destinationUri: vscode.Uri;
+  /**
+   * The download failures the install already reported to the user, carried on
+   * the result so a caller can tell a clean install from one that left content
+   * missing. Absent when nothing failed.
+   */
+  errors?: string[];
   hookConfigUpdate?: HookConfigUpdateResult;
   mcpConfigUpdate?: McpConfigUpdateResult;
 }
@@ -129,7 +151,7 @@ function isDeleteTargetAllowed(
   allowedRootUri: vscode.Uri,
   operation: string,
 ): boolean {
-  if (isContainedPath(allowedRootUri.fsPath, targetUri.fsPath)) {
+  if (isDeletableWithin(allowedRootUri.fsPath, targetUri.fsPath)) {
     return true;
   }
   logger.error(
@@ -1282,14 +1304,17 @@ export async function installSkill(
         );
         throw error;
       }
-      if (result.errors.length > 0 && !options.suppressRecoveryPrompt) {
-        vscode.window.showWarningMessage(
-          isJapanese()
-            ? `プラグイン "${skill.name}" の一部のファイルがダウンロードできませんでした。コピーされた内容を確認してください。`
-            : `Some files for plugin "${skill.name}" could not be downloaded. Review the copied contents before activation.`,
-        );
+      if (result.errors.length > 0) {
+        if (!options.suppressRecoveryPrompt) {
+          vscode.window.showWarningMessage(
+            isJapanese()
+              ? `プラグイン "${skill.name}" の一部のファイルがダウンロードできませんでした。コピーされた内容を確認してください。`
+              : `Some files for plugin "${skill.name}" could not be downloaded. Review the copied contents before activation.`,
+          );
+        }
+        return { destinationUri: skillPath, errors: result.errors };
       }
-      return {};
+      return { destinationUri: skillPath };
     }
 
     if (resourceKind !== "skill") {
@@ -1344,7 +1369,7 @@ export async function installSkill(
           hookConfigRootUri,
           skillPath,
         );
-        return { hookConfigUpdate };
+        return { destinationUri: skillPath, hookConfigUpdate };
       }
       if (
         resourceKind === "mcp" &&
@@ -1357,9 +1382,9 @@ export async function installSkill(
             confirmOverwrite: options.confirmMcpServerOverwrite,
           },
         );
-        return { mcpConfigUpdate };
+        return { destinationUri: skillPath, mcpConfigUpdate };
       }
-      return {};
+      return { destinationUri: skillPath };
     }
 
     // パスが .md で終わる場合は単独ファイル
@@ -1569,7 +1594,7 @@ export async function installSkill(
   );
 
   if (!incomplete) {
-    return {};
+    return { destinationUri: skillPath };
   }
 
   if (!options.suppressRecoveryPrompt) {
@@ -1716,6 +1741,60 @@ async function reportIncompleteSkillInstall(
 }
 
 /**
+ * Drops the registered locations the deleted resource paths lived under. The
+ * keys come from the real setting, so a `custom` install target is cleaned up
+ * and an entry unrelated to the deletion is left alone.
+ *
+ * Lives here rather than in `extension.ts` so every path that removes a plugin
+ * folder can call the same implementation.
+ */
+export async function unregisterPluginLocations(
+  deletedFsPaths: string[],
+  pluginFolderName: string,
+): Promise<void> {
+  if (deletedFsPaths.length === 0) {
+    return;
+  }
+  // Same guard as registration: a build without the setting has nothing to
+  // clean up, and writing it would only raise an error.
+  if (!supportsPluginLocations(vscode.version)) {
+    logger.info(
+      `[Resource Ninja] ${messages.pluginLocationUnsupportedVersion(vscode.version)}`,
+    );
+    return;
+  }
+  try {
+    const chatConfig = vscode.workspace.getConfiguration("chat");
+    const existing = chatConfig.get<Record<string, boolean>>("pluginLocations");
+    const keys = collectPluginLocationKeysForRemoval(
+      existing,
+      deletedFsPaths,
+      pluginFolderName,
+      isContainedPath,
+    );
+    if (keys.length === 0) {
+      return;
+    }
+    await chatConfig.update(
+      "pluginLocations",
+      removePluginLocations(existing, keys),
+      vscode.ConfigurationTarget.Global,
+    );
+    logger.info(
+      `[Resource Ninja] Removed plugin locations: ${keys.join(", ")}`,
+    );
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error(
+      `[Resource Ninja] Failed to remove plugin locations: ${errorMessage}`,
+    );
+    vscode.window.showErrorMessage(
+      messages.pluginLocationRegisterFailed(errorMessage),
+    );
+  }
+}
+
+/**
  * スキルをアンインストールする
  */
 export async function uninstallSkill(
@@ -1746,6 +1825,13 @@ export async function uninstallSkill(
   } catch (error) {
     throw new Error(`Failed to delete skill directory: ${error}`);
   }
+  // The skills root is a configurable path, so this recursive delete can take a
+  // plugin folder with it. The helper only removes keys the setting actually
+  // holds, so a plain skill delete removes nothing.
+  await unregisterPluginLocations(
+    [skillPath.fsPath],
+    path.basename(skillPath.fsPath),
+  );
   return {};
 }
 
@@ -1767,10 +1853,17 @@ export async function uninstallSkillByPath(
   // The root each branch joined against; a `..` segment in relativePath would
   // otherwise let the join escape it.
   let deleteRootUri: vscode.Uri;
+  // A plugin is scanned by its manifest, but the installed unit is the whole folder.
+  let pluginRootFsPath: string | undefined;
   if (isAbsoluteResourcePath) {
     const absoluteUri = vscode.Uri.file(path.normalize(relativePath));
-    skillPath =
-      kind === "skill" || (kind === "hook" && !isHookConfigFile)
+    pluginRootFsPath =
+      kind === "plugin"
+        ? getPluginRootFsPathFromManifestPath(absoluteUri.fsPath)
+        : undefined;
+    skillPath = pluginRootFsPath
+      ? vscode.Uri.file(pluginRootFsPath)
+      : kind === "skill" || (kind === "hook" && !isHookConfigFile)
         ? getParentDirectoryUri(absoluteUri)
         : absoluteUri;
     // The absolute path can come from `.skill-meta.json`, so it is bounded by
@@ -1814,10 +1907,17 @@ export async function uninstallSkillByPath(
     skillPath = isHookConfigFile ? hookFile : getParentDirectoryUri(hookFile);
     deleteRootUri = workspaceUri;
   } else {
-    skillPath = vscode.Uri.joinPath(
+    const resourceUri = vscode.Uri.joinPath(
       workspaceUri,
       ...normalizedPath.split("/").filter(Boolean),
     );
+    pluginRootFsPath =
+      kind === "plugin"
+        ? getPluginRootFsPathFromManifestPath(resourceUri.fsPath)
+        : undefined;
+    skillPath = pluginRootFsPath
+      ? vscode.Uri.file(pluginRootFsPath)
+      : resourceUri;
     deleteRootUri = workspaceUri;
   }
 
@@ -1844,7 +1944,13 @@ export async function uninstallSkillByPath(
       );
     }
     await vscode.workspace.fs.delete(skillPath, { recursive: true });
-    if (kind !== "skill") {
+    if (pluginRootFsPath) {
+      await unregisterPluginLocations(
+        [skillPath.fsPath],
+        path.basename(pluginRootFsPath),
+      );
+    }
+    if (kind !== "skill" && !pluginRootFsPath) {
       const resourceUri = isAbsoluteResourcePath
         ? vscode.Uri.file(path.normalize(relativePath))
         : vscode.Uri.joinPath(

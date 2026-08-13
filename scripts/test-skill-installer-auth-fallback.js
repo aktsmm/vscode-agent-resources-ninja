@@ -102,6 +102,10 @@ async function main() {
               path.join(__dirname, "..", "src", "pathSafety.ts"),
               {},
             ),
+            "./pluginLocations": requireTypeScriptModule(
+              path.join(__dirname, "..", "src", "pluginLocations.ts"),
+              {},
+            ),
             "./skillIndex": {
               loadSkillIndex: async () => ({ sources: [] }),
               getSourceBranch: async () => "main",

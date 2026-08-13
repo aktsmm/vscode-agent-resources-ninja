@@ -18,6 +18,9 @@ import {
   getResourceMetadataPath,
   isBuiltInResourcePath,
   isIncompleteSkillContent,
+  isPluginManifestPath,
+  isPluginMarkerDirectoryName,
+  selectPreferredPluginManifest,
   shouldReplaceBuiltInResourcePath,
 } from "./resourceKinds";
 import { isJapanese } from "./i18n";
@@ -459,7 +462,89 @@ function getScanPriority(
   return 2;
 }
 
-async function collectMarkdownFiles(
+/**
+ * `<scanRoot>/plugins/<name>/` is where a plugin package is installed, and it mirrors
+ * the depth-1 glob the workspace scanner uses, so both scopes collapse exactly the
+ * same directories. The depth is part of the rule: a `plugins` directory further down
+ * — say `<scanRoot>/skills/x/plugins/y/` — belongs to somebody else and must keep its
+ * recursive walk. The segment is matched case-insensitively because a case-insensitive
+ * filesystem happily serves the same install directory as `Plugins`.
+ */
+function isPluginPackageDirectory(
+  directory: vscode.Uri,
+  scanRoot: vscode.Uri,
+): boolean {
+  const rootSegments = scanRoot.path.split("/").filter(Boolean);
+  const segments = directory.path.split("/").filter(Boolean);
+  return (
+    segments.length === rootSegments.length + 2 &&
+    segments[rootSegments.length].toLowerCase() === "plugins"
+  );
+}
+
+/**
+ * A plugin is installed as a whole package, so its manifest is the only file that
+ * represents it. When `directory` is a plugin root this returns that manifest and the
+ * caller must stop descending: the package's own skills, agents, hooks and MCP config
+ * belong to the plugin, and VS Code already loads them from `chat.pluginLocations`.
+ *
+ * A package can ship several accepted manifests, so the one that represents it is
+ * chosen by the shared precedence rather than by directory iteration order, which is
+ * what keeps this scope on the same manifest as the workspace scope.
+ */
+async function findPluginManifestInDirectory(
+  directory: vscode.Uri,
+  entries: [string, vscode.FileType][],
+): Promise<vscode.Uri | undefined> {
+  const candidates: { manifestPath: string; uri: vscode.Uri }[] = [];
+
+  for (const [name, type] of entries) {
+    if (
+      hasFileType(type, vscode.FileType.File) &&
+      isPluginManifestPath(name.toLowerCase())
+    ) {
+      candidates.push({
+        manifestPath: name,
+        uri: vscode.Uri.joinPath(directory, name),
+      });
+    }
+  }
+
+  for (const [name, type] of entries) {
+    if (
+      !hasFileType(type, vscode.FileType.Directory) ||
+      !isPluginMarkerDirectoryName(name)
+    ) {
+      continue;
+    }
+    const markerUri = vscode.Uri.joinPath(directory, name);
+    let markerEntries: [string, vscode.FileType][];
+    try {
+      markerEntries = await vscode.workspace.fs.readDirectory(markerUri);
+    } catch {
+      continue;
+    }
+    for (const [markerFileName, markerType] of markerEntries) {
+      const manifestPath = `${name}/${markerFileName}`;
+      if (
+        hasFileType(markerType, vscode.FileType.File) &&
+        isPluginManifestPath(manifestPath.toLowerCase())
+      ) {
+        candidates.push({
+          manifestPath,
+          uri: vscode.Uri.joinPath(markerUri, markerFileName),
+        });
+      }
+    }
+  }
+
+  return selectPreferredPluginManifest(
+    candidates,
+    (candidate) => candidate.manifestPath,
+  )?.uri;
+}
+
+export async function collectMarkdownFiles(
   root: vscode.Uri,
   includeBuiltInResources: boolean,
   options: CollectResourceFilesOptions = {},
@@ -478,7 +563,7 @@ async function collectMarkdownFiles(
       : [];
   }
 
-  async function walk(current: vscode.Uri): Promise<void> {
+  async function walk(current: vscode.Uri, isScanRoot: boolean): Promise<void> {
     if (files.length >= maxFiles) {
       return;
     }
@@ -488,6 +573,21 @@ async function collectMarkdownFiles(
       entries = await vscode.workspace.fs.readDirectory(current);
     } catch {
       return;
+    }
+
+    // Only a package this extension installed is collapsed to its manifest, and
+    // those always sit one level under the scan root's own `plugins` directory. A
+    // stray `plugin.json` elsewhere, or a `plugins` directory nested deeper in the
+    // tree, is somebody else's and must not hide the resources beside it.
+    if (!isScanRoot && isPluginPackageDirectory(current, root)) {
+      const pluginManifestUri = await findPluginManifestInDirectory(
+        current,
+        entries,
+      );
+      if (pluginManifestUri) {
+        files.push(pluginManifestUri);
+        return;
+      }
     }
 
     const sortedEntries = entries
@@ -508,7 +608,7 @@ async function collectMarkdownFiles(
 
       const child = vscode.Uri.joinPath(current, name);
       if (hasFileType(type, vscode.FileType.Directory)) {
-        await walk(child);
+        await walk(child, false);
       } else if (
         hasFileType(type, vscode.FileType.File) &&
         (name.toLowerCase().endsWith(".md") ||
@@ -525,7 +625,7 @@ async function collectMarkdownFiles(
     }
   }
 
-  await walk(root);
+  await walk(root, true);
   return files;
 }
 

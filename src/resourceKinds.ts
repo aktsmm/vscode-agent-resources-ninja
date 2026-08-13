@@ -186,22 +186,204 @@ function isNativeInstructionFilePath(lowerPath: string): boolean {
   );
 }
 
-const PLUGIN_MARKER_MANIFEST_PATTERN =
-  /^(.*?)(?:^|\/)\.(?:claude-plugin|codex-plugin|cursor-plugin|plugin)\/(?:plugin|marketplace)\.json$/i;
+const PLUGIN_MARKER_DIRECTORY_NAMES = [
+  ".claude-plugin",
+  ".codex-plugin",
+  ".cursor-plugin",
+  ".plugin",
+];
 
-const PLUGIN_ROOT_MANIFEST_FILE_NAMES = new Set([
+const PLUGIN_MARKER_MANIFEST_FILE_NAMES = ["plugin.json", "marketplace.json"];
+
+const PLUGIN_ROOT_MANIFEST_FILE_NAMES = [
   "plugin.json",
   "gemini-extension.json",
   "apm.yml",
   "apm.yaml",
-]);
+];
 
-function isPluginManifestPath(lowerPath: string): boolean {
+const PLUGIN_ROOT_MANIFEST_FILE_NAME_SET = new Set(
+  PLUGIN_ROOT_MANIFEST_FILE_NAMES,
+);
+
+function toRegExpAlternation(values: string[]): string {
+  return values
+    .map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+}
+
+const PLUGIN_MARKER_MANIFEST_PATTERN = new RegExp(
+  `^(.*?)(?:^|/)(?:${toRegExpAlternation(PLUGIN_MARKER_DIRECTORY_NAMES)})/(?:${toRegExpAlternation(PLUGIN_MARKER_MANIFEST_FILE_NAMES)})$`,
+  "i",
+);
+
+/**
+ * Globs, relative to a directory that holds one folder per installed plugin, matching
+ * only the manifest forms `isPluginManifestPath` accepts. Child resources of a plugin
+ * are deliberately out of reach so a scan cannot list them a second time under the
+ * root of their own kind.
+ */
+export function getPluginManifestScanGlobs(): string[] {
+  return [
+    `*/{${PLUGIN_ROOT_MANIFEST_FILE_NAMES.join(",")}}`,
+    `*/{${PLUGIN_MARKER_DIRECTORY_NAMES.join(",")}}/{${PLUGIN_MARKER_MANIFEST_FILE_NAMES.join(",")}}`,
+  ];
+}
+
+export function isPluginManifestPath(lowerPath: string): boolean {
   const fileName = lowerPath.slice(lowerPath.lastIndexOf("/") + 1);
   return (
-    PLUGIN_ROOT_MANIFEST_FILE_NAMES.has(fileName) ||
+    PLUGIN_ROOT_MANIFEST_FILE_NAME_SET.has(fileName) ||
     PLUGIN_MARKER_MANIFEST_PATTERN.test(lowerPath)
   );
+}
+
+/**
+ * One package can ship several accepted manifests at once: `awslabs/agent-plugins`
+ * ships `.claude-plugin/` and `.codex-plugin/` side by side, and a package may carry a
+ * root `plugin.json` next to `gemini-extension.json` or `apm.yml`. Every scope picks
+ * the manifest that comes first in this list, so a package is one row with the same
+ * manifest everywhere. Marker forms rank above root forms because a marker directory
+ * exists only to declare the plugin, while a root file name can also belong to an
+ * unrelated tool.
+ */
+export function getPluginManifestPrecedence(): string[] {
+  const markerForms = PLUGIN_MARKER_DIRECTORY_NAMES.flatMap((directoryName) =>
+    PLUGIN_MARKER_MANIFEST_FILE_NAMES.map(
+      (fileName) => `${directoryName}/${fileName}`,
+    ),
+  );
+  return [...markerForms, ...PLUGIN_ROOT_MANIFEST_FILE_NAMES];
+}
+
+const PLUGIN_MANIFEST_PRECEDENCE_RANK = new Map(
+  getPluginManifestPrecedence().map((form, index) => [form, index]),
+);
+
+/**
+ * The precedence-bearing tail of a manifest path: `.claude-plugin/plugin.json` for a
+ * marker form, the file name for a root form. Everything above it identifies the
+ * package rather than the manifest form, so it must not affect the ranking.
+ */
+function getPluginManifestForm(manifestPath: string): string | undefined {
+  const lowerPath = manifestPath.replace(/\\/g, "/").toLowerCase();
+  if (!isPluginManifestPath(lowerPath)) {
+    return undefined;
+  }
+  const segments = lowerPath.split("/").filter(Boolean);
+  const fileName = segments[segments.length - 1] ?? "";
+  const parentName = segments[segments.length - 2];
+  if (parentName !== undefined && isPluginMarkerDirectoryName(parentName)) {
+    return `${parentName}/${fileName}`;
+  }
+  return fileName;
+}
+
+/**
+ * Orders two manifests of the same package. Ties fall back to the path itself so the
+ * choice never depends on directory iteration order.
+ */
+export function comparePluginManifestPrecedence(
+  manifestPathA: string,
+  manifestPathB: string,
+): number {
+  const rank = (manifestPath: string): number => {
+    const form = getPluginManifestForm(manifestPath);
+    const index =
+      form === undefined
+        ? undefined
+        : PLUGIN_MANIFEST_PRECEDENCE_RANK.get(form);
+    return index ?? Number.MAX_SAFE_INTEGER;
+  };
+  const rankDifference = rank(manifestPathA) - rank(manifestPathB);
+  if (rankDifference !== 0) {
+    return rankDifference;
+  }
+  const normalizedA = manifestPathA.replace(/\\/g, "/").toLowerCase();
+  const normalizedB = manifestPathB.replace(/\\/g, "/").toLowerCase();
+  return normalizedA < normalizedB ? -1 : normalizedA > normalizedB ? 1 : 0;
+}
+
+/**
+ * The one manifest that represents a package whose directory holds several of them.
+ */
+export function selectPreferredPluginManifest<T>(
+  candidates: readonly T[],
+  toManifestPath: (candidate: T) => string,
+): T | undefined {
+  let preferred: T | undefined;
+  for (const candidate of candidates) {
+    if (
+      preferred === undefined ||
+      comparePluginManifestPrecedence(
+        toManifestPath(candidate),
+        toManifestPath(preferred),
+      ) < 0
+    ) {
+      preferred = candidate;
+    }
+  }
+  return preferred;
+}
+
+/**
+ * Collapses manifests that resolve to the same plugin root down to the preferred one,
+ * keeping the position of the first manifest seen for that root. Anything that is not
+ * a plugin manifest passes through untouched.
+ */
+/**
+ * Two plugin roots are the same package only when the filesystem says so. Folding
+ * case everywhere would merge `plugins/demo` and `plugins/Demo` on Linux, where
+ * they are two different installed packages. The platform test is inlined because
+ * many plain-Node loaders read this module directly and must not need a stub for
+ * another `src/` file.
+ */
+export function toPluginRootIdentityKey(
+  pluginRootFsPath: string,
+  platform: string = process.platform,
+): string {
+  const normalized = pluginRootFsPath.replace(/\\/g, "/");
+  return platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+export function dedupePluginManifestsByRoot<T>(
+  items: readonly T[],
+  toManifestFsPath: (item: T) => string,
+): T[] {
+  const deduped: T[] = [];
+  const indexByPluginRoot = new Map<string, number>();
+  for (const item of items) {
+    const manifestFsPath = toManifestFsPath(item);
+    const pluginRoot = getPluginRootFsPathFromManifestPath(manifestFsPath);
+    if (pluginRoot === undefined) {
+      deduped.push(item);
+      continue;
+    }
+    const rootKey = toPluginRootIdentityKey(pluginRoot);
+    const existingIndex = indexByPluginRoot.get(rootKey);
+    if (existingIndex === undefined) {
+      indexByPluginRoot.set(rootKey, deduped.length);
+      deduped.push(item);
+      continue;
+    }
+    if (
+      comparePluginManifestPrecedence(
+        manifestFsPath,
+        toManifestFsPath(deduped[existingIndex]),
+      ) < 0
+    ) {
+      deduped[existingIndex] = item;
+    }
+  }
+  return deduped;
+}
+
+/**
+ * A marker directory holds the manifest of the plugin rooted at the directory ABOVE it,
+ * so it is never a plugin root of its own.
+ */
+export function isPluginMarkerDirectoryName(name: string): boolean {
+  return PLUGIN_MARKER_DIRECTORY_NAMES.includes(name.toLowerCase());
 }
 
 export function getPluginRootFromManifestPath(
@@ -224,6 +406,60 @@ export function getPluginRootFromManifestPath(
     return ".";
   }
   return normalizedPath.slice(0, slashIndex).replace(/\/+$/, "") || ".";
+}
+
+/**
+ * Filesystem variant of `getPluginRootFromManifestPath`: the result is a prefix of the
+ * input, so an absolute prefix such as `/` or `D:\` and the platform separator both
+ * survive. Returns `undefined` when the path is not a manifest, or when no directory
+ * sits above the manifest, so a caller deleting the root recursively can never climb
+ * out of the manifest's own folder.
+ */
+export function getPluginRootFsPathFromManifestPath(
+  manifestFsPath: string,
+): string | undefined {
+  if (typeof manifestFsPath !== "string" || manifestFsPath.length === 0) {
+    return undefined;
+  }
+  const lowerNormalizedPath = manifestFsPath.replace(/\\/g, "/").toLowerCase();
+  if (!isPluginManifestPath(lowerNormalizedPath)) {
+    return undefined;
+  }
+
+  // `.claude-plugin/plugin.json` and friends describe the directory above the marker.
+  const levelsAboveManifest = PLUGIN_MARKER_MANIFEST_PATTERN.test(
+    lowerNormalizedPath,
+  )
+    ? 2
+    : 1;
+  let cutIndex = manifestFsPath.length;
+  for (let level = 0; level < levelsAboveManifest; level += 1) {
+    cutIndex = lowerNormalizedPath.lastIndexOf("/", cutIndex - 1);
+    if (cutIndex <= 0) {
+      return undefined;
+    }
+  }
+  const rootFsPath = manifestFsPath.slice(0, cutIndex);
+  return isTooShallowForRecursiveDelete(rootFsPath) ? undefined : rootFsPath;
+}
+
+/**
+ * A drive specifier like `D:` is drive-RELATIVE on Windows and resolves to that
+ * drive's current directory, so returning one as a plugin root would point a
+ * recursive delete somewhere unrelated. Filesystem and share roots are refused
+ * for the same reason, and so is any relative path, which resolves against the
+ * process working directory rather than the install location.
+ */
+function isTooShallowForRecursiveDelete(fsPath: string): boolean {
+  const normalized = fsPath.replace(/\\/g, "/");
+  const isAbsolute = /^\//.test(normalized) || /^[A-Za-z]:\//.test(normalized);
+  return (
+    normalized.length === 0 ||
+    !isAbsolute ||
+    /^[A-Za-z]:\/?$/.test(normalized) ||
+    /^\/+$/.test(normalized) ||
+    /^\/\/[^/]+\/[^/]+\/?$/.test(normalized)
+  );
 }
 
 export const AGENT_PLUGINS_MANIFEST_SCHEMA =
@@ -780,7 +1016,11 @@ export function getResourceMetadataPath(
     return `${normalizedPath.replace(/\/README\.md$/i, "")}/.resource-ninja.json`;
   }
   if (kind === "plugin") {
-    return `${normalizedPath.replace(/\/+$/g, "")}/.resource-ninja.json`;
+    // The installer passes the plugin root while a scanner passes the manifest
+    // it found, so normalize here rather than at each call site.
+    const rootFromManifest =
+      getPluginRootFsPathFromManifestPath(resourcePath) ?? resourcePath;
+    return `${rootFromManifest.replace(/\\/g, "/").replace(/\/+$/g, "")}/.resource-ninja.json`;
   }
   return `${normalizedPath}.resource-ninja.json`;
 }

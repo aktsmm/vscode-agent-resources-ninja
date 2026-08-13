@@ -1597,6 +1597,22 @@
           ],
           "markdownDescription": "%config.instructionBlock.globalHome.includeInstructions.markdownDescription%"
         },
+        "resourceNinja.registerPluginLocation": {
+          "type": "string",
+          "default": "prompt",
+          "order": 35,
+          "enum": [
+            "always",
+            "prompt",
+            "never"
+          ],
+          "enumDescriptions": [
+            "%config.registerPluginLocation.always%",
+            "%config.registerPluginLocation.prompt%",
+            "%config.registerPluginLocation.never%"
+          ],
+          "markdownDescription": "%config.registerPluginLocation.markdownDescription%"
+        },
         "resourceNinja.versionInfo": {
           "type": "null",
           "order": 100,

@@ -141,6 +141,10 @@ async function main() {
         path.join(__dirname, "..", "src", "pathSafety.ts"),
         {},
       ),
+      "./pluginLocations": requireTypeScriptModule(
+        path.join(__dirname, "..", "src", "pluginLocations.ts"),
+        {},
+      ),
       "./skillIndex": {
         getResourceKind: (resource) => resource.kind || "skill",
         loadSkillIndex: async () => ({ sources: [] }),
@@ -230,7 +234,13 @@ async function main() {
     { suppressRecoveryPrompt: true },
   );
 
-  assert.deepStrictEqual(result, {});
+  assert.deepStrictEqual(Object.keys(result), ["destinationUri"]);
+  assert.ok(
+    result.destinationUri.fsPath.endsWith(
+      path.join(".github", "skills", "temp-skill"),
+    ),
+    "the install must report the directory it actually wrote to",
+  );
   assert.deepStrictEqual(deleted, []);
   assert.ok(
     directories.some((entry) =>
