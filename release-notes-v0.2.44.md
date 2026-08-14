@@ -26,11 +26,12 @@
 - `npm run audit:runtime`: PASS (0 vulnerabilities)
 - Raw installability, no-new-collision, release hygiene, README/CHANGELOG, manifest consistency, bundle, MCP metadata, and diff checks: PASS
 - Full development audit: guarded at 9 high advisories in development-only lint/test tooling (`brace-expansion`, `js-yaml` through ESLint/Mocha); the packaged runtime dependency audit is clean, and the available complete fix requires a breaking ESLint 10 upgrade.
-- Packaged VSIX install: pending isolated-profile verification
+- Packaged VSIX install: PASS in a fresh isolated `--user-data-dir` / `--extensions-dir` profile (`yamapan.agent-resources-ninja@0.2.44`)
+- Exact extracted VSIX bits Extension Host smoke: PASS (`1/1`, core commands registered)
 
 ## Artifact
 
 - VSIX: `artifacts/vsix/agent-resources-ninja-0.2.44.vsix`
-- Size: pending
-- SHA256: pending
-- Payload: pending final package inspection
+- Size: 465,997 bytes
+- SHA256: `4F9A226396AB2019794E318F9C4C6974CF502798895F4A6045FB24DCE878D695`
+- Payload: 12 files; `extension/dist/extension.js`, package metadata, icons, and Resource Index present; no source maps, development directories, or release notes
