@@ -179,7 +179,9 @@ async function downloadDirectoryWithGitFallback(
     await downloadDirectory(owner, repo, remotePath, localPath, branch);
     return;
   } catch (error) {
-    if (!String(error?.message || error).includes("Failed to list directory: 403")) {
+    if (
+      !String(error?.message || error).includes("Failed to list directory: 403")
+    ) {
       throw error;
     }
   }
