@@ -30,6 +30,8 @@ function requireTypeScriptModule(filePath) {
 const {
   AGENT_PLUGINS_MANIFEST_KIND,
   getAgentPluginsNameIssue,
+  getPluginOwnedHookInstallFileName,
+  getPluginOwnedInstallFileName,
   isHookConfigFilePath,
 } = requireTypeScriptModule(path.join(repoRoot, "src", "resourceKinds.ts"));
 
@@ -72,18 +74,26 @@ function getInstallDestinationSlot(resource) {
   }
   if (kind === "hook") {
     if (isHookConfigFilePath(remotePath)) {
-      return `hook:${baseName}`;
+      return `hook:${getPluginOwnedHookInstallFileName({
+        kind,
+        source: resource.source,
+        pluginRoot: resource.pluginRoot,
+        resourcePath: remotePath,
+        fileName: baseName,
+      })}`;
     }
     return `hook:${sanitizeInstallName(
       path.posix.basename(path.posix.dirname(remotePath)) || resource.name,
     )}/README.md`;
   }
-  if (
-    kind === "agent" ||
-    kind === "instruction" ||
-    kind === "prompt" ||
-    kind === "cursor-rule"
-  ) {
+  if (kind === "agent" || kind === "instruction" || kind === "prompt") {
+    return `${kind}:${getPluginOwnedInstallFileName({
+      kind,
+      pluginRoot: resource.pluginRoot,
+      fileName: baseName,
+    })}`;
+  }
+  if (kind === "cursor-rule") {
     return `${kind}:${baseName}`;
   }
   // Unknown kinds fall through to the verbatim-path branch of getResourceTargetUri.
@@ -116,7 +126,6 @@ function findCrossSourceInstallCollisions(index) {
 // this list may only shrink; never add a slot to make a new collision pass.
 // Grandfathered because they predate this guard and pruning them needs an index
 // regeneration (network + token), which is a separate change:
-// - hook:hooks.json ........ four vendors each ship their own hooks/hooks.json.
 // - instruction:*.instructions.md ... code-and-sorts republishes the four
 //   language instruction files that github-awesome-copilot also ships.
 // - skill:* ................ the same skill name is vendored by two catalogs
@@ -124,12 +133,6 @@ function findCrossSourceInstallCollisions(index) {
 //   awesome-copilot; agent skills duplicated between anthropic, aws, openai and
 //   oh-my-codex forks).
 const GRANDFATHERED_INSTALL_COLLISIONS = {
-  "hook:hooks.json": [
-    "anthropic-claude-code",
-    "aws-agent-plugins",
-    "compound-engineering",
-    "oh-my-codex",
-  ],
   "instruction:csharp.instructions.md": [
     "code-and-sorts-awesome-copilot-agents",
     "github-awesome-copilot",

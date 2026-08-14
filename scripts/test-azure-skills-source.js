@@ -193,8 +193,15 @@ async function main() {
     "utf8",
   );
   assert.match(updaterSource, /kind === "mcp"/);
-  assert.match(updaterSource, /mcpServers/);
-  assert.match(updaterSource, /MCP configuration for/);
+  assert.match(updaterSource, /getMcpConfigMetadata/);
+  const resourceKindsSource = fs.readFileSync(
+    path.join(__dirname, "..", "src", "resourceKinds.ts"),
+    "utf8",
+  );
+  assert.match(
+    resourceKindsSource,
+    /parsed\.mcpServers[\s\S]*?parsed\.servers/,
+  );
 
   console.log(
     "PASS Microsoft Azure Skills source is indexed with skills and MCP metadata",

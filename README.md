@@ -155,31 +155,32 @@ Or search for **"Agent Resources Ninja"** in VS Code Extensions (`Ctrl+Shift+X`)
 
 Preset index includes skills, agents, prompts, instructions, hooks, MCP config resources, plugin manifests, and Cursor rules from official, curated, and community sources out of the box.
 
-| Source                                                                                                                        | Type      | Description                                                                     |
-| ----------------------------------------------------------------------------------------------------------------------------- | --------- | ------------------------------------------------------------------------------- |
-| [anthropics/skills](https://github.com/anthropics/skills)                                                                     | Official  | Anthropic official Claude Skills                                                |
-| [openai/skills](https://github.com/openai/skills)                                                                             | Official  | OpenAI official Codex Skills (1.7k+)                                            |
-| [github/awesome-copilot](https://github.com/github/awesome-copilot)                                                           | Official  | GitHub official Copilot resources, including plugin-published skills and agents |
-| [cursor/plugins](https://github.com/cursor/plugins)                                                                           | Official  | Cursor official plugin manifests, skills, agents, and rules                     |
-| [MicrosoftDocs/Agent-Skills](https://github.com/MicrosoftDocs/Agent-Skills)                                                   | Official  | Microsoft official Azure agent skills                                           |
-| [microsoft/azure-skills](https://github.com/microsoft/azure-skills)                                                           | Official  | Microsoft Azure skills and MCP config resources                                 |
-| [awslabs/agent-plugins](https://github.com/awslabs/agent-plugins)                                                             | Official  | AWS Labs agent plugin skills                                                    |
-| [elastic/agent-skills](https://github.com/elastic/agent-skills)                                                               | Official  | Elastic official agent skills                                                   |
-| [google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli)                                                       | Official  | Gemini CLI official skills                                                      |
-| [google/skills](https://github.com/google/skills)                                                                             | Official  | Google official Agent Skills for Google Cloud and Google products               |
-| [openai/codex](https://github.com/openai/codex)                                                                               | Official  | Codex repository skills                                                         |
-| [anthropics/claude-code](https://github.com/anthropics/claude-code)                                                           | Official  | Claude Code plugin skills                                                       |
-| [cline/cline](https://github.com/cline/cline)                                                                                 | Official  | Cline repository skills                                                         |
-| [ComposioHQ/awesome-claude-skills](https://github.com/ComposioHQ/awesome-claude-skills)                                       | Curated   | Curated Claude Skills list                                                      |
-| [Code-and-Sorts/awesome-copilot-agents](https://github.com/Code-and-Sorts/awesome-copilot-agents)                             | Curated   | Copilot agents, instructions, prompts, and skills                               |
-| [obra/superpowers](https://github.com/obra/superpowers)                                                                       | Community | Superpowers plugin manifests and plugin-derived skills                          |
-| [glittercowboy/taches-cc-resources](https://github.com/glittercowboy/taches-cc-resources)                                     | Community | Claude Code resources and skills                                                |
-| [Yeachan-Heo/oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex)                                                         | Community | Codex workflow plugin metadata, skills, prompts, hooks, and OMX guidance        |
-| [muratcankoylan/Agent-Skills-for-Context-Engineering](https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering) | Community | Context Engineering skills (5k+)                                                |
-| [danielmiessler/LifeOS](https://github.com/danielmiessler/LifeOS)                                                             | Community | LifeOS skills - PAI successor                                                   |
-| [EveryInc/compound-engineering-plugin](https://github.com/EveryInc/compound-engineering-plugin)                               | Community | Compound Engineering (3.5k+)                                                    |
-| [Wirasm/PRPs-agentic-eng](https://github.com/Wirasm/PRPs-agentic-eng)                                                         | Community | PRP (Prompt Recipe Patterns)                                                    |
-| [qdhenry/Claude-Command-Suite](https://github.com/qdhenry/Claude-Command-Suite)                                               | Community | Claude commands & skills                                                        |
+| Source                                                                                                                        | Type      | Description                                                                            |
+| ----------------------------------------------------------------------------------------------------------------------------- | --------- | -------------------------------------------------------------------------------------- |
+| [anthropics/skills](https://github.com/anthropics/skills)                                                                     | Official  | Anthropic official Claude Skills                                                       |
+| [openai/skills](https://github.com/openai/skills)                                                                             | Official  | OpenAI official Codex Skills (1.7k+)                                                   |
+| [github/awesome-copilot](https://github.com/github/awesome-copilot)                                                           | Official  | GitHub official Copilot resources, including plugin-published skills and agents        |
+| [github/copilot-plugins](https://github.com/github/copilot-plugins)                                                           | Official  | GitHub official plugin marketplace plus the plugin resources stored in this repository |
+| [cursor/plugins](https://github.com/cursor/plugins)                                                                           | Official  | Cursor official plugin manifests, skills, agents, and rules                            |
+| [MicrosoftDocs/Agent-Skills](https://github.com/MicrosoftDocs/Agent-Skills)                                                   | Official  | Microsoft official Azure agent skills                                                  |
+| [microsoft/azure-skills](https://github.com/microsoft/azure-skills)                                                           | Official  | Microsoft Azure skills and MCP config resources                                        |
+| [awslabs/agent-plugins](https://github.com/awslabs/agent-plugins)                                                             | Official  | AWS Labs agent plugin skills                                                           |
+| [elastic/agent-skills](https://github.com/elastic/agent-skills)                                                               | Official  | Elastic official agent skills                                                          |
+| [google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli)                                                       | Official  | Gemini CLI official skills                                                             |
+| [google/skills](https://github.com/google/skills)                                                                             | Official  | Google official Agent Skills for Google Cloud and Google products                      |
+| [openai/codex](https://github.com/openai/codex)                                                                               | Official  | Codex repository skills                                                                |
+| [anthropics/claude-code](https://github.com/anthropics/claude-code)                                                           | Official  | Claude Code plugin skills                                                              |
+| [cline/cline](https://github.com/cline/cline)                                                                                 | Official  | Cline repository skills                                                                |
+| [ComposioHQ/awesome-claude-skills](https://github.com/ComposioHQ/awesome-claude-skills)                                       | Curated   | Curated Claude Skills list                                                             |
+| [Code-and-Sorts/awesome-copilot-agents](https://github.com/Code-and-Sorts/awesome-copilot-agents)                             | Curated   | Copilot agents, instructions, prompts, and skills                                      |
+| [obra/superpowers](https://github.com/obra/superpowers)                                                                       | Community | Superpowers plugin manifests and plugin-derived skills                                 |
+| [glittercowboy/taches-cc-resources](https://github.com/glittercowboy/taches-cc-resources)                                     | Community | Claude Code resources and skills                                                       |
+| [Yeachan-Heo/oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex)                                                         | Community | Codex workflow plugin metadata, skills, prompts, hooks, and OMX guidance               |
+| [muratcankoylan/Agent-Skills-for-Context-Engineering](https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering) | Community | Context Engineering skills (5k+)                                                       |
+| [danielmiessler/LifeOS](https://github.com/danielmiessler/LifeOS)                                                             | Community | LifeOS skills - PAI successor                                                          |
+| [EveryInc/compound-engineering-plugin](https://github.com/EveryInc/compound-engineering-plugin)                               | Community | Compound Engineering (3.5k+)                                                           |
+| [Wirasm/PRPs-agentic-eng](https://github.com/Wirasm/PRPs-agentic-eng)                                                         | Community | PRP (Prompt Recipe Patterns)                                                           |
+| [qdhenry/Claude-Command-Suite](https://github.com/qdhenry/Claude-Command-Suite)                                               | Community | Claude commands & skills                                                               |
 
 Azure uses the canonical `microsoft/azure-skills` source for the Azure Skills Plugin distribution and its Azure MCP config. The selectable Azure Skills bundle can install skills together, while the MCP config can be copied for review or explicitly merged into `.vscode/mcp.json`.
 
@@ -192,6 +193,8 @@ Generic MCP config file names such as `mcp.json` and `.mcp.json` are installed w
 > Use `Update Index` to refresh the latest resources and metadata from these sources.
 > Official product and plugin repositories are path-filtered so bundled presets include distribution-ready resource roots and selected plugin manifests, not samples or test fixtures.
 > For `github/awesome-copilot`, resources published from `plugins/` are indexed from distribution-ready top-level resource paths when available, avoiding duplicate raw plugin paths.
+>
+> For `github/copilot-plugins`, the marketplace manifest and the physical resources stored under `plugins/` are indexed. Marketplace entries hosted in external repositories remain catalog metadata and are not emitted as fake local resources.
 > Files nested under a directory-based `SKILL.md` root are treated as internal skill contents, so helper prompts or instructions in a skill's `templates` folder do not appear as separate Remote Resources.
 
 ### 🧩 Plugin Formats
@@ -352,11 +355,42 @@ Two things are outside this extension's control:
 
 To review or undo, open `chat.pluginLocations` in your user settings; the confirmation notification has a button that takes you straight there. Removing an entry there stops VS Code loading that plugin without deleting any files.
 
+For GitHub Copilot CLI, choose **Install in Copilot CLI** instead. The extension reads the repository's `marketplace.json`, verifies that the selected plugin has one exact marketplace entry, and delegates the supported sequence to the installed `copilot` executable:
+
+1. `copilot plugin marketplace add OWNER/REPO`, only when that exact marketplace source is not already registered.
+2. `copilot plugin install PLUGIN@MARKETPLACE`.
+
+Current CLI help still lists direct repository source forms, but that plugin path is deprecated in favor of marketplace registration and is not used here. The extension never writes `~/.copilot/installed-plugins` or `config.json` itself. A modal confirmation names the marketplace and plugin before either command runs. If this operation adds a marketplace but plugin installation fails, the extension removes only the registration whose name and repository still match; it never force-removes a marketplace or touches a registration it cannot prove it added. Use **Agent Resources Ninja: Uninstall Agent Plugin from Copilot CLI** to delegate plugin removal while keeping the marketplace registered.
+
+Copilot CLI plugins can supply skills, agents, hooks, MCP servers, and LSP servers. Review the repository before confirming because Copilot CLI may load those components in later sessions. A repository without a valid marketplace entry remains available through the VS Code install path but is not guessed into a CLI command. See [Finding and installing plugins for GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/plugins-finding-installing) and the [Copilot CLI plugin reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-plugin-reference).
+
+Plugin discovery includes the Copilot CLI manifest layout `.github/plugin/plugin.json` as well as `plugin.json`, `.plugin/plugin.json`, `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, and `.cursor-plugin/plugin.json`.
+
+The install picker separates native installation from product handoff instead of treating every recognized manifest as equally installable:
+
+| Host                          | Current level     | Behavior                                                                                                                                                                                                                                                           |
+| ----------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| VS Code / GitHub Copilot Chat | Native            | Copies the package and offers `chat.pluginLocations` registration                                                                                                                                                                                                  |
+| GitHub Copilot CLI            | Native            | Delegates marketplace registration and plugin lifecycle to `copilot`                                                                                                                                                                                               |
+| Claude Code                   | Native / Handoff  | With standalone `claude`, manages marketplace, install, update, enable, disable, and uninstall through the official CLI. With only the VS Code extension, opens its `/plugins` UI                                                                                  |
+| Codex                         | Native / Handoff  | With Codex CLI, manages marketplace plus plugin add/list/remove through the official CLI. On Windows it can use the official WinGet link or package executable when the shell alias is missing. With only the Codex extension, opens the ChatGPT Plugins Directory |
+| Cursor                        | Native local copy | Shown only while running Cursor. Copies Agent Plugin or Cursor Plugin packages to `~/.cursor/plugins/local/<name>`, stores an ownership fingerprint, and deletes only unchanged owned copies                                                                       |
+
+`resourceNinja.defaultPluginHost` controls the recommendation and ordering. `auto` puts a detected compatible native host first, while `ask` adds no recommendation. Only the User setting changes priority; a Workspace value is shown as a suggestion and never preselects an external action. Claude Code and Codex appear only when their extension or CLI is detected and the selected package has resolved source and manifest metadata.
+
+Before the picker opens, each available host is checked independently. The row shows **Installed** with a version when the host reports one, **Enabled** or **Disabled** only when that state is known, **Not installed**, or **State unavailable / State error** without blocking the other hosts. Recommended stays first; otherwise an installed compatible host is placed ahead of a host that has not installed the plugin. A failed state check is never auto-recommended. Claude Code and Codex management commands begin from the host's installed plugin IDs and show only catalog entries whose verified `plugin@marketplace` identity matches, including marketplaces whose entry name differs from the plugin manifest name.
+
+Cursor is a separate editor rather than an AI extension hosted by Microsoft VS Code, so its local install target is not offered in Microsoft VS Code.
+
+The native host contracts were validated on Windows with Claude Code CLI 2.1.229, Claude Code VS Code extension 2.1.231, Codex CLI 0.146.1, the Codex VS Code extension 26.727.40816, and Cursor 3.15.19. Claude and Codex lifecycle tests used isolated configuration homes and harmless skill-only marketplaces. Cursor loaded this extension in an isolated Extension Host (`1 passing`) and its local plugin package path was exercised and cleaned up; Cursor's logs do not expose a plugin discovery event, so local package activation itself remains a UI-level verification.
+
+If WinGet reports Codex CLI as installed but `codex` is unavailable in your shell, the extension identifies whether it is using PATH, the WinGet Links directory, or the official WinGet package executable and shows that provenance in the host picker and confirmation dialogs. **Copy Codex CLI Troubleshooting Command** copies `winget install --id OpenAI.Codex -e --source winget --force`; this is a troubleshooting step and does not guarantee that WinGet will recreate the alias or update PATH.
+
 A few edges worth knowing:
 
 - Re-installing a plugin whose folder is already registered and enabled does not ask again.
 - Moving or deleting the folder outside this extension leaves the entry behind. Nothing repairs it automatically, so remove it yourself.
-- This setting is VS Code only. Plugins installed with the GitHub Copilot CLI live elsewhere and are managed with `copilot plugin`.
+- `chat.pluginLocations` is VS Code only. Plugins installed with GitHub Copilot CLI live elsewhere and are managed through the CLI commands above.
 
 ### Search Tips 💡
 
@@ -461,44 +495,45 @@ Settings are ordered by the workflow users usually follow:
 
 Use `additionalSkillRoots` when workspace skills are stored outside the primary Workspace Skill Directory, for example `copilot-skills/skills` or `copilot-skills/m-skills`. Entries are root directories, not glob patterns. They affect discovery and generated instruction output only; installs still go to `resourcesDirectory`. For coexistence with the skill-only sibling extension, `skillNinja.additionalSkillRoots` is honored as a compatibility fallback.
 
-| Order | Setting                                                         | Default                | Description                                                                                                  |
-| :---: | --------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------ |
-|   0   | `resourceNinja.defaultInstallTarget`                            | `workspace`            | Default target for click/double-click installs                                                               |
-|   1   | `resourceNinja.singleClickInstall`                              | `false`                | Install resources with single click                                                                          |
-|   2   | `resourceNinja.resourcesDirectory`                              | `.github/skills`       | Workspace skill directory                                                                                    |
-|   3   | `resourceNinja.additionalSkillRoots`                            | `[]`                   | Extra workspace skill discovery roots                                                                        |
-|   4   | `resourceNinja.workspaceAgentsDirectory`                        | `.github/agents`       | Workspace agent directory                                                                                    |
-|   5   | `resourceNinja.workspaceInstructionsDirectory`                  | `.github/instructions` | Workspace instruction directory                                                                              |
-|   6   | `resourceNinja.workspacePromptsDirectory`                       | `.github/prompts`      | Workspace prompt directory                                                                                   |
-|   7   | `resourceNinja.workspaceHooksDirectory`                         | `.github/hooks`        | Workspace hook directory                                                                                     |
-|   8   | `resourceNinja.workspaceMcpDirectory`                           | `.github/mcp`          | Safe workspace MCP config staging directory before optional `.vscode/mcp.json` merge                         |
-|   9   | `resourceNinja.userAgentsDirectory`                             | `""`                   | Optional User Profile agent override; empty stores `.agent.md` in VS Code User `prompts`                     |
-|  10   | `resourceNinja.userInstructionsDirectory`                       | `""`                   | Optional User Profile instruction directory override                                                         |
-|  11   | `resourceNinja.userPromptsDirectory`                            | `""`                   | Optional User Profile prompt directory override                                                              |
-|  12   | `resourceNinja.globalResourceHomePreset`                        | `copilot`              | Known Global Resource Home preset (`~/.copilot`, `~/.claude`, `~/.agents`)                                   |
-|  13   | `resourceNinja.globalHomeDirectory`                             | `""`                   | Optional custom Global Resource Home override                                                                |
-|  14   | `resourceNinja.autoUpdateInstruction`                           | `true`                 | Auto-update the generated instruction block after resource changes                                           |
-|  15   | `resourceNinja.instructionFile`                                 | `AGENTS.md`            | Generated instruction block sync target _(requires Auto Update)_                                             |
-|  16   | `resourceNinja.customInstructionPath`                           | `""`                   | Custom generated instruction block path _(only when 'custom' selected)_                                      |
-|  17   | `resourceNinja.includeLocalResources`                           | `false`                | Include workspace-wide fallback `SKILL.md` files in the generated instruction block                          |
-|  18   | `resourceNinja.autoUpdateResourcesOnUpgrade`                    | `prompt`               | Update installed remote skills on extension upgrade                                                          |
-|  19   | `resourceNinja.coexistenceMode`                                 | `auto`                 | Shared marker ownership mode (`auto` / `independent`)                                                        |
-|  20   | `resourceNinja.kindsExcluded`                                   | `[]`                   | Legacy standalone compatibility exclusions for shared instruction blocks                                     |
-|  21   | `resourceNinja.useSharedSourcesManifest`                        | `false`                | Enable shared `sources.json` SSOT for coexistence with the skill-only sibling extension                      |
-|  22   | `resourceNinja.useSharedResourceIndex`                          | `false`                | Enable shared `index.json` SSOT for coexistence with the skill-only sibling extension                        |
-|  23   | `resourceNinja.staleSourceIndexUpdateMode`                      | `prompt`               | Startup handling for source indexes stale for more than 30 days (`always` / `prompt` / `never`)              |
-|  24   | `resourceNinja.useRefOutput`                                    | `true`                 | Keep managed output lightweight by linking to per-kind catalogs                                              |
-|  25   | `resourceNinja.outputFormat`                                    | `full`                 | Inline output format used when Ref output is off (`full` / `compact` / `legacy`)                             |
-|  26   | `resourceNinja.refCatalogFormat`                                | `full`                 | README index detail format used when Ref output is on (`full` / `compact` / `legacy`)                        |
-|  27   | `resourceNinja.showBuiltInResources`                            | `true`                 | Show built-in resources in User / Global Resource Home                                                       |
-|  28   | `resourceNinja.remoteResourceViewMode`                          | `repositoryFirst`      | Remote Resources layout (repository-first / resource-type-first)                                             |
-|  29   | `resourceNinja.language`                                        | `auto`                 | UI language (auto / en / ja)                                                                                 |
-|  30   | `resourceNinja.githubToken`                                     | `""`                   | GitHub Token (API rate limits and private source repositories)                                               |
-|  31   | `resourceNinja.instructionBlock.includeAgents`                  | `false`                | Include `agent` resources in workspace instruction blocks                                                    |
-|  32   | `resourceNinja.instructionBlock.includeInstructions`            | `false`                | Include `instruction` resources in workspace instruction blocks                                              |
-|  33   | `resourceNinja.instructionBlock.globalHome.includeAgents`       | `inherit`              | Override Global Resource Home agent listing policy (`inherit` / `on` / `off`)                                |
-|  34   | `resourceNinja.instructionBlock.globalHome.includeInstructions` | `inherit`              | Override Global Resource Home instruction listing policy (`inherit` / `on` / `off`)                          |
-|  35   | `resourceNinja.registerPluginLocation`                          | `prompt`               | Add an installed plugin folder to the VS Code `chat.pluginLocations` setting (`always` / `prompt` / `never`) |
+| Order | Setting                                                         | Default                | Description                                                                                                                          |
+| :---: | --------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+|   0   | `resourceNinja.defaultInstallTarget`                            | `workspace`            | Default target for click/double-click installs                                                                                       |
+|   1   | `resourceNinja.singleClickInstall`                              | `false`                | Install resources with single click                                                                                                  |
+|   2   | `resourceNinja.resourcesDirectory`                              | `.github/skills`       | Workspace skill directory                                                                                                            |
+|   3   | `resourceNinja.additionalSkillRoots`                            | `[]`                   | Extra workspace skill discovery roots                                                                                                |
+|   4   | `resourceNinja.workspaceAgentsDirectory`                        | `.github/agents`       | Workspace agent directory                                                                                                            |
+|   5   | `resourceNinja.workspaceInstructionsDirectory`                  | `.github/instructions` | Workspace instruction directory                                                                                                      |
+|   6   | `resourceNinja.workspacePromptsDirectory`                       | `.github/prompts`      | Workspace prompt directory                                                                                                           |
+|   7   | `resourceNinja.workspaceHooksDirectory`                         | `.github/hooks`        | Workspace hook directory                                                                                                             |
+|   8   | `resourceNinja.workspaceMcpDirectory`                           | `.github/mcp`          | Safe workspace MCP config staging directory before optional `.vscode/mcp.json` merge                                                 |
+|   9   | `resourceNinja.userAgentsDirectory`                             | `""`                   | Optional User Profile agent override; empty stores `.agent.md` in VS Code User `prompts`                                             |
+|  10   | `resourceNinja.userInstructionsDirectory`                       | `""`                   | Optional User Profile instruction directory override                                                                                 |
+|  11   | `resourceNinja.userPromptsDirectory`                            | `""`                   | Optional User Profile prompt directory override                                                                                      |
+|  12   | `resourceNinja.globalResourceHomePreset`                        | `copilot`              | Known Global Resource Home preset (`~/.copilot`, `~/.claude`, `~/.agents`)                                                           |
+|  13   | `resourceNinja.globalHomeDirectory`                             | `""`                   | Optional custom Global Resource Home override                                                                                        |
+|  14   | `resourceNinja.autoUpdateInstruction`                           | `true`                 | Auto-update the generated instruction block after resource changes                                                                   |
+|  15   | `resourceNinja.instructionFile`                                 | `AGENTS.md`            | Generated instruction block sync target _(requires Auto Update)_                                                                     |
+|  16   | `resourceNinja.customInstructionPath`                           | `""`                   | Custom generated instruction block path _(only when 'custom' selected)_                                                              |
+|  17   | `resourceNinja.includeLocalResources`                           | `false`                | Include workspace-wide fallback `SKILL.md` files in the generated instruction block                                                  |
+|  18   | `resourceNinja.autoUpdateResourcesOnUpgrade`                    | `prompt`               | Update installed remote skills on extension upgrade                                                                                  |
+|  19   | `resourceNinja.coexistenceMode`                                 | `auto`                 | Shared marker ownership mode (`auto` / `independent`)                                                                                |
+|  20   | `resourceNinja.kindsExcluded`                                   | `[]`                   | Legacy standalone compatibility exclusions for shared instruction blocks                                                             |
+|  21   | `resourceNinja.useSharedSourcesManifest`                        | `false`                | Enable shared `sources.json` SSOT for coexistence with the skill-only sibling extension                                              |
+|  22   | `resourceNinja.useSharedResourceIndex`                          | `false`                | Enable shared `index.json` SSOT for coexistence with the skill-only sibling extension                                                |
+|  23   | `resourceNinja.staleSourceIndexUpdateMode`                      | `prompt`               | Startup handling for source indexes stale for more than 30 days (`always` / `prompt` / `never`)                                      |
+|  24   | `resourceNinja.useRefOutput`                                    | `true`                 | Keep managed output lightweight by linking to per-kind catalogs                                                                      |
+|  25   | `resourceNinja.outputFormat`                                    | `full`                 | Inline output format used when Ref output is off (`full` / `compact` / `legacy`)                                                     |
+|  26   | `resourceNinja.refCatalogFormat`                                | `full`                 | README index detail format used when Ref output is on (`full` / `compact` / `legacy`)                                                |
+|  27   | `resourceNinja.showBuiltInResources`                            | `true`                 | Show built-in resources in User / Global Resource Home                                                                               |
+|  28   | `resourceNinja.remoteResourceViewMode`                          | `repositoryFirst`      | Remote Resources layout (repository-first / resource-type-first)                                                                     |
+|  29   | `resourceNinja.language`                                        | `auto`                 | UI language (auto / en / ja)                                                                                                         |
+|  30   | `resourceNinja.githubToken`                                     | `""`                   | GitHub Token (API rate limits and private source repositories)                                                                       |
+|  31   | `resourceNinja.instructionBlock.includeAgents`                  | `false`                | Include `agent` resources in workspace instruction blocks                                                                            |
+|  32   | `resourceNinja.instructionBlock.includeInstructions`            | `false`                | Include `instruction` resources in workspace instruction blocks                                                                      |
+|  33   | `resourceNinja.instructionBlock.globalHome.includeAgents`       | `inherit`              | Override Global Resource Home agent listing policy (`inherit` / `on` / `off`)                                                        |
+|  34   | `resourceNinja.instructionBlock.globalHome.includeInstructions` | `inherit`              | Override Global Resource Home instruction listing policy (`inherit` / `on` / `off`)                                                  |
+|  35   | `resourceNinja.registerPluginLocation`                          | `prompt`               | Add an installed plugin folder to the VS Code `chat.pluginLocations` setting (`always` / `prompt` / `never`)                         |
+|  36   | `resourceNinja.defaultPluginHost`                               | `auto`                 | Recommend and order compatible plugin hosts (`auto` / `ask` / `vscode-copilot` / `copilot-cli` / `claude-code` / `codex` / `cursor`) |
 
 `staleSourceIndexUpdateMode` refreshes remote source indexes only. It does not reinstall installed files, and sources that fail to refresh keep their previous timestamp so they can be retried later.
 

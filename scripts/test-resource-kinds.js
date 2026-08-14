@@ -225,6 +225,14 @@ test("detects Agent Plugins 1.0.0 layouts at any depth", () => {
     "plugins/foo",
   );
   assert.strictEqual(
+    detectResourceKindFromPath("plugins/foo/.github/plugin/plugin.json"),
+    "plugin",
+  );
+  assert.strictEqual(
+    getPluginRootFromManifestPath("plugins/foo/.github/plugin/plugin.json"),
+    "plugins/foo",
+  );
+  assert.strictEqual(
     getPluginRootFromManifestPath("gemini-extension.json"),
     ".",
   );
@@ -764,7 +772,13 @@ test("bundled official product presets use filtered resource roots", () => {
   }
 
   const pluginSourceExpectations = {
-    "aws-agent-plugins": { total: 40, skills: 28, plugins: 9, hooks: 3 },
+    "aws-agent-plugins": {
+      total: 54,
+      skills: 34,
+      plugins: 9,
+      hooks: 3,
+      mcp: 8,
+    },
     "elastic-agent-skills": { total: 71, skills: 66, plugins: 5 },
     "anthropic-claude-code": {
       total: 42,
@@ -796,6 +810,9 @@ test("bundled official product presets use filtered resource roots", () => {
     }
     if (expected.hooks !== undefined) {
       assert.strictEqual(counts.hook || 0, expected.hooks);
+    }
+    if (expected.mcp !== undefined) {
+      assert.strictEqual(counts.mcp || 0, expected.mcp);
     }
   }
 
@@ -840,7 +857,9 @@ test("bundled resources respect source include and exclude path filters", () => 
     );
     for (const resource of resources) {
       const resourcePath = String(
-        resource.pluginManifestPath || resource.path || "",
+        (resource.kind === "plugin" && resource.pluginManifestPath) ||
+          resource.path ||
+          "",
       )
         .replace(/\\/g, "/")
         .toLowerCase();

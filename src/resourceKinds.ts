@@ -168,10 +168,47 @@ export function isIncompleteSkillContent(text: string): boolean {
 
 export function isHookConfigFilePath(resourcePath: string): boolean {
   const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
-  if (!/(^|\/)(?:\.github\/)?hooks\/[^/]+\.json$/i.test(lowerPath)) {
+  if (
+    !/(^|\/)(?:\.github\/)?hooks\/[^/]+\.json$/i.test(lowerPath) &&
+    !/(^|\/)hooks\.json$/i.test(lowerPath)
+  ) {
     return false;
   }
   return !isResourceMetadataSidecarPath(lowerPath);
+}
+
+export function getMcpConfigMetadata(
+  content: string,
+  fallbackName: string,
+): { name: string; description: string } {
+  try {
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+    const serverMap =
+      parsed.mcpServers && typeof parsed.mcpServers === "object"
+        ? (parsed.mcpServers as Record<string, unknown>)
+        : parsed.servers && typeof parsed.servers === "object"
+          ? (parsed.servers as Record<string, unknown>)
+          : {};
+    const serverNames = Object.keys(serverMap);
+    if (serverNames.length === 1) {
+      return {
+        name: serverNames[0],
+        description: `MCP configuration for ${serverNames[0]}`,
+      };
+    }
+    if (serverNames.length > 1) {
+      return {
+        name: fallbackName,
+        description: `MCP configuration for ${serverNames.join(", ")}`,
+      };
+    }
+  } catch {
+    // Non-JSON MCP resources use the path-derived fallback.
+  }
+  return {
+    name: fallbackName,
+    description: `MCP configuration for ${fallbackName}`,
+  };
 }
 
 function isNativeInstructionFilePath(lowerPath: string): boolean {
@@ -191,6 +228,11 @@ const PLUGIN_MARKER_DIRECTORY_NAMES = [
   ".codex-plugin",
   ".cursor-plugin",
   ".plugin",
+];
+
+const PLUGIN_MARKER_DIRECTORY_PATHS = [
+  ...PLUGIN_MARKER_DIRECTORY_NAMES,
+  ".github/plugin",
 ];
 
 const PLUGIN_MARKER_MANIFEST_FILE_NAMES = ["plugin.json", "marketplace.json"];
@@ -213,7 +255,7 @@ function toRegExpAlternation(values: string[]): string {
 }
 
 const PLUGIN_MARKER_MANIFEST_PATTERN = new RegExp(
-  `^(.*?)(?:^|/)(?:${toRegExpAlternation(PLUGIN_MARKER_DIRECTORY_NAMES)})/(?:${toRegExpAlternation(PLUGIN_MARKER_MANIFEST_FILE_NAMES)})$`,
+  `^(.*?)(?:^|/)(?:${toRegExpAlternation(PLUGIN_MARKER_DIRECTORY_PATHS)})/(?:${toRegExpAlternation(PLUGIN_MARKER_MANIFEST_FILE_NAMES)})$`,
   "i",
 );
 
@@ -227,6 +269,7 @@ export function getPluginManifestScanGlobs(): string[] {
   return [
     `*/{${PLUGIN_ROOT_MANIFEST_FILE_NAMES.join(",")}}`,
     `*/{${PLUGIN_MARKER_DIRECTORY_NAMES.join(",")}}/{${PLUGIN_MARKER_MANIFEST_FILE_NAMES.join(",")}}`,
+    `*/.github/plugin/{${PLUGIN_MARKER_MANIFEST_FILE_NAMES.join(",")}}`,
   ];
 }
 
@@ -248,7 +291,7 @@ export function isPluginManifestPath(lowerPath: string): boolean {
  * unrelated tool.
  */
 export function getPluginManifestPrecedence(): string[] {
-  const markerForms = PLUGIN_MARKER_DIRECTORY_NAMES.flatMap((directoryName) =>
+  const markerForms = PLUGIN_MARKER_DIRECTORY_PATHS.flatMap((directoryName) =>
     PLUGIN_MARKER_MANIFEST_FILE_NAMES.map(
       (fileName) => `${directoryName}/${fileName}`,
     ),
@@ -270,13 +313,15 @@ function getPluginManifestForm(manifestPath: string): string | undefined {
   if (!isPluginManifestPath(lowerPath)) {
     return undefined;
   }
-  const segments = lowerPath.split("/").filter(Boolean);
-  const fileName = segments[segments.length - 1] ?? "";
-  const parentName = segments[segments.length - 2];
-  if (parentName !== undefined && isPluginMarkerDirectoryName(parentName)) {
-    return `${parentName}/${fileName}`;
+  for (const markerPath of PLUGIN_MARKER_DIRECTORY_PATHS) {
+    for (const fileName of PLUGIN_MARKER_MANIFEST_FILE_NAMES) {
+      const form = `${markerPath}/${fileName}`;
+      if (lowerPath === form || lowerPath.endsWith(`/${form}`)) {
+        return form;
+      }
+    }
   }
-  return fileName;
+  return lowerPath.slice(lowerPath.lastIndexOf("/") + 1);
 }
 
 /**
@@ -426,12 +471,18 @@ export function getPluginRootFsPathFromManifestPath(
     return undefined;
   }
 
-  // `.claude-plugin/plugin.json` and friends describe the directory above the marker.
-  const levelsAboveManifest = PLUGIN_MARKER_MANIFEST_PATTERN.test(
-    lowerNormalizedPath,
-  )
-    ? 2
-    : 1;
+  // Marker manifests describe the directory above the marker path. The Copilot
+  // `.github/plugin/` form is one level deeper than `.claude-plugin/` and friends.
+  const markerForm = PLUGIN_MARKER_DIRECTORY_PATHS.find((markerPath) =>
+    PLUGIN_MARKER_MANIFEST_FILE_NAMES.some((fileName) => {
+      const suffix = `${markerPath}/${fileName}`;
+      return (
+        lowerNormalizedPath === suffix ||
+        lowerNormalizedPath.endsWith(`/${suffix}`)
+      );
+    }),
+  );
+  const levelsAboveManifest = markerForm ? markerForm.split("/").length + 1 : 1;
   let cutIndex = manifestFsPath.length;
   for (let level = 0; level < levelsAboveManifest; level += 1) {
     cutIndex = lowerNormalizedPath.lastIndexOf("/", cutIndex - 1);
@@ -464,9 +515,130 @@ function isTooShallowForRecursiveDelete(fsPath: string): boolean {
 
 export const AGENT_PLUGINS_MANIFEST_SCHEMA =
   "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
+export const AGENT_PLUGINS_MCP_SCHEMA =
+  "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json";
+
+export function getAgentPluginsMcpSchemaIssue(
+  filePath: string,
+  content: string,
+  agentPluginRoots: ReadonlySet<string>,
+): string | undefined {
+  const normalizedPath = filePath.replace(/\\/g, "/").replace(/^\/+/, "");
+  const pluginRoot = Array.from(agentPluginRoots).find((root) => {
+    const normalizedRoot = root.replace(/\\/g, "/").replace(/\/+$/, "");
+    const relativePath =
+      normalizedRoot === "."
+        ? normalizedPath
+        : normalizedPath.startsWith(`${normalizedRoot}/`)
+          ? normalizedPath.slice(normalizedRoot.length + 1)
+          : undefined;
+    return relativePath === "mcp.json";
+  });
+  if (!pluginRoot) {
+    return undefined;
+  }
+  let config: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(content) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return "mcp.json must be a JSON object";
+    }
+    config = parsed as Record<string, unknown>;
+  } catch {
+    return "mcp.json is not valid JSON";
+  }
+  if (config.$schema !== AGENT_PLUGINS_MCP_SCHEMA) {
+    return `mcp.json must declare ${AGENT_PLUGINS_MCP_SCHEMA} to match ${AGENT_PLUGINS_MANIFEST_SCHEMA}`;
+  }
+  return undefined;
+}
 export const AGENT_PLUGINS_MANIFEST_KIND = "agent-plugins";
 
 export const AGENT_PLUGINS_NAME_MAX_LENGTH = 64;
+
+export interface PluginManifestInfo {
+  pluginRoot: string;
+  pluginManifestPath: string;
+  pluginManifestKind: string;
+}
+
+export function getPluginManifestKindFromPath(
+  filePath: string,
+): string | undefined {
+  const lowerPath = filePath.toLowerCase().replace(/\\/g, "/");
+  if (lowerPath.endsWith(".claude-plugin/plugin.json")) return "claude-plugin";
+  if (lowerPath.endsWith(".codex-plugin/plugin.json")) return "codex-plugin";
+  if (lowerPath.endsWith(".cursor-plugin/plugin.json")) return "cursor-plugin";
+  if (lowerPath.endsWith(".plugin/plugin.json")) return "plugin";
+  if (lowerPath.endsWith("marketplace.json")) return "marketplace";
+  if (lowerPath.endsWith("gemini-extension.json")) return "gemini-extension";
+  if (lowerPath.endsWith("apm.yml") || lowerPath.endsWith("apm.yaml")) {
+    return "apm";
+  }
+  if (lowerPath.endsWith("plugin.json")) return "plugin";
+  return undefined;
+}
+
+function shouldPreferPluginManifestInfo(
+  candidate: PluginManifestInfo,
+  existing: PluginManifestInfo | undefined,
+): boolean {
+  if (!existing) return true;
+  const candidateWeight =
+    candidate.pluginManifestKind === "marketplace" ? 1 : 0;
+  const existingWeight = existing.pluginManifestKind === "marketplace" ? 1 : 0;
+  if (candidateWeight !== existingWeight)
+    return candidateWeight < existingWeight;
+  return (
+    candidate.pluginManifestPath.length < existing.pluginManifestPath.length
+  );
+}
+
+export function getPluginManifestInfoByRoot(
+  paths: readonly string[],
+): Map<string, PluginManifestInfo> {
+  const infos = new Map<string, PluginManifestInfo>();
+  for (const filePath of paths) {
+    if (detectResourceKindFromPath(filePath) !== "plugin") continue;
+    const pluginRoot = getPluginRootFromManifestPath(filePath) || ".";
+    const pluginManifestKind = getPluginManifestKindFromPath(filePath);
+    if (!pluginManifestKind) continue;
+    const candidate = {
+      pluginRoot,
+      pluginManifestPath: filePath.replace(/\\/g, "/"),
+      pluginManifestKind,
+    };
+    if (shouldPreferPluginManifestInfo(candidate, infos.get(pluginRoot))) {
+      infos.set(pluginRoot, candidate);
+    }
+  }
+  return infos;
+}
+
+export function getOwningPluginManifestInfo(
+  filePath: string,
+  pluginManifestInfoByRoot: ReadonlyMap<string, PluginManifestInfo>,
+): PluginManifestInfo | undefined {
+  const normalizedPath = filePath.replace(/\\/g, "/").replace(/^\/+/, "");
+  const entries = Array.from(pluginManifestInfoByRoot.entries()).sort(
+    ([left], [right]) => right.length - left.length,
+  );
+  for (const [pluginRoot, info] of entries) {
+    if (normalizedPath === info.pluginManifestPath) continue;
+    const normalizedRoot = pluginRoot.replace(/\\/g, "/").replace(/\/+$/, "");
+    const relativePath =
+      normalizedRoot === "."
+        ? normalizedPath
+        : normalizedPath.startsWith(`${normalizedRoot}/`)
+          ? normalizedPath.slice(normalizedRoot.length + 1)
+          : undefined;
+    if (!relativePath) continue;
+    if (detectPluginChildResourceKind(relativePath) || pluginRoot === ".") {
+      return info;
+    }
+  }
+  return undefined;
+}
 
 /**
  * Agent Plugins 1.0.0 identifies itself through the `$schema` value of a root
@@ -712,6 +884,94 @@ export function getPluginIdFromPath(resourcePath?: string): string | undefined {
     /^\.github\/plugins\/([^/]+)\//i,
   );
   return githubPluginMatch?.[1];
+}
+
+export function qualifyPluginOwnedResourceName(
+  kind: ResourceKind,
+  name: string,
+  pluginInfo: PluginManifestInfo | undefined,
+): string {
+  if (
+    kind !== "hook" ||
+    !pluginInfo ||
+    pluginInfo.pluginRoot === "." ||
+    (name !== "hooks" && name !== "hooks.json")
+  ) {
+    return name;
+  }
+  const pluginName = pluginInfo.pluginRoot
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "")
+    .split("/")
+    .pop();
+  return pluginName ? `${pluginName}-hooks` : name;
+}
+
+export function getPluginOwnedHookInstallFileName(input: {
+  kind?: ResourceKind;
+  source?: string;
+  pluginRoot?: string;
+  resourcePath?: string;
+  fileName: string;
+}): string {
+  if (
+    input.kind !== "hook" ||
+    !isHookConfigFilePath(input.resourcePath || input.fileName) ||
+    !input.pluginRoot
+  ) {
+    return input.fileName;
+  }
+  const pluginName =
+    input.pluginRoot === "."
+      ? input.source
+      : input.pluginRoot
+          .replace(/\\/g, "/")
+          .replace(/\/+$/, "")
+          .split("/")
+          .pop();
+  const sanitizedPluginName = pluginName
+    ?.toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[()[\]{}]/g, "")
+    .replace(/[^a-z0-9\-_]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return sanitizedPluginName
+    ? `${sanitizedPluginName}-${input.fileName}`
+    : input.fileName;
+}
+
+export function getPluginOwnedInstallFileName(input: {
+  kind?: ResourceKind;
+  pluginRoot?: string;
+  fileName: string;
+}): string {
+  if (
+    !input.pluginRoot ||
+    input.pluginRoot === "." ||
+    (input.kind !== "agent" &&
+      input.kind !== "instruction" &&
+      input.kind !== "prompt")
+  ) {
+    return input.fileName;
+  }
+  const pluginName = input.pluginRoot
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "")
+    .split("/")
+    .pop()
+    ?.toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  const safeFileName = pathBasename(input.fileName);
+  return pluginName && safeFileName
+    ? `${pluginName}-${safeFileName}`
+    : input.fileName;
+}
+
+function pathBasename(fileName: string): string {
+  return fileName.replace(/\\/g, "/").split("/").pop() || "";
 }
 
 function normalizePluginRoot(root: string | undefined): string | undefined {

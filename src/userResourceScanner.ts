@@ -538,6 +538,42 @@ async function findPluginManifestInDirectory(
     }
   }
 
+  const githubEntry = entries.find(
+    ([name, type]) =>
+      name.toLowerCase() === ".github" &&
+      hasFileType(type, vscode.FileType.Directory),
+  );
+  if (githubEntry) {
+    const githubUri = vscode.Uri.joinPath(directory, githubEntry[0]);
+    try {
+      const githubEntries = await vscode.workspace.fs.readDirectory(githubUri);
+      const pluginEntry = githubEntries.find(
+        ([name, type]) =>
+          name.toLowerCase() === "plugin" &&
+          hasFileType(type, vscode.FileType.Directory),
+      );
+      if (pluginEntry) {
+        const pluginMarkerUri = vscode.Uri.joinPath(githubUri, pluginEntry[0]);
+        const pluginEntries =
+          await vscode.workspace.fs.readDirectory(pluginMarkerUri);
+        for (const [fileName, fileType] of pluginEntries) {
+          const manifestPath = `.github/plugin/${fileName}`;
+          if (
+            hasFileType(fileType, vscode.FileType.File) &&
+            isPluginManifestPath(manifestPath.toLowerCase())
+          ) {
+            candidates.push({
+              manifestPath,
+              uri: vscode.Uri.joinPath(pluginMarkerUri, fileName),
+            });
+          }
+        }
+      }
+    } catch {
+      // A disappearing or unreadable marker directory is not a plugin candidate.
+    }
+  }
+
   return selectPreferredPluginManifest(
     candidates,
     (candidate) => candidate.manifestPath,

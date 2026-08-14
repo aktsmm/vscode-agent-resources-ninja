@@ -151,31 +151,32 @@ ext install yamapan.agent-resources-ninja
 
 プリセットインデックスには、公式・キュレーション・コミュニティの各ソースから skills、agents、prompts、instructions、hooks、MCP config、plugin manifest、Cursor rule リソースが初期状態で含まれます。
 
-| Source                                                                                                                        | Type      | 説明                                                                      |
-| ----------------------------------------------------------------------------------------------------------------------------- | --------- | ------------------------------------------------------------------------- |
-| [anthropics/skills](https://github.com/anthropics/skills)                                                                     | Official  | Anthropic 公式 Claude Skills                                              |
-| [openai/skills](https://github.com/openai/skills)                                                                             | Official  | OpenAI 公式 Codex Skills (1.7k+)                                          |
-| [github/awesome-copilot](https://github.com/github/awesome-copilot)                                                           | Official  | plugin から公開された skills / agents を含む GitHub 公式 Copilot リソース |
-| [cursor/plugins](https://github.com/cursor/plugins)                                                                           | Official  | Cursor 公式 plugin manifest、skills、agents、rules                        |
-| [MicrosoftDocs/Agent-Skills](https://github.com/MicrosoftDocs/Agent-Skills)                                                   | Official  | Microsoft 公式 Azure Agent Skills                                         |
-| [microsoft/azure-skills](https://github.com/microsoft/azure-skills)                                                           | Official  | Microsoft Azure 公式 skills と MCP config リソース                        |
-| [awslabs/agent-plugins](https://github.com/awslabs/agent-plugins)                                                             | Official  | AWS Labs の Agent Plugins skills                                          |
-| [elastic/agent-skills](https://github.com/elastic/agent-skills)                                                               | Official  | Elastic 公式 Agent Skills                                                 |
-| [google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli)                                                       | Official  | Gemini CLI 公式 skills                                                    |
-| [google/skills](https://github.com/google/skills)                                                                             | Official  | Google Cloud / Google プロダクト向けの Google 公式 Agent Skills           |
-| [openai/codex](https://github.com/openai/codex)                                                                               | Official  | Codex リポジトリの skills                                                 |
-| [anthropics/claude-code](https://github.com/anthropics/claude-code)                                                           | Official  | Claude Code 公式プラグイン skills                                         |
-| [cline/cline](https://github.com/cline/cline)                                                                                 | Official  | Cline リポジトリの skills                                                 |
-| [ComposioHQ/awesome-claude-skills](https://github.com/ComposioHQ/awesome-claude-skills)                                       | Curated   | Claude Skills キュレーションリスト                                        |
-| [Code-and-Sorts/awesome-copilot-agents](https://github.com/Code-and-Sorts/awesome-copilot-agents)                             | Curated   | Copilot agents、instructions、prompts、skills                             |
-| [obra/superpowers](https://github.com/obra/superpowers)                                                                       | Community | Superpowers plugin manifest と plugin 由来 skills                         |
-| [glittercowboy/taches-cc-resources](https://github.com/glittercowboy/taches-cc-resources)                                     | Community | Claude Code resources と skills                                           |
-| [Yeachan-Heo/oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex)                                                         | Community | Codex workflow plugin metadata、skills、prompts、hooks、OMX guidance      |
-| [muratcankoylan/Agent-Skills-for-Context-Engineering](https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering) | Community | Context Engineering スキル (5k+)                                          |
-| [danielmiessler/LifeOS](https://github.com/danielmiessler/LifeOS)                                                             | Community | LifeOS skills - PAI successor                                             |
-| [EveryInc/compound-engineering-plugin](https://github.com/EveryInc/compound-engineering-plugin)                               | Community | Compound Engineering (3.5k+)                                              |
-| [Wirasm/PRPs-agentic-eng](https://github.com/Wirasm/PRPs-agentic-eng)                                                         | Community | PRP (Prompt Recipe Patterns)                                              |
-| [qdhenry/Claude-Command-Suite](https://github.com/qdhenry/Claude-Command-Suite)                                               | Community | Claude コマンド・スキル集                                                 |
+| Source                                                                                                                        | Type      | 説明                                                                       |
+| ----------------------------------------------------------------------------------------------------------------------------- | --------- | -------------------------------------------------------------------------- |
+| [anthropics/skills](https://github.com/anthropics/skills)                                                                     | Official  | Anthropic 公式 Claude Skills                                               |
+| [openai/skills](https://github.com/openai/skills)                                                                             | Official  | OpenAI 公式 Codex Skills (1.7k+)                                           |
+| [github/awesome-copilot](https://github.com/github/awesome-copilot)                                                           | Official  | plugin から公開された skills / agents を含む GitHub 公式 Copilot リソース  |
+| [github/copilot-plugins](https://github.com/github/copilot-plugins)                                                           | Official  | GitHub公式plugin marketplaceと、このrepository内に実体があるpluginリソース |
+| [cursor/plugins](https://github.com/cursor/plugins)                                                                           | Official  | Cursor 公式 plugin manifest、skills、agents、rules                         |
+| [MicrosoftDocs/Agent-Skills](https://github.com/MicrosoftDocs/Agent-Skills)                                                   | Official  | Microsoft 公式 Azure Agent Skills                                          |
+| [microsoft/azure-skills](https://github.com/microsoft/azure-skills)                                                           | Official  | Microsoft Azure 公式 skills と MCP config リソース                         |
+| [awslabs/agent-plugins](https://github.com/awslabs/agent-plugins)                                                             | Official  | AWS Labs の Agent Plugins skills                                           |
+| [elastic/agent-skills](https://github.com/elastic/agent-skills)                                                               | Official  | Elastic 公式 Agent Skills                                                  |
+| [google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli)                                                       | Official  | Gemini CLI 公式 skills                                                     |
+| [google/skills](https://github.com/google/skills)                                                                             | Official  | Google Cloud / Google プロダクト向けの Google 公式 Agent Skills            |
+| [openai/codex](https://github.com/openai/codex)                                                                               | Official  | Codex リポジトリの skills                                                  |
+| [anthropics/claude-code](https://github.com/anthropics/claude-code)                                                           | Official  | Claude Code 公式プラグイン skills                                          |
+| [cline/cline](https://github.com/cline/cline)                                                                                 | Official  | Cline リポジトリの skills                                                  |
+| [ComposioHQ/awesome-claude-skills](https://github.com/ComposioHQ/awesome-claude-skills)                                       | Curated   | Claude Skills キュレーションリスト                                         |
+| [Code-and-Sorts/awesome-copilot-agents](https://github.com/Code-and-Sorts/awesome-copilot-agents)                             | Curated   | Copilot agents、instructions、prompts、skills                              |
+| [obra/superpowers](https://github.com/obra/superpowers)                                                                       | Community | Superpowers plugin manifest と plugin 由来 skills                          |
+| [glittercowboy/taches-cc-resources](https://github.com/glittercowboy/taches-cc-resources)                                     | Community | Claude Code resources と skills                                            |
+| [Yeachan-Heo/oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex)                                                         | Community | Codex workflow plugin metadata、skills、prompts、hooks、OMX guidance       |
+| [muratcankoylan/Agent-Skills-for-Context-Engineering](https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering) | Community | Context Engineering スキル (5k+)                                           |
+| [danielmiessler/LifeOS](https://github.com/danielmiessler/LifeOS)                                                             | Community | LifeOS skills - PAI successor                                              |
+| [EveryInc/compound-engineering-plugin](https://github.com/EveryInc/compound-engineering-plugin)                               | Community | Compound Engineering (3.5k+)                                               |
+| [Wirasm/PRPs-agentic-eng](https://github.com/Wirasm/PRPs-agentic-eng)                                                         | Community | PRP (Prompt Recipe Patterns)                                               |
+| [qdhenry/Claude-Command-Suite](https://github.com/qdhenry/Claude-Command-Suite)                                               | Community | Claude コマンド・スキル集                                                  |
 
 Azure は canonical な `microsoft/azure-skills` source から Azure Skills Plugin 配布物と Azure MCP config を index します。Azure Skills bundle は選択式で、skills をまとめて入れられます。MCP config は確認用にコピーするか、`.vscode/mcp.json` へ明示的にマージするかを選べます。
 
@@ -188,6 +189,8 @@ Cursor 公式 plugins と Superpowers は、plugin manifest リソースとし�
 > `Update Index` コマンドで、これらのソースから最新のリソースとメタデータを再取得できます
 > 公式プロダクト/プラグインリポジトリは path filter で配布向けの場所と選択した plugin manifest だけを対象にし、サンプルやテスト用 skill は同梱プリセットに含めません。
 > `github/awesome-copilot` では、`plugins/` から公開されたリソースも、利用可能な場合は重複する raw plugin path ではなく配布向け top-level resource path から収録します。
+>
+> `github/copilot-plugins`ではmarketplace manifestと`plugins/`配下に実体があるリソースを収録します。外部repositoryで配布されるmarketplace entryはcatalog metadataとして扱い、偽のローカルresource行は生成しません。
 > ディレクトリ型の `SKILL.md` root 配下のファイルは skill 内部の構成要素として扱い、`templates` 配下の補助 prompt / instruction などは Remote Resources に別リソースとして表示しません。
 
 ### 🧩 プラグイン形式
@@ -347,11 +350,42 @@ VS Code がローカルの Agent Plugin を読み込むのは `chat.pluginLocati
 
 確認・取り消しは、ユーザー設定の `chat.pluginLocations` を開いて行います。完了通知のボタンから直接開けます。そこでエントリを削除すれば、ファイルを消さずに読み込みだけ止められます。
 
+GitHub Copilot CLI で使う場合は、代わりに **Copilot CLI にインストール**を選びます。この拡張はリポジトリの `marketplace.json` を読み、選択した plugin に一意に一致する marketplace entry を確認してから、インストール済みの `copilot` 実行ファイルへ正式な手順を委譲します。
+
+1. 同じ marketplace source が未登録の場合だけ `copilot plugin marketplace add OWNER/REPO`。
+2. `copilot plugin install PLUGIN@MARKETPLACE`。
+
+現行 CLI help にはリポジトリを直接指定する direct install 形式も残っていますが、その plugin 導線は marketplace 登録へ移行する deprecated path のため、この拡張では使いません。`~/.copilot/installed-plugins` や `config.json` も直接書き換えません。コマンド実行前の modal 確認には marketplace と plugin を表示します。この操作で marketplace を追加した後に plugin install が失敗した場合は、名前とリポジトリがまだ一致する登録だけを削除します。`--force` は使わず、この拡張が追加したと証明できない登録には触れません。plugin の削除は **Agent Resources Ninja: Agent Plugin を Copilot CLI からアンインストール**で CLI へ委譲し、marketplace 登録は残します。
+
+Copilot CLI plugin には skills、agents、hooks、MCP servers、LSP servers が含まれる場合があります。後続セッションで Copilot CLI が読み込む可能性があるため、確認前にリポジトリを確認してください。有効な marketplace entry がないリポジトリは VS Code 向けとしてはインストールできますが、CLI コマンドを推測して実行することはありません。[GitHub Copilot CLI の plugin の検索とインストール](https://docs.github.com/ja/copilot/how-tos/copilot-cli/customize-copilot/plugins-finding-installing)と [Copilot CLI plugin reference](https://docs.github.com/ja/copilot/reference/copilot-cli-reference/cli-plugin-reference)も参照してください。
+
+plugin 検出は `plugin.json`、`.plugin/plugin.json`、`.claude-plugin/plugin.json`、`.codex-plugin/plugin.json`、`.cursor-plugin/plugin.json` に加え、Copilot CLI 形式の `.github/plugin/plugin.json` にも対応します。
+
+インストール先pickerでは、認識したmanifestをすべて同じ「インストール可能」と扱わず、Native installと製品へのHandoffを区別します。
+
+| Host                          | 現在の対応レベル  | 動作                                                                                                                                                                                             |
+| ----------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| VS Code / GitHub Copilot Chat | Native            | packageをコピーして`chat.pluginLocations`への登録を提案                                                                                                                                          |
+| GitHub Copilot CLI            | Native            | marketplace登録とplugin lifecycleを`copilot`へ委譲                                                                                                                                               |
+| Claude Code                   | Native / Handoff  | standalone `claude`があれば公式CLI経由でmarketplace、install、update、enable、disable、uninstallを管理。VS Code拡張だけなら`/plugins` UIを開く                                                   |
+| Codex                         | Native / Handoff  | Codex CLIがあれば公式CLI経由でmarketplaceとplugin add/list/removeを管理。Windowsではshell aliasがなくても公式WinGet link/package実体を利用可能。Codex拡張だけならChatGPT Plugins Directoryを開く |
+| Cursor                        | Native local copy | Cursor上でのみ表示。Agent Plugin / Cursor Pluginを`~/.cursor/plugins/local/<name>`へコピーし、所有fingerprintが一致する未変更copyだけ削除                                                        |
+
+`resourceNinja.defaultPluginHost`でおすすめと表示順を制御します。`auto`は検出済みで互換性のあるNative hostを最上段にし、`ask`はおすすめを付けません。優先順位を変えるのはUser設定だけで、Workspace値は提案として表示するだけです。Claude CodeとCodexは、それぞれの拡張またはCLIが検出され、選択packageのsourceとmanifest metadataを解決できる場合だけ表示します。
+
+pickerを開く前に、利用可能な各hostの状態を独立して確認します。各行にはhostがversionを返した場合の**インストール済み**、状態を確定できる場合だけ**有効 / 無効**、**未インストール**、または他hostを妨げない**状態不明 / 状態取得失敗**を表示します。おすすめは最上段を維持し、それ以外ではインストール済みの互換hostを未導入hostより上へ置きます。状態取得に失敗したhostは自動でおすすめしません。Claude CodeとCodexの管理commandはhost側のインストール済みIDを起点にし、検証済み`plugin@marketplace` identityが一致するcatalog entryだけを表示します。marketplace entry名とplugin manifest名が異なるaliasにも対応します。
+
+CursorはMicrosoft VS Code上で動くAI拡張ではなく別エディターのため、Microsoft VS CodeではCursor local installを表示しません。
+
+Native host contractはWindows上でClaude Code CLI 2.1.229、Claude Code VS Code拡張2.1.231、Codex CLI 0.146.1、Codex VS Code拡張26.727.40816、Cursor 3.15.19を使って確認しました。Claude/Codex lifecycleは隔離config homeと無害なskill-only marketplaceで検証しています。Cursorでは隔離Extension Hostでこの拡張が`1 passing`となりlocal plugin package pathの配置・cleanupも確認しましたが、Cursor logsにはplugin discovery eventが出ないため、local packageのactivation自体はUI確認が残ります。
+
+WinGetではCodex CLIがインストール済みなのにshellから`codex`を実行できない場合、拡張はPATH、WinGet Links、公式WinGet package実体のどこから検出したかをhost pickerと確認dialogへ表示します。**Codex CLI のトラブルシューティングコマンドをコピー**は`winget install --id OpenAI.Codex -e --source winget --force`をコピーしますが、WinGetによるalias再作成やPATH更新を保証するものではありません。
+
 知っておくとよい点がいくつかあります。
 
 - 既に登録済みかつ有効なフォルダーへ再インストールした場合、確認は出ません。
 - この拡張以外でフォルダーを移動・削除すると、エントリが残ります。自動修復はしないので手動で削除してください。
-- この設定は VS Code 専用です。GitHub Copilot CLI で入れた plugin は別の場所にあり、`copilot plugin` で管理します。
+- `chat.pluginLocations` は VS Code 専用です。GitHub Copilot CLI で入れた plugin は別の場所にあり、上記の CLI コマンドで管理します。
 
 ### 検索のコツ 💡
 
@@ -456,44 +490,45 @@ MCP ツールが不要な場合は、GitHub Copilot Chat のツール一覧か�
 
 workspace skill を主 Workspace Skill Directory 以外に置く場合は、`additionalSkillRoots` を使います。例: `copilot-skills/skills`、`copilot-skills/m-skills`。各値は glob pattern ではなく root directory です。対象は discovery と生成 instruction output のみで、インストール先は引き続き `resourcesDirectory` です。skill-only sibling extension との同居互換として、`skillNinja.additionalSkillRoots` も fallback として尊重します。
 
-| 順序 | Setting                                                         | Default                | Description                                                                                                            |
-| :--: | --------------------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-|  0   | `resourceNinja.defaultInstallTarget`                            | `workspace`            | クリック/ダブルクリックインストールの既定保存先                                                                        |
-|  1   | `resourceNinja.singleClickInstall`                              | `false`                | シングルクリックでリソースをインストール                                                                               |
-|  2   | `resourceNinja.resourcesDirectory`                              | `.github/skills`       | Workspace skill directory                                                                                              |
-|  3   | `resourceNinja.additionalSkillRoots`                            | `[]`                   | 追加の workspace skill discovery root                                                                                  |
-|  4   | `resourceNinja.workspaceAgentsDirectory`                        | `.github/agents`       | Workspace agent directory                                                                                              |
-|  5   | `resourceNinja.workspaceInstructionsDirectory`                  | `.github/instructions` | Workspace instruction directory                                                                                        |
-|  6   | `resourceNinja.workspacePromptsDirectory`                       | `.github/prompts`      | Workspace prompt directory                                                                                             |
-|  7   | `resourceNinja.workspaceHooksDirectory`                         | `.github/hooks`        | Workspace hook directory                                                                                               |
-|  8   | `resourceNinja.workspaceMcpDirectory`                           | `.github/mcp`          | 任意の `.vscode/mcp.json` マージ前に使う安全な Workspace MCP config staging directory                                  |
-|  9   | `resourceNinja.userAgentsDirectory`                             | `""`                   | User Profile agent override。空の場合 `.agent.md` は VS Code User `prompts` に保存                                     |
-|  10  | `resourceNinja.userInstructionsDirectory`                       | `""`                   | User Profile instruction directory override                                                                            |
-|  11  | `resourceNinja.userPromptsDirectory`                            | `""`                   | User Profile prompt directory override                                                                                 |
-|  12  | `resourceNinja.globalResourceHomePreset`                        | `copilot`              | 代表的な Global Resource Home preset（`~/.copilot`, `~/.claude`, `~/.agents`）                                         |
-|  13  | `resourceNinja.globalHomeDirectory`                             | `""`                   | 任意の Global Resource Home override                                                                                   |
-|  14  | `resourceNinja.autoUpdateInstruction`                           | `true`                 | resource 変更後に生成 instruction block を自動更新                                                                     |
-|  15  | `resourceNinja.instructionFile`                                 | `AGENTS.md`            | 生成 instruction block の同期先 _(要: Auto Update)_                                                                    |
-|  16  | `resourceNinja.customInstructionPath`                           | `""`                   | カスタム生成 instruction block パス _(instructionFile が 'custom' の時のみ)_                                           |
-|  17  | `resourceNinja.includeLocalResources`                           | `false`                | workspace-wide fallback で検出した `SKILL.md` を生成 instruction block に含める                                        |
-|  18  | `resourceNinja.autoUpdateResourcesOnUpgrade`                    | `prompt`               | 拡張機能アップグレード時にインストール済みリソースを更新                                                               |
-|  19  | `resourceNinja.coexistenceMode`                                 | `auto`                 | 共有 marker の ownership mode (`auto` / `independent`)                                                                 |
-|  20  | `resourceNinja.kindsExcluded`                                   | `[]`                   | shared instruction block 用の旧 standalone 互換 exclusion                                                              |
-|  21  | `resourceNinja.useSharedSourcesManifest`                        | `false`                | skill-only sibling extension と source 一覧を共有する `sources.json` SSOT を有効化                                     |
-|  22  | `resourceNinja.useSharedResourceIndex`                          | `false`                | skill-only sibling extension と scan cache を共有する `index.json` SSOT を有効化                                       |
-|  23  | `resourceNinja.staleSourceIndexUpdateMode`                      | `prompt`               | 30日超更新されていない source index の起動時処理（`always` / `prompt` / `never`）                                      |
-|  24  | `resourceNinja.useRefOutput`                                    | `true`                 | 生成リソース出力を kind 別 catalog 参照で軽量化するか                                                                  |
-|  25  | `resourceNinja.outputFormat`                                    | `full`                 | Ref 出力が off のときに使う inline 出力形式（`full` / `compact` / `legacy`）                                           |
-|  26  | `resourceNinja.refCatalogFormat`                                | `full`                 | Ref 出力が on のときに README index 内で使う詳細形式（`full` / `compact` / `legacy`）                                  |
-|  27  | `resourceNinja.showBuiltInResources`                            | `true`                 | User / Global Resource Home に組み込みリソースを表示                                                                   |
-|  28  | `resourceNinja.remoteResourceViewMode`                          | `repositoryFirst`      | Remote Resources の表示レイアウト                                                                                      |
-|  29  | `resourceNinja.language`                                        | `auto`                 | UI 言語（auto / en / ja）                                                                                              |
-|  30  | `resourceNinja.githubToken`                                     | `""`                   | GitHub Token（API 制限緩和 / private source repository 用）                                                            |
-|  31  | `resourceNinja.instructionBlock.includeAgents`                  | `false`                | workspace の instruction block に `agent` を含める                                                                     |
-|  32  | `resourceNinja.instructionBlock.includeInstructions`            | `false`                | workspace の instruction block に `instruction` を含める                                                               |
-|  33  | `resourceNinja.instructionBlock.globalHome.includeAgents`       | `inherit`              | Global Resource Home 向け agent 掲載ポリシーの上書き（`inherit` / `on` / `off`）                                       |
-|  34  | `resourceNinja.instructionBlock.globalHome.includeInstructions` | `inherit`              | Global Resource Home 向け instruction 掲載ポリシーの上書き（`inherit` / `on` / `off`）                                 |
-|  35  | `resourceNinja.registerPluginLocation`                          | `prompt`               | インストール済み plugin のフォルダーを VS Code の `chat.pluginLocations` に登録するか（`always` / `prompt` / `never`） |
+| 順序 | Setting                                                         | Default                | Description                                                                                                                   |
+| :--: | --------------------------------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+|  0   | `resourceNinja.defaultInstallTarget`                            | `workspace`            | クリック/ダブルクリックインストールの既定保存先                                                                               |
+|  1   | `resourceNinja.singleClickInstall`                              | `false`                | シングルクリックでリソースをインストール                                                                                      |
+|  2   | `resourceNinja.resourcesDirectory`                              | `.github/skills`       | Workspace skill directory                                                                                                     |
+|  3   | `resourceNinja.additionalSkillRoots`                            | `[]`                   | 追加の workspace skill discovery root                                                                                         |
+|  4   | `resourceNinja.workspaceAgentsDirectory`                        | `.github/agents`       | Workspace agent directory                                                                                                     |
+|  5   | `resourceNinja.workspaceInstructionsDirectory`                  | `.github/instructions` | Workspace instruction directory                                                                                               |
+|  6   | `resourceNinja.workspacePromptsDirectory`                       | `.github/prompts`      | Workspace prompt directory                                                                                                    |
+|  7   | `resourceNinja.workspaceHooksDirectory`                         | `.github/hooks`        | Workspace hook directory                                                                                                      |
+|  8   | `resourceNinja.workspaceMcpDirectory`                           | `.github/mcp`          | 任意の `.vscode/mcp.json` マージ前に使う安全な Workspace MCP config staging directory                                         |
+|  9   | `resourceNinja.userAgentsDirectory`                             | `""`                   | User Profile agent override。空の場合 `.agent.md` は VS Code User `prompts` に保存                                            |
+|  10  | `resourceNinja.userInstructionsDirectory`                       | `""`                   | User Profile instruction directory override                                                                                   |
+|  11  | `resourceNinja.userPromptsDirectory`                            | `""`                   | User Profile prompt directory override                                                                                        |
+|  12  | `resourceNinja.globalResourceHomePreset`                        | `copilot`              | 代表的な Global Resource Home preset（`~/.copilot`, `~/.claude`, `~/.agents`）                                                |
+|  13  | `resourceNinja.globalHomeDirectory`                             | `""`                   | 任意の Global Resource Home override                                                                                          |
+|  14  | `resourceNinja.autoUpdateInstruction`                           | `true`                 | resource 変更後に生成 instruction block を自動更新                                                                            |
+|  15  | `resourceNinja.instructionFile`                                 | `AGENTS.md`            | 生成 instruction block の同期先 _(要: Auto Update)_                                                                           |
+|  16  | `resourceNinja.customInstructionPath`                           | `""`                   | カスタム生成 instruction block パス _(instructionFile が 'custom' の時のみ)_                                                  |
+|  17  | `resourceNinja.includeLocalResources`                           | `false`                | workspace-wide fallback で検出した `SKILL.md` を生成 instruction block に含める                                               |
+|  18  | `resourceNinja.autoUpdateResourcesOnUpgrade`                    | `prompt`               | 拡張機能アップグレード時にインストール済みリソースを更新                                                                      |
+|  19  | `resourceNinja.coexistenceMode`                                 | `auto`                 | 共有 marker の ownership mode (`auto` / `independent`)                                                                        |
+|  20  | `resourceNinja.kindsExcluded`                                   | `[]`                   | shared instruction block 用の旧 standalone 互換 exclusion                                                                     |
+|  21  | `resourceNinja.useSharedSourcesManifest`                        | `false`                | skill-only sibling extension と source 一覧を共有する `sources.json` SSOT を有効化                                            |
+|  22  | `resourceNinja.useSharedResourceIndex`                          | `false`                | skill-only sibling extension と scan cache を共有する `index.json` SSOT を有効化                                              |
+|  23  | `resourceNinja.staleSourceIndexUpdateMode`                      | `prompt`               | 30日超更新されていない source index の起動時処理（`always` / `prompt` / `never`）                                             |
+|  24  | `resourceNinja.useRefOutput`                                    | `true`                 | 生成リソース出力を kind 別 catalog 参照で軽量化するか                                                                         |
+|  25  | `resourceNinja.outputFormat`                                    | `full`                 | Ref 出力が off のときに使う inline 出力形式（`full` / `compact` / `legacy`）                                                  |
+|  26  | `resourceNinja.refCatalogFormat`                                | `full`                 | Ref 出力が on のときに README index 内で使う詳細形式（`full` / `compact` / `legacy`）                                         |
+|  27  | `resourceNinja.showBuiltInResources`                            | `true`                 | User / Global Resource Home に組み込みリソースを表示                                                                          |
+|  28  | `resourceNinja.remoteResourceViewMode`                          | `repositoryFirst`      | Remote Resources の表示レイアウト                                                                                             |
+|  29  | `resourceNinja.language`                                        | `auto`                 | UI 言語（auto / en / ja）                                                                                                     |
+|  30  | `resourceNinja.githubToken`                                     | `""`                   | GitHub Token（API 制限緩和 / private source repository 用）                                                                   |
+|  31  | `resourceNinja.instructionBlock.includeAgents`                  | `false`                | workspace の instruction block に `agent` を含める                                                                            |
+|  32  | `resourceNinja.instructionBlock.includeInstructions`            | `false`                | workspace の instruction block に `instruction` を含める                                                                      |
+|  33  | `resourceNinja.instructionBlock.globalHome.includeAgents`       | `inherit`              | Global Resource Home 向け agent 掲載ポリシーの上書き（`inherit` / `on` / `off`）                                              |
+|  34  | `resourceNinja.instructionBlock.globalHome.includeInstructions` | `inherit`              | Global Resource Home 向け instruction 掲載ポリシーの上書き（`inherit` / `on` / `off`）                                        |
+|  35  | `resourceNinja.registerPluginLocation`                          | `prompt`               | インストール済み plugin のフォルダーを VS Code の `chat.pluginLocations` に登録するか（`always` / `prompt` / `never`）        |
+|  36  | `resourceNinja.defaultPluginHost`                               | `auto`                 | 互換 plugin host のおすすめと表示順（`auto` / `ask` / `vscode-copilot` / `copilot-cli` / `claude-code` / `codex` / `cursor`） |
 
 `staleSourceIndexUpdateMode` は remote source index だけを更新します。インストール済みファイルは再インストールせず、更新に失敗した source は前回 timestamp のまま残るため、後から再試行できます。
 

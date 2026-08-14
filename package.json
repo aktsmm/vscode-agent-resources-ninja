@@ -2,7 +2,7 @@
   "name": "agent-resources-ninja",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.43",
+  "version": "0.2.44",
   "publisher": "yamapan",
   "license": "CC-BY-NC-SA-4.0",
   "icon": "resources/icon.png",
@@ -459,6 +459,43 @@
         "title": "%command.install%",
         "category": "Agent Resources Ninja",
         "icon": "$(add)"
+      },
+      {
+        "command": "resourceNinja.installPluginInCopilotCli",
+        "title": "%command.installPluginInCopilotCli%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "resourceNinja.uninstallPluginFromCopilotCli",
+        "title": "%command.uninstallPluginFromCopilotCli%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "resourceNinja.managePluginInClaudeCode",
+        "title": "%command.managePluginInClaudeCode%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "resourceNinja.managePluginInCodex",
+        "title": "%command.managePluginInCodex%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "resourceNinja.copyCodexRepairCommand",
+        "title": "%command.copyCodexRepairCommand%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(copy)",
+        "enablement": "isWindows"
+      },
+      {
+        "command": "resourceNinja.uninstallPluginFromCursor",
+        "title": "%command.uninstallPluginFromCursor%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(trash)"
       },
       {
         "command": "resourceNinja.uninstall",
@@ -1612,6 +1649,30 @@
             "%config.registerPluginLocation.never%"
           ],
           "markdownDescription": "%config.registerPluginLocation.markdownDescription%"
+        },
+        "resourceNinja.defaultPluginHost": {
+          "type": "string",
+          "default": "auto",
+          "order": 36,
+          "enum": [
+            "auto",
+            "ask",
+            "vscode-copilot",
+            "copilot-cli",
+            "claude-code",
+            "codex",
+            "cursor"
+          ],
+          "enumDescriptions": [
+            "%config.defaultPluginHost.auto%",
+            "%config.defaultPluginHost.ask%",
+            "%config.defaultPluginHost.vscodeCopilot%",
+            "%config.defaultPluginHost.copilotCli%",
+            "%config.defaultPluginHost.claudeCode%",
+            "%config.defaultPluginHost.codex%",
+            "%config.defaultPluginHost.cursor%"
+          ],
+          "markdownDescription": "%config.defaultPluginHost.markdownDescription%"
         },
         "resourceNinja.versionInfo": {
           "type": "null",

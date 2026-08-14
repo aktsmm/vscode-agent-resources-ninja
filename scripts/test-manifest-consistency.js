@@ -3,6 +3,7 @@
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
+const ts = require("typescript");
 
 const repoRoot = path.resolve(__dirname, "..");
 const packageJson = JSON.parse(
@@ -604,8 +605,11 @@ test("bundled Microsoft Azure Skills plugin source is complete", () => {
     "Azure Skills source should prefer top-level distribution paths over plugin payload duplicates",
   );
   assert.match(presetIndexUpdaterSource, /kind === "mcp"/);
-  assert.match(presetIndexUpdaterSource, /mcpServers/);
-  assert.match(presetIndexUpdaterSource, /MCP configuration for/);
+  assert.match(presetIndexUpdaterSource, /getMcpConfigMetadata/);
+  assert.match(
+    resourceKindsSource,
+    /parsed\.mcpServers[\s\S]*?parsed\.servers/,
+  );
   assert.ok(
     skippedResourceTests.includes("test-azure-skills-source.js"),
     "Azure Skills upstream comparison should stay declared as a network test",
@@ -1527,7 +1531,6 @@ test("every delete path that can remove a plugin folder unregisters it, and a re
   // Plugin-aware: the unit resolves the plugin root from the manifest path, or
   // delegates to a helper that does, so the folder it removes IS the plugin.
   const pluginAwareDeleteMarkers = [
-    "getPluginRootFsPathFromManifestPath(",
     "deleteInstalledResourceByPath(",
     "uninstallSkillByPath(",
   ];
@@ -1544,41 +1547,60 @@ test("every delete path that can remove a plugin folder unregisters it, and a re
   // every uninstall as a reinstall — which is how a reinstall that never
   // re-registers stayed invisible.
   const reinstallCallPattern = /(?<![A-Za-z0-9_$.])installSkill\(/;
-  const unitStartPattern =
-    /^(?:export )?(?:async )?function (\w+)\s*\(|^\s*(?:const|let) (\w+) = vscode\.commands\.registerCommand\(/;
-
   const units = [];
   for (const [file, source] of files) {
-    const lines = source.split("\n");
-    let offset = 0;
-    for (const line of lines) {
-      const match = unitStartPattern.exec(line);
-      if (match) {
-        units.push({
-          file,
-          name: match[1] || match[2],
-          start: offset,
-          source,
-        });
+    const sourceFile = ts.createSourceFile(
+      file,
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    const addUnit = (name, node) => {
+      if (!name) return;
+      units.push({
+        file,
+        name,
+        start: node.getStart(sourceFile),
+        end: node.end,
+        source,
+      });
+    };
+    const visit = (node) => {
+      if (ts.isFunctionDeclaration(node) && node.name) {
+        addUnit(node.name.text, node);
+      } else if (ts.isMethodDeclaration(node) && ts.isIdentifier(node.name)) {
+        addUnit(node.name.text, node);
+      } else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+        const initializer = node.initializer;
+        if (
+          initializer &&
+          (ts.isArrowFunction(initializer) ||
+            ts.isFunctionExpression(initializer) ||
+            (ts.isCallExpression(initializer) &&
+              initializer.expression
+                .getText(sourceFile)
+                .endsWith(".registerCommand")))
+        ) {
+          addUnit(node.name.text, node.parent.parent);
+        }
       }
-      offset += line.length + 1;
-    }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
   }
 
   function findUnit(file, index) {
-    const candidates = units.filter(
-      (unit) => unit.file === file && unit.start <= index,
-    );
-    return candidates[candidates.length - 1];
+    return units
+      .filter(
+        (unit) => unit.file === file && unit.start <= index && index < unit.end,
+      )
+      .sort(
+        (left, right) => left.end - left.start - (right.end - right.start),
+      )[0];
   }
 
-  const unitBody = (unit) => {
-    const next = units
-      .filter((other) => other.file === unit.file && other.start > unit.start)
-      .map((other) => other.start)
-      .sort((left, right) => left - right)[0];
-    return unit.source.slice(unit.start, next ?? unit.source.length);
-  };
+  const unitBody = (unit) => unit.source.slice(unit.start, unit.end);
 
   // A unit is a delete path when it calls a marker, and also when it IS the
   // helper a marker names: a helper that performs the delete itself owes the
@@ -1988,6 +2010,7 @@ test("every scripts/test-*.js is either executed or explicitly declared as a net
   // deliberate edit here, and removing one must shrink this list.
   const JUSTIFIED_NETWORK_TESTS = [
     "test-azure-skills-source.js",
+    "test-copilot-plugins-upstream.js",
     "test-microsoft-install-e2e.js",
   ];
   assert.deepStrictEqual(
@@ -2981,6 +3004,37 @@ test("ignore files exclude local release and agent artifacts", () => {
       `.vscodeignore should exclude ${marker}`,
     );
   }
+});
+
+test("legacy Refine ledgers never return under .github", () => {
+  const legacyRefineLedgers = [
+    ".github/refine-product.md",
+    ".github/refine-product-state.md",
+  ];
+  for (const relativePath of legacyRefineLedgers) {
+    assert.strictEqual(
+      fs.existsSync(path.join(repoRoot, relativePath)),
+      false,
+      `${relativePath} is obsolete; Refine state belongs only in .git/info/refine-product-state.md`,
+    );
+  }
+});
+
+test("generated release artifacts stay out of the repository root", () => {
+  const rootVsixFiles = fs
+    .readdirSync(repoRoot, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".vsix"))
+    .map((entry) => entry.name);
+  assert.deepStrictEqual(
+    rootVsixFiles,
+    [],
+    "VSIX artifacts belong under artifacts/vsix, not the repository root",
+  );
+  assert.strictEqual(
+    fs.existsSync(path.join(repoRoot, "compile.log")),
+    false,
+    "compile.log is a temporary build artifact and must not remain at the repository root",
+  );
 });
 
 test("package lock uses public registry URLs and sha512 integrity", () => {

@@ -5,6 +5,7 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const os = require("os");
 const path = require("path");
+const { execFileSync } = require("child_process");
 
 const INDEX_PATH = path.join(__dirname, "..", "resources", "skill-index.json");
 const FETCH_TIMEOUT = 15000;
@@ -166,6 +167,55 @@ async function downloadDirectory(owner, repo, remotePath, localPath, branch) {
   }
 }
 
+async function downloadDirectoryWithGitFallback(
+  owner,
+  repo,
+  remotePath,
+  localPath,
+  branch,
+  tempRoot,
+) {
+  try {
+    await downloadDirectory(owner, repo, remotePath, localPath, branch);
+    return;
+  } catch (error) {
+    if (!String(error?.message || error).includes("Failed to list directory: 403")) {
+      throw error;
+    }
+  }
+
+  const cloneRoot = path.join(tempRoot, "git-fallback");
+  const gitEnv = {
+    ...process.env,
+    GIT_TERMINAL_PROMPT: "0",
+    GCM_INTERACTIVE: "Never",
+  };
+  execFileSync(
+    "git",
+    [
+      "clone",
+      "--depth",
+      "1",
+      "--filter=blob:none",
+      "--sparse",
+      "--branch",
+      branch,
+      `https://github.com/${owner}/${repo}.git`,
+      cloneRoot,
+    ],
+    { stdio: "pipe", env: gitEnv },
+  );
+  execFileSync(
+    "git",
+    ["-C", cloneRoot, "sparse-checkout", "set", "--no-cone", remotePath],
+    { stdio: "pipe", env: gitEnv },
+  );
+  await fsp.rm(localPath, { recursive: true, force: true });
+  await fsp.cp(path.join(cloneRoot, remotePath), localPath, {
+    recursive: true,
+  });
+}
+
 async function main() {
   console.log("=== MicrosoftDocs Agent Skills E2E install test ===");
 
@@ -202,7 +252,14 @@ async function main() {
 
   try {
     await fsp.mkdir(installDir, { recursive: true });
-    await downloadDirectory(owner, repo, actualSkill.path, installDir, branch);
+    await downloadDirectoryWithGitFallback(
+      owner,
+      repo,
+      actualSkill.path,
+      installDir,
+      branch,
+      tempRoot,
+    );
 
     const skillMdPath = path.join(installDir, "SKILL.md");
     const stat = await fsp.stat(skillMdPath);

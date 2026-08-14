@@ -42,6 +42,8 @@ import {
 import {
   detectResourceKindFromPath,
   getPluginRootFromManifestPath,
+  getPluginOwnedHookInstallFileName,
+  getPluginOwnedInstallFileName,
   getPluginRootFsPathFromManifestPath,
   getResourceMetadataPath,
   isHookConfigFilePath,
@@ -550,7 +552,76 @@ async function deleteResourceInstallMetadata(
   }
 }
 
+async function removeOwnedLegacyPluginResource(
+  targetUri: vscode.Uri,
+  skill: Skill,
+): Promise<void> {
+  const kind = getResourceKind(skill);
+  if (
+    !skill.pluginRoot ||
+    (kind !== "hook" &&
+      kind !== "agent" &&
+      kind !== "instruction" &&
+      kind !== "prompt")
+  ) {
+    return;
+  }
+  const originalFileName = path.posix.basename(skill.path.replace(/\\/g, "/"));
+  if (path.basename(targetUri.fsPath) === originalFileName) {
+    return;
+  }
+  const legacyUri = vscode.Uri.joinPath(
+    getParentDirectoryUri(targetUri),
+    originalFileName,
+  );
+  try {
+    const metadataUri = getResourceMetadataUri(legacyUri, kind);
+    const metadata = JSON.parse(
+      Buffer.from(await vscode.workspace.fs.readFile(metadataUri)).toString(
+        "utf8",
+      ),
+    ) as Partial<ResourceInstallMeta>;
+    if (
+      metadata.kind !== kind ||
+      metadata.source !==
+        normalizeSkillMetaSource({
+          source: skill.source,
+          remotePath: skill.path,
+        }) ||
+      metadata.remotePath !== skill.path ||
+      metadata.pluginRoot !== skill.pluginRoot
+    ) {
+      return;
+    }
+    await vscode.workspace.fs.delete(legacyUri, { useTrash: true });
+    await vscode.workspace.fs.delete(metadataUri, { useTrash: true });
+    logger.info(
+      `[Resource Ninja] Migrated owned plugin resource from ${legacyUri.fsPath} to ${targetUri.fsPath}`,
+    );
+  } catch {
+    // Missing or unowned legacy files are never removed.
+  }
+}
+
 function getInstallFileName(skill: Skill, fileName: string): string {
+  const pluginHookFileName = getPluginOwnedHookInstallFileName({
+    kind: getResourceKind(skill),
+    source: skill.source,
+    pluginRoot: skill.pluginRoot,
+    resourcePath: skill.path,
+    fileName,
+  });
+  if (pluginHookFileName !== fileName) {
+    return pluginHookFileName;
+  }
+  const pluginOwnedFileName = getPluginOwnedInstallFileName({
+    kind: getResourceKind(skill),
+    pluginRoot: skill.pluginRoot,
+    fileName,
+  });
+  if (pluginOwnedFileName !== fileName) {
+    return pluginOwnedFileName;
+  }
   if (getResourceKind(skill) !== "mcp") {
     return fileName;
   }
@@ -1323,7 +1394,9 @@ export async function installSkill(
       const resourcePathExisted = await uriExists(skillPath);
       await vscode.workspace.fs.createDirectory(resourceParentUri);
       try {
-        if (resourceKind === "hook") {
+        const isHookConfigFile =
+          resourceKind === "hook" && isHookConfigFilePath(remotePath);
+        if (resourceKind === "hook" && !isHookConfigFile) {
           const remoteDir = remotePath.split("/").slice(0, -1).join("/");
           await downloadDirectory(
             owner,
@@ -1342,6 +1415,7 @@ export async function installSkill(
           );
         }
         await writeResourceInstallMetadata(skillPath, skill);
+        await removeOwnedLegacyPluginResource(skillPath, skill);
       } catch (error) {
         if (!resourcePathExisted) {
           await deleteResourceInstallMetadata(skillPath, resourceKind);
@@ -1358,7 +1432,7 @@ export async function installSkill(
         );
         throw error;
       }
-      if (resourceKind === "hook") {
+      if (resourceKind === "hook" && !isHookConfigFilePath(remotePath)) {
         const hookConfigRootUri = getHookConfigRootUri(
           workspaceUri,
           config,

@@ -2,6 +2,9 @@
 
 import * as vscode from "vscode";
 import * as path from "path";
+import * as os from "os";
+import { realpath } from "fs/promises";
+import { createHash } from "crypto";
 import {
   SkillIndex,
   Skill,
@@ -12,9 +15,11 @@ import {
   loadSkillIndex,
   getSkillGitHubUrlAsync,
   getIndexResources,
+  getIndexSources,
   getResourceKind,
   getResourceKindIcon,
   getResourceKindLabel,
+  getSourceBranch,
 } from "./skillIndex";
 import { searchSkills, SkillQuickPickItem } from "./skillSearch";
 import {
@@ -76,12 +81,14 @@ import {
   searchGitHub,
   showAuthHelp,
   openGitHubAuthSettings,
+  fetchGitHubTextContent,
 } from "./indexUpdater";
 import { messages, isJapanese } from "./i18n";
 import { showSkillPreview, getSkillId } from "./skillPreview";
 import {
   LocalSkill,
   registerLocalSkill,
+  scanLocalSkills,
   unregisterLocalSkill,
 } from "./localSkillScanner";
 import { createChatParticipant } from "./chatParticipant";
@@ -99,6 +106,7 @@ import {
   subscribeOwnershipChanges,
 } from "./coexistence";
 import {
+  AGENT_PLUGINS_MANIFEST_SCHEMA,
   detectResourceKindFromPath,
   getPluginIdFromPath,
   getPluginRootFsPathFromManifestPath,
@@ -166,6 +174,66 @@ import {
   getSourceIndexUpdateNotificationKind,
   scaleSourceIndexProgressIncrement,
 } from "./sourceIndexUpdatePresentation";
+import {
+  COPILOT_MARKETPLACE_MANIFEST_PATHS,
+  CopilotMarketplacePluginIdentity,
+  MarketplaceCleanupResult,
+  findCopilotCliExecutable,
+  getCanonicalCopilotCliPluginRoot,
+  installCopilotCliPlugin,
+  normalizeGitHubOwnerRepo,
+  parseCopilotCliPluginList,
+  resolveMarketplacePluginIdentityFromCandidates,
+  uninstallCopilotCliPlugin,
+} from "./copilotCliPlugins";
+import {
+  DefaultPluginHost,
+  formatPluginHostState,
+  resolvePluginHostChoices,
+} from "./pluginHosts/recommendation";
+import {
+  canExecuteWithoutShell,
+  CodexExecutableProbe,
+  findCodexExecutableProbe,
+  findExecutableOnPath,
+} from "./pluginHosts/executable";
+import {
+  getClaudeCodeAvailability,
+  installClaudeCodePlugin,
+  mutateClaudeCodePlugin,
+  parseClaudePluginListJson,
+} from "./pluginHosts/adapters/claudeCode";
+import {
+  getCodexAvailability,
+  installCodexPlugin,
+  parseCodexPluginListJson,
+  uninstallCodexPlugin,
+} from "./pluginHosts/adapters/codex";
+import {
+  getCursorLocalPluginPath,
+  isCursorEditor,
+} from "./pluginHosts/adapters/cursor";
+import {
+  ExecutionIntentAuthority,
+  MutationExecutor,
+  buildSanitizedEnvironment,
+} from "./pluginHosts/executionGate";
+import {
+  PluginHostCommandResult,
+  PluginHostCommandRunner,
+  createApprovedCommandRunner,
+  runPluginHostProcess,
+} from "./pluginHosts/commandRunner";
+import {
+  PluginHostAction,
+  PluginHostId,
+  PluginHostState,
+  PluginInstallScope,
+} from "./pluginHosts/types";
+import {
+  collectPluginHostStates,
+  withPluginStateTimeout,
+} from "./pluginHosts/state";
 
 // 現在の拡張機能バージョン
 const EXTENSION_VERSION =
@@ -173,8 +241,63 @@ const EXTENSION_VERSION =
     ?.version || "0.0.0";
 const STALE_SOURCE_PROMPT_DATE_KEY = "resourceNinja.staleSourceLastPromptDate";
 const STALE_SOURCE_CURSOR_KEY = "resourceNinja.staleSourceUpdateCursor";
+const CURSOR_PLUGIN_RECEIPTS_KEY = "resourceNinja.cursorPluginReceipts";
+const CODEX_REPAIR_COMMAND =
+  "winget install --id OpenAI.Codex -e --source winget --force";
 
 let activeExtensionContext: vscode.ExtensionContext | undefined;
+const pluginExecutionAuthority = new ExecutionIntentAuthority();
+const pluginMutationExecutor = new MutationExecutor(pluginExecutionAuthority);
+const loggedCodexFallbacks = new Set<string>();
+
+interface CursorPluginReceipt {
+  rootPath: string;
+  targetPath: string;
+  pluginName: string;
+  source: string;
+  remotePath: string;
+  fingerprint: string;
+  installedAt: string;
+}
+
+function formatCodexExecutableReason(
+  probe: CodexExecutableProbe,
+  japanese: boolean,
+): string {
+  switch (probe.reason) {
+    case "path":
+      return japanese ? "Codex CLIをPATHで検出" : "Codex CLI detected on PATH";
+    case "winget-link-not-on-path":
+      return japanese
+        ? "WinGet linkでNative実行（shell alias/PATH未反映）"
+        : "Native via WinGet link (shell alias/PATH unavailable)";
+    case "winget-package-no-link":
+      return japanese
+        ? "公式WinGet packageからNative実行（shell aliasなし）"
+        : "Native via official WinGet package fallback (shell alias missing)";
+    case "unsupported-winget-package":
+      return japanese
+        ? "WinGet packageはあるが対応実行ファイルなし"
+        : "WinGet package found without a supported executable";
+    case "not-found":
+    default:
+      return japanese ? "Codex CLI未検出" : "Codex CLI not found";
+  }
+}
+
+function logCodexFallback(probe: CodexExecutableProbe): void {
+  if (!probe.executablePath || !probe.source || probe.source === "path") {
+    return;
+  }
+  const key = `${probe.reason}|${probe.executablePath}`;
+  if (loggedCodexFallbacks.has(key)) {
+    return;
+  }
+  loggedCodexFallbacks.add(key);
+  logger.info(
+    `[Resource Ninja] Codex CLI fallback: ${probe.reason} (${probe.executablePath})`,
+  );
+}
 
 function normalizeInstalledRemotePath(
   remotePath: string | undefined,
@@ -418,8 +541,30 @@ async function offerPluginLocationRegistration(
   const disabledNote = pluginsDisabled
     ? ` ${messages.pluginsDisabledNote()}`
     : "";
+  const compatibleUris: vscode.Uri[] = [];
+  for (const uri of pluginUris) {
+    try {
+      const manifest = JSON.parse(
+        Buffer.from(
+          await vscode.workspace.fs.readFile(
+            vscode.Uri.joinPath(uri, "plugin.json"),
+          ),
+        ).toString("utf8"),
+      ) as Record<string, unknown>;
+      if (manifest.$schema === AGENT_PLUGINS_MANIFEST_SCHEMA) {
+        compatibleUris.push(uri);
+      }
+    } catch {
+      logger.info(
+        `[Resource Ninja] Skipped chat.pluginLocations for non-Agent-Plugin package: ${uri.fsPath}`,
+      );
+    }
+  }
+  if (compatibleUris.length === 0) {
+    return;
+  }
   const keys = Array.from(
-    new Set(pluginUris.map((uri) => toPluginLocationKey(uri.fsPath))),
+    new Set(compatibleUris.map((uri) => toPluginLocationKey(uri.fsPath))),
   );
 
   // Nothing to offer when every folder is already registered and enabled.
@@ -510,6 +655,7 @@ const RESETTABLE_RESOURCE_NINJA_SETTINGS = [
   "instructionBlock.globalHome.includeInstructions",
   "kindsExcluded",
   "registerPluginLocation",
+  "defaultPluginHost",
   "resourcesDirectory",
   "additionalSkillRoots",
   "workspaceAgentsDirectory",
@@ -2765,6 +2911,1659 @@ export async function activate(
     );
   }
 
+  interface PluginHostExecutableProbe {
+    executablePath: string;
+    version: string;
+    cwd: string;
+    environment: Record<string, string>;
+    targetPaths: string[];
+  }
+
+  function getPluginHostHome(hostId: PluginHostId): string {
+    switch (hostId) {
+      case "claude-code":
+        return (
+          process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude")
+        );
+      case "codex":
+        return process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+      case "copilot-cli":
+      default:
+        return process.env.COPILOT_HOME || path.join(os.homedir(), ".copilot");
+    }
+  }
+
+  function getPluginHostEnvironment(
+    hostId: PluginHostId,
+  ): Record<string, string> {
+    const commonKeys = [
+      "PATH",
+      "PATHEXT",
+      "SystemRoot",
+      "COMSPEC",
+      "TEMP",
+      "TMP",
+      "HOME",
+      "USERPROFILE",
+      "APPDATA",
+      "LOCALAPPDATA",
+      "LANG",
+    ];
+    const hostKeys =
+      hostId === "claude-code"
+        ? ["CLAUDE_CONFIG_DIR", "ANTHROPIC_API_KEY"]
+        : hostId === "codex"
+          ? ["CODEX_HOME", "OPENAI_API_KEY"]
+          : ["COPILOT_HOME", "GH_TOKEN", "GITHUB_TOKEN"];
+    return buildSanitizedEnvironment(process.env, [...commonKeys, ...hostKeys]);
+  }
+
+  async function probePluginHostExecutable(
+    hostId: PluginHostId,
+    executablePath: string,
+    cwd: string,
+  ): Promise<PluginHostExecutableProbe> {
+    const resolvedExecutable = await realpath(executablePath);
+    const environment = getPluginHostEnvironment(hostId);
+    const versionResult = await runPluginHostProcess(
+      resolvedExecutable,
+      ["--version"],
+      {
+        cwd,
+        environment,
+        timeoutMs: 15_000,
+        outputLimit: 8 * 1024,
+      },
+    );
+    if (versionResult.exitCode !== 0 || versionResult.error) {
+      throw new Error(
+        versionResult.error ||
+          versionResult.stderr.trim() ||
+          "Could not read plugin host version.",
+      );
+    }
+    const version = versionResult.stdout.trim().split(/\r?\n/, 1)[0];
+    if (!version) {
+      throw new Error("Plugin host returned an empty version.");
+    }
+    return {
+      executablePath: resolvedExecutable,
+      version,
+      cwd,
+      environment,
+      targetPaths: [path.resolve(getPluginHostHome(hostId))],
+    };
+  }
+
+  function createGatedPluginHostRunner(input: {
+    probe: PluginHostExecutableProbe;
+    hostId: PluginHostId;
+    action: PluginHostAction;
+    scope?: PluginInstallScope;
+    resourceIdentity: string;
+    sourceOrigin: string;
+    readonlyCommands: readonly (readonly string[])[];
+    mutationCommands: readonly (readonly string[])[];
+  }): PluginHostCommandRunner {
+    return createApprovedCommandRunner({
+      authority: pluginExecutionAuthority,
+      executor: pluginMutationExecutor,
+      hostId: input.hostId,
+      action: input.action,
+      scope: input.scope,
+      executablePath: input.probe.executablePath,
+      executableVersion: input.probe.version,
+      cwd: input.probe.cwd,
+      environment: input.probe.environment,
+      resourceIdentity: input.resourceIdentity,
+      sourceOrigin: input.sourceOrigin,
+      resolutionMode: "host-resolved",
+      targetPaths: input.probe.targetPaths,
+      readonlyCommands: input.readonlyCommands,
+      mutationCommands: input.mutationCommands,
+    });
+  }
+
+  function getGitHubOwnerRepo(source: Source): string | undefined {
+    try {
+      const url = new URL(source.url);
+      if (url.hostname.toLowerCase() !== "github.com") {
+        return undefined;
+      }
+      return normalizeGitHubOwnerRepo(url.pathname.replace(/^\/+|\/+$/g, ""));
+    } catch {
+      return undefined;
+    }
+  }
+
+  const pluginMarketplaceCache = new Map<
+    string,
+    {
+      expiresAt: number;
+      value: Promise<{ ownerRepo: string; contents: string[] }>;
+    }
+  >();
+
+  function getPluginMarketplaceData(
+    source: Source,
+    manifestPath?: string,
+  ): Promise<{ ownerRepo: string; contents: string[] }> {
+    const cached = pluginMarketplaceCache.get(source.id);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
+    const pending = (async () => {
+      const ownerRepo = getGitHubOwnerRepo(source);
+      if (!ownerRepo) {
+        throw new Error("The plugin source is not a GitHub repository.");
+      }
+      const { token } = await resolveGitHubToken();
+      const branch = await getSourceBranch(source, token, manifestPath);
+      const [owner, repo] = ownerRepo.split("/");
+      const contents: string[] = [];
+      for (const marketplacePath of COPILOT_MARKETPLACE_MANIFEST_PATHS) {
+        const content = await fetchGitHubTextContent(
+          owner,
+          repo,
+          branch,
+          marketplacePath,
+          token,
+        );
+        if (content !== undefined) {
+          contents.push(content);
+        }
+      }
+      return { ownerRepo, contents };
+    })();
+    pluginMarketplaceCache.set(source.id, {
+      expiresAt: Date.now() + 30_000,
+      value: pending,
+    });
+    pending.catch(() => {
+      if (pluginMarketplaceCache.get(source.id)?.value === pending) {
+        pluginMarketplaceCache.delete(source.id);
+      }
+    });
+    return pending;
+  }
+
+  async function resolveCopilotCliPluginIdentity(
+    skill: Skill,
+  ): Promise<CopilotMarketplacePluginIdentity> {
+    const pluginRoot = getCanonicalCopilotCliPluginRoot(skill);
+    if (!pluginRoot) {
+      throw new Error(
+        isJapanese()
+          ? "このリソースは Copilot CLI marketplace の実プラグインとして特定できません。"
+          : "This resource cannot be identified as a concrete Copilot CLI marketplace plugin.",
+      );
+    }
+    if (!skillIndex) {
+      skillIndex = await loadSkillIndex(context);
+    }
+    const source = skillIndex.sources.find(
+      (candidate) => candidate.id === skill.source,
+    );
+    if (!source) {
+      throw new Error(
+        isJapanese()
+          ? "Copilot CLI marketplace の GitHub ソースを解決できません。"
+          : "The GitHub source for the Copilot CLI marketplace could not be resolved.",
+      );
+    }
+    const { ownerRepo, contents: marketplaceContents } =
+      await getPluginMarketplaceData(source, skill.pluginManifestPath);
+    const identity = resolveMarketplacePluginIdentityFromCandidates(
+      marketplaceContents,
+      pluginRoot,
+      ownerRepo,
+    );
+    if (identity) {
+      return identity;
+    }
+    throw new Error(
+      isJapanese()
+        ? "Copilot CLI が認識する marketplace.json に、このプラグインと一意に一致する entry がありません。VS Code 向けとしてインストールしてください。"
+        : "No marketplace.json recognized by Copilot CLI has one unique entry for this plugin. Install it for VS Code instead.",
+    );
+  }
+
+  async function probeVsCodePluginState(
+    skill: Skill,
+  ): Promise<PluginHostState> {
+    if (!workspaceFolder) {
+      return {
+        hostId: "vscode-copilot",
+        status: "unknown",
+        reason: "No workspace is open.",
+      };
+    }
+    const [workspaceResources, userResources] = await Promise.all([
+      scanLocalSkills(workspaceFolder.uri, true, true),
+      scanUserResources(workspaceFolder.uri, false),
+    ]);
+    const targetKeys = new Set(getResourceIdentityKeys(skill));
+    const installed = [...workspaceResources, ...userResources].find(
+      (resource) =>
+        getResourceKind(resource) === "plugin" &&
+        getResourceIdentityKeys(resource).some((key) => targetKeys.has(key)),
+    );
+    if (!installed) {
+      return { hostId: "vscode-copilot", status: "not-installed" };
+    }
+    let enabled: boolean | undefined;
+    if (
+      supportsPluginLocations(vscode.version) &&
+      installed.fullPath &&
+      getPluginRootFsPathFromManifestPath(installed.fullPath)
+    ) {
+      const pluginRoot = getPluginRootFsPathFromManifestPath(
+        installed.fullPath,
+      )!;
+      const chatConfig = vscode.workspace.getConfiguration("chat");
+      const locations =
+        chatConfig.get<Record<string, boolean>>("pluginLocations");
+      const key = toPluginLocationKey(pluginRoot);
+      const locationEnabled = locations?.[key] === true;
+      const pluginsEnabled =
+        chatConfig.get<boolean>("plugins.enabled", true) !== false;
+      enabled = locationEnabled && pluginsEnabled;
+    }
+    return {
+      hostId: "vscode-copilot",
+      status: "installed",
+      enabled,
+      version:
+        typeof (installed as { version?: unknown }).version === "string"
+          ? (installed as { version: string }).version
+          : undefined,
+    };
+  }
+
+  async function runPluginHostReadOnly(input: {
+    hostId: PluginHostId;
+    executablePath: string;
+    args: readonly string[];
+  }): Promise<PluginHostCommandResult> {
+    const executablePath = await realpath(input.executablePath);
+    return runPluginHostProcess(executablePath, input.args, {
+      cwd: workspaceFolder?.uri.fsPath ?? os.homedir(),
+      environment: getPluginHostEnvironment(input.hostId),
+      timeoutMs: 10_000,
+      outputLimit: 64 * 1024,
+    });
+  }
+
+  async function probeCliPluginState(input: {
+    hostId: "copilot-cli" | "claude-code" | "codex";
+    executablePath: string;
+    pluginId: string;
+  }): Promise<PluginHostState> {
+    const args =
+      input.hostId === "copilot-cli"
+        ? ["--no-color", "plugin", "list"]
+        : ["plugin", "list", "--json"];
+    const result = await runPluginHostReadOnly({
+      hostId: input.hostId,
+      executablePath: input.executablePath,
+      args,
+    });
+    if (result.exitCode !== 0 || result.error || result.timedOut) {
+      return {
+        hostId: input.hostId,
+        status: "error",
+        reason:
+          result.error || result.stderr.trim() || "Plugin state probe failed.",
+      };
+    }
+    if (input.hostId === "copilot-cli") {
+      const states = parseCopilotCliPluginList(result.stdout);
+      if (!states) {
+        return {
+          hostId: input.hostId,
+          status: "unknown",
+          reason: "Copilot CLI plugin list output was not recognized.",
+        };
+      }
+      const state = states.find((candidate) => candidate.id === input.pluginId);
+      return state
+        ? {
+            hostId: input.hostId,
+            status: "installed",
+            enabled: state.enabled,
+            version: state.version,
+          }
+        : { hostId: input.hostId, status: "not-installed" };
+    }
+    if (input.hostId === "claude-code") {
+      const states = parseClaudePluginListJson(result.stdout);
+      if (!states) {
+        return {
+          hostId: input.hostId,
+          status: "unknown",
+          reason: "Claude Code plugin JSON was not recognized.",
+        };
+      }
+      const state = states.find((candidate) => candidate.id === input.pluginId);
+      return state
+        ? {
+            hostId: input.hostId,
+            status: "installed",
+            enabled: state.enabled,
+            version: state.version,
+          }
+        : { hostId: input.hostId, status: "not-installed" };
+    }
+    const states = parseCodexPluginListJson(result.stdout);
+    if (!states) {
+      return {
+        hostId: input.hostId,
+        status: "unknown",
+        reason: "Codex plugin JSON was not recognized.",
+      };
+    }
+    const state = states.find(
+      (candidate) => candidate.pluginId === input.pluginId,
+    );
+    return state
+      ? {
+          hostId: input.hostId,
+          status: "installed",
+          enabled: state.enabled,
+          version: state.version,
+        }
+      : { hostId: input.hostId, status: "not-installed" };
+  }
+
+  async function probeCursorPluginState(
+    skill: Skill,
+  ): Promise<PluginHostState> {
+    const targetPath = getCursorLocalPluginPath(os.homedir(), skill.name);
+    const receipts = context.globalState.get<CursorPluginReceipt[]>(
+      CURSOR_PLUGIN_RECEIPTS_KEY,
+      [],
+    );
+    const receipt = receipts.find(
+      (candidate) =>
+        candidate.targetPath === targetPath &&
+        candidate.source === skill.source &&
+        candidate.remotePath === skill.path,
+    );
+    if (!receipt || !targetPath) {
+      return { hostId: "cursor", status: "not-installed" };
+    }
+    try {
+      await vscode.workspace.fs.stat(vscode.Uri.file(targetPath));
+      return { hostId: "cursor", status: "installed" };
+    } catch {
+      return {
+        hostId: "cursor",
+        status: "error",
+        reason: "The owned Cursor plugin path is missing.",
+      };
+    }
+  }
+
+  async function probePluginHostStates(input: {
+    skill: Skill;
+    identity?: CopilotMarketplacePluginIdentity;
+    copilotCliExecutable?: string;
+    claudeExecutable?: string;
+    codexExecutable?: string;
+    cursorDetected: boolean;
+  }): Promise<Map<PluginHostId, PluginHostState>> {
+    const probes: Array<{
+      hostId: PluginHostId;
+      operation: Promise<PluginHostState>;
+    }> = [
+      {
+        hostId: "vscode-copilot",
+        operation: probeVsCodePluginState(input.skill),
+      },
+    ];
+    if (input.identity && input.copilotCliExecutable) {
+      probes.push({
+        hostId: "copilot-cli",
+        operation: probeCliPluginState({
+          hostId: "copilot-cli",
+          executablePath: input.copilotCliExecutable,
+          pluginId: `${input.identity.pluginName}@${input.identity.marketplaceName}`,
+        }),
+      });
+    }
+    if (input.identity && input.claudeExecutable) {
+      probes.push({
+        hostId: "claude-code",
+        operation: probeCliPluginState({
+          hostId: "claude-code",
+          executablePath: input.claudeExecutable,
+          pluginId: `${input.identity.pluginName}@${input.identity.marketplaceName}`,
+        }),
+      });
+    }
+    if (input.identity && input.codexExecutable) {
+      probes.push({
+        hostId: "codex",
+        operation: probeCliPluginState({
+          hostId: "codex",
+          executablePath: input.codexExecutable,
+          pluginId: `${input.identity.pluginName}@${input.identity.marketplaceName}`,
+        }),
+      });
+    }
+    if (input.cursorDetected) {
+      probes.push({
+        hostId: "cursor",
+        operation: probeCursorPluginState(input.skill),
+      });
+    }
+    return collectPluginHostStates(probes, 12_000);
+  }
+
+  function formatCliCleanup(cleanup: MarketplaceCleanupResult): string {
+    if (cleanup.status === "not-needed") {
+      return "";
+    }
+    if (cleanup.status === "removed") {
+      return isJapanese()
+        ? " 追加した marketplace は削除しました。"
+        : " The marketplace added by this operation was removed.";
+    }
+    const label =
+      cleanup.status === "skipped"
+        ? isJapanese()
+          ? "cleanup を安全に実行できませんでした"
+          : "Cleanup was skipped because ownership could not be proven"
+        : isJapanese()
+          ? "cleanup に失敗しました"
+          : "Cleanup failed";
+    return ` ${label}: ${cleanup.reason}`;
+  }
+
+  async function installPluginInCopilotCli(skill: Skill): Promise<boolean> {
+    try {
+      const identity = await resolveCopilotCliPluginIdentity(skill);
+      const executable = await findCopilotCliExecutable();
+      if (!executable) {
+        vscode.window.showErrorMessage(
+          isJapanese()
+            ? "Copilot CLI 実行ファイルが PATH に見つかりません。Copilot CLI をインストールしてから再実行してください。"
+            : "No Copilot CLI executable was found on PATH. Install Copilot CLI and try again.",
+        );
+        return false;
+      }
+      const probe = await probePluginHostExecutable(
+        "copilot-cli",
+        executable,
+        workspaceFolder?.uri.fsPath ?? os.homedir(),
+      );
+
+      const installAction = isJapanese()
+        ? "Copilot CLI にインストール"
+        : "Install in Copilot CLI";
+      const choice = await vscode.window.showWarningMessage(
+        isJapanese()
+          ? `${identity.pluginName}@${identity.marketplaceName} を Copilot CLI にインストールします。必要に応じて marketplace (${identity.ownerRepo}) も登録します。プラグインには skills、agents、hooks、MCP/LSP servers が含まれ、Copilot CLI 実行時に読み込まれる可能性があります。\n\n実行: ${probe.executablePath}\nVersion: ${probe.version}`
+          : `Install ${identity.pluginName}@${identity.marketplaceName} in Copilot CLI. Its marketplace (${identity.ownerRepo}) will also be registered if needed. Plugins can include skills, agents, hooks, and MCP/LSP servers that Copilot CLI may load at runtime.\n\nExecutable: ${probe.executablePath}\nVersion: ${probe.version}`,
+        { modal: true },
+        installAction,
+      );
+      if (choice !== installAction) {
+        return false;
+      }
+      const pluginId = `${identity.pluginName}@${identity.marketplaceName}`;
+      const runner = createGatedPluginHostRunner({
+        probe,
+        hostId: "copilot-cli",
+        action: "install",
+        scope: "user",
+        resourceIdentity: pluginId,
+        sourceOrigin: identity.ownerRepo,
+        readonlyCommands: [["--no-color", "plugin", "marketplace", "list"]],
+        mutationCommands: [
+          ["--no-color", "plugin", "marketplace", "add", identity.ownerRepo],
+          ["--no-color", "plugin", "install", pluginId],
+          [
+            "--no-color",
+            "plugin",
+            "marketplace",
+            "remove",
+            identity.marketplaceName,
+          ],
+        ],
+      });
+
+      const result = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: isJapanese()
+            ? `${identity.pluginName} を Copilot CLI にインストール中...`
+            : `Installing ${identity.pluginName} in Copilot CLI...`,
+          cancellable: false,
+        },
+        () => installCopilotCliPlugin(identity, runner),
+      );
+      if (!result.ok) {
+        const message = `${result.reason}${formatCliCleanup(result.cleanup)}`;
+        logger.error(
+          `[Resource Ninja] Copilot CLI plugin install failed (${result.phase}): ${message}`,
+        );
+        vscode.window.showErrorMessage(
+          isJapanese()
+            ? `Copilot CLI へのインストールに失敗しました: ${message}`
+            : `Copilot CLI plugin installation failed: ${message}`,
+        );
+        return false;
+      }
+      vscode.window.showInformationMessage(
+        isJapanese()
+          ? `${identity.pluginName}@${identity.marketplaceName} を Copilot CLI にインストールしました。`
+          : `Installed ${identity.pluginName}@${identity.marketplaceName} in Copilot CLI.`,
+      );
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(
+        `[Resource Ninja] Failed to resolve Copilot CLI plugin: ${message}`,
+      );
+      vscode.window.showErrorMessage(message);
+      return false;
+    }
+  }
+
+  async function pickRemotePlugin(
+    manifestKinds?: readonly string[],
+  ): Promise<Skill | undefined> {
+    if (!skillIndex) {
+      skillIndex = await loadSkillIndex(context);
+    }
+    const plugins = getIndexResources(skillIndex).filter(
+      (resource) =>
+        getResourceKind(resource) === "plugin" &&
+        resource.pluginManifestKind !== "marketplace" &&
+        (!manifestKinds ||
+          manifestKinds.includes(resource.pluginManifestKind ?? "")),
+    );
+    const selected = await vscode.window.showQuickPick(
+      plugins.map((plugin) => ({
+        label: plugin.name,
+        description: plugin.source,
+        detail: plugin.pluginRoot || plugin.path,
+        plugin,
+      })),
+      {
+        placeHolder: isJapanese()
+          ? "Copilot CLI で管理するプラグインを選択"
+          : "Select a plugin to manage in Copilot CLI",
+        matchOnDescription: true,
+        matchOnDetail: true,
+      },
+    );
+    return selected?.plugin;
+  }
+
+  async function pickInstalledRemotePlugin(input: {
+    hostId: "claude-code" | "codex";
+    executablePath: string;
+    manifestKind: string;
+  }): Promise<Skill | undefined> {
+    const result = await runPluginHostReadOnly({
+      hostId: input.hostId,
+      executablePath: input.executablePath,
+      args: ["plugin", "list", "--json"],
+    });
+    if (result.exitCode !== 0 || result.error || result.timedOut) {
+      vscode.window.showWarningMessage(
+        isJapanese()
+          ? "Hostのインストール済み状態を取得できません。Unknownとしてカタログから選択します。"
+          : "Installed host state could not be read. Select from the catalog with Unknown state.",
+      );
+      return pickRemotePlugin([input.manifestKind]);
+    }
+    const installedIds =
+      input.hostId === "claude-code"
+        ? parseClaudePluginListJson(result.stdout)?.map((state) => state.id)
+        : parseCodexPluginListJson(result.stdout)
+            ?.filter((state) => state.installed !== false)
+            .map((state) => state.pluginId);
+    if (!installedIds) {
+      vscode.window.showWarningMessage(
+        isJapanese()
+          ? "Hostのplugin list形式を認識できません。Unknownとしてカタログから選択します。"
+          : "The host plugin list format was not recognized. Select from the catalog with Unknown state.",
+      );
+      return pickRemotePlugin([input.manifestKind]);
+    }
+    if (installedIds.length === 0) {
+      vscode.window.showInformationMessage(
+        isJapanese()
+          ? "このHostにインストール済みのpluginはありません。"
+          : "No plugins are installed in this host.",
+      );
+      return undefined;
+    }
+    if (!skillIndex) {
+      skillIndex = await loadSkillIndex(context);
+    }
+    const candidates = getIndexResources(skillIndex).filter(
+      (resource) =>
+        getResourceKind(resource) === "plugin" &&
+        resource.pluginManifestKind === input.manifestKind,
+    );
+    const resolvedCandidates = await Promise.allSettled(
+      candidates.map(async (plugin) => {
+        const identity = await withPluginStateTimeout(
+          resolveCopilotCliPluginIdentity(plugin),
+          12_000,
+          undefined,
+        );
+        if (!identity) {
+          return undefined;
+        }
+        const pluginId = `${identity.pluginName}@${identity.marketplaceName}`;
+        return installedIds.includes(pluginId)
+          ? { plugin, pluginId }
+          : undefined;
+      }),
+    );
+    const matched = resolvedCandidates.flatMap((result) =>
+      result.status === "fulfilled" && result.value ? [result.value] : [],
+    );
+    if (matched.length === 0) {
+      vscode.window.showWarningMessage(
+        isJapanese()
+          ? "インストール済みpluginに対応するカタログentryが見つかりません。"
+          : "No catalog entry matches the installed plugin identity.",
+      );
+      return undefined;
+    }
+    const selected = await vscode.window.showQuickPick(
+      matched.map(({ plugin, pluginId }) => ({
+        label: plugin.name,
+        description: pluginId,
+        detail: isJapanese() ? "インストール済み" : "Installed",
+        plugin,
+      })),
+      {
+        placeHolder: isJapanese()
+          ? "管理するインストール済みpluginを選択"
+          : "Select an installed plugin to manage",
+      },
+    );
+    return selected?.plugin;
+  }
+
+  async function uninstallPluginFromCopilotCli(
+    skillOrItem?: Skill | SkillTreeItem,
+  ): Promise<boolean> {
+    const skill =
+      skillOrItem instanceof SkillTreeItem
+        ? skillOrItem.skill
+        : skillOrItem || (await pickRemotePlugin());
+    if (!skill || getResourceKind(skill) !== "plugin") {
+      return false;
+    }
+    try {
+      const identity = await resolveCopilotCliPluginIdentity(skill);
+      const executable = await findCopilotCliExecutable();
+      if (!executable) {
+        vscode.window.showErrorMessage(
+          isJapanese()
+            ? "Copilot CLI 実行ファイルが PATH に見つかりません。"
+            : "No Copilot CLI executable was found on PATH.",
+        );
+        return false;
+      }
+      const probe = await probePluginHostExecutable(
+        "copilot-cli",
+        executable,
+        workspaceFolder?.uri.fsPath ?? os.homedir(),
+      );
+      const uninstallAction = isJapanese()
+        ? "Copilot CLI からアンインストール"
+        : "Uninstall from Copilot CLI";
+      const choice = await vscode.window.showWarningMessage(
+        isJapanese()
+          ? `${identity.pluginName}@${identity.marketplaceName} を Copilot CLI から削除します。marketplace 登録は残します。\n\n実行: ${probe.executablePath}\nVersion: ${probe.version}`
+          : `Remove ${identity.pluginName}@${identity.marketplaceName} from Copilot CLI. The marketplace registration will be kept.\n\nExecutable: ${probe.executablePath}\nVersion: ${probe.version}`,
+        { modal: true },
+        uninstallAction,
+      );
+      if (choice !== uninstallAction) {
+        return false;
+      }
+      const pluginId = `${identity.pluginName}@${identity.marketplaceName}`;
+      const runner = createGatedPluginHostRunner({
+        probe,
+        hostId: "copilot-cli",
+        action: "uninstall",
+        scope: "user",
+        resourceIdentity: pluginId,
+        sourceOrigin: identity.ownerRepo,
+        readonlyCommands: [["--no-color", "plugin", "marketplace", "list"]],
+        mutationCommands: [["--no-color", "plugin", "uninstall", pluginId]],
+      });
+      const result = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: isJapanese()
+            ? `${identity.pluginName} を Copilot CLI から削除中...`
+            : `Removing ${identity.pluginName} from Copilot CLI...`,
+          cancellable: false,
+        },
+        () => uninstallCopilotCliPlugin(identity, runner),
+      );
+      if (!result.ok) {
+        vscode.window.showErrorMessage(
+          isJapanese()
+            ? `Copilot CLI からの削除に失敗しました: ${result.reason}`
+            : `Copilot CLI plugin removal failed: ${result.reason}`,
+        );
+        return false;
+      }
+      vscode.window.showInformationMessage(
+        isJapanese()
+          ? `${identity.pluginName}@${identity.marketplaceName} を Copilot CLI から削除しました。`
+          : `Removed ${identity.pluginName}@${identity.marketplaceName} from Copilot CLI.`,
+      );
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      vscode.window.showErrorMessage(message);
+      return false;
+    }
+  }
+
+  async function installPluginInClaudeCode(skill: Skill): Promise<boolean> {
+    try {
+      const claudeExecutable = await findExecutableOnPath("claude");
+      const claudeNativeExecutable =
+        claudeExecutable && canExecuteWithoutShell(claudeExecutable)
+          ? claudeExecutable
+          : undefined;
+      const claudeExtensionDetected = !!vscode.extensions.getExtension(
+        "anthropic.claude-code",
+      );
+      const availability = getClaudeCodeAvailability({
+        extensionDetected: claudeExtensionDetected,
+        executablePath: claudeNativeExecutable,
+        nativeExecutionEnabled: true,
+      });
+      if (availability === "unavailable") {
+        vscode.window.showErrorMessage(
+          isJapanese()
+            ? "Claude Code のVS Code拡張またはstandalone CLIが見つかりません。"
+            : "Neither the Claude Code VS Code extension nor standalone CLI was found.",
+        );
+        return false;
+      }
+      let identity: CopilotMarketplacePluginIdentity | undefined;
+      let identityError: string | undefined;
+      try {
+        identity = await resolveCopilotCliPluginIdentity(skill);
+      } catch (error) {
+        identityError = error instanceof Error ? error.message : String(error);
+        logger.warn(
+          `[Resource Ninja] Claude Code marketplace identity unavailable: ${identityError}`,
+        );
+      }
+      const openAction = isJapanese()
+        ? "Claude Codeを開く"
+        : "Open Claude Code";
+      if (!claudeNativeExecutable || !identity) {
+        const choice = await vscode.window.showInformationMessage(
+          isJapanese()
+            ? `${skill.name} はClaude Codeの /plugins UIでインストールできます。${identityError ? ` 自動解決できない理由: ${identityError}` : ""}`
+            : `${skill.name} can be installed from Claude Code's /plugins UI.${identityError ? ` Automatic resolution failed: ${identityError}` : ""}`,
+          ...(claudeExtensionDetected ? [openAction] : []),
+        );
+        if (choice !== openAction) {
+          return false;
+        }
+        const prompt = encodeURIComponent(
+          identity
+            ? `/plugins で ${identity.pluginName}@${identity.marketplaceName} を確認`
+            : `/plugins で ${skill.name} を検索`,
+        );
+        await vscode.env.openExternal(
+          vscode.Uri.parse(
+            `vscode://anthropic.claude-code/open?prompt=${prompt}`,
+          ),
+        );
+        return false;
+      }
+
+      const scopeItems = [
+        {
+          label: isJapanese()
+            ? "User - すべてのproject"
+            : "User - all projects",
+          scope: "user" as PluginInstallScope,
+        },
+        ...(vscode.workspace.isTrusted
+          ? [
+              {
+                label: isJapanese()
+                  ? "Project - repositoryで共有"
+                  : "Project - shared in the repository",
+                scope: "project" as PluginInstallScope,
+              },
+              {
+                label: isJapanese()
+                  ? "Local - このrepositoryの自分だけ"
+                  : "Local - only you in this repository",
+                scope: "local" as PluginInstallScope,
+              },
+            ]
+          : []),
+      ];
+      const selectedScope = await vscode.window.showQuickPick(scopeItems, {
+        placeHolder: isJapanese()
+          ? "Claude Code pluginのscopeを選択"
+          : "Choose the Claude Code plugin scope",
+      });
+      if (!selectedScope) {
+        return false;
+      }
+      const probe = await probePluginHostExecutable(
+        "claude-code",
+        claudeNativeExecutable,
+        workspaceFolder?.uri.fsPath ?? os.homedir(),
+      );
+      const pluginId = `${identity.pluginName}@${identity.marketplaceName}`;
+      const installAction = isJapanese()
+        ? "Claude Codeにインストール"
+        : "Install in Claude Code";
+      const choice = await vscode.window.showWarningMessage(
+        isJapanese()
+          ? `${pluginId} をClaude Codeへ${selectedScope.scope} scopeでインストールします。pluginはskills、agents、hooks、MCP/LSP servers、monitorsを有効化し得ます。\n\n実行: ${probe.executablePath}\nVersion: ${probe.version}`
+          : `Install ${pluginId} in Claude Code with ${selectedScope.scope} scope. The plugin can activate skills, agents, hooks, MCP/LSP servers, and monitors.\n\nExecutable: ${probe.executablePath}\nVersion: ${probe.version}`,
+        { modal: true },
+        installAction,
+      );
+      if (choice !== installAction) {
+        return false;
+      }
+      const runner = createGatedPluginHostRunner({
+        probe,
+        hostId: "claude-code",
+        action: "install",
+        scope: selectedScope.scope,
+        resourceIdentity: pluginId,
+        sourceOrigin: identity.ownerRepo,
+        readonlyCommands: [
+          ["plugin", "marketplace", "list", "--json"],
+          ["plugin", "list", "--json"],
+        ],
+        mutationCommands: [
+          [
+            "plugin",
+            "marketplace",
+            "add",
+            identity.ownerRepo,
+            "--scope",
+            selectedScope.scope,
+          ],
+          ["plugin", "install", pluginId, "--scope", selectedScope.scope],
+          [
+            "plugin",
+            "marketplace",
+            "remove",
+            identity.marketplaceName,
+            "--scope",
+            selectedScope.scope,
+          ],
+        ],
+      });
+      const result = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: isJapanese()
+            ? `${identity.pluginName} をClaude Codeへインストール中...`
+            : `Installing ${identity.pluginName} in Claude Code...`,
+          cancellable: false,
+        },
+        () =>
+          installClaudeCodePlugin({
+            runner,
+            pluginName: identity.pluginName,
+            marketplaceName: identity.marketplaceName,
+            marketplaceSource: identity.ownerRepo,
+            scope: selectedScope.scope,
+          }),
+      );
+      if (!result.ok) {
+        vscode.window.showErrorMessage(
+          isJapanese()
+            ? `Claude Codeへのインストールに失敗しました: ${result.reason}`
+            : `Claude Code plugin installation failed: ${result.reason}`,
+        );
+        return false;
+      }
+      vscode.window.showInformationMessage(
+        isJapanese()
+          ? `${pluginId} をClaude Codeへインストールしました。既存sessionでは /reload-plugins が必要な場合があります。`
+          : `Installed ${pluginId} in Claude Code. Existing sessions may require /reload-plugins.`,
+      );
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      vscode.window.showErrorMessage(message);
+      return false;
+    }
+  }
+
+  async function installPluginInCodex(skill: Skill): Promise<boolean> {
+    if (!skillIndex) {
+      skillIndex = await loadSkillIndex(context);
+    }
+    const source = skillIndex.sources.find(
+      (candidate) => candidate.id === skill.source,
+    );
+    const ownerRepo = source ? getGitHubOwnerRepo(source) : undefined;
+    if (!ownerRepo) {
+      vscode.window.showErrorMessage(
+        isJapanese()
+          ? "Codex plugin marketplaceのGitHub sourceを解決できません。"
+          : "The GitHub source for the Codex plugin marketplace could not be resolved.",
+      );
+      return false;
+    }
+    const codexExecutableProbe = await findCodexExecutableProbe();
+    const codexExecutable = codexExecutableProbe.executablePath;
+    logCodexFallback(codexExecutableProbe);
+    const codexExtensionDetected =
+      !!vscode.extensions.getExtension("openai.chatgpt");
+    const availability = getCodexAvailability({
+      extensionDetected: codexExtensionDetected,
+      executablePath: codexExecutable,
+      nativeExecutionEnabled: true,
+    });
+    if (availability === "unavailable") {
+      const repairAction = isJapanese()
+        ? "troubleshooting commandをコピー"
+        : "Copy troubleshooting command";
+      const selected = await vscode.window.showErrorMessage(
+        isJapanese()
+          ? `CodexのVS Code拡張またはCLIが見つかりません。${formatCodexExecutableReason(codexExecutableProbe, true)}`
+          : `Neither the Codex VS Code extension nor CLI was found. ${formatCodexExecutableReason(codexExecutableProbe, false)}`,
+        ...(process.platform === "win32" ? [repairAction] : []),
+      );
+      if (selected === repairAction) {
+        await copyCodexRepairCommand();
+      }
+      return false;
+    }
+    const openAction = isJapanese()
+      ? "Plugins Directoryを開く"
+      : "Open Plugins Directory";
+    let identity: CopilotMarketplacePluginIdentity | undefined;
+    let identityError: string | undefined;
+    try {
+      identity = await resolveCopilotCliPluginIdentity(skill);
+    } catch (error) {
+      identityError = error instanceof Error ? error.message : String(error);
+      logger.warn(
+        `[Resource Ninja] Codex marketplace identity unavailable: ${identityError}`,
+      );
+    }
+    if (!codexExecutable || !identity) {
+      const choice = await vscode.window.showInformationMessage(
+        isJapanese()
+          ? `${skill.name} はChatGPT Plugins Directoryでインストールできます。${identityError ? ` 自動解決できない理由: ${identityError}` : ""}`
+          : `${skill.name} can be installed from the ChatGPT Plugins Directory.${identityError ? ` Automatic resolution failed: ${identityError}` : ""}`,
+        openAction,
+      );
+      if (choice === openAction) {
+        await vscode.env.openExternal(
+          vscode.Uri.parse("https://chatgpt.com/plugins"),
+        );
+      }
+      return false;
+    }
+    const probe = await probePluginHostExecutable(
+      "codex",
+      codexExecutable,
+      workspaceFolder?.uri.fsPath ?? os.homedir(),
+    );
+    const pluginId = `${identity.pluginName}@${identity.marketplaceName}`;
+    const installAction = isJapanese()
+      ? "Codexにインストール"
+      : "Install in Codex";
+    const choice = await vscode.window.showWarningMessage(
+      isJapanese()
+        ? `${pluginId} をCodexへインストールします。pluginはskills、hooks、MCP serversを含み得ます。hooksはCodex側のtrust確認に従います。\n\n${formatCodexExecutableReason(codexExecutableProbe, true)}\n実行: ${probe.executablePath}\nVersion: ${probe.version}`
+        : `Install ${pluginId} in Codex. The plugin can include skills, hooks, and MCP servers. Plugin hooks remain subject to Codex trust review.\n\n${formatCodexExecutableReason(codexExecutableProbe, false)}\nExecutable: ${probe.executablePath}\nVersion: ${probe.version}`,
+      { modal: true },
+      installAction,
+    );
+    if (choice !== installAction) {
+      return false;
+    }
+    const runner = createGatedPluginHostRunner({
+      probe,
+      hostId: "codex",
+      action: "install",
+      scope: "user",
+      resourceIdentity: pluginId,
+      sourceOrigin: ownerRepo,
+      readonlyCommands: [
+        ["plugin", "marketplace", "list", "--json"],
+        ["plugin", "list", "--json"],
+      ],
+      mutationCommands: [
+        ["plugin", "marketplace", "add", ownerRepo, "--json"],
+        ["plugin", "add", pluginId, "--json"],
+        ["plugin", "marketplace", "remove", identity.marketplaceName, "--json"],
+      ],
+    });
+    const result = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: isJapanese()
+          ? `${identity.pluginName} をCodexへインストール中...`
+          : `Installing ${identity.pluginName} in Codex...`,
+        cancellable: false,
+      },
+      () =>
+        installCodexPlugin({
+          runner,
+          pluginName: identity.pluginName,
+          marketplaceName: identity.marketplaceName,
+          marketplaceSource: ownerRepo,
+        }),
+    );
+    if (!result.ok) {
+      vscode.window.showErrorMessage(
+        isJapanese()
+          ? `Codexへのインストールに失敗しました: ${result.reason}`
+          : `Codex plugin installation failed: ${result.reason}`,
+      );
+      return false;
+    }
+    vscode.window.showInformationMessage(
+      isJapanese()
+        ? `${pluginId} をCodexへインストールしました。`
+        : `Installed ${pluginId} in Codex.`,
+    );
+    return true;
+  }
+
+  async function managePluginInClaudeCode(
+    skillOrItem?: Skill | SkillTreeItem,
+  ): Promise<boolean> {
+    const executable = await findExecutableOnPath("claude");
+    if (!executable || !canExecuteWithoutShell(executable)) {
+      vscode.window.showErrorMessage(
+        isJapanese()
+          ? "Claude Code standalone CLIが見つかりません。"
+          : "The standalone Claude Code CLI was not found.",
+      );
+      return false;
+    }
+    const skill =
+      skillOrItem instanceof SkillTreeItem
+        ? skillOrItem.skill
+        : skillOrItem ||
+          (await pickInstalledRemotePlugin({
+            hostId: "claude-code",
+            executablePath: executable,
+            manifestKind: "claude-plugin",
+          }));
+    if (!skill || skill.pluginManifestKind !== "claude-plugin") {
+      return false;
+    }
+    try {
+      const identity = await resolveCopilotCliPluginIdentity(skill);
+      const executable = await findExecutableOnPath("claude");
+      if (!executable) {
+        vscode.window.showErrorMessage(
+          isJapanese()
+            ? "Claude Code standalone CLIが見つかりません。"
+            : "The standalone Claude Code CLI was not found.",
+        );
+        return false;
+      }
+      const action = await vscode.window.showQuickPick(
+        [
+          { label: isJapanese() ? "更新" : "Update", value: "update" as const },
+          {
+            label: isJapanese() ? "有効化" : "Enable",
+            value: "enable" as const,
+          },
+          {
+            label: isJapanese() ? "無効化" : "Disable",
+            value: "disable" as const,
+          },
+          {
+            label: isJapanese() ? "アンインストール" : "Uninstall",
+            value: "uninstall" as const,
+          },
+        ],
+        {
+          placeHolder: isJapanese()
+            ? "Claude Code pluginの操作を選択"
+            : "Choose a Claude Code plugin action",
+        },
+      );
+      if (!action) {
+        return false;
+      }
+      const scopes = [
+        { label: "User", scope: "user" as PluginInstallScope },
+        ...(vscode.workspace.isTrusted
+          ? [
+              { label: "Project", scope: "project" as PluginInstallScope },
+              { label: "Local", scope: "local" as PluginInstallScope },
+            ]
+          : []),
+      ];
+      const selectedScope = await vscode.window.showQuickPick(scopes, {
+        placeHolder: isJapanese()
+          ? "対象scopeを選択"
+          : "Choose the target scope",
+      });
+      if (!selectedScope) {
+        return false;
+      }
+      const probe = await probePluginHostExecutable(
+        "claude-code",
+        executable,
+        workspaceFolder?.uri.fsPath ?? os.homedir(),
+      );
+      const pluginId = `${identity.pluginName}@${identity.marketplaceName}`;
+      const confirmAction = isJapanese() ? "実行" : "Run";
+      const choice = await vscode.window.showWarningMessage(
+        isJapanese()
+          ? `${pluginId} に ${action.value} を実行します。Scope: ${selectedScope.scope}\n\n実行: ${probe.executablePath}\nVersion: ${probe.version}`
+          : `Run ${action.value} for ${pluginId}. Scope: ${selectedScope.scope}\n\nExecutable: ${probe.executablePath}\nVersion: ${probe.version}`,
+        { modal: true },
+        confirmAction,
+      );
+      if (choice !== confirmAction) {
+        return false;
+      }
+      const argv = [
+        "plugin",
+        action.value,
+        pluginId,
+        "--scope",
+        selectedScope.scope,
+      ];
+      const runner = createGatedPluginHostRunner({
+        probe,
+        hostId: "claude-code",
+        action: action.value,
+        scope: selectedScope.scope,
+        resourceIdentity: pluginId,
+        sourceOrigin: identity.ownerRepo,
+        readonlyCommands: [["plugin", "marketplace", "list", "--json"]],
+        mutationCommands: [argv],
+      });
+      const result = await mutateClaudeCodePlugin({
+        runner,
+        action: action.value,
+        pluginId,
+        marketplaceName: identity.marketplaceName,
+        marketplaceSource: identity.ownerRepo,
+        scope: selectedScope.scope,
+      });
+      if (!result.ok) {
+        vscode.window.showErrorMessage(result.reason);
+        return false;
+      }
+      vscode.window.showInformationMessage(
+        isJapanese()
+          ? `${pluginId}: ${action.value} を完了しました。`
+          : `${pluginId}: ${action.value} completed.`,
+      );
+      return true;
+    } catch (error) {
+      vscode.window.showErrorMessage(
+        error instanceof Error ? error.message : String(error),
+      );
+      return false;
+    }
+  }
+
+  async function managePluginInCodex(
+    skillOrItem?: Skill | SkillTreeItem,
+  ): Promise<boolean> {
+    const executableProbe = await findCodexExecutableProbe();
+    const executable = executableProbe.executablePath;
+    if (!executable) {
+      const repairAction = isJapanese()
+        ? "troubleshooting commandをコピー"
+        : "Copy troubleshooting command";
+      const selected = await vscode.window.showErrorMessage(
+        isJapanese()
+          ? `Codex CLIが見つかりません。${formatCodexExecutableReason(executableProbe, true)}`
+          : `Codex CLI was not found. ${formatCodexExecutableReason(executableProbe, false)}`,
+        ...(process.platform === "win32" ? [repairAction] : []),
+      );
+      if (selected === repairAction) {
+        await copyCodexRepairCommand();
+      }
+      return false;
+    }
+    logCodexFallback(executableProbe);
+    const skill =
+      skillOrItem instanceof SkillTreeItem
+        ? skillOrItem.skill
+        : skillOrItem ||
+          (await pickInstalledRemotePlugin({
+            hostId: "codex",
+            executablePath: executable,
+            manifestKind: "codex-plugin",
+          }));
+    if (!skill || skill.pluginManifestKind !== "codex-plugin") {
+      return false;
+    }
+    try {
+      const identity = await resolveCopilotCliPluginIdentity(skill);
+      const probe = await probePluginHostExecutable(
+        "codex",
+        executable,
+        workspaceFolder?.uri.fsPath ?? os.homedir(),
+      );
+      const pluginId = `${identity.pluginName}@${identity.marketplaceName}`;
+      const confirmAction = isJapanese()
+        ? "Codexから削除"
+        : "Remove from Codex";
+      const choice = await vscode.window.showWarningMessage(
+        isJapanese()
+          ? `${pluginId} をCodexから削除します。\n\n${formatCodexExecutableReason(executableProbe, true)}\n実行: ${probe.executablePath}\nVersion: ${probe.version}`
+          : `Remove ${pluginId} from Codex.\n\n${formatCodexExecutableReason(executableProbe, false)}\nExecutable: ${probe.executablePath}\nVersion: ${probe.version}`,
+        { modal: true },
+        confirmAction,
+      );
+      if (choice !== confirmAction) {
+        return false;
+      }
+      const argv = ["plugin", "remove", pluginId, "--json"];
+      const runner = createGatedPluginHostRunner({
+        probe,
+        hostId: "codex",
+        action: "uninstall",
+        scope: "user",
+        resourceIdentity: pluginId,
+        sourceOrigin: identity.ownerRepo,
+        readonlyCommands: [["plugin", "marketplace", "list", "--json"]],
+        mutationCommands: [argv],
+      });
+      const result = await uninstallCodexPlugin({
+        runner,
+        pluginId,
+        marketplaceName: identity.marketplaceName,
+        marketplaceSource: identity.ownerRepo,
+      });
+      if (!result.ok) {
+        vscode.window.showErrorMessage(result.reason);
+        return false;
+      }
+      vscode.window.showInformationMessage(
+        isJapanese()
+          ? `${pluginId} をCodexから削除しました。`
+          : `Removed ${pluginId} from Codex.`,
+      );
+      return true;
+    } catch (error) {
+      vscode.window.showErrorMessage(
+        error instanceof Error ? error.message : String(error),
+      );
+      return false;
+    }
+  }
+
+  async function copyCodexRepairCommand(): Promise<void> {
+    if (process.platform !== "win32") {
+      vscode.window.showInformationMessage(
+        isJapanese()
+          ? "このWinGet troubleshooting commandはWindows専用です。"
+          : "This WinGet troubleshooting command is available only on Windows.",
+      );
+      return;
+    }
+    await vscode.env.clipboard.writeText(CODEX_REPAIR_COMMAND);
+    vscode.window.showInformationMessage(
+      isJapanese()
+        ? "Codex CLIのtroubleshooting commandをコピーしました。WinGet alias/PATH修復を保証するものではありません。"
+        : "Copied the Codex CLI troubleshooting command. It does not guarantee that WinGet will repair the alias or PATH.",
+    );
+  }
+
+  async function getProjectedRealPath(targetPath: string): Promise<string> {
+    const suffix: string[] = [];
+    let ancestor = targetPath;
+    while (true) {
+      try {
+        const ancestorRealPath = await realpath(ancestor);
+        return path.join(ancestorRealPath, ...suffix);
+      } catch {
+        const parent = path.dirname(ancestor);
+        if (parent === ancestor) {
+          throw new Error(`No existing ancestor for ${targetPath}`);
+        }
+        suffix.unshift(path.basename(ancestor));
+        ancestor = parent;
+      }
+    }
+  }
+
+  async function fingerprintDirectory(rootUri: vscode.Uri): Promise<string> {
+    const hash = createHash("sha256");
+    const visit = async (
+      directory: vscode.Uri,
+      relativeRoot: string,
+    ): Promise<void> => {
+      const entries = await vscode.workspace.fs.readDirectory(directory);
+      entries.sort(([left], [right]) => left.localeCompare(right));
+      for (const [name, type] of entries) {
+        const relativePath = relativeRoot ? `${relativeRoot}/${name}` : name;
+        if ((type & vscode.FileType.SymbolicLink) !== 0) {
+          throw new Error(
+            `Cursor plugin contains a symbolic link: ${relativePath}`,
+          );
+        }
+        const uri = vscode.Uri.joinPath(directory, name);
+        if ((type & vscode.FileType.Directory) !== 0) {
+          hash.update(`D\0${relativePath}\0`, "utf8");
+          await visit(uri, relativePath);
+        } else if ((type & vscode.FileType.File) !== 0) {
+          hash.update(`F\0${relativePath}\0`, "utf8");
+          hash.update(await vscode.workspace.fs.readFile(uri));
+        }
+      }
+    };
+    await visit(rootUri, "");
+    return hash.digest("hex");
+  }
+
+  async function installPluginInCursor(skill: Skill): Promise<boolean> {
+    const targetPath = getCursorLocalPluginPath(os.homedir(), skill.name);
+    if (
+      !targetPath ||
+      !isCursorEditor(vscode.env.appName, vscode.env.uriScheme)
+    ) {
+      vscode.window.showErrorMessage(
+        isJapanese()
+          ? "Cursor local plugin installはCursor上でのみ利用できます。"
+          : "Cursor local plugin install is available only while running Cursor.",
+      );
+      return false;
+    }
+    const cursorRoot = path.dirname(targetPath);
+    const projectedRoot = await getProjectedRealPath(cursorRoot);
+    const projectedTarget = await getProjectedRealPath(targetPath);
+    const homeRealPath = await realpath(os.homedir());
+    if (
+      !isDeletableWithin(homeRealPath, projectedRoot) ||
+      !isDeletableWithin(projectedRoot, projectedTarget)
+    ) {
+      throw new Error("Cursor plugin target escapes the user home directory.");
+    }
+    try {
+      await vscode.workspace.fs.stat(vscode.Uri.file(targetPath));
+      vscode.window.showErrorMessage(
+        isJapanese()
+          ? `Cursor plugin targetは既に存在します。上書きしません: ${targetPath}`
+          : `The Cursor plugin target already exists and will not be overwritten: ${targetPath}`,
+      );
+      return false;
+    } catch {
+      // Missing target is required for an owned install.
+    }
+    const installAction = isJapanese()
+      ? "Cursor local pluginとしてコピー"
+      : "Copy as Cursor local plugin";
+    const choice = await vscode.window.showWarningMessage(
+      isJapanese()
+        ? `${skill.name} packageを ${targetPath} へコピーします。pluginはrules、skills、agents、hooks、MCP serversを含み得ます。完了後にCursorをreloadしてください。`
+        : `Copy the ${skill.name} package to ${targetPath}. The plugin can contain rules, skills, agents, hooks, and MCP servers. Reload Cursor afterward.`,
+      { modal: true },
+      installAction,
+    );
+    if (choice !== installAction || !workspaceFolder) {
+      return false;
+    }
+    const processExecutable = await realpath(process.execPath);
+    const createSpec = () => ({
+      hostId: "cursor" as const,
+      action: "copy" as const,
+      scope: "user" as const,
+      executablePath: processExecutable,
+      executableVersion: process.version,
+      cwd: workspaceFolder.uri.fsPath,
+      argv: ["copy-plugin", skill.source, skill.path, targetPath],
+      environment: {},
+      resourceIdentity: `${skill.source}:${skill.path}`,
+      sourceOrigin: skill.source,
+      resolutionMode: "local-copy" as const,
+      targetPaths: [cursorRoot, targetPath],
+    });
+    const intent = pluginExecutionAuthority.approve(
+      pluginExecutionAuthority.prepare(createSpec()),
+    );
+    let installResult: Awaited<ReturnType<typeof installSkill>> | undefined;
+    await pluginMutationExecutor.execute(
+      intent,
+      async () => {
+        const currentTarget = await getProjectedRealPath(targetPath);
+        const currentRoot = await getProjectedRealPath(cursorRoot);
+        const currentHome = await realpath(os.homedir());
+        if (
+          !isDeletableWithin(currentHome, currentRoot) ||
+          !isDeletableWithin(currentRoot, currentTarget)
+        ) {
+          throw new Error("Cursor plugin target changed after approval.");
+        }
+        try {
+          await vscode.workspace.fs.stat(vscode.Uri.file(targetPath));
+          throw new Error("Cursor plugin target appeared after approval.");
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            error.message === "Cursor plugin target appeared after approval."
+          ) {
+            throw error;
+          }
+        }
+        return createSpec();
+      },
+      async () => {
+        await vscode.workspace.fs.createDirectory(vscode.Uri.file(cursorRoot));
+        installResult = await installSkill(
+          skill,
+          workspaceFolder.uri,
+          context,
+          {
+            targetScope: "custom",
+            customTargetUri: vscode.Uri.file(cursorRoot),
+          },
+        );
+      },
+    );
+    if (!installResult || !installWasClean(installResult)) {
+      if (isDeletableWithin(cursorRoot, targetPath)) {
+        await vscode.workspace.fs.delete(vscode.Uri.file(targetPath), {
+          recursive: true,
+          useTrash: true,
+        });
+      }
+      return false;
+    }
+    const fingerprint = await fingerprintDirectory(vscode.Uri.file(targetPath));
+    const receipts = context.globalState.get<CursorPluginReceipt[]>(
+      CURSOR_PLUGIN_RECEIPTS_KEY,
+      [],
+    );
+    await context.globalState.update(CURSOR_PLUGIN_RECEIPTS_KEY, [
+      ...receipts.filter((receipt) => receipt.targetPath !== targetPath),
+      {
+        rootPath: cursorRoot,
+        targetPath,
+        pluginName: skill.name,
+        source: skill.source,
+        remotePath: skill.path,
+        fingerprint,
+        installedAt: new Date().toISOString(),
+      },
+    ]);
+    vscode.window.showInformationMessage(
+      isJapanese()
+        ? `${skill.name} をCursor local pluginとしてコピーしました。Cursorをreloadしてください。`
+        : `Copied ${skill.name} as a Cursor local plugin. Reload Cursor to activate it.`,
+    );
+    return true;
+  }
+
+  async function uninstallPluginFromCursor(): Promise<boolean> {
+    if (!isCursorEditor(vscode.env.appName, vscode.env.uriScheme)) {
+      vscode.window.showErrorMessage(
+        isJapanese()
+          ? "Cursor local plugin uninstallはCursor上でのみ利用できます。"
+          : "Cursor local plugin uninstall is available only while running Cursor.",
+      );
+      return false;
+    }
+    const receipts = context.globalState.get<CursorPluginReceipt[]>(
+      CURSOR_PLUGIN_RECEIPTS_KEY,
+      [],
+    );
+    if (receipts.length === 0) {
+      vscode.window.showInformationMessage(
+        isJapanese()
+          ? "Agent Resources Ninjaが所有するCursor pluginはありません。"
+          : "No Cursor plugins are owned by Agent Resources Ninja.",
+      );
+      return false;
+    }
+    const selected = await vscode.window.showQuickPick(
+      receipts.map((receipt) => ({
+        label: receipt.pluginName,
+        description: receipt.source,
+        detail: receipt.targetPath,
+        receipt,
+      })),
+      {
+        placeHolder: isJapanese()
+          ? "削除するCursor local pluginを選択"
+          : "Select a Cursor local plugin to remove",
+      },
+    );
+    if (!selected) {
+      return false;
+    }
+    const { receipt } = selected;
+    const expectedTarget = getCursorLocalPluginPath(
+      os.homedir(),
+      receipt.pluginName,
+    );
+    const expectedRoot = expectedTarget
+      ? path.dirname(expectedTarget)
+      : undefined;
+    if (
+      !expectedTarget ||
+      !expectedRoot ||
+      receipt.rootPath !== expectedRoot ||
+      receipt.targetPath !== expectedTarget ||
+      !isDeletableWithin(expectedRoot, expectedTarget)
+    ) {
+      throw new Error(
+        "Cursor plugin receipt points outside the local plugin root.",
+      );
+    }
+    const cursorRoot = expectedRoot;
+    const cursorRootRealPath = await realpath(cursorRoot);
+    const homeRealPath = await realpath(os.homedir());
+    const targetRealPath = await realpath(receipt.targetPath);
+    if (
+      !isDeletableWithin(homeRealPath, cursorRootRealPath) ||
+      !isDeletableWithin(cursorRootRealPath, targetRealPath)
+    ) {
+      throw new Error(
+        "Cursor plugin target escapes the fixed local plugin root.",
+      );
+    }
+    const currentFingerprint = await fingerprintDirectory(
+      vscode.Uri.file(receipt.targetPath),
+    );
+    if (currentFingerprint !== receipt.fingerprint) {
+      vscode.window.showErrorMessage(
+        isJapanese()
+          ? "Cursor pluginはインストール後に変更されています。自動削除しません。"
+          : "The Cursor plugin changed after installation and will not be deleted automatically.",
+      );
+      return false;
+    }
+    const removeAction = isJapanese() ? "削除" : "Remove";
+    const choice = await vscode.window.showWarningMessage(
+      isJapanese()
+        ? `${receipt.pluginName} をCursor local pluginsから削除します。`
+        : `Remove ${receipt.pluginName} from Cursor local plugins.`,
+      { modal: true },
+      removeAction,
+    );
+    if (choice !== removeAction) {
+      return false;
+    }
+    const processExecutable = await realpath(process.execPath);
+    const createSpec = () => ({
+      hostId: "cursor" as const,
+      action: "delete" as const,
+      scope: "user" as const,
+      executablePath: processExecutable,
+      executableVersion: process.version,
+      cwd: workspaceFolder?.uri.fsPath ?? os.homedir(),
+      argv: ["delete-plugin", receipt.targetPath],
+      environment: {},
+      resourceIdentity: `${receipt.source}:${receipt.remotePath}`,
+      sourceOrigin: receipt.source,
+      resolutionMode: "local-copy" as const,
+      targetPaths: [cursorRoot, receipt.targetPath],
+    });
+    const intent = pluginExecutionAuthority.approve(
+      pluginExecutionAuthority.prepare(createSpec()),
+    );
+    await pluginMutationExecutor.execute(
+      intent,
+      async () => {
+        const currentRootRealPath = await realpath(cursorRoot);
+        const currentHomeRealPath = await realpath(os.homedir());
+        const currentTargetRealPath = await realpath(receipt.targetPath);
+        if (
+          !isDeletableWithin(currentHomeRealPath, currentRootRealPath) ||
+          !isDeletableWithin(currentRootRealPath, currentTargetRealPath)
+        ) {
+          throw new Error("Cursor plugin target changed after approval.");
+        }
+        const fingerprint = await fingerprintDirectory(
+          vscode.Uri.file(receipt.targetPath),
+        );
+        if (fingerprint !== receipt.fingerprint) {
+          throw new Error("Cursor plugin changed after approval.");
+        }
+        return createSpec();
+      },
+      async () => {
+        await vscode.workspace.fs.delete(vscode.Uri.file(receipt.targetPath), {
+          recursive: true,
+          useTrash: true,
+        });
+      },
+    );
+    await context.globalState.update(
+      CURSOR_PLUGIN_RECEIPTS_KEY,
+      receipts.filter((item) => item.targetPath !== receipt.targetPath),
+    );
+    vscode.window.showInformationMessage(
+      isJapanese()
+        ? `${receipt.pluginName} をCursor local pluginsから削除しました。`
+        : `Removed ${receipt.pluginName} from Cursor local plugins.`,
+    );
+    return true;
+  }
+
   async function installResource(
     skillOrItem: any,
     mode: "ask" | "default",
@@ -2787,6 +4586,356 @@ export async function activate(
       return false;
     }
 
+    const resourceKind = getResourceKind(skill);
+    if (resourceKind === "plugin" && mode === "ask") {
+      if (!skillIndex) {
+        skillIndex = await loadSkillIndex(context);
+      }
+      const pluginSourceResolved = getIndexSources(skillIndex).some(
+        (source) => source.id === skill.source && !!getGitHubOwnerRepo(source),
+      );
+      const pluginPackageResolved =
+        !!skill.pluginRoot &&
+        !!skill.pluginManifestPath &&
+        (skill as Skill & { incomplete?: boolean }).incomplete !== true &&
+        pluginSourceResolved;
+      const pluginHostSetting = vscode.workspace
+        .getConfiguration("resourceNinja")
+        .inspect<DefaultPluginHost>("defaultPluginHost");
+      const userDefault = pluginHostSetting?.globalValue ?? "auto";
+      const workspaceSuggestion =
+        pluginHostSetting?.workspaceFolderValue ??
+        pluginHostSetting?.workspaceValue;
+      const copilotCliExecutable = await findCopilotCliExecutable();
+      const claudeExecutable = await findExecutableOnPath("claude");
+      const claudeNativeExecutable =
+        claudeExecutable && canExecuteWithoutShell(claudeExecutable)
+          ? claudeExecutable
+          : undefined;
+      const claudeExtensionDetected = !!vscode.extensions.getExtension(
+        "anthropic.claude-code",
+      );
+      const claudeDetected =
+        claudeExtensionDetected || !!claudeNativeExecutable;
+      const claudeCompatible =
+        skill.pluginManifestKind === "claude-plugin" && pluginPackageResolved;
+      const codexExecutableProbe = await findCodexExecutableProbe();
+      const codexExecutable = codexExecutableProbe.executablePath;
+      logCodexFallback(codexExecutableProbe);
+      const codexExtensionDetected =
+        !!vscode.extensions.getExtension("openai.chatgpt");
+      const codexDetected = codexExtensionDetected || !!codexExecutable;
+      const codexCompatible =
+        skill.pluginManifestKind === "codex-plugin" && pluginPackageResolved;
+      const cursorDetected = isCursorEditor(
+        vscode.env.appName,
+        vscode.env.uriScheme,
+      );
+      const cursorCompatible =
+        (skill.pluginManifestKind === "agent-plugins" ||
+          skill.pluginManifestKind === "cursor-plugin") &&
+        pluginPackageResolved;
+      const vscodeCompatible =
+        skill.pluginManifestKind === "agent-plugins" && pluginPackageResolved;
+      let stateIdentity: CopilotMarketplacePluginIdentity | undefined;
+      if (
+        pluginPackageResolved &&
+        (copilotCliExecutable || claudeNativeExecutable || codexExecutable)
+      ) {
+        try {
+          stateIdentity = await withPluginStateTimeout(
+            resolveCopilotCliPluginIdentity(skill),
+            12_000,
+            undefined,
+          );
+        } catch (error) {
+          logger.info(
+            `[Resource Ninja] Plugin host state identity unavailable: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
+      const hostStates = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Window,
+          title: isJapanese()
+            ? "Plugin hostの状態を確認中..."
+            : "Checking plugin host state...",
+          cancellable: false,
+        },
+        () =>
+          probePluginHostStates({
+            skill,
+            identity: stateIdentity,
+            copilotCliExecutable,
+            claudeExecutable: claudeNativeExecutable,
+            codexExecutable,
+            cursorDetected,
+          }),
+      );
+      const unavailableState = (hostId: PluginHostId): PluginHostState => ({
+        hostId,
+        status: "unknown",
+        reason: stateIdentity
+          ? "The host state could not be read."
+          : "The marketplace identity could not be resolved.",
+      });
+      const choices = resolvePluginHostChoices({
+        candidates: [
+          ...(vscodeCompatible
+            ? [
+                {
+                  hostId: "vscode-copilot" as const,
+                  supportLevel: "native" as const,
+                  compatible: true,
+                  detected: !!vscode.extensions.getExtension(
+                    "github.copilot-chat",
+                  ),
+                  available: supportsPluginLocations(vscode.version),
+                  state: hostStates.get("vscode-copilot"),
+                },
+              ]
+            : []),
+          ...(stateIdentity && copilotCliExecutable
+            ? [
+                {
+                  hostId: "copilot-cli" as const,
+                  supportLevel: "native" as const,
+                  compatible: true,
+                  detected: true,
+                  available: true,
+                  state:
+                    hostStates.get("copilot-cli") ??
+                    unavailableState("copilot-cli"),
+                },
+              ]
+            : []),
+          ...(claudeCompatible &&
+          claudeDetected &&
+          (stateIdentity || !claudeNativeExecutable)
+            ? [
+                {
+                  hostId: "claude-code" as const,
+                  supportLevel: claudeNativeExecutable
+                    ? ("native" as const)
+                    : ("handoff" as const),
+                  compatible: true,
+                  detected: true,
+                  available: true,
+                  state: claudeNativeExecutable
+                    ? (hostStates.get("claude-code") ??
+                      unavailableState("claude-code"))
+                    : unavailableState("claude-code"),
+                  reason: isJapanese()
+                    ? claudeNativeExecutable
+                      ? "standalone Claude Code CLIでNative install"
+                      : "Claude Codeの /plugins UIへHandoff"
+                    : claudeNativeExecutable
+                      ? "Native install through standalone Claude Code CLI"
+                      : "Handoff to Claude Code's /plugins UI",
+                },
+              ]
+            : []),
+          ...(codexCompatible &&
+          codexDetected &&
+          (stateIdentity || !codexExecutable)
+            ? [
+                {
+                  hostId: "codex" as const,
+                  supportLevel: codexExecutable
+                    ? ("native" as const)
+                    : ("handoff" as const),
+                  compatible: true,
+                  detected: true,
+                  available: true,
+                  state: codexExecutable
+                    ? (hostStates.get("codex") ?? unavailableState("codex"))
+                    : unavailableState("codex"),
+                  reason: isJapanese()
+                    ? codexExecutable
+                      ? formatCodexExecutableReason(codexExecutableProbe, true)
+                      : "ChatGPT DesktopのPlugins DirectoryへHandoff"
+                    : codexExecutable
+                      ? formatCodexExecutableReason(codexExecutableProbe, false)
+                      : "Handoff to the ChatGPT Desktop Plugins Directory",
+                },
+              ]
+            : []),
+          ...(cursorCompatible && cursorDetected
+            ? [
+                {
+                  hostId: "cursor" as const,
+                  supportLevel: "native" as const,
+                  compatible: true,
+                  detected: true,
+                  available: true,
+                  state: hostStates.get("cursor") ?? unavailableState("cursor"),
+                  reason: isJapanese()
+                    ? "Cursor local plugin folderへNative copy"
+                    : "Native copy to Cursor's local plugin folder",
+                },
+              ]
+            : []),
+        ],
+        userDefault,
+        workspaceSuggestion,
+      });
+      if (choices.length === 0) {
+        vscode.window.showInformationMessage(
+          isJapanese()
+            ? "このpackageをNative管理できるhostが見つかりません。managed copyのインストール先を選択します。"
+            : "No native host can manage this package. Choose a managed-copy install target.",
+        );
+      }
+      const hostItems = choices.map((choice) => {
+        const isInstalled = choice.state?.status === "installed";
+        const badges = [
+          choice.recommended
+            ? isJapanese()
+              ? "おすすめ"
+              : "Recommended"
+            : undefined,
+          choice.detected
+            ? isJapanese()
+              ? "検出済み"
+              : "Detected"
+            : undefined,
+          choice.suggestedByWorkspace
+            ? isJapanese()
+              ? "Workspace の提案"
+              : "Workspace suggestion"
+            : undefined,
+        ].filter((badge): badge is string => !!badge);
+        const badgePrefix = badges.length > 0 ? `${badges.join(" · ")} — ` : "";
+        const stateLabel = formatPluginHostState(choice.state, isJapanese());
+        const detail = choice.reason
+          ? `${stateLabel} · ${choice.reason}`
+          : stateLabel;
+        if (choice.hostId === "claude-code") {
+          return {
+            label: `$(sparkle) ${
+              isInstalled
+                ? isJapanese()
+                  ? "Claude Codeで管理"
+                  : "Manage in Claude Code"
+                : isJapanese()
+                  ? "Claude Codeでインストール"
+                  : "Install with Claude Code"
+            }`,
+            description: `${badgePrefix}${detail}`,
+            value: isInstalled
+              ? ("claudeCodeManage" as const)
+              : ("claudeCode" as const),
+          };
+        }
+        if (choice.hostId === "codex") {
+          return {
+            label: `$(hubot) ${
+              isInstalled
+                ? isJapanese()
+                  ? "Codexで管理"
+                  : "Manage in Codex"
+                : isJapanese()
+                  ? "Codexでインストール"
+                  : "Install with Codex"
+            }`,
+            description: `${badgePrefix}${detail}`,
+            value: isInstalled ? ("codexManage" as const) : ("codex" as const),
+          };
+        }
+        if (choice.hostId === "cursor") {
+          return {
+            label: `$(cursor) ${
+              isInstalled
+                ? isJapanese()
+                  ? "Cursor local pluginを削除"
+                  : "Remove Cursor local plugin"
+                : isJapanese()
+                  ? "Cursorでインストール"
+                  : "Install with Cursor"
+            }`,
+            description: `${badgePrefix}${detail}`,
+            value: isInstalled
+              ? ("cursorUninstall" as const)
+              : ("cursor" as const),
+          };
+        }
+        if (choice.hostId === "copilot-cli") {
+          return {
+            label: `$(terminal) ${
+              isInstalled
+                ? isJapanese()
+                  ? "Copilot CLIからアンインストール"
+                  : "Uninstall from Copilot CLI"
+                : isJapanese()
+                  ? "Copilot CLI にインストール"
+                  : "Install in Copilot CLI"
+            }`,
+            description: `${badgePrefix}${stateLabel} · ${
+              isJapanese()
+                ? "marketplace add + plugin@marketplace を Copilot CLI に委譲"
+                : "Delegate marketplace add + plugin@marketplace to Copilot CLI"
+            }`,
+            value: isInstalled
+              ? ("copilotCliUninstall" as const)
+              : ("copilotCli" as const),
+          };
+        }
+        return {
+          label: `$(code) ${
+            isInstalled
+              ? isJapanese()
+                ? "VS Code / GitHub Copilot Chatへ再インストール"
+                : "Reinstall for VS Code / GitHub Copilot Chat"
+              : isJapanese()
+                ? "VS Code / GitHub Copilot Chat にインストール"
+                : "Install for VS Code / GitHub Copilot Chat"
+          }`,
+          description: `${badgePrefix}${stateLabel} · ${
+            isJapanese()
+              ? "Global Home にコピーし、chat.pluginLocations への登録を確認"
+              : "Copy to Global Home and offer chat.pluginLocations registration"
+          }`,
+          value: "vscode" as const,
+        };
+      });
+      if (hostItems.length > 0) {
+        const destination = await vscode.window.showQuickPick(hostItems, {
+          placeHolder: isJapanese()
+            ? "プラグインの利用先を選択"
+            : "Choose where to install the plugin",
+        });
+        if (!destination) {
+          return false;
+        }
+        if (destination.value === "copilotCli") {
+          return installPluginInCopilotCli(skill);
+        }
+        if (destination.value === "copilotCliUninstall") {
+          return uninstallPluginFromCopilotCli(skill);
+        }
+        if (destination.value === "claudeCode") {
+          return installPluginInClaudeCode(skill);
+        }
+        if (destination.value === "claudeCodeManage") {
+          return managePluginInClaudeCode(skill);
+        }
+        if (destination.value === "codex") {
+          return installPluginInCodex(skill);
+        }
+        if (destination.value === "codexManage") {
+          return managePluginInCodex(skill);
+        }
+        if (destination.value === "cursor") {
+          return installPluginInCursor(skill);
+        }
+        if (destination.value === "cursorUninstall") {
+          return uninstallPluginFromCursor();
+        }
+      }
+    }
+
     const installTarget =
       mode === "default"
         ? await resolveDefaultInstallTarget(skill)
@@ -2795,7 +4944,6 @@ export async function activate(
       return false;
     }
 
-    const resourceKind = getResourceKind(skill);
     const mcpInstallOptions =
       resourceKind === "mcp"
         ? mode === "default"
@@ -3053,6 +5201,45 @@ export async function activate(
     async (skillOrItem?: any) => {
       return installResource(skillOrItem, "default");
     },
+  );
+
+  const installPluginInCopilotCliCmd = vscode.commands.registerCommand(
+    "resourceNinja.installPluginInCopilotCli",
+    async (skillOrItem?: Skill | SkillTreeItem) => {
+      const skill =
+        skillOrItem instanceof SkillTreeItem
+          ? skillOrItem.skill
+          : skillOrItem || (await pickRemotePlugin());
+      if (!skill || getResourceKind(skill) !== "plugin") {
+        return false;
+      }
+      return installPluginInCopilotCli(skill);
+    },
+  );
+
+  const uninstallPluginFromCopilotCliCmd = vscode.commands.registerCommand(
+    "resourceNinja.uninstallPluginFromCopilotCli",
+    uninstallPluginFromCopilotCli,
+  );
+
+  const managePluginInClaudeCodeCmd = vscode.commands.registerCommand(
+    "resourceNinja.managePluginInClaudeCode",
+    managePluginInClaudeCode,
+  );
+
+  const managePluginInCodexCmd = vscode.commands.registerCommand(
+    "resourceNinja.managePluginInCodex",
+    managePluginInCodex,
+  );
+
+  const copyCodexRepairCommandCmd = vscode.commands.registerCommand(
+    "resourceNinja.copyCodexRepairCommand",
+    copyCodexRepairCommand,
+  );
+
+  const uninstallPluginFromCursorCmd = vscode.commands.registerCommand(
+    "resourceNinja.uninstallPluginFromCursor",
+    uninstallPluginFromCursor,
   );
 
   // Command: Uninstall skill
@@ -6249,6 +8436,12 @@ ${fileUri.fsPath}`,
     searchCmd,
     installCmd,
     installDefaultCmd,
+    installPluginInCopilotCliCmd,
+    uninstallPluginFromCopilotCliCmd,
+    managePluginInClaudeCodeCmd,
+    managePluginInCodexCmd,
+    copyCodexRepairCommandCmd,
+    uninstallPluginFromCursorCmd,
     uninstallCmd,
     reinstallAllCmd,
     reinstallCmd,

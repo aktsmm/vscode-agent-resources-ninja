@@ -174,6 +174,60 @@ test("both READMEs explain how an installed plugin becomes loadable", () => {
   }
 });
 
+test("both READMEs distinguish VS Code and Copilot CLI plugin lifecycle", () => {
+  for (const [name, text] of [
+    ["README.md", readme],
+    ["README_ja.md", readmeJa],
+  ]) {
+    const sectionStart = text.indexOf(
+      name === "README.md"
+        ? "### Installing an Agent Plugin"
+        : "### Agent Plugin のインストール",
+    );
+    const section = text.slice(sectionStart, sectionStart + 6500);
+    for (const needle of [
+      "copilot plugin marketplace add",
+      "copilot plugin install",
+      "PLUGIN@MARKETPLACE",
+      "direct",
+      "installed-plugins",
+      "MCP",
+      "LSP",
+    ]) {
+      assert.ok(section.includes(needle), `${name} must explain ${needle}`);
+    }
+  }
+});
+
+test("both READMEs distinguish native plugin hosts from fallback handoffs", () => {
+  for (const [name, text] of [
+    ["README.md", readme],
+    ["README_ja.md", readmeJa],
+  ]) {
+    const sectionStart = text.indexOf(
+      name === "README.md"
+        ? "### Installing an Agent Plugin"
+        : "### Agent Plugin のインストール",
+    );
+    const section = text.slice(sectionStart, sectionStart + 10000);
+    for (const needle of [
+      "VS Code / GitHub Copilot Chat",
+      "GitHub Copilot CLI",
+      "Claude Code",
+      "Codex",
+      "Cursor",
+      "Native",
+      "Handoff",
+      "resourceNinja.defaultPluginHost",
+    ]) {
+      assert.ok(section.includes(needle), `${name} must explain ${needle}`);
+    }
+    assert.match(section, /Claude Code[\s\S]*(Native|公式CLI)/);
+    assert.match(section, /Codex[\s\S]*(Native|公式CLI)/);
+    assert.match(section, /Cursor[\s\S]*(fingerprint|所有fingerprint)/);
+  }
+});
+
 test("remote layout docs include MCP config resources", () => {
   assert.match(
     readme,

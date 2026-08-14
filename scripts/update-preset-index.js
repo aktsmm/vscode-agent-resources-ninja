@@ -37,6 +37,11 @@ const {
   getAgentPluginsConformanceIssue,
   getDefaultResourceCategories,
   getPluginIdFromPath,
+  getPluginManifestInfoByRoot,
+  getPluginManifestKindFromPath,
+  getOwningPluginManifestInfo,
+  getMcpConfigMetadata,
+  qualifyPluginOwnedResourceName,
   getPluginRootFromManifestPath,
   getResourceInstallPath,
   getSkillRootDirectoriesFromPaths,
@@ -473,21 +478,6 @@ function resolveIndexLastUpdated(previousLastUpdated, isPartialScan, today) {
   return isPartialScan && previousLastUpdated ? previousLastUpdated : today;
 }
 
-function getPluginManifestKind(filePath) {
-  const lowerPath = filePath.toLowerCase().replace(/\\/g, "/");
-  if (lowerPath.endsWith(".claude-plugin/plugin.json")) return "claude-plugin";
-  if (lowerPath.endsWith(".codex-plugin/plugin.json")) return "codex-plugin";
-  if (lowerPath.endsWith(".cursor-plugin/plugin.json")) return "cursor-plugin";
-  if (lowerPath.endsWith(".plugin/plugin.json")) return "plugin";
-  if (lowerPath.endsWith("marketplace.json")) return "marketplace";
-  if (lowerPath.endsWith("gemini-extension.json")) return "gemini-extension";
-  if (lowerPath.endsWith("apm.yml") || lowerPath.endsWith("apm.yaml")) {
-    return "apm";
-  }
-  if (lowerPath.endsWith("plugin.json")) return "plugin";
-  return undefined;
-}
-
 function stringifyManifestValue(value) {
   if (typeof value === "string") return value.trim() || undefined;
   if (typeof value === "number" || typeof value === "boolean") {
@@ -515,7 +505,7 @@ function parseSimpleYamlObject(content) {
 }
 
 function parsePluginManifestMetadata(content, filePath) {
-  const manifestKind = getPluginManifestKind(filePath);
+  const manifestKind = getPluginManifestKindFromPath(filePath);
   const pluginRoot = getPluginRootFromManifestPath(filePath) || ".";
   let manifest = {};
   try {
@@ -672,44 +662,6 @@ function getPluginRootsFromPaths(paths) {
   ).sort((a, b) => b.length - a.length);
 }
 
-function shouldPreferPluginManifestInfo(candidate, existing) {
-  if (!existing) return true;
-  const candidateWeight =
-    candidate.pluginManifestKind === "marketplace" ? 1 : 0;
-  const existingWeight = existing.pluginManifestKind === "marketplace" ? 1 : 0;
-  if (candidateWeight !== existingWeight) {
-    return candidateWeight < existingWeight;
-  }
-  return (
-    candidate.pluginManifestPath.length < existing.pluginManifestPath.length
-  );
-}
-
-function getPluginManifestInfoByRoot(paths) {
-  const pluginInfos = new Map();
-
-  for (const filePath of paths) {
-    const kind = detectResourceKindFromPath(filePath);
-    if (kind !== "plugin") {
-      continue;
-    }
-
-    const pluginRoot = getPluginRootFromManifestPath(filePath) || ".";
-    const pluginInfo = {
-      pluginRoot,
-      pluginManifestPath: filePath.replace(/\\/g, "/"),
-      pluginManifestKind: getPluginManifestKind(filePath),
-    };
-
-    const existing = pluginInfos.get(pluginRoot);
-    if (shouldPreferPluginManifestInfo(pluginInfo, existing)) {
-      pluginInfos.set(pluginRoot, pluginInfo);
-    }
-  }
-
-  return pluginInfos;
-}
-
 function getRelativePathFromPluginRoot(filePath, pluginRoot) {
   const normalizedPath = String(filePath)
     .replace(/\\/g, "/")
@@ -723,33 +675,6 @@ function getRelativePathFromPluginRoot(filePath, pluginRoot) {
   return normalizedPath.startsWith(`${normalizedRoot}/`)
     ? normalizedPath.slice(normalizedRoot.length + 1)
     : undefined;
-}
-
-function getOwningPluginManifestInfo(filePath, kind, pluginManifestInfoByRoot) {
-  const normalizedPath = String(filePath)
-    .replace(/\\/g, "/")
-    .replace(/^\/+/, "");
-
-  for (const [pluginRoot, pluginInfo] of pluginManifestInfoByRoot.entries()) {
-    if (normalizedPath === pluginInfo.pluginManifestPath) {
-      continue;
-    }
-
-    const relativePath = getRelativePathFromPluginRoot(
-      normalizedPath,
-      pluginRoot,
-    );
-    if (!relativePath) {
-      continue;
-    }
-
-    const childKind = detectPluginChildResourceKind(relativePath);
-    if (childKind || pluginRoot === ".") {
-      return pluginInfo;
-    }
-  }
-
-  return undefined;
 }
 
 // Mirrors src/indexUpdater.ts: the manifest resource itself keeps the parsed
@@ -852,7 +777,6 @@ async function processTree(data, owner, repoName, branch, source) {
                 )
               : getOwningPluginManifestInfo(
                   file.path,
-                  kind,
                   pluginManifestInfoByRoot,
                 );
 
@@ -864,9 +788,21 @@ async function processTree(data, owner, repoName, branch, source) {
           const skillInfo = parseSkillFrontmatter(content, file.path, kind);
           if (!skillInfo) return null;
 
+          if (kind === "hook" && isHookConfigFilePath(file.path)) {
+            const ownerLabel =
+              pluginInfo?.pluginRoot && pluginInfo.pluginRoot !== "."
+                ? path.posix.basename(pluginInfo.pluginRoot)
+                : `${owner}/${repoName}`;
+            skillInfo.description = `Hook configuration for ${ownerLabel}`;
+          }
+
           return {
             kind,
-            name: skillInfo.name,
+            name: qualifyPluginOwnedResourceName(
+              kind,
+              skillInfo.name,
+              pluginInfo,
+            ),
             source: source.id,
             path: getResourceInstallPath(file.path, kind),
             categories:
@@ -909,6 +845,17 @@ function parseSkillFrontmatter(content, filePath, kind = "skill") {
   if (kind === "plugin") {
     return parsePluginManifestMetadata(normalizedContent, filePath);
   }
+  if (kind === "mcp") {
+    const metadata = getMcpConfigMetadata(
+      normalizedContent,
+      getFallbackResourceName(filePath, kind),
+    );
+    return {
+      ...metadata,
+      description_ja: "",
+      categories: getDefaultResourceCategories(kind),
+    };
+  }
   // frontmatter を抽出
   const frontmatterMatch = normalizedContent.match(/^---\n([\s\S]*?)\n---/);
 
@@ -943,22 +890,6 @@ function parseSkillFrontmatter(content, filePath, kind = "skill") {
     license = frontmatter.get("license") || undefined;
     author = frontmatter.get("author") || metadataMatch?.[1]?.trim();
     version = frontmatter.get("version") || undefined;
-  }
-
-  if (!frontmatterMatch && kind === "mcp") {
-    try {
-      const parsed = JSON.parse(normalizedContent);
-      const serverNames = Object.keys(parsed?.mcpServers || {});
-      if (serverNames.length === 1) {
-        name = serverNames[0];
-        description = `MCP configuration for ${serverNames[0]}`;
-      } else if (serverNames.length > 1) {
-        name = getFallbackResourceName(filePath, kind);
-        description = `MCP configuration for ${serverNames.join(", ")}`;
-      }
-    } catch {
-      // Fall back to path-derived metadata for non-JSON MCP files.
-    }
   }
 
   // name がない場合はパスから推測

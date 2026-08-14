@@ -32,13 +32,142 @@ function requireTypeScriptModule(filePath) {
 const {
   AGENT_PLUGINS_MANIFEST_KIND,
   AGENT_PLUGINS_MANIFEST_SCHEMA,
+  AGENT_PLUGINS_MCP_SCHEMA,
   detectResourceKindFromPath,
   detectPluginChildResourceKind,
   getAgentPluginsConformanceIssue,
+  getAgentPluginsMcpSchemaIssue,
+  getPluginManifestInfoByRoot,
+  getOwningPluginManifestInfo,
+  getPluginOwnedHookInstallFileName,
+  getPluginOwnedInstallFileName,
   isAgentPluginsManifest,
   isIncompleteSkillContent,
   markAgentPluginsIssueDescription,
+  qualifyPluginOwnedResourceName,
 } = requireTypeScriptModule(path.join(repoRoot, "src", "resourceKinds.ts"));
+
+test("Agent Plugins mcp.json uses the matching schema version", () => {
+  const roots = new Set(["plugins/demo"]);
+  assert.strictEqual(
+    getAgentPluginsMcpSchemaIssue(
+      "plugins/demo/mcp.json",
+      JSON.stringify({ $schema: AGENT_PLUGINS_MCP_SCHEMA, servers: {} }),
+      roots,
+    ),
+    undefined,
+  );
+  assert.match(
+    getAgentPluginsMcpSchemaIssue(
+      "plugins/demo/mcp.json",
+      JSON.stringify({ servers: {} }),
+      roots,
+    ),
+    /must declare/,
+  );
+  assert.match(
+    getAgentPluginsMcpSchemaIssue("plugins/demo/mcp.json", "not-json", roots),
+    /not valid JSON/,
+  );
+  assert.strictEqual(
+    getAgentPluginsMcpSchemaIssue(
+      "plugins/other/mcp.json",
+      JSON.stringify({ servers: {} }),
+      roots,
+    ),
+    undefined,
+  );
+});
+
+test("nested plugin manifests own children before the root marketplace", () => {
+  const infos = getPluginManifestInfoByRoot([
+    ".github/plugin/marketplace.json",
+    "plugins/build-perf-cpp/plugin.json",
+  ]);
+  assert.deepStrictEqual(
+    {
+      ...getOwningPluginManifestInfo(
+        "plugins/build-perf-cpp/skills/demo/SKILL.md",
+        infos,
+      ),
+    },
+    {
+      pluginRoot: "plugins/build-perf-cpp",
+      pluginManifestPath: "plugins/build-perf-cpp/plugin.json",
+      pluginManifestKind: "plugin",
+    },
+  );
+  assert.strictEqual(
+    getOwningPluginManifestInfo("plugins/spark/skills/demo/SKILL.md", infos)
+      .pluginManifestKind,
+    "marketplace",
+  );
+});
+
+test("generic plugin hook names are namespaced by their package", () => {
+  const info = {
+    pluginRoot: "plugins/build-perf-cpp",
+    pluginManifestPath: "plugins/build-perf-cpp/plugin.json",
+    pluginManifestKind: "plugin",
+  };
+  assert.strictEqual(
+    qualifyPluginOwnedResourceName("hook", "hooks", info),
+    "build-perf-cpp-hooks",
+  );
+  assert.strictEqual(
+    qualifyPluginOwnedResourceName("hook", "custom-hook", info),
+    "custom-hook",
+  );
+  assert.strictEqual(
+    qualifyPluginOwnedResourceName("skill", "hooks", info),
+    "hooks",
+  );
+  assert.strictEqual(
+    getPluginOwnedHookInstallFileName({
+      kind: "hook",
+      source: "demo-source",
+      pluginRoot: "plugins/build-perf-cpp",
+      resourcePath: "plugins/build-perf-cpp/hooks/hooks.json",
+      fileName: "hooks.json",
+    }),
+    "build-perf-cpp-hooks.json",
+  );
+});
+
+test("nested plugin agents instructions and prompts get safe target names", () => {
+  assert.strictEqual(
+    getPluginOwnedInstallFileName({
+      kind: "agent",
+      pluginRoot: "plugins/prp-core",
+      fileName: "../code-reviewer.md",
+    }),
+    "prp-core-code-reviewer.md",
+  );
+  assert.strictEqual(
+    getPluginOwnedInstallFileName({
+      kind: "instruction",
+      pluginRoot: "plugins/prp-core",
+      fileName: "CLAUDE.md",
+    }),
+    "prp-core-CLAUDE.md",
+  );
+  assert.strictEqual(
+    getPluginOwnedInstallFileName({
+      kind: "skill",
+      pluginRoot: "plugins/prp-core",
+      fileName: "SKILL.md",
+    }),
+    "SKILL.md",
+  );
+  assert.strictEqual(
+    getPluginOwnedInstallFileName({
+      kind: "agent",
+      pluginRoot: ".",
+      fileName: "code-reviewer.md",
+    }),
+    "code-reviewer.md",
+  );
+});
 
 function test(name, fn) {
   try {
@@ -173,7 +302,7 @@ test("plugin child rules are declared only in src/resourceKinds.ts", () => {
   );
   assert.match(
     indexUpdater,
-    /detectPluginChildResourceKind,?\s*[\s\S]{0,400}?from "\.\/resourceKinds"/,
+    /import\s*\{[^}]*\bdetectPluginChildResourceKind\b[^}]*\}\s*from "\.\/resourceKinds"/,
     "src/indexUpdater.ts should import the shared plugin kind rules",
   );
 });

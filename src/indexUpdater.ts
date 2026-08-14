@@ -2,6 +2,7 @@
 // GitHub API を使用してスキルを検索・更新
 
 import * as vscode from "vscode";
+import * as path from "path";
 import {
   SkillIndex,
   Skill,
@@ -16,6 +17,7 @@ import {
 import {
   AGENT_PLUGINS_MANIFEST_KIND,
   getAgentPluginsConformanceIssue,
+  getAgentPluginsMcpSchemaIssue,
   isAgentPluginsManifest,
   markAgentPluginsIssueDescription,
   detectResourceKindFromPath,
@@ -23,10 +25,16 @@ import {
   getDefaultResourceCategories,
   getFallbackResourceName,
   getPluginIdFromPath,
+  getPluginManifestInfoByRoot,
+  getPluginManifestKindFromPath,
+  getOwningPluginManifestInfo,
+  getMcpConfigMetadata,
+  qualifyPluginOwnedResourceName,
   getPluginRootFromManifestPath,
   getResourceInstallPath,
   getSkillRootDirectoriesFromPaths,
   isNestedResourcePathUnderSkillRoot,
+  isHookConfigFilePath,
 } from "./resourceKinds";
 export {
   AGENT_PLUGINS_MANIFEST_SCHEMA,
@@ -116,35 +124,6 @@ function normalizeResourceDescription(
   return "";
 }
 
-function getPluginManifestKind(filePath: string): string | undefined {
-  const lowerPath = filePath.toLowerCase().replace(/\\/g, "/");
-  if (lowerPath.endsWith(".claude-plugin/plugin.json")) {
-    return "claude-plugin";
-  }
-  if (lowerPath.endsWith(".codex-plugin/plugin.json")) {
-    return "codex-plugin";
-  }
-  if (lowerPath.endsWith(".cursor-plugin/plugin.json")) {
-    return "cursor-plugin";
-  }
-  if (lowerPath.endsWith(".plugin/plugin.json")) {
-    return "plugin";
-  }
-  if (lowerPath.endsWith("marketplace.json")) {
-    return "marketplace";
-  }
-  if (lowerPath.endsWith("gemini-extension.json")) {
-    return "gemini-extension";
-  }
-  if (lowerPath.endsWith("apm.yml") || lowerPath.endsWith("apm.yaml")) {
-    return "apm";
-  }
-  if (lowerPath.endsWith("plugin.json")) {
-    return "plugin";
-  }
-  return undefined;
-}
-
 function stringifyManifestValue(value: unknown): string | undefined {
   if (typeof value === "string") {
     return value.trim() || undefined;
@@ -194,7 +173,7 @@ function parsePluginManifestMetadata(
   pluginManifestPath?: string;
   pluginManifestKind?: string;
 } | null {
-  const manifestKind = getPluginManifestKind(filePath);
+  const manifestKind = getPluginManifestKindFromPath(filePath);
   const pluginRoot = getPluginRootFromManifestPath(filePath) || ".";
   let manifest: Record<string, unknown> = {};
 
@@ -893,16 +872,6 @@ function isResourcePathAllowed(
   );
 }
 
-function getPluginRootsFromPaths(paths: string[]): string[] {
-  return Array.from(
-    new Set(
-      paths
-        .map((filePath) => getPluginRootFromManifestPath(filePath))
-        .filter((root): root is string => !!root),
-    ),
-  ).sort((a, b) => b.length - a.length);
-}
-
 function getRelativePathFromPluginRoot(
   filePath: string,
   pluginRoot: string,
@@ -959,8 +928,11 @@ async function processTreeResponse(
   const skillRootDirectories = getSkillRootDirectoriesFromPaths(
     allowedBlobFiles.map((item) => item.path),
   );
-  const pluginRoots = getPluginRootsFromPaths(
+  const pluginManifestInfoByRoot = getPluginManifestInfoByRoot(
     allowedBlobFiles.map((item) => item.path),
+  );
+  const pluginRoots = Array.from(pluginManifestInfoByRoot.keys()).sort(
+    (a, b) => b.length - a.length,
   );
   const resourceFiles = allowedBlobFiles.filter((item) => {
     const kind = detectResourceKindWithPluginRoots(item.path, pluginRoots);
@@ -969,6 +941,36 @@ async function processTreeResponse(
       !isNestedResourcePathUnderSkillRoot(item.path, kind, skillRootDirectories)
     );
   });
+  const agentPluginRootResults = await mapWithConcurrency(
+    resourceFiles.filter((file) => {
+      const normalized = file.path.replace(/\\/g, "/").toLowerCase();
+      return normalized.endsWith("plugin.json");
+    }),
+    FETCH_CONCURRENCY,
+    async (file): Promise<string | undefined> => {
+      const content = await fetchGitHubTextContent(
+        owner,
+        repoName,
+        branch,
+        file.path,
+        token,
+      );
+      if (!content) {
+        return undefined;
+      }
+      try {
+        const manifest = JSON.parse(content) as Record<string, unknown>;
+        return isAgentPluginsManifest(file.path, manifest)
+          ? getPluginRootFromManifestPath(file.path)
+          : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+  );
+  const agentPluginRoots = new Set(
+    agentPluginRootResults.filter((root): root is string => !!root),
+  );
   const canUseLegacyFallbackScanner =
     resourceFiles.length === 0 &&
     !sourceOptions?.includePaths?.length &&
@@ -1047,7 +1049,16 @@ async function processTreeResponse(
 
         const skill: Skill = {
           kind,
-          name: skillInfo.name,
+          name: qualifyPluginOwnedResourceName(
+            kind,
+            skillInfo.name,
+            kind === "plugin"
+              ? undefined
+              : getOwningPluginManifestInfo(
+                  file.path,
+                  pluginManifestInfoByRoot,
+                ),
+          ),
           source: `${owner}-${repoName}`,
           path: getResourceInstallPath(file.path, kind),
           categories:
@@ -1060,6 +1071,28 @@ async function processTreeResponse(
             skillInfo.name,
           ),
         };
+        if (kind === "mcp") {
+          const mcpSchemaIssue = getAgentPluginsMcpSchemaIssue(
+            file.path,
+            content,
+            agentPluginRoots,
+          );
+          if (mcpSchemaIssue) {
+            skill.description = `[Agent Plugins 1.0.0: ${mcpSchemaIssue}] ${skill.description}`;
+            logger.warn(`${file.path}: ${mcpSchemaIssue}`);
+          }
+        }
+        if (kind === "hook" && isHookConfigFilePath(file.path)) {
+          const pluginInfo = getOwningPluginManifestInfo(
+            file.path,
+            pluginManifestInfoByRoot,
+          );
+          const ownerLabel =
+            pluginInfo?.pluginRoot && pluginInfo.pluginRoot !== "."
+              ? path.posix.basename(pluginInfo.pluginRoot)
+              : `${owner}/${repoName}`;
+          skill.description = `Hook configuration for ${ownerLabel}`;
+        }
         if (kind === "skill" && skillInfo.standalone !== undefined) {
           skill.standalone = skillInfo.standalone;
         }
@@ -1103,6 +1136,16 @@ async function processTreeResponse(
           skill.pluginRoot = skillInfo.pluginRoot;
           skill.pluginManifestPath = skillInfo.pluginManifestPath;
           skill.pluginManifestKind = skillInfo.pluginManifestKind;
+        } else {
+          const pluginInfo = getOwningPluginManifestInfo(
+            file.path,
+            pluginManifestInfoByRoot,
+          );
+          if (pluginInfo) {
+            skill.pluginRoot = pluginInfo.pluginRoot;
+            skill.pluginManifestPath = pluginInfo.pluginManifestPath;
+            skill.pluginManifestKind = pluginInfo.pluginManifestKind;
+          }
         }
         return skill;
       } catch (error) {
@@ -1568,6 +1611,16 @@ function parseSkillFrontmatter(
   const normalizedContent = content.replace(/\r\n/g, "\n");
   if (kind === "plugin") {
     return parsePluginManifestMetadata(normalizedContent, filePath);
+  }
+  if (kind === "mcp") {
+    const metadata = getMcpConfigMetadata(
+      normalizedContent,
+      getFallbackResourceName(filePath, kind),
+    );
+    return {
+      ...metadata,
+      categories: getDefaultResourceCategories(kind),
+    };
   }
   // frontmatter を抽出
   const frontmatterMatch = normalizedContent.match(/^---\n([\s\S]*?)\n---/);

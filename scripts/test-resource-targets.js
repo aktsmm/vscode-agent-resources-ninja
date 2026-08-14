@@ -23,10 +23,14 @@ function requireTypeScriptModule(filePath) {
   return loadedModule.exports;
 }
 
-const { isHookConfigFilePath, getPluginRootFsPathFromManifestPath } =
-  requireTypeScriptModule(
-    path.join(__dirname, "..", "src", "resourceKinds.ts"),
-  );
+const {
+  getPluginOwnedHookInstallFileName,
+  getPluginOwnedInstallFileName,
+  isHookConfigFilePath,
+  getPluginRootFsPathFromManifestPath,
+} = requireTypeScriptModule(
+  path.join(__dirname, "..", "src", "resourceKinds.ts"),
+);
 
 const extensionSource = fs.readFileSync(
   path.join(__dirname, "..", "src", "extension.ts"),
@@ -56,6 +60,20 @@ function globalHomeRoot(config = {}) {
 }
 
 function getInstallFileName(skill, fileName) {
+  const pluginHookFileName = getPluginOwnedHookInstallFileName({
+    kind: skill.kind,
+    source: skill.source,
+    pluginRoot: skill.pluginRoot,
+    resourcePath: skill.path,
+    fileName,
+  });
+  if (pluginHookFileName !== fileName) return pluginHookFileName;
+  const pluginOwnedFileName = getPluginOwnedInstallFileName({
+    kind: skill.kind,
+    pluginRoot: skill.pluginRoot,
+    fileName,
+  });
+  if (pluginOwnedFileName !== fileName) return pluginOwnedFileName;
   if (skill.kind !== "mcp" || !skill.source) return fileName;
   const normalizedFileName = fileName.replace(/^\./, "");
   if (normalizedFileName.toLowerCase() !== "mcp.json") return fileName;
@@ -286,6 +304,15 @@ test("workspace targets are resource-kind aware", () => {
   );
   assert.strictEqual(
     targetPath("/repo", {
+      kind: "agent",
+      name: "Code Reviewer",
+      path: "plugins/prp-core/agents/code-reviewer.md",
+      pluginRoot: "plugins/prp-core",
+    }),
+    "/repo/.github/agents/prp-core-code-reviewer.md",
+  );
+  assert.strictEqual(
+    targetPath("/repo", {
       kind: "instruction",
       name: "TS",
       path: "instructions/typescript.instructions.md",
@@ -315,6 +342,26 @@ test("workspace targets are resource-kind aware", () => {
       path: ".github/hooks/copilot-cli-policy.json",
     }),
     "/repo/.github/hooks/copilot-cli-policy.json",
+  );
+  assert.strictEqual(
+    targetPath("/repo", {
+      kind: "hook",
+      name: "Build Perf Hooks",
+      source: "github-copilot-plugins",
+      path: "plugins/build-perf-cpp/hooks/hooks.json",
+      pluginRoot: "plugins/build-perf-cpp",
+    }),
+    "/repo/.github/hooks/build-perf-cpp-hooks.json",
+  );
+  assert.strictEqual(
+    targetPath("/repo", {
+      kind: "hook",
+      name: "Root Hooks",
+      source: "compound-engineering",
+      path: "hooks.json",
+      pluginRoot: ".",
+    }),
+    "/repo/.github/hooks/compound-engineering-hooks.json",
   );
   assert.strictEqual(
     targetPath("/repo", {
@@ -684,6 +731,26 @@ test("hook config detection excludes resource metadata sidecars", () => {
   );
 });
 
+test("plugin resources migrate only owned legacy files", () => {
+  assert.match(
+    skillInstallerSource,
+    /resourceKind === "hook" && !isHookConfigFile[\s\S]*?downloadDirectory/,
+  );
+  assert.match(
+    skillInstallerSource,
+    /isHookConfigFile[\s\S]*?fetchFileContent[\s\S]*?writeFile\(\s*skillPath/,
+  );
+  assert.match(
+    skillInstallerSource,
+    /resourceKind === "hook" && !isHookConfigFilePath\(remotePath\)[\s\S]*?updateHookConfigForInstall/,
+  );
+  assert.match(skillInstallerSource, /removeOwnedLegacyPluginResource/);
+  assert.match(
+    skillInstallerSource,
+    /metadata\.kind !== kind[\s\S]*?metadata\.source !==[\s\S]*?normalizeSkillMetaSource[\s\S]*?metadata\.remotePath !== skill\.path[\s\S]*?metadata\.pluginRoot !== skill\.pluginRoot/,
+  );
+});
+
 // A plugin is scanned by its manifest, so a delete that stops at the manifest would
 // leave the copied package behind as an orphaned directory.
 test("plugin manifests resolve to the plugin root directory", () => {
@@ -694,6 +761,8 @@ test("plugin manifests resolve to the plugin root directory", () => {
     ".codex-plugin/plugin.json",
     ".cursor-plugin/plugin.json",
     ".plugin/plugin.json",
+    ".github/plugin/plugin.json",
+    ".github/plugin/marketplace.json",
     ".claude-plugin/marketplace.json",
     "gemini-extension.json",
     "apm.yml",
@@ -717,6 +786,12 @@ test("plugin root resolution keeps Windows separators and the drive prefix", () 
   assert.strictEqual(
     getPluginRootFsPathFromManifestPath(
       "D:\\repo\\.github\\plugins\\demo\\.claude-plugin\\plugin.json",
+    ),
+    "D:\\repo\\.github\\plugins\\demo",
+  );
+  assert.strictEqual(
+    getPluginRootFsPathFromManifestPath(
+      "D:\\repo\\.github\\plugins\\demo\\.github\\plugin\\plugin.json",
     ),
     "D:\\repo\\.github\\plugins\\demo",
   );

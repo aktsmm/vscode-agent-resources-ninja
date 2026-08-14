@@ -21,6 +21,8 @@ const scriptsDir = path.join(repoRoot, "scripts");
 const NETWORK_TESTS = {
   "test-azure-skills-source.js":
     "compares the bundled index against the live microsoft/azure-skills tree over the network",
+  "test-copilot-plugins-upstream.js":
+    "compares the bundled GitHub Copilot plugins source against its live official tree and marketplace",
   "test-microsoft-install-e2e.js":
     "installs from the live MicrosoftDocs/Agent-Skills repository over the network",
 };
