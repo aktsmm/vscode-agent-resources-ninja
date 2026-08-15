@@ -32,5 +32,5 @@
 
 - VSIX: `artifacts/vsix/agent-resources-ninja-0.2.45.vsix`
 - Size: 468,072 bytes
-- SHA256: `B113E6500647B9662CE27D8A4A7C06E2DD53A594207FFF7BD5E2A0E7BC568207`
+- SHA256: `A04487EEEF83CAF52B117893F5D038AA49D3057B1D734AB1757579495BF1A4D4`
 - Payload: 12 files; compiled entrypoint, package metadata, locales, icon assets, license, README, changelog, and Resource Index present; no source maps, source/test directories, or release notes
