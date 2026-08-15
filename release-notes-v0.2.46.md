@@ -25,11 +25,12 @@
 - `npm audit --audit-level=moderate`: PASS (0 vulnerabilities)
 - `npm run audit:runtime`: PASS (0 vulnerabilities)
 - Raw installability, no-new-collision, release hygiene, tagged CHANGELOG immutability, manifest consistency, and diff checks: PASS
-- Packaged VSIX install and exact-bits smoke: pending
+- Packaged VSIX install: PASS in a fresh isolated profile (`yamapan.agent-resources-ninja@0.2.46`)
+- Exact extracted VSIX bits Extension Host smoke: PASS (`1/1`, core commands registered)
 
 ## Artifact
 
 - VSIX: `artifacts/vsix/agent-resources-ninja-0.2.46.vsix`
-- Size: pending
-- SHA256: pending
-- Payload: pending final package inspection
+- Size: 471,836 bytes
+- SHA256: `CD3FA6BC430C22D5D0C857CEB43399D48BA6CE779461F4A47B1E7D20F30E62CE`
+- Payload: 12 files; compiled entrypoint, package metadata, locales, icon assets, license, README, changelog, and Resource Index present; no source maps, source/test directories, or release notes
