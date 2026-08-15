@@ -13,10 +13,11 @@ import {
 import { isJapanese, messages } from "./i18n";
 import {
   getGitHubToken,
-  hasStoredGitHubToken,
+  hasClearableGitHubToken,
   resolveGitHubToken,
 } from "./githubAuth";
 import { fetchGitHubWithOptionalAuthRetry } from "./githubFetch";
+import { createGitHubResponseError } from "./githubResponse";
 import {
   GitHubDirectoryEntry,
   partitionGitHubDirectoryEntries,
@@ -48,6 +49,7 @@ import {
   getResourceMetadataPath,
   isHookConfigFilePath,
   isOwnMetadataSidecarFileName,
+  sanitizeResourceInstallName,
 } from "./resourceKinds";
 import { getVsCodeUserDataPath } from "./userDataPaths";
 import {
@@ -120,6 +122,19 @@ export class SkillInstallIncompleteError extends Error {
     super(`Skill install incomplete: ${skillName}`);
     this.name = "SkillInstallIncompleteError";
   }
+}
+
+export class SkillNotFoundHandledError extends Error {
+  constructor(skillName: string) {
+    super(`Skill not found: ${skillName}`);
+    this.name = "SkillNotFoundHandledError";
+  }
+}
+
+export function isSkillNotFoundHandledError(
+  error: unknown,
+): error is SkillNotFoundHandledError {
+  return error instanceof SkillNotFoundHandledError;
 }
 
 export function isSkillInstallIncompleteError(
@@ -397,7 +412,7 @@ async function handleSkillNotFound(
     const updateIndex = messages.actionUpdateIndex();
     const reportBug = messages.actionReportBug();
     const clearStoredToken = messages.actionClearStoredGitHubToken();
-    const hasStoredToken = await hasStoredGitHubToken();
+    const hasStoredToken = await hasClearableGitHubToken();
     const choice = await vscode.window.showErrorMessage(
       buildSkillNotFoundMessage(skill.name, token),
       openSettings,
@@ -426,7 +441,7 @@ async function handleSkillNotFound(
     }
   }
 
-  throw new Error(`Skill not found: ${skill.name}`);
+  throw new SkillNotFoundHandledError(skill.name);
 }
 
 function createSyntheticSource(
@@ -651,11 +666,13 @@ function getInstallFileName(skill: Skill, fileName: string): string {
     return fileName;
   }
 
-  return `${sanitizeSkillName(skill.source)}-${normalizedFileName}`;
+  return `${sanitizeResourceInstallName(skill.source)}-${normalizedFileName}`;
 }
 
 function getPluginInstallRootName(skill: Skill): string {
-  return sanitizeSkillName(skill.name || skill.pluginRoot || "plugin");
+  return sanitizeResourceInstallName(
+    skill.name || skill.pluginRoot || "plugin",
+  );
 }
 
 export function getResourceTargetUri(
@@ -673,7 +690,7 @@ export function getResourceTargetUri(
   );
   const isHookConfigFile =
     kind === "hook" && isHookConfigFilePath(normalizedRemotePath);
-  const resourceFolderName = sanitizeSkillName(
+  const resourceFolderName = sanitizeResourceInstallName(
     kind === "skill"
       ? skill.name
       : path.posix.basename(path.posix.dirname(normalizedRemotePath)) ||
@@ -720,7 +737,7 @@ export function getResourceTargetUri(
     if (kind === "skill") {
       return vscode.Uri.joinPath(
         options.customTargetUri,
-        sanitizeSkillName(skill.name),
+        sanitizeResourceInstallName(skill.name),
       );
     }
     if (kind === "hook") {
@@ -747,7 +764,7 @@ export function getResourceTargetUri(
         return vscode.Uri.joinPath(
           root,
           "skills",
-          sanitizeSkillName(skill.name),
+          sanitizeResourceInstallName(skill.name),
         );
       case "agent":
         return vscode.Uri.joinPath(root, "agents", fileName);
@@ -790,7 +807,7 @@ export function getResourceTargetUri(
     if (kind === "skill") {
       return vscode.Uri.joinPath(
         vscode.Uri.joinPath(globalHomeRoot, "skills"),
-        sanitizeSkillName(skill.name),
+        sanitizeResourceInstallName(skill.name),
       );
     }
     if (kind === "hook") {
@@ -841,7 +858,10 @@ export function getResourceTargetUri(
 
   if (kind === "skill") {
     const targetRoot = resolveSkillsDirectoryUri(workspaceUri, config);
-    return vscode.Uri.joinPath(targetRoot, sanitizeSkillName(skill.name));
+    return vscode.Uri.joinPath(
+      targetRoot,
+      sanitizeResourceInstallName(skill.name),
+    );
   }
 
   switch (kind) {
@@ -1001,9 +1021,19 @@ async function listGitHubDirectoryInternal(
     token,
   });
   if (!response.ok) {
-    if (response.status === 403) {
-      throw new Error(
-        `GitHub API rate limit exceeded (403). Please authenticate with a GitHub token.`,
+    if (
+      response.status === 401 ||
+      response.status === 403 ||
+      response.status === 429
+    ) {
+      const bodyText = await response
+        .clone()
+        .text()
+        .catch(() => "");
+      throw createGitHubResponseError(
+        response,
+        bodyText,
+        `Failed to list directory ${owner}/${repo}/${normalizedPath}`,
       );
     }
     throw new Error(`Failed to list directory: ${response.status}`);
@@ -1234,16 +1264,6 @@ async function downloadDirectory(
 /**
  * スキル名をフォルダ名として安全な形式に変換
  */
-function sanitizeSkillName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/\s+/g, "-") // スペースをハイフンに
-    .replace(/[()[\]{}]/g, "") // 括弧を削除
-    .replace(/[^a-z0-9\-_]/g, "-") // 英数字とハイフン、アンダースコア以外をハイフンに
-    .replace(/-+/g, "-") // 連続ハイフンを1つに
-    .replace(/^-|-$/g, ""); // 先頭・末尾のハイフンを削除
-}
-
 /**
  * スキルをインストールする
  * GitHub からスキルファイルをダウンロードしてワークスペースに配置
@@ -1896,7 +1916,7 @@ export async function uninstallSkill(
     await vscode.workspace.fs.stat(skillPath);
   } catch {
     // 存在しない場合はサニタイズした名前で試す
-    const safeName = sanitizeSkillName(skillName);
+    const safeName = sanitizeResourceInstallName(skillName);
     skillPath = vscode.Uri.joinPath(skillsRootUri, safeName);
   }
 
@@ -1906,7 +1926,10 @@ export async function uninstallSkill(
         `Refused to delete ${skillPath.fsPath} outside ${skillsRootUri.fsPath}`,
       );
     }
-    await vscode.workspace.fs.delete(skillPath, { recursive: true });
+    await vscode.workspace.fs.delete(skillPath, {
+      recursive: true,
+      useTrash: true,
+    });
   } catch (error) {
     throw new Error(`Failed to delete skill directory: ${error}`);
   }
@@ -2028,7 +2051,10 @@ export async function uninstallSkillByPath(
         `Refused to delete ${skillPath.fsPath} outside ${deleteRootUri.fsPath}`,
       );
     }
-    await vscode.workspace.fs.delete(skillPath, { recursive: true });
+    await vscode.workspace.fs.delete(skillPath, {
+      recursive: true,
+      useTrash: true,
+    });
     if (pluginRootFsPath) {
       await unregisterPluginLocations(
         [skillPath.fsPath],

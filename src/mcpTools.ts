@@ -69,6 +69,23 @@ export function mcpContextUnavailableMessage(): string {
   );
 }
 
+export function githubAuthTroubleshootingText(): string {
+  return localizeMcpText(
+    `**GitHub authentication troubleshooting:**
+1. Check the network connection and GitHub API rate-limit reset time.
+2. Credential precedence is SecretStorage → GH_TOKEN → GITHUB_TOKEN → gh CLI → legacy setting. A legacy setting is copied into SecretStorage and then has the highest effective priority until cleared.
+3. If GH_TOKEN or GITHUB_TOKEN is stale, update or unset it and reload VS Code.
+4. Use "Clear Stored and Configured GitHub Token" for stale SecretStorage/legacy values, or run gh auth login to refresh gh CLI.
+5. Private repositories require Contents: Read permission and may require organization SSO authorization.`,
+    `**GitHub認証のトラブルシューティング:**
+1. ネットワーク接続とGitHub API rate limitの再試行時刻を確認してください。
+2. credentialの優先順は SecretStorage → GH_TOKEN → GITHUB_TOKEN → gh CLI → legacy設定です。legacy設定はSecretStorageへコピーされ、Clearするまで実効上の最優先になります。
+3. GH_TOKENまたはGITHUB_TOKENが古い場合は更新または解除し、VS Codeをreloadしてください。
+4. SecretStorage/legacy値には「保存・設定済み GitHub トークンをクリア」を使い、gh CLIは gh auth login で更新してください。
+5. private repositoryにはContents: Read権限が必要で、organization SSO認可が必要な場合があります。`,
+  );
+}
+
 function mcpWorkspaceUnavailableMessage(): string {
   return localizeMcpText(
     "❌ No workspace folder open. Please open a folder first.",
@@ -139,7 +156,10 @@ function getIndexUpdateInfo(index: SkillIndex): {
   }
 
   const warning = isOutdated
-    ? `⚠️ **インデックスが古くなっています！** (${daysOld}日前)`
+    ? localizeMcpText(
+        `⚠️ **The index is out of date.** (${daysOld} days old)`,
+        `⚠️ **インデックスが古くなっています。** (${daysOld}日前)`,
+      )
     : "";
 
   return { lastUpdated, daysOld, isOutdated, warning };
@@ -151,7 +171,10 @@ function getIndexUpdateInfo(index: SkillIndex): {
 function getSourceStats(index: SkillIndex): string {
   const sourceCount = getIndexSources(index).length;
   const skillCount = getIndexResources(index).length;
-  return `${sourceCount} リポジトリ、${skillCount} リソース`;
+  return localizeMcpText(
+    `${sourceCount} repositories, ${skillCount} resources`,
+    `${sourceCount}リポジトリ、${skillCount}リソース`,
+  );
 }
 
 function normalizeKindFilter(kind?: string): ResourceKind | undefined {
@@ -368,9 +391,17 @@ class SkillSearchTool implements vscode.LanguageModelTool<{
 
     if (results.length === 0) {
       return new vscode.LanguageModelToolResult([
-        new vscode.LanguageModelTextPart(`🔎 ${sourceStats}から検索しました（最終更新: ${
-          updateInfo.lastUpdated
-        }）
+        new vscode.LanguageModelTextPart(
+          localizeMcpText(
+            `🔎 Searched ${sourceStats} (last updated: ${updateInfo.lastUpdated})
+${updateInfo.warning}
+
+No resources matched "${query}"${kindFilter ? ` (${getResourceKindLabel(kindFilter, false)})` : ""}.
+
+Try another keyword, search GitHub directly, add a source, or update the index${updateInfo.isOutdated ? " (recommended)" : ""}.`,
+            `🔎 ${sourceStats}から検索しました（最終更新: ${
+              updateInfo.lastUpdated
+            }）
 ${updateInfo.warning}
 
 "${query}"${kindFilter ? ` (${getResourceKindLabel(kindFilter, isJapanese())})` : ""} に一致するリソースが見つかりませんでした。
@@ -384,10 +415,12 @@ ${updateInfo.warning}
 | 🌐 **GitHub で検索** | インデックスにないリソースを GitHub から直接検索 |
 | ➕ **ソースを追加** | 新しいリポジトリをインデックスに追加 |
 | 🔄 **インデックス更新** | 登録済みソースから最新情報を取得${
-          updateInfo.isOutdated ? " ⚠️ 推奨!" : ""
-        } |
+              updateInfo.isOutdated ? " ⚠️ 推奨!" : ""
+            } |
 
-> 現在のインデックス: ${sourceStats}（最終更新: ${updateInfo.lastUpdated}）`),
+> 現在のインデックス: ${sourceStats}（最終更新: ${updateInfo.lastUpdated}）`,
+          ),
+        ),
       ]);
     }
 
@@ -419,16 +452,27 @@ ${updateInfo.warning}
     })[0];
 
     const recommendSection = recommended
-      ? `\n### 🌟 おすすめ: ${recommended.name}\n${
+      ? `\n### 🌟 ${isJa ? "おすすめ" : "Recommended"}: ${recommended.name}\n${
           getLocalizedDescription(recommended, isJa) || ""
         } (${getTrustBadge(recommended.source || "")})\n`
       : "";
 
     return new vscode.LanguageModelToolResult([
       new vscode.LanguageModelTextPart(
-        `🔎 ${sourceStats}から検索しました（最終更新: ${
-          updateInfo.lastUpdated
-        }）
+        localizeMcpText(
+          `🔎 Searched ${sourceStats} (last updated: ${updateInfo.lastUpdated})
+${updateInfo.warning}
+
+Search results for "${query}"${kindFilter ? ` (${getResourceKindLabel(kindFilter, false)})` : ""}: ${results.length}
+
+| Kind | Resource | Description | Categories | Trust |
+|---|---|---|---|---|
+${formatted}
+${recommendSection}
+Choose a resource to install, or search GitHub/add a source/update the index for more results.`,
+          `🔎 ${sourceStats}から検索しました（最終更新: ${
+            updateInfo.lastUpdated
+          }）
 ${updateInfo.warning}
 
 "${query}"${kindFilter ? ` (${getResourceKindLabel(kindFilter, isJa)})` : ""} の検索結果: ${results.length} 件
@@ -461,10 +505,11 @@ ${
 | 🌐 **GitHub で検索** | インデックスにないリソースを GitHub から直接検索できます |
 | ➕ **ソースを追加** | 新しいリポジトリをインデックスに追加できます |
 | 🔄 **インデックス更新** | 登録済みソースから最新情報を取得できます${
-          updateInfo.isOutdated ? " ⚠️ 推奨!" : ""
-        } |
+            updateInfo.isOutdated ? " ⚠️ 推奨!" : ""
+          } |
 
 > 現在のインデックス: ${sourceStats}（最終更新: ${updateInfo.lastUpdated}）`,
+        ),
       ),
     ]);
   }
@@ -514,11 +559,13 @@ class SkillInstallTool implements vscode.LanguageModelTool<{
 
     if (!skill) {
       const candidates = matchResult.candidates;
-      const isJa = isJapanese();
       if (candidates.length > 1) {
         return new vscode.LanguageModelToolResult([
           new vscode.LanguageModelTextPart(
-            `⚠️ Multiple resources match "${skillName}". Retry with an exact resourceName${kindFilter ? "" : " or kind"}.\n\n| Kind | Resource | Source | Path |\n|------|----------|--------|------|\n${formatResourceCandidates(candidates, isJa)}`,
+            localizeMcpText(
+              `⚠️ Multiple resources match "${skillName}". Retry with an exact resourceName${kindFilter ? "" : " or kind"}.\n\n| Kind | Resource | Source | Path |\n|---|---|---|---|\n${formatResourceCandidates(candidates, false)}`,
+              `⚠️ リソース「${skillName}」に複数候補があります。正確なresourceName${kindFilter ? "" : "またはkind"}で再実行してください。\n\n| 種別 | リソース | Source | Path |\n|---|---|---|---|\n${formatResourceCandidates(candidates, true)}`,
+            ),
           ),
         ]);
       }
@@ -555,6 +602,18 @@ class SkillInstallTool implements vscode.LanguageModelTool<{
       const hookConfigSummary = formatHookConfigUpdateSummary(
         installResult.hookConfigUpdate,
       );
+      const installErrorCount = installResult.errors?.length ?? 0;
+      if (installErrorCount > 0) {
+        await vscode.commands.executeCommand("resourceNinja.refresh");
+        return new vscode.LanguageModelToolResult([
+          new vscode.LanguageModelTextPart(
+            localizeMcpText(
+              `⚠️ Resource "${skill.name}" was only partially installed. ${installErrorCount} file(s) failed to download. Review the installed folder and retry the install.`,
+              `⚠️ リソース「${skill.name}」は一部だけインストールされました。${installErrorCount}件のファイル取得に失敗しています。インストール先を確認して再実行してください。`,
+            ),
+          ),
+        ]);
+      }
 
       // インストラクションファイル (AGENTS.md) を更新（設定で有効な場合のみ）
       const config = vscode.workspace.getConfiguration("resourceNinja");
@@ -577,7 +636,20 @@ class SkillInstallTool implements vscode.LanguageModelTool<{
 
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          `✅ **${skill.name}** をインストールしました！
+          localizeMcpText(
+            `✅ Installed **${skill.name}**.
+
+| Field | Value |
+|---|---|
+| Resource | ${escapeMarkdownCell(skill.name)} |
+| Kind | ${getResourceKindLabel(kind, false)} |
+| Description | ${escapeMarkdownCell(desc || "No description")} |
+| Trust | ${trust} |
+| Installed to | ${escapeMarkdownCell(toDisplayPath(workspaceFolder, targetUri))} |
+${hookConfigSummary ? `| hooks.json | ${hookConfigSummary} |` : ""}
+
+You can now view the installed file or list workspace resources.`,
+            `✅ **${skill.name}** をインストールしました！
 
 | 項目 | 内容 |
 |-----------|------|
@@ -605,6 +677,7 @@ ${hookConfigSummary ? `| hooks.json | ${hookConfigSummary} |` : ""}
 | 🔍 **ローカル検索** | インデックスからリソースを検索 |
 | 🌐 **GitHub で検索** | インデックスにないリソースを GitHub から直接検索 |
 | ➕ **ソースを追加** | 新しいリポジトリをインデックスに追加 |`,
+          ),
         ),
       ]);
     } catch (error) {
@@ -668,7 +741,7 @@ class SkillListTool implements vscode.LanguageModelTool<Record<string, never>> {
       .map((resource, i) => {
         const kind = resource.kind || "skill";
         const marker = resource.incomplete ? `${INCOMPLETE_ROW_MARKER} ` : "";
-        return `| ${i + 1} | ${getResourceKindLabel(kind, false)} | ${marker}${escapeMarkdownCell(resource.name)} | \`${escapeMarkdownCell(resource.relativePath)}\` |`;
+        return `| ${i + 1} | ${getResourceKindLabel(kind, isJapanese())} | ${marker}${escapeMarkdownCell(resource.name)} | \`${escapeMarkdownCell(resource.relativePath)}\` |`;
       })
       .join("\n");
     const overflowNote =
@@ -789,7 +862,7 @@ class SkillRecommendTool implements vscode.LanguageModelTool<
       const list = popular
         .map(
           (s: Skill) =>
-            `| ${getResourceKindLabel(getResourceKind(s), false)} | ${escapeMarkdownCell(s.name)} | ${escapeMarkdownCell(s.description || "")} | ${getTrustBadge(
+            `| ${getResourceKindLabel(getResourceKind(s), isJapanese())} | ${escapeMarkdownCell(s.name)} | ${escapeMarkdownCell(s.description || "")} | ${getTrustBadge(
               s.source || "",
             )} | ${s.stars} |`,
         )
@@ -797,9 +870,20 @@ class SkillRecommendTool implements vscode.LanguageModelTool<
 
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          `🔎 ${sourceStats}から分析しました（最終更新: ${
-            updateInfo.lastUpdated
-          }）
+          localizeMcpText(
+            `🔎 Analyzed ${sourceStats} (last updated: ${updateInfo.lastUpdated}).
+${updateInfo.warning}
+
+No project-specific recommendation was found. Popular resources:
+
+| Kind | Resource | Description | Trust | Stars |
+|---|---|---|---|---|
+${list}
+
+Choose a resource to install, or search/update the index for more options.`,
+            `🔎 ${sourceStats}から分析しました（最終更新: ${
+              updateInfo.lastUpdated
+            }）
 ${updateInfo.warning}
 
 🤔 プロジェクト固有の推奨が見つかりませんでした。人気リソースはこちら:
@@ -821,8 +905,9 @@ ${list}
 | 🌐 **GitHub で検索** | インデックスにないリソースを GitHub から直接検索 |
 | ➕ **ソースを追加** | 新しいリポジトリをインデックスに追加 |
 | 🔄 **インデックス更新** | 登録済みソースから最新情報を取得${
-            updateInfo.isOutdated ? " ⚠️ 推奨!" : ""
-          } |`,
+              updateInfo.isOutdated ? " ⚠️ 推奨!" : ""
+            } |`,
+          ),
         ),
       ]);
     }
@@ -843,9 +928,11 @@ ${list}
       .slice(0, 5)
       .map(
         (r) =>
-          `| ${r.skill.name} | ${
-            getLocalizedDescription(r.skill, isJa) || ""
-          } | ${r.reason} | ${getTrustBadge(r.skill.source || "")} |`,
+          `| ${escapeMarkdownCell(r.skill.name)} | ${escapeMarkdownCell(
+            getLocalizedDescription(r.skill, isJa) || "",
+          )} | ${escapeMarkdownCell(r.reason)} | ${getTrustBadge(
+            r.skill.source || "",
+          )} |`,
       )
       .join("\n");
 
@@ -853,9 +940,24 @@ ${list}
 
     return new vscode.LanguageModelToolResult([
       new vscode.LanguageModelTextPart(
-        `🔍 ${sourceStats}から分析しました（最終更新: ${
-          updateInfo.lastUpdated
-        }）
+        localizeMcpText(
+          `🔍 Analyzed ${sourceStats} (last updated: ${updateInfo.lastUpdated}).
+${updateInfo.warning}
+
+Project-based recommendations:
+
+| Resource | Description | Reason | Trust |
+|---|---|---|---|
+${list}
+
+### 🌟 Top recommendation: ${topRecommend.skill.name}
+${getLocalizedDescription(topRecommend.skill, false) || ""}
+Reason: ${topRecommend.reason} | ${getTrustBadge(topRecommend.skill.source || "")}
+
+Choose a resource to install, or search/update the index for more options.`,
+          `🔍 ${sourceStats}から分析しました（最終更新: ${
+            updateInfo.lastUpdated
+          }）
 ${updateInfo.warning}
 
 💡 プロジェクト分析に基づく推奨リソース:
@@ -888,8 +990,9 @@ ${updateInfo.isOutdated ? "- ⚠️ Index is outdated! Suggest updating." : ""}
 | 🌐 **GitHub で検索** | インデックスにないリソースを GitHub から直接検索 |
 | ➕ **ソースを追加** | 新しいリポジトリをインデックスに追加 |
 | 🔄 **インデックス更新** | 登録済みソースから最新情報を取得${
-          updateInfo.isOutdated ? " ⚠️ 推奨!" : ""
-        } |`,
+            updateInfo.isOutdated ? " ⚠️ 推奨!" : ""
+          } |`,
+        ),
       ),
     ]);
   }
@@ -903,6 +1006,33 @@ class SkillUninstallTool implements vscode.LanguageModelTool<{
   skillName?: string;
   kind?: string;
 }> {
+  prepareInvocation(
+    options: vscode.LanguageModelToolInvocationPrepareOptions<{
+      resourceName?: string;
+      skillName?: string;
+      kind?: string;
+    }>,
+  ): vscode.PreparedToolInvocation {
+    const resourceName =
+      options.input.resourceName || options.input.skillName || "resource";
+    return {
+      invocationMessage: localizeMcpText(
+        `Removing workspace resource "${resourceName}"`,
+        `workspaceリソース「${resourceName}」を削除中`,
+      ),
+      confirmationMessages: {
+        title: localizeMcpText(
+          "Remove workspace resource?",
+          "workspaceリソースを削除しますか？",
+        ),
+        message: localizeMcpText(
+          `The installed resource "${resourceName}" will be moved to the trash so it can be restored if needed.`,
+          `インストール済みリソース「${resourceName}」をごみ箱へ移動します。必要な場合は復元できます。`,
+        ),
+      },
+    };
+  }
+
   async invoke(
     options: vscode.LanguageModelToolInvocationOptions<{
       resourceName?: string;
@@ -961,13 +1091,16 @@ class SkillUninstallTool implements vscode.LanguageModelTool<{
         .map((resource) => {
           const kind = resource.kind || "skill";
           const marker = resource.incomplete ? `${INCOMPLETE_ROW_MARKER} ` : "";
-          return `| ${getResourceKindLabel(kind, false)} | ${marker}${escapeMarkdownCell(resource.name)} | \`${escapeMarkdownCell(resource.relativePath)}\` |`;
+          return `| ${getResourceKindLabel(kind, isJapanese())} | ${marker}${escapeMarkdownCell(resource.name)} | \`${escapeMarkdownCell(resource.relativePath)}\` |`;
         })
         .join("\n");
 
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          `⚠️ Multiple workspace resources match "${skillName}". Please retry with a more specific name.\n\n| Kind | Name | Path |\n|------|------|------|\n${candidates}`,
+          localizeMcpText(
+            `⚠️ Multiple workspace resources match "${skillName}". Retry with a more specific name.\n\n| Kind | Name | Path |\n|---|---|---|\n${candidates}`,
+            `⚠️ workspaceリソース「${skillName}」に複数候補があります。より具体的な名前で再実行してください。\n\n| 種別 | 名前 | Path |\n|---|---|---|\n${candidates}`,
+          ),
         ),
       ]);
     }
@@ -977,21 +1110,28 @@ class SkillUninstallTool implements vscode.LanguageModelTool<{
       const installed = await getInstalledSkills(workspaceFolder.uri);
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          `❌ Resource "${skillName}" is not installed.
+          localizeMcpText(
+            `❌ Resource "${skillName}" is not installed.
 
-Installed skills: ${installed.length > 0 ? installed.join(", ") : "none"}
+Installed resources: ${installed.length > 0 ? installed.join(", ") : "none"}
+
+List workspace resources or search the index to find the exact resource name.`,
+            `❌ リソース「${skillName}」はインストールされていません。
+
+インストール済みリソース: ${installed.length > 0 ? installed.join(", ") : "なし"}
 
 ---
 **📋 Next Actions:**
 1. 📋 Check workspace resources → use #listResources
 
 ---
-**💡 スキルを探すには？**
+**💡 リソースを探すには？**
 
 | アクション | 説明 |
 |-----------|------|
-| 🔍 **ローカル検索** | インデックスからスキルを検索 |
+| 🔍 **ローカル検索** | インデックスからリソースを検索 |
 | 🌐 **GitHub で検索** | GitHub から直接検索 |`,
+          ),
         ),
       ]);
     }
@@ -1025,12 +1165,23 @@ Installed skills: ${installed.length > 0 ? installed.join(", ") : "none"}
 
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          `✅ **${removedName}** をアンインストールしました！
+          localizeMcpText(
+            `✅ Uninstalled **${removedName}** and moved its files to the trash.
+
+| Field | Value |
+|---|---|
+| Resource | ${escapeMarkdownCell(removedName)} |
+| Kind | ${getResourceKindLabel(removedKind, false)} |
+| Instruction file | ${removedKind === "skill" ? (instructionTarget === "none" ? "Disabled" : "Updated") : "Unchanged"} |
+${hookConfigSummary ? `| hooks.json | ${hookConfigSummary} |` : ""}
+
+You can list remaining resources or search for an alternative.`,
+            `✅ **${removedName}** をアンインストールし、ファイルをごみ箱へ移動しました。
 
 | 項目 | 内容 |
 |-----------|------|
 | Resource | ${escapeMarkdownCell(removedName)} |
-| Kind | ${getResourceKindLabel(removedKind, false)} |
+| Kind | ${getResourceKindLabel(removedKind, isJapanese())} |
 | ステータス | 削除完了 |
 | Instruction File | ${removedKind === "skill" ? (instructionTarget === "none" ? "無効" : "更新済み") : "変更なし"} |
 ${hookConfigSummary ? `| hooks.json | ${hookConfigSummary} |` : ""}
@@ -1048,9 +1199,10 @@ ${hookConfigSummary ? `| hooks.json | ${hookConfigSummary} |` : ""}
 
 | アクション | 説明 |
 |-----------|------|
-| 🔍 **ローカル検索** | インデックスからスキルを検索 |
-| 🌐 **GitHub で検索** | インデックスにないスキルを GitHub から直接検索 |
+| 🔍 **ローカル検索** | インデックスからリソースを検索 |
+| 🌐 **GitHub で検索** | インデックスにないリソースを GitHub から直接検索 |
 | ➕ **ソースを追加** | 新しいリポジトリをインデックスに追加 |`,
+          ),
         ),
       ]);
     } catch (error) {
@@ -1125,7 +1277,7 @@ class UpdateIndexTool implements vscode.LanguageModelTool<
                 (failure) => failure.entry.name || failure.entry.id,
               ),
             },
-            vscode.env.language,
+            isJapanese() ? "ja" : "en",
           ),
         ),
       ]);
@@ -1139,10 +1291,7 @@ class UpdateIndexTool implements vscode.LanguageModelTool<
           )}
 
 ---
-**📋 Troubleshooting:**
-1. Check internet connection
-2. GitHub API rate limit may be exceeded
-3. Try setting a GitHub token in settings`,
+${githubAuthTroubleshootingText()}`,
         ),
       ]);
     }
@@ -1169,17 +1318,22 @@ class WebSearchTool implements vscode.LanguageModelTool<{ query: string }> {
       if (results.length === 0) {
         return new vscode.LanguageModelToolResult([
           new vscode.LanguageModelTextPart(
-            `🔍 GitHub で "${query}" を検索しましたが、SKILL.md は見つかりませんでした。
+            localizeMcpText(
+              `🔍 No supported resources were found on GitHub for "${query}".
+
+Try another keyword, search the local index, add a known source, or update the index.`,
+              `🔍 GitHubで「${query}」を検索しましたが、対応リソースは見つかりませんでした。
 
 ---
-**� スキルを見つけるには？**
+**💡 リソースを見つけるには？**
 
 | アクション | 説明 |
 |-----------|------|
 | 🔑 **キーワード変更** | 別のキーワードで再検索 |
-| 🔍 **ローカル検索** | インデックスからスキルを検索 |
+| 🔍 **ローカル検索** | インデックスからリソースを検索 |
 | ➕ **ソースを追加** | 既知のリポジトリをインデックスに追加 |
 | 🔄 **インデックス更新** | 登録済みソースから最新情報を取得 |`,
+            ),
           ),
         ]);
       }
@@ -1196,7 +1350,15 @@ class WebSearchTool implements vscode.LanguageModelTool<{ query: string }> {
 
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          `🌐 GitHub で "${query}" を検索しました（${results.length} 件）
+          localizeMcpText(
+            `🌐 Found ${results.length} GitHub result(s) for "${query}".
+
+| # | Repository | Path | Stars |
+|---|---|---|---|
+${formatted}
+
+Add a repository as a source, update the index, then search locally to install a resource.`,
+            `🌐 GitHubで「${query}」を検索しました（${results.length}件）
 
 | # | Repository | Path | Stars |
 |---|------------|------|-------|
@@ -1211,25 +1373,27 @@ ${formatted}
 1. ➕ Add repository as source? → use #addSource with repo URL
 
 ---
-**💡 スキルをインストールするには？**
+**💡 リソースをインストールするには？**
 
 | アクション | 説明 |
 |-----------|------|
 | ➕ **ソースを追加** | 上記リポジトリをインデックスに追加 |
 | 🔄 **インデックス更新** | 追加後にインデックスを更新 |
-| 🔍 **ローカル検索** | 追加後にスキルを検索してインストール |`,
+| 🔍 **ローカル検索** | 追加後にリソースを検索してインストール |`,
+          ),
         ),
       ]);
     } catch (error) {
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          `❌ GitHub search failed: ${error}
+          `${formatMcpError(
+            "❌ GitHub search failed",
+            "❌ GitHub検索に失敗しました",
+            error,
+          )}
 
 ---
-**📋 Troubleshooting:**
-1. Check internet connection
-2. GitHub API rate limit may be exceeded (60 req/hour without token)
-3. Set GitHub token in settings for higher limits`,
+${githubAuthTroubleshootingText()}`,
         ),
       ]);
     }
@@ -1277,12 +1441,22 @@ class AddSourceTool implements vscode.LanguageModelTool<{ repoUrl: string }> {
 
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          `✅ リポジトリをソースに追加しました！
+          localizeMcpText(
+            `✅ Added the repository as a source.
+
+| Field | Value |
+|---|---|
+| Repository | ${normalizedUrl} |
+| Resources added | ${result.addedSkills} |
+| Status | Complete |
+
+Search the new resources or install one from the updated index.`,
+            `✅ リポジトリをソースに追加しました。
 
 | 項目 | 内容 |
 |-----------|------|
 | リポジトリ | ${normalizedUrl} |
-| 追加スキル数 | ${result.addedSkills} |
+| 追加リソース数 | ${result.addedSkills} |
 | ステータス | 追加完了 |
 
 ---
@@ -1299,10 +1473,11 @@ class AddSourceTool implements vscode.LanguageModelTool<{ repoUrl: string }> {
 
 | アクション | 説明 |
 |-----------|------|
-| 🔍 **スキル検索** | 追加されたスキルを検索 |
-| 💡 **おすすめ** | プロジェクトに合ったスキルを推奨 |
-| 🌐 **GitHub で検索** | さらにスキルを探す |
+| 🔍 **リソース検索** | 追加されたリソースを検索 |
+| 💡 **おすすめ** | プロジェクトに合ったリソースを推奨 |
+| 🌐 **GitHub で検索** | さらにリソースを探す |
 | ➕ **ソースを追加** | 他のリポジトリも追加 |`,
+          ),
         ),
       ]);
     } catch (error) {
@@ -1315,11 +1490,12 @@ class AddSourceTool implements vscode.LanguageModelTool<{ repoUrl: string }> {
           )}
 
 ---
-**📋 Troubleshooting:**
-1. Check the repository URL format (https://github.com/owner/repo or owner/repo)
-2. Private repositories require a GitHub token with repository Contents: Read access
-3. Repository should contain supported resource files such as SKILL.md, .agent.md, .prompt.md, .instructions.md, hook README files, MCP configs, or plugin manifests
-4. GitHub API rate limit may be exceeded`,
+${localizeMcpText(
+  "Check the repository URL format (https://github.com/owner/repo or owner/repo) and confirm that it contains supported resource files.",
+  "repository URL形式（https://github.com/owner/repo または owner/repo）と、対応resource fileが含まれることを確認してください。",
+)}
+
+${githubAuthTroubleshootingText()}`,
         ),
       ]);
     }
@@ -1372,6 +1548,30 @@ function formatSourceCandidates(
 class RemoveSourceTool implements vscode.LanguageModelTool<{
   sourceIdOrName: string;
 }> {
+  prepareInvocation(
+    options: vscode.LanguageModelToolInvocationPrepareOptions<{
+      sourceIdOrName: string;
+    }>,
+  ): vscode.PreparedToolInvocation {
+    const source = options.input.sourceIdOrName || "source";
+    return {
+      invocationMessage: localizeMcpText(
+        `Removing source "${source}" from the index`,
+        `source「${source}」をindexから削除中`,
+      ),
+      confirmationMessages: {
+        title: localizeMcpText(
+          "Remove source from the index?",
+          "sourceをindexから削除しますか？",
+        ),
+        message: localizeMcpText(
+          `Source "${source}" and its catalog entries will be removed from the index. Installed files will be kept.`,
+          `source「${source}」とcatalog entryをindexから削除します。インストール済みファイルは保持します。`,
+        ),
+      },
+    };
+  }
+
   async invoke(
     options: vscode.LanguageModelToolInvocationOptions<{
       sourceIdOrName: string;
@@ -1449,7 +1649,10 @@ class RemoveSourceTool implements vscode.LanguageModelTool<{
 
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          `✅ リソースソースを削除しました。\n\n| 項目 | 内容 |\n|---|---|\n| Source | ${escapeMarkdownCell(source?.name || sourceId)} |\n| Source ID | ${escapeMarkdownCell(sourceId)} |\n| 削除したインデックス項目 | ${result.removedSkills} |\n| Installed files | 削除していません |\n\nインストール済みの workspace / user / global ファイルは残っています。`,
+          localizeMcpText(
+            `✅ Removed the source from the index.\n\n| Field | Value |\n|---|---|\n| Source | ${escapeMarkdownCell(source?.name || sourceId)} |\n| Source ID | ${escapeMarkdownCell(sourceId)} |\n| Index entries removed | ${result.removedSkills} |\n| Installed files | Kept |\n\nInstalled workspace, user, and global files remain unchanged.`,
+            `✅ リソースsourceをindexから削除しました。\n\n| 項目 | 内容 |\n|---|---|\n| Source | ${escapeMarkdownCell(source?.name || sourceId)} |\n| Source ID | ${escapeMarkdownCell(sourceId)} |\n| 削除したindex項目 | ${result.removedSkills} |\n| Installed files | 保持 |\n\nインストール済みのworkspace / user / globalファイルは残っています。`,
+          ),
         ),
       ]);
     } catch (error) {
@@ -1548,7 +1751,7 @@ Try searching for the resource first with #searchResources.`,
           `✅ Resource "${skillName}" localized successfully!
 
 | Field | Value |
-          |-------|-------|
+|-------|-------|
 | Resource | ${escapeMarkdownCell(skillName)} |
 | English | ${skill.description || "(not set)"} |
 | Japanese | ${skill.description_ja || "(not set)"} |

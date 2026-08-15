@@ -448,7 +448,7 @@ test("MCP install targets avoid generic filename collisions", () => {
   );
   assert.match(
     skillInstallerSource,
-    /`\$\{sanitizeSkillName\(skill\.source\)\}-\$\{normalizedFileName\}`/,
+    /`\$\{sanitizeResourceInstallName\(skill\.source\)\}-\$\{normalizedFileName\}`/,
   );
 });
 
@@ -1049,6 +1049,7 @@ test("github token setting is password-style and excluded from standard reset", 
     config["resourceNinja.githubToken"]?.editPresentation,
     "password",
   );
+  assert.strictEqual(config["resourceNinja.githubToken"]?.scope, "machine");
   assert.match(
     nls["config.githubToken.markdownDescription"],
     /Personal Access Token/,
@@ -1066,6 +1067,8 @@ test("github token setting is password-style and excluded from standard reset", 
     nlsJa["config.githubToken.markdownDescription"],
     /リポジトリ scope は不要/,
   );
+  assert.match(extensionSource, /deleteConfiguredGitHubTokens\(\)/);
+  assert.match(extensionSource, /deleteStoredGitHubToken\(\)/);
 });
 
 test("plugin resources remain browsable from raw plugin paths", () => {
@@ -1728,6 +1731,73 @@ test("every delete path that can remove a plugin folder unregisters it, and a re
   }
 });
 
+test("workspace uninstall paths move resources to the trash", () => {
+  for (const functionName of ["uninstallSkill", "uninstallSkillByPath"]) {
+    const functionStart = skillInstallerSource.indexOf(
+      `export async function ${functionName}(`,
+    );
+    assert.ok(functionStart >= 0, `Missing ${functionName}`);
+    const nextExport = skillInstallerSource.indexOf(
+      "export async function ",
+      functionStart + 1,
+    );
+    const functionSource = skillInstallerSource.slice(
+      functionStart,
+      nextExport >= 0 ? nextExport : undefined,
+    );
+    assert.match(
+      functionSource,
+      /workspace\.fs\.delete\(skillPath, \{[\s\S]*?recursive: true,[\s\S]*?useTrash: true/,
+      `${functionName} must preserve a trash-based recovery path`,
+    );
+  }
+});
+
+test("resource actions avoid silent no-ops and false success", () => {
+  assert.match(extensionSource, /item\.source\?\.url/);
+  assert.match(extensionSource, /messages\.resourceUrlUnavailable\(\)/);
+  assert.match(extensionSource, /workspace\.fs\.stat\(item\.resourceUri\)/);
+  assert.match(extensionSource, /path\.dirname\(item\.resourceUri\.fsPath\)/);
+  assert.match(
+    extensionSource,
+    /installResult && !installWasClean\(installResult\)/,
+  );
+  assert.match(
+    extensionSource,
+    /executeCommand<boolean>\(\s*"resourceNinja\.reinstallAll"/,
+  );
+});
+
+test("destructive resource actions explain recovery and require confirmation", () => {
+  assert.match(extensionSource, /Move to Trash/);
+  assert.match(extensionSource, /ごみ箱へ移動/);
+  assert.match(extensionSource, /Remove only the managed marker block/);
+  assert.match(
+    mcpToolsSource,
+    /class SkillUninstallTool[\s\S]*?prepareInvocation\(/,
+  );
+  assert.match(
+    mcpToolsSource,
+    /class RemoveSourceTool[\s\S]*?prepareInvocation\(/,
+  );
+  assert.match(mcpToolsSource, /confirmationMessages/);
+});
+
+test("Language Model tool output stays locale-safe and structurally valid", () => {
+  assert.doesNotMatch(mcpToolsSource, /�/);
+  assert.doesNotMatch(
+    mcpToolsSource,
+    /new vscode\.LanguageModelTextPart\(\s*`(?!\$\{(?:formatMcpError|localizeMcpText))[^`]*[ぁ-んァ-ヶ一-龥]/s,
+    "User-visible Japanese LM output must be selected through localizeMcpText",
+  );
+  assert.match(mcpToolsSource, /The index is out of date/);
+  assert.match(mcpToolsSource, /インデックスが古くなっています/);
+  assert.match(mcpToolsSource, /repositories, \$\{skillCount\} resources/);
+  assert.match(mcpToolsSource, /リポジトリ、\$\{skillCount\}リソース/);
+  assert.doesNotMatch(mcpToolsSource, /^ {4,}\|[-:]+\|/m);
+  assert.match(mcpToolsSource, /installErrorCount > 0/);
+});
+
 test("source freshness metadata is preserved and stamped only on successful scans", () => {
   assert.match(skillIndexSource, /lastIndexedAt\?: string/);
   assert.match(sharedManifestSource, /\| "lastIndexedAt"/);
@@ -1781,6 +1851,12 @@ test("chat participant and MCP short responses use runtime localization helpers"
   assert.match(chatParticipantSource, /getLocalizedDescription/);
   assert.match(mcpToolsSource, /export function localizeMcpText/);
   assert.match(mcpToolsSource, /export function formatMcpError/);
+  assert.match(mcpToolsSource, /export function githubAuthTroubleshootingText/);
+  assert.match(
+    mcpToolsSource,
+    /SecretStorage → GH_TOKEN → GITHUB_TOKEN → gh CLI/,
+  );
+  assert.match(mcpToolsSource, /Contents: Read/);
   assert.match(
     mcpToolsSource,
     /error instanceof Error \? error\.message : String\(error\)/,

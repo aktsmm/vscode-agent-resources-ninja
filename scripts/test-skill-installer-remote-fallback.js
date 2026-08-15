@@ -165,6 +165,12 @@ function loadInstaller(writes, options = {}) {
     path.join(srcDir, "resourceKinds.ts"),
     {},
   );
+  const capturedLogs = options.logs || [];
+  const logger = {
+    info: (...args) => capturedLogs.push(["info", ...args]),
+    warn: (...args) => capturedLogs.push(["warn", ...args]),
+    error: (...args) => capturedLogs.push(["error", ...args]),
+  };
 
   // githubFetch は実装をそのまま使い、復旧経路が共通 helper を通ることを検証する。
   const githubResponse = requireTypeScriptModule(
@@ -175,9 +181,10 @@ function loadInstaller(writes, options = {}) {
     path.join(srcDir, "githubFetch.ts"),
     {
       "./githubResponse": githubResponse,
-      "./logger": { logger: { info() {}, warn() {}, error() {} } },
+      "./logger": { logger },
       "./githubAuth": {
-        resolveGitHubTokenAfterFailure: async () => undefined,
+        resolveGitHubTokenAfterFailure:
+          options.resolveGitHubTokenAfterFailure || (async () => undefined),
       },
     },
   );
@@ -193,6 +200,7 @@ function loadInstaller(writes, options = {}) {
       {},
     ),
     "./githubFetch": githubFetch,
+    "./githubResponse": githubResponse,
     "./skillIndex": {
       loadSkillIndex: async () => options.skillIndex || { sources: [] },
       getSourceBranch: async (source) => source.branch || "main",
@@ -213,7 +221,7 @@ function loadInstaller(writes, options = {}) {
     },
     "./githubAuth": {
       getGitHubToken: async () => options.token,
-      hasStoredGitHubToken: async () => false,
+      hasClearableGitHubToken: async () => false,
       resolveGitHubToken: async () => ({
         token: options.token,
         source: options.token ? "secret" : "none",
@@ -262,11 +270,7 @@ function loadInstaller(writes, options = {}) {
       getVsCodeUserDataPath: () => "/tmp/vscode-user-data",
     },
     "./logger": {
-      logger: {
-        info: () => undefined,
-        warn: () => undefined,
-        error: () => undefined,
-      },
+      logger,
     },
     "./bugReport": {
       openBugReport: async (...args) => {
@@ -424,6 +428,7 @@ function loadWindowsInstaller(recorded, options = {}) {
       {},
     ),
     "./githubFetch": githubFetch,
+    "./githubResponse": githubResponse,
     "./githubDirectoryTraversal": requireTypeScriptModule(
       path.join(srcDir, "githubDirectoryTraversal.ts"),
       {},
@@ -444,7 +449,7 @@ function loadWindowsInstaller(recorded, options = {}) {
     "./i18n": { isJapanese: () => false, messages: {} },
     "./githubAuth": {
       getGitHubToken: async () => undefined,
-      hasStoredGitHubToken: async () => false,
+      hasClearableGitHubToken: async () => false,
       resolveGitHubToken: async () => ({ token: undefined, source: "none" }),
     },
     "./hookConfigManager": {
@@ -923,6 +928,128 @@ async function run() {
         ),
         "non-skill install should retain sidecar metadata",
       );
+      passed++;
+    }
+
+    // --- Test 9b: stale token は gh CLI の保存済み credential へ切り替わる ---
+    {
+      writes.clear();
+      const staleToken = "stale-token-must-not-leak";
+      const recoveredToken = "recovered-token-must-not-leak";
+      const privatePayload =
+        "---\nname: private-recovered-agent\n---\nRecovered private content\n";
+      const requested = [];
+      const fallbackCalls = [];
+      const logs = [];
+      const errorMessages = [];
+      const warningMessages = [];
+      const bugReports = [];
+      const { installSkill } = loadInstaller(writes, {
+        skillIndex: privateSourceIndex,
+        token: staleToken,
+        logs,
+        errorMessages,
+        warningMessages,
+        bugReports,
+        resolveGitHubTokenAfterFailure: async (failedToken, triedTokens) => {
+          fallbackCalls.push({
+            failedToken,
+            triedTokens: Array.from(triedTokens),
+          });
+          return { token: recoveredToken, source: "gh-cli" };
+        },
+      });
+      global.fetch = async (url, options = {}) => {
+        const headers = options.headers || {};
+        requested.push({ url, headers });
+
+        if (requested.length === 1) {
+          return new Response("not found", { status: 404 });
+        }
+        if (requested.length === 2) {
+          return new Response(JSON.stringify({ message: "Bad credentials" }), {
+            status: 401,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (requested.length === 3) {
+          return new Response(JSON.stringify({ message: "Requires auth" }), {
+            status: 401,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response(privatePayload, { status: 200 });
+      };
+
+      const result = await installSkill(
+        {
+          name: "private-recovered-agent",
+          kind: "agent",
+          source: "private-source",
+          path: "agents/private-recovered.agent.md",
+          categories: [],
+          description: "Private recovered agent",
+        },
+        makeUri("/tmp/workspace"),
+        {},
+      );
+
+      assert.deepStrictEqual(Object.keys(result), ["destinationUri"]);
+      assert.strictEqual(
+        result.destinationUri.fsPath,
+        "/tmp/resource/private-recovered.agent.md",
+      );
+      assert.strictEqual(
+        writes.get("/tmp/resource/private-recovered.agent.md"),
+        privatePayload,
+        "Install must persist the payload returned only for the recovered credential",
+      );
+      assert.ok(
+        [...writes.keys()].some(
+          (writtenPath) =>
+            writtenPath.replace(/\\/g, "/") ===
+            "/tmp/resource/private-recovered.agent.md.resource-meta.json",
+        ),
+        "Recovered install should retain sidecar metadata",
+      );
+      assert.strictEqual(requested.length, 4);
+      assert.strictEqual(requested[0].headers.Authorization, undefined);
+      assert.strictEqual(
+        requested[1].headers.Authorization,
+        `token ${staleToken}`,
+      );
+      assert.strictEqual(requested[2].headers.Authorization, undefined);
+      assert.strictEqual(
+        requested[3].headers.Authorization,
+        `token ${recoveredToken}`,
+      );
+      assert.strictEqual(
+        requested[1].url,
+        "https://api.github.com/repos/owner/private-repo/contents/agents/private-recovered.agent.md?ref=main",
+      );
+      assert.strictEqual(requested[3].url, requested[1].url);
+      assert.deepStrictEqual(fallbackCalls, [
+        { failedToken: staleToken, triedTokens: [staleToken] },
+      ]);
+
+      const credentialSwitchLogs = logs.filter((entry) =>
+        entry.some(
+          (value) =>
+            typeof value === "string" &&
+            value.includes("next credential source: gh-cli"),
+        ),
+      );
+      assert.strictEqual(
+        credentialSwitchLogs.length,
+        1,
+        "The real githubFetch credential-switch path must execute",
+      );
+      const serializedLogs = JSON.stringify(logs);
+      assert.strictEqual(serializedLogs.includes(staleToken), false);
+      assert.strictEqual(serializedLogs.includes(recoveredToken), false);
+      assert.deepStrictEqual(errorMessages, []);
+      assert.deepStrictEqual(warningMessages, []);
+      assert.deepStrictEqual(bugReports, []);
       passed++;
     }
 
@@ -1902,7 +2029,7 @@ async function run() {
   }
 
   console.log(
-    `PASS: test-skill-installer-remote-fallback.js (${passed}/26 cases)`,
+    `PASS: test-skill-installer-remote-fallback.js (${passed}/27 cases)`,
   );
 }
 

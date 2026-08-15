@@ -26,8 +26,10 @@ import {
   initializeGitHubAuth,
   migrateConfiguredGitHubTokenToSecretStorage,
   syncConfiguredGitHubToken,
+  deleteConfiguredGitHubTokens,
   deleteStoredGitHubToken,
   clearStoredGitHubTokenWithFeedback,
+  checkGitHubAuth,
   getGitHubToken,
   resolveGitHubToken,
 } from "./githubAuth";
@@ -36,6 +38,7 @@ import {
   InstallSkillResult,
   InstallTargetScope,
   getResourceTargetUri,
+  isSkillNotFoundHandledError,
   SkillMeta,
   uninstallSkill,
   uninstallSkillByPath,
@@ -80,7 +83,7 @@ import {
   removeSource,
   searchGitHub,
   showAuthHelp,
-  openGitHubAuthSettings,
+  getGitHubAuthSourceLabel,
   fetchGitHubTextContent,
 } from "./indexUpdater";
 import { messages, isJapanese } from "./i18n";
@@ -399,7 +402,7 @@ function formatSourceUpdateFailureReason(error: unknown): string {
     case "rate-limit":
       return error.resetAt
         ? `${messages.githubRateLimitReason()} (${messages.githubRateLimitResetAt(
-            formatSourceIndexResetAt(error.resetAt, vscode.env.language),
+            formatSourceIndexResetAt(error.resetAt, isJapanese() ? "ja" : "en"),
           )})`
         : messages.githubRateLimitReason();
     case "sso-required":
@@ -976,6 +979,14 @@ export async function activate(
       logger.info(
         "Migrated legacy resourceNinja.githubToken setting into SecretStorage.",
       );
+      const removeLegacySetting = messages.actionRemoveLegacyGitHubToken();
+      const action = await vscode.window.showInformationMessage(
+        messages.githubTokenMigrated(),
+        removeLegacySetting,
+      );
+      if (action === removeLegacySetting) {
+        await deleteConfiguredGitHubTokens();
+      }
     }
   } catch (migrationError) {
     logger.warn(
@@ -1447,7 +1458,7 @@ export async function activate(
         if (action === detailAction) {
           logger.show(true);
         } else if (action === authAction) {
-          await openGitHubAuthSettings();
+          await showAuthHelp(firstFailure.error);
         }
       }
 
@@ -1472,6 +1483,11 @@ export async function activate(
     suppressRecoveryPrompt?: boolean;
   };
 
+  type ReinstallAllCommandOptions = {
+    skipConfirmation?: boolean;
+    suppressSuccessMessage?: boolean;
+  };
+
   function normalizeReinstallCommandOptions(
     value?: boolean | ReinstallCommandOptions,
   ): ReinstallCommandOptions {
@@ -1494,6 +1510,15 @@ export async function activate(
       failedNames,
       isJapanese(),
     );
+  }
+
+  function getReinstallTrashRecoverySuffix(failedCount: number): string {
+    if (failedCount === 0) {
+      return "";
+    }
+    return isJapanese()
+      ? " 削除後に失敗したresourceはごみ箱から復元できます。"
+      : " Resources that failed after removal can be restored from the trash.";
   }
 
   function getBatchCancellationSuffix(
@@ -1712,6 +1737,16 @@ export async function activate(
               "Failed to update resource output on setting change:",
               err,
             );
+            const showDetails = messages.actionShowDetails();
+            const action = await vscode.window.showWarningMessage(
+              isJapanese()
+                ? "設定変更後のresource output更新に失敗しました。以前のmanaged blockは削除済みの可能性があります。"
+                : "Failed to update resource output after the settings change. The previous managed block may already have been removed.",
+              showDetails,
+            );
+            if (action === showDetails) {
+              logger.show(true);
+            }
           }
         }, 500);
       }
@@ -1872,7 +1907,7 @@ export async function activate(
       const wsFolder = vscode.workspace.workspaceFolders?.[0];
       if (!wsFolder) {
         vscode.window.showErrorMessage(messages.noWorkspace());
-        return;
+        return false;
       }
 
       const confirm = await vscode.window.showWarningMessage(
@@ -2169,8 +2204,8 @@ export async function activate(
         if (!suppressSuccessMessage) {
           vscode.window.showErrorMessage(
             isJapanese()
-              ? `再インストール失敗: ${String(error)}`
-              : `Reinstall failed: ${String(error)}`,
+              ? `再インストール失敗: ${String(error)}。元のファイルはごみ箱から復元できます。`
+              : `Reinstall failed: ${String(error)}. You can restore the original files from the trash.`,
           );
         }
         return false;
@@ -5043,6 +5078,12 @@ export async function activate(
         },
       );
 
+      if (installResult && !installWasClean(installResult)) {
+        workspaceProvider.refresh();
+        browseProvider.refresh();
+        return false;
+      }
+
       markRecentlyInstalled(skill);
 
       statusBarItem.text = `$(check) ${skill.name} ${
@@ -5119,14 +5160,18 @@ export async function activate(
       }
       return true;
     } catch (error) {
+      if (isSkillNotFoundHandledError(error)) {
+        return false;
+      }
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       if (
+        shouldOfferGitHubAuth(error) ||
         errorMessage.includes("rate limit") ||
         errorMessage.includes("403") ||
         errorMessage.includes("authentication")
       ) {
-        await showAuthHelp();
+        await showAuthHelp(error);
       } else {
         vscode.window.showErrorMessage(messages.installFailed(errorMessage));
       }
@@ -5346,6 +5391,17 @@ export async function activate(
       }
 
       if (skillName) {
+        const removeAction = isJapanese() ? "ごみ箱へ移動" : "Move to Trash";
+        const confirmed = await vscode.window.showWarningMessage(
+          isJapanese()
+            ? `「${skillName}」をごみ箱へ移動します。必要な場合は復元できます。`
+            : `Move "${skillName}" to the trash? You can restore it if needed.`,
+          { modal: true },
+          removeAction,
+        );
+        if (confirmed !== removeAction) {
+          return;
+        }
         try {
           let uninstallResult:
             | Awaited<ReturnType<typeof uninstallSkillByPath>>
@@ -5418,7 +5474,7 @@ export async function activate(
   // Command: Reinstall all skills
   const reinstallAllCmd = vscode.commands.registerCommand(
     "resourceNinja.reinstallAll",
-    async () => {
+    async (options: ReinstallAllCommandOptions = {}) => {
       const wsFolder = vscode.workspace.workspaceFolders?.[0];
       if (!wsFolder) {
         vscode.window.showErrorMessage(messages.noWorkspace());
@@ -5428,19 +5484,21 @@ export async function activate(
       const installedMeta = await getInstalledSkillsWithMeta(wsFolder.uri);
       if (installedMeta.length === 0) {
         vscode.window.showInformationMessage(messages.noInstalledSkills());
-        return;
+        return false;
       }
 
-      const confirm = await vscode.window.showWarningMessage(
-        isJapanese()
-          ? `${installedMeta.length} 個のスキルを再インストールしますか？`
-          : `Reinstall ${installedMeta.length} skills?`,
-        { modal: true },
-        isJapanese() ? "再インストール" : "Reinstall",
-      );
+      if (!options.skipConfirmation) {
+        const confirm = await vscode.window.showWarningMessage(
+          isJapanese()
+            ? `${installedMeta.length} 個のスキルを再インストールしますか？`
+            : `Reinstall ${installedMeta.length} skills?`,
+          { modal: true },
+          isJapanese() ? "再インストール" : "Reinstall",
+        );
 
-      if (!confirm) {
-        return;
+        if (!confirm) {
+          return false;
+        }
       }
 
       let index = await loadSkillIndex(context);
@@ -5516,9 +5574,19 @@ export async function activate(
               try {
                 // 既存を削除して再インストール
                 await uninstallSkill(meta.name, wsFolder.uri);
-                await installSkill(skill, wsFolder.uri, context, {
-                  suppressRecoveryPrompt: true,
-                });
+                const installResult = await installSkill(
+                  skill,
+                  wsFolder.uri,
+                  context,
+                  {
+                    suppressRecoveryPrompt: true,
+                  },
+                );
+                if (!installWasClean(installResult)) {
+                  failedSkills.push(meta.name);
+                  completed++;
+                  continue;
+                }
                 markRecentlyInstalled(skill);
                 success++;
               } catch (error) {
@@ -5549,15 +5617,17 @@ export async function activate(
             success,
             total,
             failedSkills,
-          )}${cancelled ? getBatchCancellationSuffix(completed, installedMeta.length) : ""}`,
+          )}${cancelled ? getBatchCancellationSuffix(completed, installedMeta.length) : ""}${getReinstallTrashRecoverySuffix(failedSkills.length)}`,
         );
-      } else {
+        return false;
+      } else if (!options.suppressSuccessMessage) {
         vscode.window.showInformationMessage(
           isJapanese()
             ? `${success} 個のスキルを再インストールしました`
             : `Reinstalled ${success} skills`,
         );
       }
+      return true;
     },
   );
 
@@ -5839,8 +5909,8 @@ export async function activate(
         if (!suppressSuccessMessage) {
           vscode.window.showErrorMessage(
             isJapanese()
-              ? `再インストール失敗: ${String(error)}`
-              : `Reinstall failed: ${String(error)}`,
+              ? `再インストール失敗: ${String(error)}。元のファイルはごみ箱から復元できます。`
+              : `Reinstall failed: ${String(error)}. You can restore the original files from the trash.`,
           );
         }
         return false;
@@ -5940,7 +6010,7 @@ export async function activate(
             success,
             total,
             failedResources,
-          )}${cancelled ? getBatchCancellationSuffix(completed, remoteInstalledItems.length) : ""}`,
+          )}${cancelled ? getBatchCancellationSuffix(completed, remoteInstalledItems.length) : ""}${getReinstallTrashRecoverySuffix(failedResources.length)}`,
         );
       } else {
         vscode.window.showInformationMessage(
@@ -5983,8 +6053,8 @@ export async function activate(
 
       const confirm2 = await vscode.window.showWarningMessage(
         isJapanese()
-          ? `本当に全てのスキルを削除しますか？この操作は元に戻せません。`
-          : `Are you sure you want to delete ALL skills? This cannot be undone.`,
+          ? `全てのスキルをごみ箱へ移動します。必要な場合は復元できます。`
+          : `Move ALL skills to the trash? They can be restored if needed.`,
         { modal: true },
         isJapanese() ? "全て削除" : "Delete All",
       );
@@ -6427,10 +6497,10 @@ export async function activate(
 
       const confirm = await vscode.window.showWarningMessage(
         isJapanese()
-          ? `${selected.length} 個のスキルを削除しますか？`
-          : `Delete ${selected.length} skills?`,
+          ? `${selected.length}個のスキルをごみ箱へ移動します。必要な場合は復元できます。`
+          : `Move ${selected.length} skills to the trash? They can be restored if needed.`,
         { modal: true },
-        isJapanese() ? "削除" : "Delete",
+        isJapanese() ? "ごみ箱へ移動" : "Move to Trash",
       );
 
       if (!confirm) {
@@ -6484,7 +6554,7 @@ export async function activate(
             success,
             total,
             failedSkills,
-          )}${cancelled ? getBatchCancellationSuffix(completed, selected.length) : ""}`,
+          )}${cancelled ? getBatchCancellationSuffix(completed, selected.length) : ""}${getReinstallTrashRecoverySuffix(failedSkills.length)}`,
         );
       } else {
         vscode.window.showInformationMessage(
@@ -6571,9 +6641,19 @@ export async function activate(
             if (skill) {
               try {
                 await uninstallSkill(item.meta.name, wsFolder.uri);
-                await installSkill(skill, wsFolder.uri, context, {
-                  suppressRecoveryPrompt: true,
-                });
+                const installResult = await installSkill(
+                  skill,
+                  wsFolder.uri,
+                  context,
+                  {
+                    suppressRecoveryPrompt: true,
+                  },
+                );
+                if (!installWasClean(installResult)) {
+                  failedSkills.push(item.meta.name);
+                  completed++;
+                  continue;
+                }
                 markRecentlyInstalled(skill);
                 success++;
               } catch (error) {
@@ -6737,7 +6817,7 @@ export async function activate(
           if (action === detailAction) {
             logger.show(true);
           } else if (action === authAction) {
-            await openGitHubAuthSettings();
+            await showAuthHelp(firstFailure.error);
           }
         }
         browseProvider.refresh();
@@ -6746,10 +6826,11 @@ export async function activate(
         const errorMessage =
           error instanceof Error ? error.message : String(error);
         if (
+          shouldOfferGitHubAuth(error) ||
           errorMessage.includes("rate limit") ||
           errorMessage.includes("authentication")
         ) {
-          await showAuthHelp();
+          await showAuthHelp(error);
         } else {
           vscode.window.showErrorMessage(messages.updateFailed(errorMessage));
         }
@@ -6851,10 +6932,11 @@ export async function activate(
         const errorMessage =
           error instanceof Error ? error.message : String(error);
         if (
+          shouldOfferGitHubAuth(error) ||
           errorMessage.includes("rate limit") ||
           errorMessage.includes("authentication")
         ) {
-          await showAuthHelp();
+          await showAuthHelp(error);
         } else {
           vscode.window.showErrorMessage(messages.updateFailed(errorMessage));
         }
@@ -6972,10 +7054,11 @@ export async function activate(
         const errorMessage =
           error instanceof Error ? error.message : String(error);
         if (
+          shouldOfferGitHubAuth(error) ||
           errorMessage.includes("rate limit") ||
           errorMessage.includes("authentication")
         ) {
-          await showAuthHelp();
+          await showAuthHelp(error);
         } else if (errorMessage.includes("No resources found")) {
           vscode.window.showWarningMessage(messages.noSkillsInRepo());
         } else {
@@ -7270,7 +7353,7 @@ export async function activate(
             errorMessage.includes("rate limit") ||
             errorMessage.includes("authentication")
           ) {
-            await showAuthHelp();
+            await showAuthHelp(error);
           } else {
             vscode.window.showErrorMessage(messages.searchFailed(errorMessage));
           }
@@ -8164,11 +8247,27 @@ export async function activate(
         return;
       }
 
-      await removeSkillSectionFromFile(instructionUri);
-      vscode.window.showInformationMessage(
+      const removeAction = isJapanese() ? "削除する" : "Remove Block";
+      const confirmed = await vscode.window.showWarningMessage(
         isJapanese()
-          ? `管理マーカーブロックを削除しました: ${instructionUri.fsPath}`
-          : `Removed managed marker block from ${instructionUri.fsPath}`,
+          ? `管理マーカーブロックだけを削除します。その他の内容は保持します。\n${instructionUri.fsPath}`
+          : `Remove only the managed marker block and preserve all other content?\n${instructionUri.fsPath}`,
+        { modal: true },
+        removeAction,
+      );
+      if (confirmed !== removeAction) {
+        return;
+      }
+
+      const removed = await removeSkillSectionFromFile(instructionUri);
+      await vscode.window.showInformationMessage(
+        removed
+          ? isJapanese()
+            ? `管理マーカーブロックを削除しました: ${instructionUri.fsPath}`
+            : `Removed managed marker block from ${instructionUri.fsPath}`
+          : isJapanese()
+            ? `管理マーカーブロックは見つかりませんでした: ${instructionUri.fsPath}`
+            : `No managed marker block was found in ${instructionUri.fsPath}`,
       );
     },
   );
@@ -8446,11 +8545,7 @@ ${fileUri.fsPath}`,
 
       // トークンもリセット（旧設定 + SecretStorage）
       if (selected.value === "all") {
-        await config.update(
-          "githubToken",
-          undefined,
-          vscode.ConfigurationTarget.Global,
-        );
+        await deleteConfiguredGitHubTokens();
         await deleteStoredGitHubToken();
       }
 
@@ -8469,23 +8564,40 @@ ${fileUri.fsPath}`,
     clearStoredGitHubTokenWithFeedback,
   );
 
+  const showGitHubAuthStatusCmd = vscode.commands.registerCommand(
+    "resourceNinja.showGitHubAuthStatus",
+    async () => {
+      const auth = await checkGitHubAuth();
+      if (auth.authenticated) {
+        await vscode.window.showInformationMessage(
+          messages.githubAuthStatusAuthenticated(
+            getGitHubAuthSourceLabel(auth.method),
+          ),
+        );
+        return;
+      }
+      await showAuthHelp(auth.error);
+    },
+  );
+
   // Command: Copy URL (for Browse view)
   const copyUrlCmd = vscode.commands.registerCommand(
     "resourceNinja.copyUrl",
     async (item: SkillTreeItem) => {
-      if (!item.skill) {
-        return;
-      }
-
-      const currentIndex = await loadSkillIndex(context);
-      const url = await getSkillGitHubUrlAsync(
-        item.skill,
-        currentIndex.sources,
-      );
+      const url = item.skill
+        ? await getSkillGitHubUrlAsync(
+            item.skill,
+            (await loadSkillIndex(context)).sources,
+          )
+        : item.source?.url;
       if (url) {
         await vscode.env.clipboard.writeText(url);
-        vscode.window.showInformationMessage(
+        await vscode.window.showInformationMessage(
           messages.copiedToClipboardWithValue(url),
+        );
+      } else {
+        await vscode.window.showWarningMessage(
+          messages.resourceUrlUnavailable(),
         );
       }
     },
@@ -8510,12 +8622,22 @@ ${fileUri.fsPath}`,
     "resourceNinja.openInTerminal",
     async (item: SkillTreeItem) => {
       if (item.resourceUri) {
-        const folderPath = item.resourceUri.fsPath;
-        const terminal = vscode.window.createTerminal({
-          name: `Skill: ${item.label}`,
-          cwd: folderPath,
-        });
-        terminal.show();
+        try {
+          const stat = await vscode.workspace.fs.stat(item.resourceUri);
+          const cwd =
+            stat.type === vscode.FileType.Directory
+              ? item.resourceUri
+              : vscode.Uri.file(path.dirname(item.resourceUri.fsPath));
+          const terminal = vscode.window.createTerminal({
+            name: `Resource: ${item.label}`,
+            cwd,
+          });
+          terminal.show();
+        } catch {
+          await vscode.window.showWarningMessage(
+            messages.resourceTerminalUnavailable(),
+          );
+        }
       }
     },
   );
@@ -8629,6 +8751,7 @@ ${fileUri.fsPath}`,
     openSettingsCmd,
     resetSettingsCmd,
     clearGitHubTokenCmd,
+    showGitHubAuthStatusCmd,
     copyUrlCmd,
     copyPathCmd,
     openInTerminalCmd,
@@ -8775,13 +8898,16 @@ async function checkVersionAndRefreshMetadata(
     if (shouldUpdate) {
       try {
         // 全スキルを再インストール
-        await vscode.commands.executeCommand("resourceNinja.reinstallAll");
-        vscode.window.showInformationMessage(
-          isJapanese()
-            ? `🥷 v${EXTENSION_VERSION} にアップデートしました。${remoteSkillCount} 個のスキルを最新版に更新しました。`
-            : `🥷 Updated to v${EXTENSION_VERSION}. Updated ${remoteSkillCount} skill(s) to latest version.`,
+        const reinstalled = await vscode.commands.executeCommand<boolean>(
+          "resourceNinja.reinstallAll",
+          {
+            skipConfirmation: true,
+            suppressSuccessMessage: true,
+          },
         );
-        return; // 再インストールしたのでメタデータ更新はスキップ
+        if (reinstalled) {
+          return; // 再インストールしたのでメタデータ更新はスキップ
+        }
       } catch (error) {
         logger.error("[Resource Ninja] Failed to reinstall skills:", error);
       }

@@ -159,8 +159,10 @@ async function main() {
       },
       "./githubAuth": {
         getGitHubToken: async () => undefined,
+        hasClearableGitHubToken: async () => false,
       },
       "./githubFetch": githubFetchModule,
+      "./githubResponse": githubResponseModule,
       "./githubDirectoryTraversal": traversalModule,
       "./customizationPaths": {
         DEFAULT_GLOBAL_HOME_DIRECTORY: "~/.copilot",

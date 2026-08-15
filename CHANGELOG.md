@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.47] - 2026-08-16
+
+### Fixed
+
+- 🧩 **Reliable Resource Actions and Localized Agent UX** - Workspace uninstall and reinstall now move existing resources to the trash, explain how to restore them after a failed reinstall, and require accurate confirmation in both GUI and destructive Language Model tool paths. Single, batch, upgrade-triggered, and Language Model installs no longer report success for partial downloads or cancelled/failed reinstalls. Source-row **Copy URL** now copies the source repository instead of silently doing nothing; **Open in Terminal** opens a file-backed resource's parent directory; orphan marker cleanup confirms the exact file and reports a no-op honestly; and failed output regeneration now offers diagnostics. Language Model tool search, recommendation, install, uninstall, GitHub search, and source-management results now follow `resourceNinja.language`, use resource-oriented terminology, preserve valid Markdown tables, and contain no replacement-character corruption / Workspaceのuninstall/reinstallは既存resourceをごみ箱へ移動し、reinstall失敗時の復元方法を案内するとともに、GUIと破壊的Language Model toolの両方で正確な確認を要求するようにしました。単体、batch、upgrade起点、Language Model経由のinstallは、partial downloadやcancel/失敗したreinstallを成功と表示しません。Source行の **URLをコピー** はsilent no-opではなくsource repository URLをコピーし、**ターミナルで開く** はfile-backed resourceの親directoryを開きます。orphan marker cleanupは対象fileを確認し、変更が無い場合も正しく通知します。output再生成失敗からdiagnosticsも開けます。Language Model toolの検索、推奨、install、uninstall、GitHub検索、source管理結果は`resourceNinja.language`に従い、resource-orientedな用語、正しいMarkdown table、文字化けのない表示へ統一しました。
+
+- 🧭 **Recoverable GitHub Authentication UX** - GitHub authentication failures now show the active credential source and source-specific recovery steps instead of a generic token prompt. Rate-limit reset time, organization SSO, classic-PAT policy, private-repository access, and branch/access failures keep their distinct reasons across install, source update, add-source, search, and Language Model tool surfaces. `GH_TOKEN` now takes precedence over `GITHUB_TOKEN`, matching GitHub CLI. The GitHub Token setting is machine-scoped so a PAT cannot be newly saved in workspace settings; the clear/reset flows remove SecretStorage plus legacy global/workspace/folder setting values while leaving environment variables and GitHub CLI credentials untouched. A new **Show GitHub Authentication Status** command reports the active source without exposing token values, and a handled install recovery no longer produces a second generic error toast / GitHub認証失敗時にgenericなtoken案内ではなく、現在のcredential sourceとsource別の復旧手順を表示するようにしました。rate-limitの再試行時刻、organization SSO、classic PAT policy、private repository access、branch/access failureの原因を、install、source update、source追加、search、Language Model toolの各surfaceで区別します。`GH_TOKEN`を`GITHUB_TOKEN`より優先し、GitHub CLIと一致させました。GitHub Token設定はMachine scopeとし、PATを新たにworkspace settingsへ保存できないようにしました。Clear/ResetはSecretStorageに加えてlegacyのGlobal/Workspace/WorkspaceFolder設定値を削除しますが、環境変数とGitHub CLI credentialは変更しません。新しい **GitHub 認証状態を表示** commandはtoken値を出さずactive sourceを表示し、installの専用復旧dialog後にgeneric error toastが重複表示される問題も解消します。
+
+- 🔑 **GitHub CLI Stored-Credential Fallback** - When a configured or environment-provided GitHub token is stale, GitHub API authentication failures can now continue with the credential stored by GitHub CLI for `github.com`. The `gh auth token --hostname github.com` child process receives a copy of the environment with only `GH_TOKEN` and `GITHUB_TOKEN` removed, so those variables no longer shadow the stored credential; the parent environment remains unchanged, and a GitHub Enterprise token cannot be selected for requests to GitHub.com / 設定または環境変数の GitHub token が期限切れの場合、GitHub API の認証失敗後に GitHub CLI が `github.com` 用に保存している credential へ切り替えられるようにしました。`gh auth token --hostname github.com` の子プロセスには `GH_TOKEN` と `GITHUB_TOKEN` だけを除いた環境のコピーを渡すため、これらの変数が保存済み credential を隠さず、親プロセスの環境は変更しません。また、GitHub.com への request で GitHub Enterprise token が選ばれることも防ぎます。
+
 ## [0.2.46] - 2026-08-15
 
 ### Fixed
@@ -766,7 +776,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The original Agent Skills Ninja release history is intentionally not carried into this changelog. Migration context is tracked in [MIGRATION_NOTES.md](MIGRATION_NOTES.md). / 旧 Agent Skills Ninja のリリース履歴はこの CHANGELOG には引き継ぎません。移行経緯は [MIGRATION_NOTES.md](MIGRATION_NOTES.md) に記録します。
 
-[Unreleased]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.46...HEAD
+[Unreleased]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.47...HEAD
+[0.2.47]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.46...v0.2.47
 [0.2.46]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.45...v0.2.46
 [0.2.45]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.44...v0.2.45
 [0.2.44]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.43...v0.2.44

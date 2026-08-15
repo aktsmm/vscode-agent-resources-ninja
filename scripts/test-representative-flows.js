@@ -7,7 +7,24 @@
 
 const assert = require("assert");
 const fs = require("fs");
+const Module = require("module");
 const path = require("path");
+const ts = require("typescript");
+
+function requireTypeScriptModule(filePath) {
+  const transpiled = ts.transpileModule(fs.readFileSync(filePath, "utf8"), {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+    },
+    fileName: filePath,
+  });
+  const loadedModule = new Module(filePath, module);
+  loadedModule.filename = filePath;
+  loadedModule.paths = Module._nodeModulePaths(path.dirname(filePath));
+  loadedModule._compile(transpiled.outputText, filePath);
+  return loadedModule.exports;
+}
 
 const repoRoot = path.resolve(__dirname, "..");
 const indexPath = path.join(repoRoot, "resources", "skill-index.json");
@@ -24,22 +41,15 @@ const skillInstallerSource = fs.readFileSync(
   "utf8",
 );
 const index = JSON.parse(fs.readFileSync(indexPath, "utf8"));
-
-function sanitizeResourceName(name) {
-  return name
-    .toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/[()[\]{}]/g, "")
-    .replace(/[^a-z0-9\-_]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-}
+const { sanitizeResourceInstallName } = requireTypeScriptModule(
+  path.join(repoRoot, "src", "resourceKinds.ts"),
+);
 
 function getInstallFileName(resource, fileName) {
   if (resource.kind !== "mcp" || !resource.source) return fileName;
   const normalized = fileName.replace(/^\./, "");
   if (normalized.toLowerCase() !== "mcp.json") return fileName;
-  return `${sanitizeResourceName(resource.source)}-${normalized}`;
+  return `${sanitizeResourceInstallName(resource.source)}-${normalized}`;
 }
 
 function workspaceTargetPath(workspaceRoot, resource) {
@@ -48,7 +58,7 @@ function workspaceTargetPath(workspaceRoot, resource) {
     resource,
     path.posix.basename(normalizedRemotePath),
   );
-  const resourceFolderName = sanitizeResourceName(
+  const resourceFolderName = sanitizeResourceInstallName(
     resource.kind === "skill"
       ? resource.name
       : path.posix.basename(path.posix.dirname(normalizedRemotePath)) ||
@@ -60,7 +70,7 @@ function workspaceTargetPath(workspaceRoot, resource) {
       return path.posix.join(
         workspaceRoot,
         ".github/skills",
-        sanitizeResourceName(resource.name),
+        sanitizeResourceInstallName(resource.name),
       );
     case "agent":
       return path.posix.join(workspaceRoot, ".github/agents", fileName);
@@ -81,7 +91,9 @@ function workspaceTargetPath(workspaceRoot, resource) {
       return path.posix.join(
         workspaceRoot,
         ".github/plugins",
-        sanitizeResourceName(resource.name || resource.pluginRoot || "plugin"),
+        sanitizeResourceInstallName(
+          resource.name || resource.pluginRoot || "plugin",
+        ),
       );
     case "cursor-rule":
       return path.posix.join(workspaceRoot, ".cursor/rules", fileName);
@@ -225,7 +237,7 @@ test("uninstall removes exactly the install location for each kind", () => {
     if (kind === "skill") {
       const relative = path.posix.join(
         ".github/skills",
-        sanitizeResourceName(resource.name),
+        sanitizeResourceInstallName(resource.name),
         "SKILL.md",
       );
       assert.strictEqual(
@@ -233,7 +245,7 @@ test("uninstall removes exactly the install location for each kind", () => {
         installPath,
       );
     } else if (kind === "hook") {
-      const folderName = sanitizeResourceName(
+      const folderName = sanitizeResourceInstallName(
         path.posix.basename(
           path.posix.dirname(resource.path.replace(/\\/g, "/")),
         ) || resource.name,
@@ -250,7 +262,7 @@ test("uninstall removes exactly the install location for each kind", () => {
         expectedHookFolder,
       );
     } else if (kind === "plugin") {
-      const folderName = sanitizeResourceName(
+      const folderName = sanitizeResourceInstallName(
         resource.name || resource.pluginRoot || "plugin",
       );
       const relative = path.posix.join(".github/plugins", folderName);

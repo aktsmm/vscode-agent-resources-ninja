@@ -46,12 +46,19 @@ export {
   markAgentPluginsIssueDescription,
   isAgentPluginsManifest,
 } from "./resourceKinds";
-import { messages } from "./i18n";
+import { isJapanese, messages } from "./i18n";
 import {
   normalizeRegistryIndexRow,
   normalizeSearchIndexRow,
 } from "./indexDataNormalization";
-import { getGitHubToken, hasStoredGitHubToken } from "./githubAuth";
+import {
+  getGitHubAuthRecoveryPolicy,
+  getGitHubToken,
+  hasClearableGitHubToken,
+  isGhCliAvailable,
+  resolveGitHubToken,
+  GitHubTokenSource,
+} from "./githubAuth";
 export { checkGitHubAuth } from "./githubAuth";
 import { LICENSE_EXTRACTION, INDEX_LIMITS } from "./constants";
 import { logger } from "./logger";
@@ -62,6 +69,7 @@ import {
 } from "./githubFetch";
 import {
   createGitHubResponseError,
+  GitHubResponseError,
   isGitHubResponseError,
 } from "./githubResponse";
 import {
@@ -488,9 +496,11 @@ async function githubFetch(url: string, token?: string): Promise<Response> {
 function createPrivateRepositoryAccessError(
   owner: string,
   repo: string,
-): Error {
-  return new Error(
-    `Repository not found or private: ${owner}/${repo}. Configure a GitHub token with repository Contents: Read access, or authenticate with gh CLI for this repository.`,
+): GitHubResponseError {
+  return new GitHubResponseError(
+    "auth-required",
+    404,
+    messages.privateRepositoryAccessFailed(owner, repo),
   );
 }
 
@@ -804,12 +814,21 @@ export async function scanRepositoryForSkills(
       if (!token) {
         throw createPrivateRepositoryAccessError(owner, repoName);
       }
-      throw new Error(
-        `Repository or branch not found: ${owner}/${repoName} (branch: ${branch})`,
+      throw new GitHubResponseError(
+        "auth-required",
+        404,
+        messages.repositoryOrBranchAccessFailed(owner, repoName, branch),
       );
     }
     if (response.status === 401 || (response.status === 404 && !token)) {
       throw createPrivateRepositoryAccessError(owner, repoName);
+    }
+    if (response.status === 404 && token) {
+      throw new GitHubResponseError(
+        "auth-required",
+        404,
+        messages.repositoryOrBranchAccessFailed(owner, repoName, branch),
+      );
     }
     const bodyText = await response
       .clone()
@@ -2762,18 +2781,86 @@ export async function openGitHubAuthSettings(): Promise<void> {
   );
 }
 
-export async function showAuthHelp(): Promise<void> {
+export function getGitHubAuthSourceLabel(source: GitHubTokenSource): string {
+  switch (source) {
+    case "secret":
+      return messages.githubAuthSourceSecret();
+    case "env":
+      return messages.githubAuthSourceEnv();
+    case "gh-cli":
+      return messages.githubAuthSourceGhCli();
+    case "config":
+      return messages.githubAuthSourceConfig();
+    default:
+      return messages.githubAuthSourceNone();
+  }
+}
+
+function getGitHubAuthGuidance(source: GitHubTokenSource): string {
+  switch (source) {
+    case "secret":
+      return messages.githubAuthGuidanceSecret();
+    case "env":
+      return messages.githubAuthGuidanceEnv();
+    case "gh-cli":
+      return messages.githubAuthGuidanceGhCli();
+    case "config":
+      return messages.githubAuthGuidanceConfig();
+    default:
+      return messages.githubAuthGuidanceNone();
+  }
+}
+
+function getGitHubAuthFailureReason(error?: unknown): string {
+  if (!isGitHubResponseError(error)) {
+    return messages.authRequired();
+  }
+  switch (error.kind) {
+    case "rate-limit":
+      return error.resetAt
+        ? `${messages.githubRateLimitReason()} (${messages.githubRateLimitResetAt(
+            new Date(error.resetAt).toLocaleString(isJapanese() ? "ja" : "en"),
+          )})`
+        : messages.githubRateLimitReason();
+    case "sso-required":
+      return messages.githubSsoRequiredReason();
+    case "classic-pat-forbidden":
+      return messages.githubClassicPatForbiddenReason();
+    case "auth-required":
+      return messages.githubAuthRequiredReason();
+    default:
+      return error.message;
+  }
+}
+
+export async function showAuthHelp(error?: unknown): Promise<void> {
+  const { source } = await resolveGitHubToken();
   const openSettingsLabel = messages.openSettings();
   const authWithGhCliLabel = messages.authWithGhCli();
+  const installGhCliLabel = messages.actionInstallGhCli();
   const clearStoredTokenLabel = messages.actionClearStoredGitHubToken();
+  const openGitHubTokenPageLabel = messages.actionOpenGitHubTokenPage();
   const cancelLabel = messages.actionCancel();
-  const hasStoredToken = await hasStoredGitHubToken();
+  const hasClearableToken = await hasClearableGitHubToken();
+  const ghCliAvailable = source === "env" ? false : await isGhCliAvailable();
+  const policy = getGitHubAuthRecoveryPolicy({
+    source,
+    hasClearableToken,
+    ghCliAvailable,
+    failureKind: isGitHubResponseError(error) ? error.kind : undefined,
+  });
 
   const action = await vscode.window.showErrorMessage(
-    messages.authRequired(),
-    openSettingsLabel,
-    authWithGhCliLabel,
-    ...(hasStoredToken ? [clearStoredTokenLabel] : []),
+    messages.githubAuthHelp(
+      getGitHubAuthFailureReason(error),
+      getGitHubAuthSourceLabel(source),
+      getGitHubAuthGuidance(source),
+    ),
+    ...(policy.showSettings ? [openSettingsLabel] : []),
+    ...(policy.showGhLogin ? [authWithGhCliLabel] : []),
+    ...(policy.showGhInstall ? [installGhCliLabel] : []),
+    ...(policy.showClearToken ? [clearStoredTokenLabel] : []),
+    ...(policy.showGitHubTokenPage ? [openGitHubTokenPageLabel] : []),
     cancelLabel,
   );
 
@@ -2783,7 +2870,13 @@ export async function showAuthHelp(): Promise<void> {
     const terminal = vscode.window.createTerminal("GitHub Auth");
     terminal.show();
     terminal.sendText("gh auth login");
+  } else if (action === installGhCliLabel) {
+    await vscode.env.openExternal(vscode.Uri.parse("https://cli.github.com/"));
   } else if (action === clearStoredTokenLabel) {
     await vscode.commands.executeCommand("resourceNinja.clearGitHubToken");
+  } else if (action === openGitHubTokenPageLabel) {
+    await vscode.env.openExternal(
+      vscode.Uri.parse("https://github.com/settings/tokens"),
+    );
   }
 }

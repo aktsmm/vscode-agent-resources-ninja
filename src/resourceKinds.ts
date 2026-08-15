@@ -915,6 +915,16 @@ export function qualifyPluginOwnedResourceName(
   return pluginName ? `${pluginName}-hooks` : name;
 }
 
+export function sanitizeResourceInstallName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[()[\]{}]/g, "")
+    .replace(/[^a-z0-9\-_]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
 export function getPluginOwnedHookInstallFileName(input: {
   kind?: ResourceKind;
   source?: string;
@@ -938,12 +948,8 @@ export function getPluginOwnedHookInstallFileName(input: {
           .split("/")
           .pop();
   const sanitizedPluginName = pluginName
-    ?.toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/[()[\]{}]/g, "")
-    .replace(/[^a-z0-9\-_]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
+    ? sanitizeResourceInstallName(pluginName)
+    : undefined;
   return sanitizedPluginName
     ? `${sanitizedPluginName}-${input.fileName}`
     : input.fileName;

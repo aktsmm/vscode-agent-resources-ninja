@@ -211,11 +211,11 @@ test("clear GitHub token recovery is localized and registered", () => {
   assert.strictEqual(clearCommand.title, "%command.clearGitHubToken%");
   assert.strictEqual(
     nls["command.clearGitHubToken"],
-    "Clear GitHub Token (SecretStorage only)",
+    "Clear Stored and Configured GitHub Token",
   );
   assert.strictEqual(
     nlsJa["command.clearGitHubToken"],
-    "GitHub トークンをクリア（SecretStorage のみ）",
+    "保存・設定済み GitHub トークンをクリア",
   );
   assert.match(
     extensionSource,
@@ -227,24 +227,47 @@ test("clear GitHub token recovery is localized and registered", () => {
   );
 });
 
+test("GitHub authentication status command is localized and registered", () => {
+  const statusCommand = packageJson.contributes.commands.find(
+    (command) => command.command === "resourceNinja.showGitHubAuthStatus",
+  );
+  assert.strictEqual(statusCommand.title, "%command.showGitHubAuthStatus%");
+  assert.strictEqual(
+    nls["command.showGitHubAuthStatus"],
+    "Show GitHub Authentication Status",
+  );
+  assert.strictEqual(
+    nlsJa["command.showGitHubAuthStatus"],
+    "GitHub 認証状態を表示",
+  );
+  assert.match(extensionSource, /checkGitHubAuth\(\)/);
+  assert.match(extensionSource, /githubAuthStatusAuthenticated/);
+  assert.match(extensionSource, /showAuthHelp\(auth\.error\)/);
+  assert.match(extensionSource, /githubTokenMigrated/);
+  assert.match(extensionSource, /deleteConfiguredGitHubTokens\(\)/);
+});
+
 test("clear-token recovery is conditional and README guidance stays in parity", () => {
   for (const source of [indexUpdaterSource, skillInstallerSource]) {
-    assert.match(source, /hasStoredGitHubToken\(\)/);
+    assert.match(source, /hasClearableGitHubToken\(\)/);
     assert.match(source, /resourceNinja\.clearGitHubToken/);
   }
   for (const expected of [
-    "Clear GitHub Token (SecretStorage only)",
-    "does not modify `GITHUB_TOKEN` / `GH_TOKEN`",
-    "legacy `resourceNinja.githubToken` setting",
-    "re-migration",
+    "Clear Stored and Configured GitHub Token",
+    "Older token entries already present in `.vscode/settings.json`",
+    "does not modify `GH_TOKEN` / `GITHUB_TOKEN`",
+    "`GH_TOKEN` takes precedence over `GITHUB_TOKEN`",
   ]) {
-    assert.ok(readme.includes(expected), `README.md should include: ${expected}`);
+    assert.ok(
+      readme.includes(expected),
+      `README.md should include: ${expected}`,
+    );
   }
   for (const expected of [
-    "GitHub トークンをクリア（SecretStorage のみ）",
-    "`GITHUB_TOKEN` / `GH_TOKEN`",
-    "legacy の `resourceNinja.githubToken` setting",
-    "再移行",
+    "保存・設定済み GitHub トークンをクリア",
+    "旧`.vscode/settings.json`",
+    "`GH_TOKEN` / `GITHUB_TOKEN`",
+    "`GH_TOKEN`は`GITHUB_TOKEN`より優先",
   ]) {
     assert.ok(
       readmeJa.includes(expected),
@@ -254,7 +277,10 @@ test("clear-token recovery is conditional and README guidance stays in parity", 
 });
 
 test("diagnostics report credential source without token values", () => {
-  assert.match(extensionSource, /GitHub Credential Source: \$\{githubAuth\.source\}/);
+  assert.match(
+    extensionSource,
+    /GitHub Credential Source: \$\{githubAuth\.source\}/,
+  );
   assert.match(
     skillInstallerSource,
     /GitHub Credential Source: \$\{githubAuth\.source\}/,
@@ -285,6 +311,21 @@ test("GitHub token guidance follows least privilege", () => {
   );
   assert.match(readme, /leave scopes unchecked/);
   assert.match(readmeJa, /scope は未選択/);
+});
+
+test("GitHub authentication help explains source-aware recovery", () => {
+  assert.match(i18nSource, /GH_TOKEN/);
+  assert.match(i18nSource, /GITHUB_TOKEN/);
+  assert.match(i18nSource, /gh CLI/);
+  assert.match(indexUpdaterSource, /resolveGitHubToken\(\)/);
+  assert.match(indexUpdaterSource, /source === "env"/);
+  assert.match(indexUpdaterSource, /githubSsoRequiredReason/);
+  assert.match(indexUpdaterSource, /githubClassicPatForbiddenReason/);
+  assert.match(indexUpdaterSource, /actionOpenGitHubTokenPage/);
+  assert.match(indexUpdaterSource, /https:\/\/github\.com\/settings\/tokens/);
+  assert.match(indexUpdaterSource, /isGhCliAvailable\(\)/);
+  assert.match(indexUpdaterSource, /actionInstallGhCli/);
+  assert.match(indexUpdaterSource, /https:\/\/cli\.github\.com\//);
 });
 
 test("preview terminology is resource-oriented in both locales", () => {

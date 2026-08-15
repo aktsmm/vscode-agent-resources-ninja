@@ -2,7 +2,7 @@
   "name": "agent-resources-ninja",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.46",
+  "version": "0.2.47",
   "publisher": "yamapan",
   "license": "CC-BY-NC-SA-4.0",
   "icon": "resources/icon.png",
@@ -797,6 +797,12 @@
         "icon": "$(key)"
       },
       {
+        "command": "resourceNinja.showGitHubAuthStatus",
+        "title": "%command.showGitHubAuthStatus%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(verified)"
+      },
+      {
         "command": "resourceNinja.installBundle",
         "title": "%command.installBundle%",
         "category": "Agent Resources Ninja",
@@ -1587,6 +1593,7 @@
           "type": "string",
           "default": "",
           "editPresentation": "password",
+          "scope": "machine",
           "order": 30,
           "markdownDescription": "%config.githubToken.markdownDescription%"
         },

@@ -1,5 +1,10 @@
 import * as vscode from "vscode";
 import { messages } from "./i18n";
+import {
+  createGitHubResponseError,
+  GitHubFailureKind,
+  GitHubResponseError,
+} from "./githubResponse";
 
 export type GitHubTokenSource = "secret" | "config" | "env" | "gh-cli" | "none";
 
@@ -37,6 +42,48 @@ function getConfiguredGitHubToken(): string | undefined {
   const config = vscode.workspace.getConfiguration("resourceNinja");
   const token = config.get<string>("githubToken")?.trim();
   return token && token.length > 0 ? token : undefined;
+}
+
+function hasConfiguredGitHubToken(): boolean {
+  const inspected = vscode.workspace
+    .getConfiguration("resourceNinja")
+    .inspect<string>("githubToken");
+  return Boolean(
+    inspected &&
+    [
+      inspected.globalValue,
+      inspected.workspaceValue,
+      inspected.workspaceFolderValue,
+    ].some((value) => typeof value === "string" && value.trim().length > 0),
+  );
+}
+
+export async function deleteConfiguredGitHubTokens(): Promise<boolean> {
+  const config = vscode.workspace.getConfiguration("resourceNinja");
+  const inspected = config.inspect<string>("githubToken");
+  if (!inspected) {
+    return false;
+  }
+
+  const configuredTargets: Array<
+    [string | undefined, vscode.ConfigurationTarget]
+  > = [
+    [inspected.globalValue, vscode.ConfigurationTarget.Global],
+    [inspected.workspaceValue, vscode.ConfigurationTarget.Workspace],
+    [
+      inspected.workspaceFolderValue,
+      vscode.ConfigurationTarget.WorkspaceFolder,
+    ],
+  ];
+  let deleted = false;
+  for (const [value, target] of configuredTargets) {
+    if (value === undefined) {
+      continue;
+    }
+    await config.update("githubToken", undefined, target);
+    deleted = true;
+  }
+  return deleted;
 }
 
 /** SecretStorage に保存されたトークンを取得 */
@@ -105,9 +152,12 @@ export async function deleteStoredGitHubToken(): Promise<boolean> {
 
 export async function clearStoredGitHubTokenWithFeedback(): Promise<void> {
   try {
-    const deleted = await deleteStoredGitHubToken();
+    const configuredDeleted = await deleteConfiguredGitHubTokens();
+    const storedDeleted = await deleteStoredGitHubToken();
     await vscode.window.showInformationMessage(
-      deleted ? messages.githubTokenCleared() : messages.githubTokenNotStored(),
+      configuredDeleted || storedDeleted
+        ? messages.githubTokenCleared()
+        : messages.githubTokenNotStored(),
     );
   } catch {
     await vscode.window.showErrorMessage(messages.githubTokenClearFailed());
@@ -118,14 +168,35 @@ export async function hasStoredGitHubToken(): Promise<boolean> {
   return Boolean(await getSecretToken());
 }
 
+export async function hasClearableGitHubToken(): Promise<boolean> {
+  return Boolean((await getSecretToken()) || hasConfiguredGitHubToken());
+}
+
+const GH_CLI_SHADOWING_TOKEN_ENV_KEYS = new Set(["GH_TOKEN", "GITHUB_TOKEN"]);
+
+/** gh の保存済み github.com 資格情報を参照するための子プロセス環境を作る。 */
+export function createGhCliChildEnv(
+  sourceEnv: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(sourceEnv).filter(
+      ([key]) => !GH_CLI_SHADOWING_TOKEN_ENV_KEYS.has(key.toUpperCase()),
+    ),
+  );
+}
+
 /** gh CLI からトークンを取得 */
 export async function getGhCliToken(): Promise<string | null> {
   try {
     const { exec } = await import("child_process");
     const token = await new Promise<string>((resolve, reject) => {
       exec(
-        "gh auth token",
-        { timeout: GITHUB_AUTH_TIMEOUT_MS, windowsHide: true },
+        "gh auth token --hostname github.com",
+        {
+          timeout: GITHUB_AUTH_TIMEOUT_MS,
+          windowsHide: true,
+          env: createGhCliChildEnv(process.env),
+        },
         (error: Error | null, stdout: string) => {
           if (error) {
             reject(error);
@@ -144,8 +215,60 @@ export async function getGhCliToken(): Promise<string | null> {
   return null;
 }
 
+export async function isGhCliAvailable(): Promise<boolean> {
+  try {
+    const { exec } = await import("child_process");
+    await new Promise<void>((resolve, reject) => {
+      exec(
+        "gh --version",
+        {
+          timeout: GITHUB_AUTH_TIMEOUT_MS,
+          windowsHide: true,
+          env: createGhCliChildEnv(process.env),
+        },
+        (error: Error | null) => {
+          if (error) {
+            reject(error);
+          } else {
+            resolve();
+          }
+        },
+      );
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function getGitHubAuthRecoveryPolicy(input: {
+  source: GitHubTokenSource;
+  hasClearableToken: boolean;
+  ghCliAvailable: boolean;
+  failureKind?: GitHubFailureKind;
+}): {
+  showSettings: boolean;
+  showGhLogin: boolean;
+  showGhInstall: boolean;
+  showClearToken: boolean;
+  showGitHubTokenPage: boolean;
+} {
+  const canUseGhCli = input.source !== "env";
+  return {
+    showSettings: input.source !== "env",
+    showGhLogin: canUseGhCli && input.ghCliAvailable,
+    showGhInstall: canUseGhCli && !input.ghCliAvailable,
+    showClearToken:
+      input.hasClearableToken &&
+      (input.source === "secret" || input.source === "config"),
+    showGitHubTokenPage:
+      input.failureKind === "sso-required" ||
+      input.failureKind === "classic-pat-forbidden",
+  };
+}
+
 function getEnvToken(): string | undefined {
-  const token = (process.env.GITHUB_TOKEN || process.env.GH_TOKEN)?.trim();
+  const token = (process.env.GH_TOKEN || process.env.GITHUB_TOKEN)?.trim();
   return token && token.length > 0 ? token : undefined;
 }
 
@@ -223,12 +346,14 @@ export async function checkGitHubAuth(): Promise<{
   authenticated: boolean;
   method: GitHubTokenSource;
   message: string;
+  error?: GitHubResponseError;
 }> {
   const { token, source } = await resolveGitHubToken();
 
   if (token) {
     try {
-      if (await validateGitHubToken(token)) {
+      const response = await validateGitHubToken(token);
+      if (response.ok) {
         return {
           authenticated: true,
           method: source,
@@ -236,13 +361,35 @@ export async function checkGitHubAuth(): Promise<{
         };
       }
 
-      const fallback = await resolveGitHubTokenAfterFailure(token);
-      if (fallback && (await validateGitHubToken(fallback.token))) {
+      if (response.status !== 401) {
+        const error = await createGitHubAuthValidationError(response);
         return {
-          authenticated: true,
-          method: fallback.source,
-          message: "GitHub token authenticated",
+          authenticated: false,
+          method: source,
+          message: error.message,
+          error,
         };
+      }
+
+      const fallback = await resolveGitHubTokenAfterFailure(token);
+      if (fallback) {
+        const fallbackResponse = await validateGitHubToken(fallback.token);
+        if (fallbackResponse.ok) {
+          return {
+            authenticated: true,
+            method: fallback.source,
+            message: "GitHub token authenticated",
+          };
+        }
+        if (fallbackResponse.status !== 401) {
+          const error = await createGitHubAuthValidationError(fallbackResponse);
+          return {
+            authenticated: false,
+            method: fallback.source,
+            message: error.message,
+            error,
+          };
+        }
       }
     } catch {
       // 無効トークンは下で none を返す
@@ -256,10 +403,23 @@ export async function checkGitHubAuth(): Promise<{
   };
 }
 
-async function validateGitHubToken(token: string): Promise<boolean> {
-  const response = await fetch("https://api.github.com/user", {
+async function validateGitHubToken(token: string): Promise<Response> {
+  return fetch("https://api.github.com/user", {
     headers: { Authorization: `token ${token}` },
     signal: AbortSignal.timeout(GITHUB_AUTH_TIMEOUT_MS),
   });
-  return response.ok;
+}
+
+async function createGitHubAuthValidationError(
+  response: Response,
+): Promise<GitHubResponseError> {
+  const bodyText = await response
+    .clone()
+    .text()
+    .catch(() => "");
+  return createGitHubResponseError(
+    response,
+    bodyText,
+    "GitHub authentication check failed",
+  );
 }

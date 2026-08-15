@@ -48,16 +48,37 @@ const jaMessages = {
     "GitHub organization のポリシーにより classic PAT が拒否されました",
   githubAuthRequiredReason:
     "GitHub 認証またはリポジトリへのアクセス権が必要です",
+  githubAuthHelp: "{0}\n\n現在の credential source: {1}\n{2}",
+  githubAuthSourceSecret: "VS Code SecretStorage",
+  githubAuthSourceEnv: "GH_TOKEN / GITHUB_TOKEN 環境変数",
+  githubAuthSourceGhCli: "gh CLI",
+  githubAuthSourceConfig: "legacy resourceNinja.githubToken 設定",
+  githubAuthSourceNone: "未設定",
+  githubAuthGuidanceSecret:
+    "保存済みトークンが古い場合はクリアしてください。その後、gh CLI または環境変数で再認証できます。",
+  githubAuthGuidanceEnv:
+    "GH_TOKEN が GITHUB_TOKEN より優先され、どちらも gh CLI より優先されます。環境変数を更新または解除してから VS Code を再読み込みしてください。",
+  githubAuthGuidanceGhCli:
+    "ターミナルで gh auth login を実行して認証を更新してください。organization SSO が必要な場合はトークンのSSO認可も確認してください。",
+  githubAuthGuidanceConfig:
+    "legacy設定のトークンが古い場合はクリアするか、GitHub Token設定を空にしてください。",
+  githubAuthGuidanceNone:
+    "gh CLIで認証するか、private repository用のfine-grained PATをGitHub Token設定へ保存してください。",
+  githubAuthStatusAuthenticated: "GitHub認証は有効です（source: {0}）。",
   actionShowDetails: "詳細を表示",
   actionConfigureGitHubAuth: "GitHub 認証を設定",
-  actionClearStoredGitHubToken:
-    "保存済み GitHub トークンをクリア（SecretStorage のみ）",
+  actionOpenGitHubTokenPage: "GitHub のトークン設定を開く",
+  actionInstallGhCli: "GitHub CLI をインストール",
+  actionClearStoredGitHubToken: "保存・設定済み GitHub トークンをクリア",
   updating: "{0} を更新中...",
   updateSourceSelectRequired:
     "Remote Resources ビューから更新するソースを選択してください。",
   sourceIdNotFound: "ソース ID が見つかりません。",
   copiedToClipboard: "コピーしました",
   copiedToClipboardWithValue: "コピーしました: {0}",
+  resourceUrlUnavailable: "この項目のGitHub URLを特定できませんでした。",
+  resourceTerminalUnavailable:
+    "この項目を開くフォルダーを特定できませんでした。",
   enterRepoUrl: "GitHub リポジトリの URL を入力してください",
   repoUrlPlaceholder: "https://github.com/owner/repo",
   invalidRepoUrl: "有効な GitHub リポジトリ URL を入力してください",
@@ -81,8 +102,11 @@ const jaMessages = {
   actionCancel: "キャンセル",
   actionAddSourceRepo: "このリポジトリをソースに追加",
   actionOpenGitHub: "GitHub で開く",
-  authRequired:
-    "GitHub認証が必要です。API制限を回避するために認証を設定してください。",
+  authRequired: "GitHub認証またはリポジトリへのアクセス権を確認してください。",
+  privateRepositoryAccessFailed:
+    "リポジトリ {0}/{1} が見つからないか、現在の認証にアクセス権がありません。private repositoryでは Contents: Read 権限とorganization SSO認可を確認してください。",
+  repositoryOrBranchAccessFailed:
+    "リポジトリ {0}/{1} のbranch {2} が見つからないか、現在の認証にアクセス権がありません。",
   skillDownloadNotFoundNoAuth:
     'スキル "{0}" が見つかりません。プライベート リポジトリの場合は GitHub 認証が必要です。認証を設定するか、インデックスを更新してください。',
   skillDownloadNotFoundWithAuth:
@@ -101,12 +125,16 @@ const jaMessages = {
     "Resource Ninja のキャッシュ、すべての設定、GitHub Token をリセットします。この操作は元に戻せません。続行しますか？",
   resetConfirmAction: "リセットする",
   resetComplete: "✅ 初期化が完了しました。VS Codeを再起動してください。",
-  githubTokenCleared: "SecretStorage の GitHub トークンを削除しました。",
+  githubTokenCleared:
+    "SecretStorage と legacy 設定の GitHub トークンを削除しました。環境変数と gh CLI の認証は変更していません。",
   githubTokenNotStored:
-    "SecretStorage に保存された GitHub トークンはありません。",
+    "SecretStorage または legacy 設定に GitHub トークンはありません。環境変数と gh CLI の認証は変更していません。",
   githubTokenClearFailed:
-    "SecretStorage の GitHub トークンを削除できませんでした。VS Code を再読み込みして再試行してください。",
-  authWithGhCli: "gh CLIで認証",
+    "保存・設定済み GitHub トークンを完全に削除できませんでした。設定を確認して再試行してください。",
+  githubTokenMigrated:
+    "legacy GitHub Token設定をSecretStorageへコピーしました。設定ファイルの平文コピーを削除しますか？",
+  actionRemoveLegacyGitHubToken: "legacy設定のコピーを削除",
+  authWithGhCli: "ターミナルで gh auth login を実行",
   installedFolder: "インストール済み",
   rateLimitExceeded:
     "GitHub API の制限に達しました。GitHub トークンで認証してください。",
@@ -230,16 +258,38 @@ const enMessages: MessageDictionary = {
     "GitHub organization policy rejected the classic PAT",
   githubAuthRequiredReason:
     "GitHub authentication or repository permission is required",
+  githubAuthHelp: "{0}\n\nActive credential source: {1}\n{2}",
+  githubAuthSourceSecret: "VS Code SecretStorage",
+  githubAuthSourceEnv: "GH_TOKEN / GITHUB_TOKEN environment variables",
+  githubAuthSourceGhCli: "gh CLI",
+  githubAuthSourceConfig: "legacy resourceNinja.githubToken setting",
+  githubAuthSourceNone: "none detected",
+  githubAuthGuidanceSecret:
+    "Clear the stored token if it is stale. You can then authenticate again with gh CLI or an environment variable.",
+  githubAuthGuidanceEnv:
+    "GH_TOKEN takes precedence over GITHUB_TOKEN, and both override gh CLI. Update or unset the environment variable, then reload VS Code.",
+  githubAuthGuidanceGhCli:
+    "Run gh auth login in the terminal to refresh authentication. If the organization requires SSO, also authorize the token for SSO.",
+  githubAuthGuidanceConfig:
+    "Clear the stale legacy token or empty the GitHub Token setting.",
+  githubAuthGuidanceNone:
+    "Authenticate with gh CLI, or save a fine-grained PAT with access to the private repository in the GitHub Token setting.",
+  githubAuthStatusAuthenticated:
+    "GitHub authentication is working (source: {0}).",
   actionShowDetails: "Show Details",
   actionConfigureGitHubAuth: "Configure GitHub Authentication",
-  actionClearStoredGitHubToken:
-    "Clear Stored GitHub Token (SecretStorage only)",
+  actionOpenGitHubTokenPage: "Open GitHub Token Settings",
+  actionInstallGhCli: "Install GitHub CLI",
+  actionClearStoredGitHubToken: "Clear Stored and Configured GitHub Token",
   updating: "Updating {0}...",
   updateSourceSelectRequired:
     "Please select a source to update from the Remote Resources view.",
   sourceIdNotFound: "Source ID not found.",
   copiedToClipboard: "Copied to clipboard",
   copiedToClipboardWithValue: "Copied: {0}",
+  resourceUrlUnavailable: "Could not determine a GitHub URL for this item.",
+  resourceTerminalUnavailable:
+    "Could not determine a folder to open for this item.",
   enterRepoUrl: "Enter GitHub repository URL",
   repoUrlPlaceholder: "https://github.com/owner/repo",
   invalidRepoUrl: "Please enter a valid GitHub repository URL",
@@ -263,8 +313,11 @@ const enMessages: MessageDictionary = {
   actionCancel: "Cancel",
   actionAddSourceRepo: "Add this repository as source",
   actionOpenGitHub: "Open on GitHub",
-  authRequired:
-    "GitHub authentication required. Please configure authentication to avoid API rate limits.",
+  authRequired: "Check GitHub authentication or repository access.",
+  privateRepositoryAccessFailed:
+    "Repository {0}/{1} was not found, or the active credential cannot access it. For a private repository, verify Contents: Read permission and organization SSO authorization.",
+  repositoryOrBranchAccessFailed:
+    "Repository {0}/{1} branch {2} was not found, or the active credential cannot access it.",
   skillDownloadNotFoundNoAuth:
     'Skill "{0}" was not found. Private repositories require GitHub authentication. Configure authentication or update the resource index.',
   skillDownloadNotFoundWithAuth:
@@ -283,11 +336,16 @@ const enMessages: MessageDictionary = {
     "Reset the Resource Ninja cache, all settings, and the GitHub token. This cannot be undone. Continue?",
   resetConfirmAction: "Reset",
   resetComplete: "✅ Reset complete. Please restart VS Code.",
-  githubTokenCleared: "Removed the GitHub token from SecretStorage.",
-  githubTokenNotStored: "No GitHub token is stored in SecretStorage.",
+  githubTokenCleared:
+    "Removed the GitHub token from SecretStorage and the legacy setting. Environment variables and gh CLI authentication were not changed.",
+  githubTokenNotStored:
+    "No GitHub token is stored in SecretStorage or the legacy setting. Environment variables and gh CLI authentication were not changed.",
   githubTokenClearFailed:
-    "Could not remove the GitHub token from SecretStorage. Reload VS Code and try again.",
-  authWithGhCli: "Authenticate with gh CLI",
+    "Could not completely remove the stored and configured GitHub token. Check your settings and try again.",
+  githubTokenMigrated:
+    "Copied the legacy GitHub Token setting into SecretStorage. Remove the plaintext setting copy?",
+  actionRemoveLegacyGitHubToken: "Remove Legacy Setting Copy",
+  authWithGhCli: "Run gh auth login in Terminal",
   installedFolder: "Installed",
   rateLimitExceeded:
     "GitHub API rate limit exceeded. Please authenticate with a GitHub token.",
@@ -489,8 +547,24 @@ export const messages = {
   githubClassicPatForbiddenReason: () =>
     localize("githubClassicPatForbiddenReason"),
   githubAuthRequiredReason: () => localize("githubAuthRequiredReason"),
+  githubAuthHelp: (reason: string, source: string, guidance: string) =>
+    localize("githubAuthHelp", reason, source, guidance),
+  githubAuthSourceSecret: () => localize("githubAuthSourceSecret"),
+  githubAuthSourceEnv: () => localize("githubAuthSourceEnv"),
+  githubAuthSourceGhCli: () => localize("githubAuthSourceGhCli"),
+  githubAuthSourceConfig: () => localize("githubAuthSourceConfig"),
+  githubAuthSourceNone: () => localize("githubAuthSourceNone"),
+  githubAuthGuidanceSecret: () => localize("githubAuthGuidanceSecret"),
+  githubAuthGuidanceEnv: () => localize("githubAuthGuidanceEnv"),
+  githubAuthGuidanceGhCli: () => localize("githubAuthGuidanceGhCli"),
+  githubAuthGuidanceConfig: () => localize("githubAuthGuidanceConfig"),
+  githubAuthGuidanceNone: () => localize("githubAuthGuidanceNone"),
+  githubAuthStatusAuthenticated: (source: string) =>
+    localize("githubAuthStatusAuthenticated", source),
   actionShowDetails: () => localize("actionShowDetails"),
   actionConfigureGitHubAuth: () => localize("actionConfigureGitHubAuth"),
+  actionOpenGitHubTokenPage: () => localize("actionOpenGitHubTokenPage"),
+  actionInstallGhCli: () => localize("actionInstallGhCli"),
   actionClearStoredGitHubToken: () => localize("actionClearStoredGitHubToken"),
   updating: (name: string) => localize("updating", name),
   updateSourceSelectRequired: () => localize("updateSourceSelectRequired"),
@@ -498,6 +572,8 @@ export const messages = {
   copiedToClipboard: () => localize("copiedToClipboard"),
   copiedToClipboardWithValue: (value: string) =>
     localize("copiedToClipboardWithValue", value),
+  resourceUrlUnavailable: () => localize("resourceUrlUnavailable"),
+  resourceTerminalUnavailable: () => localize("resourceTerminalUnavailable"),
 
   // ソース追加
   enterRepoUrl: () => localize("enterRepoUrl"),
@@ -531,6 +607,13 @@ export const messages = {
 
   // 認証
   authRequired: () => localize("authRequired"),
+  privateRepositoryAccessFailed: (owner: string, repo: string) =>
+    localize("privateRepositoryAccessFailed", owner, repo),
+  repositoryOrBranchAccessFailed: (
+    owner: string,
+    repo: string,
+    branch: string,
+  ) => localize("repositoryOrBranchAccessFailed", owner, repo, branch),
   skillDownloadNotFoundNoAuth: (name: string) =>
     localize("skillDownloadNotFoundNoAuth", name),
   skillDownloadNotFoundWithAuth: (name: string) =>
@@ -542,6 +625,9 @@ export const messages = {
   githubTokenCleared: () => localize("githubTokenCleared"),
   githubTokenNotStored: () => localize("githubTokenNotStored"),
   githubTokenClearFailed: () => localize("githubTokenClearFailed"),
+  githubTokenMigrated: () => localize("githubTokenMigrated"),
+  actionRemoveLegacyGitHubToken: () =>
+    localize("actionRemoveLegacyGitHubToken"),
 
   // 初期化
   resetSettingsTitle: () => localize("resetSettingsTitle"),

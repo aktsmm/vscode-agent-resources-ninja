@@ -115,8 +115,10 @@ async function main() {
             },
             "./githubAuth": {
               getGitHubToken: async () => undefined,
+              hasClearableGitHubToken: async () => false,
             },
             "./githubFetch": githubFetchModule,
+            "./githubResponse": githubResponseModule,
             "./githubDirectoryTraversal": traversalModule,
             "./hookConfigManager": {
               updateHookConfigForInstall: async () => undefined,

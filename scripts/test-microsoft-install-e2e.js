@@ -3,23 +3,34 @@
 const assert = require("assert");
 const fs = require("fs");
 const fsp = require("fs/promises");
+const Module = require("module");
 const os = require("os");
 const path = require("path");
 const { execFileSync } = require("child_process");
+const ts = require("typescript");
 
 const INDEX_PATH = path.join(__dirname, "..", "resources", "skill-index.json");
 const FETCH_TIMEOUT = 15000;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
 
-function sanitizeSkillName(name) {
-  return name
-    .toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/[()[\]{}]/g, "")
-    .replace(/[^a-z0-9\-_]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
+function requireTypeScriptModule(filePath) {
+  const transpiled = ts.transpileModule(fs.readFileSync(filePath, "utf8"), {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+    },
+    fileName: filePath,
+  });
+  const loadedModule = new Module(filePath, module);
+  loadedModule.filename = filePath;
+  loadedModule.paths = Module._nodeModulePaths(path.dirname(filePath));
+  loadedModule._compile(transpiled.outputText, filePath);
+  return loadedModule.exports;
 }
+
+const { sanitizeResourceInstallName } = requireTypeScriptModule(
+  path.join(__dirname, "..", "src", "resourceKinds.ts"),
+);
 
 async function fetchWithTimeout(url, options = {}, timeout = FETCH_TIMEOUT) {
   const controller = new AbortController();
@@ -249,7 +260,7 @@ async function main() {
     tempRoot,
     ".github",
     "skills",
-    sanitizeSkillName(actualSkill.name),
+    sanitizeResourceInstallName(actualSkill.name),
   );
 
   try {

@@ -63,6 +63,7 @@ const secretStorage = {
 };
 
 let configState = {};
+let configUpdates = [];
 let execHandler = null;
 const execCalls = [];
 let informationMessages = [];
@@ -84,6 +85,11 @@ realChildProcess.exec = (command, options, callback) => {
 };
 
 const vscodeStub = {
+  ConfigurationTarget: {
+    Global: 1,
+    Workspace: 2,
+    WorkspaceFolder: 3,
+  },
   window: {
     showInformationMessage: async (message) => {
       informationMessages.push(message);
@@ -100,20 +106,27 @@ const vscodeStub = {
         "getConfiguration must use the resourceNinja section",
       );
       return {
-        get: (key) => configState[key],
+        get: (key) =>
+          configState[`${key}WorkspaceFolder`] ??
+          configState[`${key}Workspace`] ??
+          configState[key],
+        inspect: (key) => ({
+          globalValue: configState[key],
+          workspaceValue: configState[`${key}Workspace`],
+          workspaceFolderValue: configState[`${key}WorkspaceFolder`],
+        }),
+        update: async (key, value, target) => {
+          configUpdates.push({ key, value, target });
+          const suffix =
+            target === vscodeStub.ConfigurationTarget.Workspace
+              ? "Workspace"
+              : target === vscodeStub.ConfigurationTarget.WorkspaceFolder
+                ? "WorkspaceFolder"
+                : "";
+          configState[`${key}${suffix}`] = value;
+        },
       };
     },
-  },
-};
-
-const childProcessStub = {
-  exec: (command, options, callback) => {
-    execCalls.push({ command, options });
-    if (typeof execHandler === "function") {
-      execHandler(command, options, callback);
-    } else {
-      callback(new Error("no gh"), "", "");
-    }
   },
 };
 
@@ -126,12 +139,16 @@ const i18nStub = {
   },
 };
 
+const githubResponse = requireTypeScriptModule(
+  path.join(__dirname, "..", "src", "githubResponse.ts"),
+);
+
 const githubAuth = requireTypeScriptModule(
   path.join(__dirname, "..", "src", "githubAuth.ts"),
   {
     vscode: vscodeStub,
     "./i18n": i18nStub,
-    child_process: childProcessStub,
+    "./githubResponse": githubResponse,
   },
 );
 
@@ -142,6 +159,7 @@ githubAuth.initializeGitHubAuth({ secrets: secretStorage });
 function resetState() {
   secretMap.clear();
   configState = {};
+  configUpdates = [];
   execHandler = null;
   execCalls.length = 0;
   informationMessages = [];
@@ -152,6 +170,49 @@ function resetState() {
 }
 
 const tests = [
+  {
+    name: "gh CLI child environment removes only shadowing token variables",
+    run: async () => {
+      const sourceEnv = {
+        Path: "C:\\tools",
+        APPDATA: "C:\\users\\test\\appdata",
+        Gh_ToKeN: "stale-gh-token",
+        github_token: "stale-github-token",
+      };
+
+      const childEnv = githubAuth.createGhCliChildEnv(sourceEnv);
+      const normalizedEntries = Object.entries(childEnv).map(([key, value]) => [
+        key.toUpperCase(),
+        value,
+      ]);
+
+      assert.deepStrictEqual(sourceEnv, {
+        Path: "C:\\tools",
+        APPDATA: "C:\\users\\test\\appdata",
+        Gh_ToKeN: "stale-gh-token",
+        github_token: "stale-github-token",
+      });
+      assert.strictEqual(
+        normalizedEntries.some(([key]) => key === "GH_TOKEN"),
+        false,
+      );
+      assert.strictEqual(
+        normalizedEntries.some(([key]) => key === "GITHUB_TOKEN"),
+        false,
+      );
+      assert.ok(
+        normalizedEntries.some(
+          ([key, value]) => key === "PATH" && value === "C:\\tools",
+        ),
+      );
+      assert.ok(
+        normalizedEntries.some(
+          ([key, value]) =>
+            key === "APPDATA" && value === "C:\\users\\test\\appdata",
+        ),
+      );
+    },
+  },
   {
     name: "SecretStorage token wins over env and legacy config",
     run: async () => {
@@ -242,15 +303,32 @@ const tests = [
     },
   },
   {
-    name: "Stale env token falls back even without a SecretStorage token",
+    name: "Stale env token falls back to stored gh CLI credentials",
     run: async () => {
-      process.env.GITHUB_TOKEN = "env-tok";
-      execHandler = (_command, _options, callback) => {
-        callback(null, "gh-tok\n", "");
+      process.env.GH_TOKEN = "stale-env-tok";
+      process.env.GITHUB_TOKEN = "lower-priority-env-tok";
+      execHandler = (_command, options, callback) => {
+        const childKeys = Object.keys(options.env).map((key) =>
+          key.toUpperCase(),
+        );
+        assert.strictEqual(childKeys.includes("GITHUB_TOKEN"), false);
+        assert.strictEqual(childKeys.includes("GH_TOKEN"), false);
+        assert.ok(
+          Object.keys(options.env).some((key) => key.toUpperCase() === "PATH"),
+          "Unrelated child environment variables should be preserved",
+        );
+        callback(null, "stored-gh-tok\n", "");
       };
 
-      const result = await githubAuth.resolveGitHubTokenAfterFailure("env-tok");
-      assert.deepStrictEqual(result, { token: "gh-tok", source: "gh-cli" });
+      const result =
+        await githubAuth.resolveGitHubTokenAfterFailure("stale-env-tok");
+      assert.deepStrictEqual(result, {
+        token: "stored-gh-tok",
+        source: "gh-cli",
+      });
+      assert.strictEqual(execCalls.length, 1);
+      assert.strictEqual(process.env.GH_TOKEN, "stale-env-tok");
+      assert.strictEqual(process.env.GITHUB_TOKEN, "lower-priority-env-tok");
     },
   },
   {
@@ -318,9 +396,74 @@ const tests = [
       assert.strictEqual(result.source, "gh-cli");
       assert.strictEqual(result.token, "gh-tok");
       assert.strictEqual(execCalls.length, 1, "exec should be called once");
-      assert.strictEqual(execCalls[0].command, "gh auth token");
+      assert.strictEqual(
+        execCalls[0].command,
+        "gh auth token --hostname github.com",
+      );
       assert.strictEqual(execCalls[0].options.timeout, 5000);
       assert.strictEqual(execCalls[0].options.windowsHide, true);
+      assert.strictEqual(
+        Object.keys(execCalls[0].options.env).some((key) =>
+          ["GH_TOKEN", "GITHUB_TOKEN"].includes(key.toUpperCase()),
+        ),
+        false,
+      );
+    },
+  },
+  {
+    name: "gh CLI availability uses a bounded sanitized probe",
+    run: async () => {
+      process.env.GH_TOKEN = "must-not-reach-child";
+      execHandler = (command, options, callback) => {
+        assert.strictEqual(command, "gh --version");
+        assert.strictEqual(options.timeout, 5000);
+        assert.strictEqual(options.windowsHide, true);
+        assert.strictEqual(
+          Object.keys(options.env).some(
+            (key) => key.toUpperCase() === "GH_TOKEN",
+          ),
+          false,
+        );
+        callback(null, "gh version 2", "");
+      };
+
+      assert.strictEqual(await githubAuth.isGhCliAvailable(), true);
+      assert.strictEqual(execCalls.length, 1);
+    },
+  },
+  {
+    name: "auth recovery policy matches the active credential source",
+    run: async () => {
+      assert.deepStrictEqual(
+        githubAuth.getGitHubAuthRecoveryPolicy({
+          source: "env",
+          hasClearableToken: true,
+          ghCliAvailable: true,
+          failureKind: "auth-required",
+        }),
+        {
+          showSettings: false,
+          showGhLogin: false,
+          showGhInstall: false,
+          showClearToken: false,
+          showGitHubTokenPage: false,
+        },
+      );
+      assert.deepStrictEqual(
+        githubAuth.getGitHubAuthRecoveryPolicy({
+          source: "secret",
+          hasClearableToken: true,
+          ghCliAvailable: false,
+          failureKind: "sso-required",
+        }),
+        {
+          showSettings: true,
+          showGhLogin: false,
+          showGhInstall: true,
+          showClearToken: true,
+          showGitHubTokenPage: true,
+        },
+      );
     },
   },
   {
@@ -351,6 +494,40 @@ const tests = [
           requests.every(
             ({ options }) => options.signal instanceof AbortSignal,
           ),
+        );
+      } finally {
+        global.fetch = originalFetch;
+      }
+    },
+  },
+  {
+    name: "Token validation preserves rate-limit reason and active source",
+    run: async () => {
+      secretMap.set(SECRET_KEY, "secret-tok");
+      const originalFetch = global.fetch;
+      global.fetch = async () =>
+        new Response(JSON.stringify({ message: "API rate limit exceeded" }), {
+          status: 403,
+          headers: {
+            "content-type": "application/json",
+            "x-ratelimit-remaining": "0",
+            "x-ratelimit-reset": "1785344400",
+          },
+        });
+
+      try {
+        const result = await githubAuth.checkGitHubAuth();
+        assert.strictEqual(result.authenticated, false);
+        assert.strictEqual(result.method, "secret");
+        assert.strictEqual(result.error.kind, "rate-limit");
+        assert.strictEqual(
+          result.error.resetAt,
+          new Date(1785344400 * 1000).toISOString(),
+        );
+        assert.strictEqual(
+          execCalls.length,
+          0,
+          "Rate limit must not rotate credentials",
         );
       } finally {
         global.fetch = originalFetch;
@@ -394,7 +571,7 @@ const tests = [
     },
   },
   {
-    name: "Clear-token feedback reports success without deleting other sources",
+    name: "Clear-token feedback removes stored and configured tokens only",
     run: async () => {
       secretMap.set(SECRET_KEY, "secret-tok");
       process.env.GITHUB_TOKEN = "env-tok";
@@ -405,7 +582,34 @@ const tests = [
       assert.strictEqual(secretMap.has(SECRET_KEY), false);
       assert.deepStrictEqual(informationMessages, ["token cleared"]);
       assert.strictEqual(process.env.GITHUB_TOKEN, "env-tok");
-      assert.strictEqual(configState.githubToken, "config-tok");
+      assert.strictEqual(configState.githubToken, undefined);
+      assert.deepStrictEqual(configUpdates, [
+        {
+          key: "githubToken",
+          value: undefined,
+          target: vscodeStub.ConfigurationTarget.Global,
+        },
+      ]);
+    },
+  },
+  {
+    name: "Clear-token recovery removes legacy workspace scopes",
+    run: async () => {
+      configState.githubTokenWorkspace = "workspace-tok";
+      configState.githubTokenWorkspaceFolder = "folder-tok";
+
+      await githubAuth.clearStoredGitHubTokenWithFeedback();
+
+      assert.strictEqual(configState.githubTokenWorkspace, undefined);
+      assert.strictEqual(configState.githubTokenWorkspaceFolder, undefined);
+      assert.deepStrictEqual(
+        configUpdates.map(({ target }) => target),
+        [
+          vscodeStub.ConfigurationTarget.Workspace,
+          vscodeStub.ConfigurationTarget.WorkspaceFolder,
+        ],
+      );
+      assert.deepStrictEqual(informationMessages, ["token cleared"]);
     },
   },
   {

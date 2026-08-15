@@ -33,19 +33,8 @@ const {
   getPluginOwnedHookInstallFileName,
   getPluginOwnedInstallFileName,
   isHookConfigFilePath,
+  sanitizeResourceInstallName,
 } = requireTypeScriptModule(path.join(repoRoot, "src", "resourceKinds.ts"));
-
-// Mirrors the private sanitizeSkillName in src/skillInstaller.ts, which is not
-// exported and cannot be loaded outside VS Code.
-function sanitizeInstallName(name) {
-  return String(name || "")
-    .toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/[()[\]{}]/g, "")
-    .replace(/[^a-z0-9\-_]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-}
 
 // The destination model follows getResourceTargetUri in src/skillInstaller.ts:
 // skills and plugins land in a folder named after the resource, mcp.json is
@@ -57,10 +46,10 @@ function getInstallDestinationSlot(resource) {
   const baseName = path.posix.basename(remotePath);
 
   if (kind === "skill") {
-    return `skill:${sanitizeInstallName(resource.name)}`;
+    return `skill:${sanitizeResourceInstallName(resource.name)}`;
   }
   if (kind === "plugin") {
-    return `plugin:${sanitizeInstallName(
+    return `plugin:${sanitizeResourceInstallName(
       resource.name || resource.pluginRoot || "plugin",
     )}`;
   }
@@ -68,7 +57,7 @@ function getInstallDestinationSlot(resource) {
     const normalized = baseName.replace(/^\./, "");
     return `mcp:${
       normalized.toLowerCase() === "mcp.json"
-        ? `${sanitizeInstallName(resource.source)}-${normalized}`
+        ? `${sanitizeResourceInstallName(resource.source)}-${normalized}`
         : baseName
     }`;
   }
@@ -82,7 +71,7 @@ function getInstallDestinationSlot(resource) {
         fileName: baseName,
       })}`;
     }
-    return `hook:${sanitizeInstallName(
+    return `hook:${sanitizeResourceInstallName(
       path.posix.basename(path.posix.dirname(remotePath)) || resource.name,
     )}/README.md`;
   }

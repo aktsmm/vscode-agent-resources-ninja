@@ -1769,7 +1769,7 @@ function removeMarkedSection(content: string): string {
  */
 export async function removeSkillSectionFromFile(
   fileUri: vscode.Uri,
-): Promise<void> {
+): Promise<boolean> {
   return runInstructionFileUpdate(() =>
     performRemoveSkillSectionFromFile(fileUri),
   );
@@ -1777,7 +1777,7 @@ export async function removeSkillSectionFromFile(
 
 async function performRemoveSkillSectionFromFile(
   fileUri: vscode.Uri,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const content = await vscode.workspace.fs.readFile(fileUri);
     let existingContent = Buffer.from(content).toString("utf-8");
@@ -1793,9 +1793,12 @@ async function performRemoveSkillSectionFromFile(
       logger.info(
         `[Resource Ninja] Removed resource section from ${fileUri.fsPath}`,
       );
+      return true;
     }
+    return false;
   } catch {
     // ファイルが存在しない場合は何もしない
+    return false;
   }
 }
 

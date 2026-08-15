@@ -44,6 +44,7 @@ const {
   toPluginRootIdentityKey,
   isBuiltInResourcePath,
   isNestedResourcePathUnderSkillRoot,
+  sanitizeResourceInstallName,
   shouldReplaceBuiltInResourcePath,
   isFileBackedHookResourcePath,
 } = requireTypeScriptModule(
@@ -74,6 +75,18 @@ function test(name, fn) {
     throw error;
   }
 }
+
+test("sanitizes install destination names with a stable contract", () => {
+  assert.strictEqual(
+    sanitizeResourceInstallName(" My Skill (Preview) "),
+    "my-skill-preview",
+  );
+  assert.strictEqual(
+    sanitizeResourceInstallName("Azure.Cost/Guard__V2"),
+    "azure-cost-guard__v2",
+  );
+  assert.strictEqual(sanitizeResourceInstallName("---"), "");
+});
 
 test("detects skill folders", () => {
   assert.strictEqual(

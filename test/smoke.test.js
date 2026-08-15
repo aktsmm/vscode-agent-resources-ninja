@@ -16,6 +16,8 @@ suite("Agent Resources Ninja smoke test", () => {
       "resourceNinja.install",
       "resourceNinja.refresh",
       "resourceNinja.openSettings",
+      "resourceNinja.clearGitHubToken",
+      "resourceNinja.showGitHubAuthStatus",
     ]) {
       assert.ok(commands.includes(command), `Missing command: ${command}`);
     }

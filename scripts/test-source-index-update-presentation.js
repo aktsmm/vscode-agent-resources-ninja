@@ -178,11 +178,7 @@ test("keeps batch diagnostics and anonymous raw guards wired", () => {
   assert.match(extensionSource, /\[Source Index\] \[SKIPPED\]/);
   assert.match(
     extensionSource,
-    /else if \(action === authAction\) \{\s*await openGitHubAuthSettings\(\);\s*\}/,
-  );
-  assert.doesNotMatch(
-    extensionSource,
-    /else if \(action === authAction\) \{\s*await showAuthHelp\(\);\s*\}/,
+    /else if \(action === authAction\) \{\s*await showAuthHelp\(firstFailure\.error\);\s*\}/,
   );
   assert.doesNotMatch(indexUpdaterSource, /githubFetch\(rawUrl,\s*token\)/);
   assert.ok(attachTokenFunction);

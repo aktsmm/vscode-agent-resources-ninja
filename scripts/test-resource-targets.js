@@ -28,6 +28,7 @@ const {
   getPluginOwnedInstallFileName,
   isHookConfigFilePath,
   getPluginRootFsPathFromManifestPath,
+  sanitizeResourceInstallName,
 } = requireTypeScriptModule(
   path.join(__dirname, "..", "src", "resourceKinds.ts"),
 );
@@ -41,16 +42,6 @@ const skillInstallerSource = fs.readFileSync(
   path.join(__dirname, "..", "src", "skillInstaller.ts"),
   "utf8",
 );
-
-function sanitizeResourceName(name) {
-  return name
-    .toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/[()[\]{}]/g, "")
-    .replace(/[^a-z0-9\-_]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-}
 
 function globalHomeRoot(config = {}) {
   if (config.globalHomeDirectory) return config.globalHomeDirectory;
@@ -77,11 +68,13 @@ function getInstallFileName(skill, fileName) {
   if (skill.kind !== "mcp" || !skill.source) return fileName;
   const normalizedFileName = fileName.replace(/^\./, "");
   if (normalizedFileName.toLowerCase() !== "mcp.json") return fileName;
-  return `${sanitizeResourceName(skill.source)}-${normalizedFileName}`;
+  return `${sanitizeResourceInstallName(skill.source)}-${normalizedFileName}`;
 }
 
 function getPluginInstallRootName(skill) {
-  return sanitizeResourceName(skill.name || skill.pluginRoot || "plugin");
+  return sanitizeResourceInstallName(
+    skill.name || skill.pluginRoot || "plugin",
+  );
 }
 
 function targetPath(
@@ -98,7 +91,7 @@ function targetPath(
   );
   const isHookConfigFile =
     skill.kind === "hook" && isHookConfigFilePath(normalizedRemotePath);
-  const resourceFolderName = sanitizeResourceName(
+  const resourceFolderName = sanitizeResourceInstallName(
     skill.kind === "skill"
       ? skill.name
       : path.posix.basename(path.posix.dirname(normalizedRemotePath)) ||
@@ -129,7 +122,10 @@ function targetPath(
 
   if (targetScope === "custom") {
     if (skill.kind === "skill") {
-      return path.posix.join(customRoot, sanitizeResourceName(skill.name));
+      return path.posix.join(
+        customRoot,
+        sanitizeResourceInstallName(skill.name),
+      );
     }
     if (skill.kind === "hook") {
       if (isHookConfigFile) {
@@ -143,7 +139,11 @@ function targetPath(
   if (targetScope === "globalHome") {
     const root = globalHomeRoot(config);
     if (skill.kind === "skill")
-      return path.posix.join(root, "skills", sanitizeResourceName(skill.name));
+      return path.posix.join(
+        root,
+        "skills",
+        sanitizeResourceInstallName(skill.name),
+      );
     if (skill.kind === "agent")
       return path.posix.join(root, "agents", fileName);
     if (skill.kind === "instruction")
@@ -161,7 +161,7 @@ function targetPath(
       return path.posix.join(
         globalRoot,
         "skills",
-        sanitizeResourceName(skill.name),
+        sanitizeResourceInstallName(skill.name),
       );
     if (skill.kind === "hook") {
       if (isHookConfigFile)
@@ -197,7 +197,7 @@ function targetPath(
     return path.posix.join(
       workspaceRoot,
       ".github/skills",
-      sanitizeResourceName(skill.name),
+      sanitizeResourceInstallName(skill.name),
     );
   }
   if (skill.kind === "agent")
