@@ -32,6 +32,8 @@
 ## Artifact
 
 - VSIX: `artifacts/vsix/agent-resources-ninja-0.2.47.vsix`
-- Size: pending packaging
-- SHA256: pending packaging
-- Payload verification: pending packaging
+- Size: 478,741 bytes
+- SHA256: `9F175AAD696F88B8D4A27890104C32D866FB63A6462B0C51DF904D5AC175624D`
+- Payload: 12 files; compiled entrypoint, package metadata, locales, icon assets, license, README, changelog, and Resource Index present; no source maps, source/test directories, or release notes
+- Fresh isolated VSIX install: PASS (`yamapan.agent-resources-ninja@0.2.47`, source `vsix`)
+- Exact extracted VSIX bits Extension Host smoke: PASS (`1/1`, core commands registered)
