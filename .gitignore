@@ -38,5 +38,6 @@ MIGRATION_NOTES.md
 /research/
 /output_sessions/
 
-# Internal sibling-extension handoff notes
-/docs/agent-skills-ninja-v0.2.47-porting-notes.md
+# Internal notes must stay local in this public repository
+/internal-notes/
+/docs/*-porting-notes.md
