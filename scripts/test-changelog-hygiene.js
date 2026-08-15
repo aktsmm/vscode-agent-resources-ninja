@@ -4,6 +4,7 @@
 // keeps CHANGELOG entries bilingual. These checks are cheap and catch the common slips.
 
 const assert = require("assert");
+const { execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
@@ -44,6 +45,14 @@ function getSections() {
 }
 
 const sections = getSections();
+
+function getVersionSection(text, version) {
+  const normalized = text.replace(/\r\n/g, "\n");
+  const start = normalized.indexOf(`## [${version}]`);
+  if (start < 0) return undefined;
+  const next = normalized.indexOf("\n## [", start + 1);
+  return normalized.slice(start, next < 0 ? undefined : next).trimEnd();
+}
 
 test("the changelog keeps an Unreleased section at the top", () => {
   assert.ok(sections.length > 0, "CHANGELOG has no version sections");
@@ -134,6 +143,32 @@ test("the newest released section matches the package version", () => {
     newestReleased.version,
     packageJson.version,
     `CHANGELOG newest release ${newestReleased.version} does not match package.json ${packageJson.version}`,
+  );
+});
+
+test("the current or latest tagged release section is immutable", () => {
+  const taggedVersions = execFileSync("git", ["tag", "--list", "v*"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  })
+    .split(/\r?\n/)
+    .filter((tag) => /^v\d+\.\d+\.\d+$/.test(tag))
+    .map((tag) => tag.slice(1))
+    .sort(compareVersions)
+    .reverse();
+  const version = taggedVersions.includes(packageJson.version)
+    ? packageJson.version
+    : taggedVersions[0];
+  assert.ok(version, "Expected at least one release tag");
+  const tag = `v${version}`;
+  const taggedChangelog = execFileSync("git", ["show", `${tag}:CHANGELOG.md`], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  });
+  assert.strictEqual(
+    getVersionSection(changelog, version),
+    getVersionSection(taggedChangelog, version),
+    `Released section ${version} differs from ${tag}; put new work under [Unreleased]`,
   );
 });
 

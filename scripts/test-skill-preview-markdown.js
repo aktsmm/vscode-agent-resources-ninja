@@ -41,6 +41,10 @@ function requireTypeScriptModule(filePath, stubs = {}) {
   return loadedModule.exports;
 }
 
+const indexDataNormalization = requireTypeScriptModule(
+  path.join(__dirname, "..", "src", "indexDataNormalization.ts"),
+);
+
 const { markdownToHtml } = requireTypeScriptModule(
   path.join(__dirname, "..", "src", "skillPreview.ts"),
   {
@@ -64,6 +68,7 @@ const { markdownToHtml } = requireTypeScriptModule(
     "./githubFetch": {
       fetchGitHubWithOptionalAuthRetry: async () => undefined,
     },
+    "./indexDataNormalization": indexDataNormalization,
   },
 );
 
@@ -155,6 +160,30 @@ runTest("コードフェンスが pre/code に変換される", () => {
     '<pre><code class="language-ts">const x = 1;\n</code></pre>',
     "Code fence conversion failed",
   );
+});
+
+runTest("固定placeholder markerで別blockを偽装できない", () => {
+  const legacyMarker = "@@SKILL_NINJA_PH_0@@";
+  const html = markdownToHtml(`${legacyMarker}\n\n\`safe\``);
+  assertIncludes(html, legacyMarker, "Literal marker should remain text");
+  assertIncludes(html, "<code>safe</code>", "Inline code should render once");
+  const codeBlocks = html.match(/<code>safe<\/code>/g) || [];
+  if (codeBlocks.length !== 1) {
+    throw new Error(`Expected one inline code block, got ${codeBlocks.length}`);
+  }
+});
+
+runTest("nonceとplaceholderはcrypto randomBytes由来", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", "src", "skillPreview.ts"),
+    "utf8",
+  );
+  if (!source.includes('randomBytes(16).toString("hex")')) {
+    throw new Error("Expected cryptographic random token generation");
+  }
+  if (source.includes("Math.random")) {
+    throw new Error("skillPreview must not use Math.random for tokens");
+  }
 });
 
 if (process.exitCode === 1) {

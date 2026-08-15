@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.46] - 2026-08-15
+
+### Fixed
+
+- ⏱️ **Bounded GitHub Operations** - GitHub fetches now share one 60-second operation budget across per-request retries, backoff waits, raw-to-API escalation, anonymous fallback, and credential-source fallback. An already-canceled caller stops before the first request, cancellation during any stage remains an `AbortError`, and an exhausted operation budget reports `ETIMEDOUT` even when a custom request or sleep implementation ignores `AbortSignal`. Existing per-request timeouts and retry-count limits remain intact / GitHub fetchで、request単位のretry、backoff待機、rawからAPIへのescalation、anonymous fallback、credential source fallbackを通じて共通の60秒operation budgetを使うようにしました。既にcancel済みのcallerは最初のrequest前に停止し、各段階でのcancelは`AbortError`のまま維持され、custom requestやsleep実装が`AbortSignal`を無視してもoperation budget超過時は`ETIMEDOUT`を返します。既存のrequest単位timeoutとretry回数上限は維持します。
+
+- 🔒 **Preview and External Index Hardening** - External `search-index.json` and `registry.json` rows now normalize names, paths, descriptions, tags, and finite non-negative star counts at the parser boundary, while the preview escapes the formatted star count again at the HTML sink. Markdown code/link placeholders and CSP nonces now use independent `crypto.randomBytes` tokens, so a resource cannot spoof the former fixed placeholder marker. Shared bug-report URLs cap titles and truncate encoded bodies to a conservative 7,500-character total with an explicit notice, avoiding oversized GitHub issue URLs across every caller / 外部`search-index.json` / `registry.json`のname、path、description、tag、有限で非負のstar数をparser境界で正規化し、previewのHTML sinkでも整形済みstar数を再度escapeするようにしました。Markdownのcode/link placeholderとCSP nonceは独立した`crypto.randomBytes` tokenを使うため、resource側から旧固定placeholder markerを偽装できません。共有bug report URLではtitleを制限し、encoded bodyを明示的な通知付きで全長7,500文字以内へ切り詰めることで、全呼び出し元の過大なGitHub issue URLを防ぎます。
+
 ## [0.2.45] - 2026-08-15
 
 ### Changed
@@ -758,7 +766,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The original Agent Skills Ninja release history is intentionally not carried into this changelog. Migration context is tracked in [MIGRATION_NOTES.md](MIGRATION_NOTES.md). / 旧 Agent Skills Ninja のリリース履歴はこの CHANGELOG には引き継ぎません。移行経緯は [MIGRATION_NOTES.md](MIGRATION_NOTES.md) に記録します。
 
-[Unreleased]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.44...HEAD
+[Unreleased]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.46...HEAD
+[0.2.46]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.45...v0.2.46
+[0.2.45]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.44...v0.2.45
 [0.2.44]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.43...v0.2.44
 [0.2.9]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/aktsmm/vscode-agent-resources-ninja/compare/v0.2.7...v0.2.8

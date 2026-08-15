@@ -47,6 +47,10 @@ export {
   isAgentPluginsManifest,
 } from "./resourceKinds";
 import { messages } from "./i18n";
+import {
+  normalizeRegistryIndexRow,
+  normalizeSearchIndexRow,
+} from "./indexDataNormalization";
 import { getGitHubToken, hasStoredGitHubToken } from "./githubAuth";
 export { checkGitHubAuth } from "./githubAuth";
 import { LICENSE_EXTRACTION, INDEX_LIMITS } from "./constants";
@@ -1459,15 +1463,15 @@ async function scanSkillRegistryJson(
  * search-index.json を解析してスキルに変換
  */
 interface SearchIndexSkill {
-  n: string; // name
-  d: string; // description
-  c: string; // category code
-  g?: string[]; // tags
-  r?: number; // stars
-  i: string; // install path
+  n?: unknown; // name
+  d?: unknown; // description
+  c?: unknown; // category code
+  g?: unknown; // tags
+  r?: unknown; // stars
+  i?: unknown; // install path
 }
 
-function parseSearchIndex(
+export function parseSearchIndex(
   data: { v?: string; t?: number; s?: SearchIndexSkill[] },
   owner: string,
   repoName: string,
@@ -1496,16 +1500,18 @@ function parseSearchIndex(
     const skillsToProcess = data.s.slice(0, MAX_SKILLS);
 
     for (const item of skillsToProcess) {
-      const category = categoryMap[item.c] || item.c || "other";
-      const tags = item.g || [];
+      const normalized = normalizeSearchIndexRow(item, categoryMap);
+      if (!normalized) {
+        continue;
+      }
 
       skills.push({
-        name: item.n,
+        name: normalized.name,
         source: sourceId,
-        path: item.i,
-        categories: [category, ...tags.slice(0, 3)],
-        description: item.d || "",
-        stars: item.r,
+        path: normalized.path,
+        categories: normalized.categories,
+        description: normalized.description,
+        stars: normalized.stars,
       });
     }
 
@@ -1530,17 +1536,17 @@ function parseSearchIndex(
  * registry.json を解析してスキルに変換（フォールバック用）
  */
 interface RegistrySkill {
-  name: string;
-  description?: string;
-  category?: string;
-  tags?: string[];
-  stars?: number;
-  repo?: string;
-  path?: string;
-  install_path?: string;
+  name?: unknown;
+  description?: unknown;
+  category?: unknown;
+  tags?: unknown;
+  stars?: unknown;
+  repo?: unknown;
+  path?: unknown;
+  install_path?: unknown;
 }
 
-function parseRegistryJson(
+export function parseRegistryJson(
   data: { skills?: RegistrySkill[]; total?: number },
   owner: string,
   repoName: string,
@@ -1555,17 +1561,18 @@ function parseRegistryJson(
     const skillsToProcess = data.skills.slice(0, MAX_SKILLS);
 
     for (const item of skillsToProcess) {
-      const categories: string[] = [];
-      if (item.category) categories.push(item.category);
-      if (item.tags) categories.push(...item.tags.slice(0, 3));
+      const normalized = normalizeRegistryIndexRow(item);
+      if (!normalized) {
+        continue;
+      }
 
       skills.push({
-        name: item.name,
+        name: normalized.name,
         source: sourceId,
-        path: item.install_path || item.path || item.repo || "",
-        categories: categories.length > 0 ? categories : ["other"],
-        description: item.description || "",
-        stars: item.stars,
+        path: normalized.path,
+        categories: normalized.categories,
+        description: normalized.description,
+        stars: normalized.stars,
       });
     }
 

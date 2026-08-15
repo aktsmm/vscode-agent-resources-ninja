@@ -633,7 +633,53 @@ const {
       ),
       /aborted/,
     );
-    assert.strictEqual(abortCalls, 1);
+    assert.strictEqual(
+      abortCalls,
+      0,
+      "an already-aborted operation must stop before the first request",
+    );
+  });
+
+  await test("bounds cumulative retries with one operation deadline", async () => {
+    let clock = 0;
+    let requestCalls = 0;
+    await assert.rejects(
+      fetchGitHubWithOptionalAuthRetry(
+        "https://api.github.com/repos/octo/public",
+        {
+          accept: "application/json",
+          operationTimeoutMs: 600,
+          now: () => clock,
+          random: () => 0,
+          request: async () => {
+            requestCalls += 1;
+            return response(503, "Service Unavailable");
+          },
+          sleep: async (delay) => {
+            clock += delay;
+          },
+        },
+      ),
+      (error) =>
+        error.code === "ETIMEDOUT" && /Operation timeout/.test(error.message),
+    );
+    assert.strictEqual(requestCalls, 2);
+    assert.strictEqual(clock, 500);
+  });
+
+  await test("times out a custom request that ignores AbortSignal", async () => {
+    await assert.rejects(
+      fetchGitHubWithOptionalAuthRetry(
+        "https://api.github.com/repos/octo/hanging",
+        {
+          accept: "application/json",
+          operationTimeoutMs: 5,
+          request: () => new Promise(() => {}),
+        },
+      ),
+      (error) =>
+        error.code === "ETIMEDOUT" && /Operation timeout/.test(error.message),
+    );
   });
 
   await test("forwards signal and extra headers, and drops auth when retrying anonymously", async () => {

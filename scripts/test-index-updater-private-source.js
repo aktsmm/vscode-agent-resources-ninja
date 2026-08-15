@@ -83,6 +83,9 @@ function createModule() {
   const sourceUpdateReconcileModule = requireTypeScriptModule(
     path.join(__dirname, "..", "src", "sourceUpdateReconcile.ts"),
   );
+  const indexDataNormalizationModule = requireTypeScriptModule(
+    path.join(__dirname, "..", "src", "indexDataNormalization.ts"),
+  );
   const uriApi = {
     joinPath: (base, ...segments) => ({
       fsPath: path.join(base.fsPath, ...segments),
@@ -177,6 +180,7 @@ function createModule() {
     "./githubFetch": githubFetchModule,
     "./githubResponse": githubResponseModule,
     "./sourceUpdateReconcile": sourceUpdateReconcileModule,
+    "./indexDataNormalization": indexDataNormalizationModule,
   });
 
   return { moduleExports, writes, resourceKindsModule };
@@ -810,6 +814,72 @@ async function testSuppliedResourceKindsCoversIndexUpdaterImports() {
   );
 }
 
+async function testExternalRegistryParsersBuildNormalizedSkills() {
+  const { moduleExports } = createModule();
+  const searchResult = moduleExports.parseSearchIndex(
+    {
+      s: [
+        {
+          n: " Demo ",
+          i: " skills/demo ",
+          d: " Description ",
+          c: "dev",
+          g: ["one", 7, "two"],
+          r: "<img src=https://example.test/x>",
+        },
+        { n: "Missing path" },
+        "bad row",
+      ],
+    },
+    "owner",
+    "search-repo",
+    "main",
+  );
+  assert.deepStrictEqual(
+    { ...searchResult.skills[0] },
+    {
+      name: "Demo",
+      source: "owner-search-repo",
+      path: "skills/demo",
+      categories: ["development", "one", "two"],
+      description: "Description",
+      stars: undefined,
+    },
+  );
+  assert.strictEqual(searchResult.skills.length, 1);
+
+  const registryResult = moduleExports.parseRegistryJson(
+    {
+      skills: [
+        {
+          name: " Registry Demo ",
+          install_path: " registry/demo ",
+          description: 42,
+          category: "tools",
+          tags: ["one", "one", "two"],
+          stars: 9.8,
+        },
+        { name: [], path: "invalid" },
+      ],
+    },
+    "owner",
+    "registry-repo",
+    "main",
+  );
+  assert.deepStrictEqual(
+    { ...registryResult.skills[0] },
+    {
+      name: "Registry Demo",
+      source: "owner-registry-repo",
+      path: "registry/demo",
+      categories: ["tools", "one", "two"],
+      description: "",
+      stars: 9,
+    },
+  );
+  assert.strictEqual(registryResult.skills.length, 1);
+}
+
 async function main() {
   await testPrivateSourceUsesContentsFallback();
   await testPublicRawDoesNotAttachToken();
@@ -821,6 +891,7 @@ async function main() {
   await testTruncatedTreeFailsExplicitly();
   await testRootResourceLicensePathIsNormalized();
   await testSuppliedResourceKindsCoversIndexUpdaterImports();
+  await testExternalRegistryParsersBuildNormalizedSkills();
   console.log("PASS index updater private source auth");
 }
 

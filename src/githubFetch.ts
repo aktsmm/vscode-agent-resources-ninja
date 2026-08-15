@@ -11,6 +11,7 @@ const GITHUB_USER_AGENT = "VSCode-AgentResourcesNinja";
 const GITHUB_API_PREFIX = "https://api.github.com/";
 const RAW_GITHUB_PREFIX = "https://raw.githubusercontent.com/";
 export const GITHUB_REQUEST_TIMEOUT_MS = 15000;
+export const GITHUB_OPERATION_TIMEOUT_MS = 60000;
 export const GITHUB_RETRY_MAX_ATTEMPTS = 3;
 export const GITHUB_RETRY_MAX_WAIT_MS = 20000;
 const GITHUB_RETRY_BASE_DELAY_MS = 500;
@@ -188,6 +189,20 @@ function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function createGitHubTimeoutError(label: string): NodeJS.ErrnoException {
+  const error = new Error(
+    `Operation timeout: ${label}`,
+  ) as NodeJS.ErrnoException;
+  error.code = "ETIMEDOUT";
+  return error;
+}
+
+function createGitHubAbortError(): Error {
+  const error = new Error("GitHub operation aborted");
+  error.name = "AbortError";
+  return error;
+}
+
 /** Diagnostics must never carry credentials, so log only host and path. */
 function describeGitHubRequest(url: string): string {
   try {
@@ -206,10 +221,66 @@ export interface GitHubRequestOptions {
   signal?: AbortSignal;
   extraHeaders?: Record<string, string>;
   maxAttempts?: number;
+  operationTimeoutMs?: number;
   request?: (url: string, init?: RequestInit) => Promise<Response>;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
   random?: () => number;
+}
+
+interface GitHubOperationBudget {
+  deadline: number;
+  now: () => number;
+  signal: AbortSignal;
+  callerSignal?: AbortSignal;
+  didTimeOut: () => boolean;
+}
+
+function assertGitHubOperationActive(
+  budget: GitHubOperationBudget,
+  label: string,
+): void {
+  if (budget.callerSignal?.aborted) {
+    throw createGitHubAbortError();
+  }
+  if (budget.didTimeOut() || budget.now() >= budget.deadline) {
+    throw createGitHubTimeoutError(label);
+  }
+}
+
+async function waitWithinGitHubOperation(
+  delay: number,
+  sleep: (ms: number) => Promise<void>,
+  budget: GitHubOperationBudget,
+  label: string,
+): Promise<void> {
+  assertGitHubOperationActive(budget, label);
+  const remaining = budget.deadline - budget.now();
+  if (delay >= remaining) {
+    throw createGitHubTimeoutError(label);
+  }
+  await resolveWithinGitHubOperation(sleep(delay), budget, label);
+  assertGitHubOperationActive(budget, label);
+}
+
+async function resolveWithinGitHubOperation<T>(
+  operation: Promise<T>,
+  budget: GitHubOperationBudget,
+  label: string,
+): Promise<T> {
+  assertGitHubOperationActive(budget, label);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () =>
+      reject(
+        budget.callerSignal?.aborted
+          ? createGitHubAbortError()
+          : createGitHubTimeoutError(label),
+      );
+    budget.signal.addEventListener("abort", onAbort, { once: true });
+    operation.then(resolve, reject).finally(() => {
+      budget.signal.removeEventListener("abort", onAbort);
+    });
+  });
 }
 
 function buildRequestHeaders(
@@ -235,17 +306,19 @@ async function sendGitHubRequestWithRetry(
   perform: () => Promise<Response>,
   options: GitHubRequestOptions,
   label: string,
+  budget: GitHubOperationBudget,
 ): Promise<Response> {
   const maxAttempts = normalizeMaxAttempts(options.maxAttempts);
   const sleep = options.sleep ?? defaultSleep;
-  const now = options.now ?? Date.now;
+  const now = budget.now;
   const random = options.random ?? Math.random;
   const signal = options.signal;
 
   for (let attempt = 1; ; attempt++) {
+    assertGitHubOperationActive(budget, label);
     let response: Response;
     try {
-      response = await perform();
+      response = await resolveWithinGitHubOperation(perform(), budget, label);
     } catch (error) {
       const failureKind = classifyGitHubTransportFailure(error, signal);
       if (
@@ -261,10 +334,7 @@ async function sendGitHubRequestWithRetry(
       logger.warn(
         `[Resource Ninja] Transient network failure for ${label}; retrying in ${delay}ms (attempt ${attempt}/${maxAttempts})`,
       );
-      await sleep(delay);
-      if (signal?.aborted) {
-        throw error;
-      }
+      await waitWithinGitHubOperation(delay, sleep, budget, label);
       continue;
     }
 
@@ -281,10 +351,7 @@ async function sendGitHubRequestWithRetry(
     logger.warn(
       `[Resource Ninja] GitHub returned ${response.status} for ${label}; retrying in ${delay}ms (attempt ${attempt}/${maxAttempts})`,
     );
-    await sleep(delay);
-    if (signal?.aborted) {
-      return response;
-    }
+    await waitWithinGitHubOperation(delay, sleep, budget, label);
   }
 }
 
@@ -292,6 +359,32 @@ export async function fetchGitHubWithOptionalAuthRetry(
   url: string,
   options: GitHubRequestOptions,
 ): Promise<Response> {
+  const now = options.now ?? Date.now;
+  const operationTimeoutMs =
+    typeof options.operationTimeoutMs === "number" &&
+    Number.isFinite(options.operationTimeoutMs) &&
+    options.operationTimeoutMs > 0
+      ? Math.floor(options.operationTimeoutMs)
+      : GITHUB_OPERATION_TIMEOUT_MS;
+  const operationController = new AbortController();
+  const callerSignal = options.signal;
+  let operationTimedOut = false;
+  const abortFromCaller = () => operationController.abort();
+  if (callerSignal?.aborted) {
+    throw createGitHubAbortError();
+  }
+  callerSignal?.addEventListener("abort", abortFromCaller, { once: true });
+  const timeoutId = setTimeout(() => {
+    operationTimedOut = true;
+    operationController.abort();
+  }, operationTimeoutMs);
+  const budget: GitHubOperationBudget = {
+    deadline: now() + operationTimeoutMs,
+    now,
+    signal: operationController.signal,
+    callerSignal,
+    didTimeOut: () => operationTimedOut,
+  };
   const request = options.request ?? fetchGitHubWithTimeout;
   // リトライ層はここだけ。個々のリクエストを包むので、認証エスカレーションは再実行されない。
   const send = (targetUrl: string, headers: Record<string, string>) =>
@@ -300,100 +393,112 @@ export async function fetchGitHubWithOptionalAuthRetry(
         request(targetUrl, {
           headers,
           method: options.method,
-          signal: options.signal,
+          signal: operationController.signal,
         }),
       options,
       describeGitHubRequest(targetUrl),
+      budget,
     );
 
-  let requestUrl = url;
-  let requestAccept = options.accept;
-  let requestHeaders = buildRequestHeaders(
-    createGitHubHeaders(url, requestAccept, options.token),
-    options.extraHeaders,
-    false,
-  );
-  let response = await send(requestUrl, requestHeaders);
-
-  if (
-    response.status === 404 &&
-    Boolean(options.token) &&
-    isRawGitHubUrl(url)
-  ) {
-    const authenticatedUrl =
-      options.authenticatedUrl || buildAuthenticatedContentUrl(url);
-    if (!authenticatedUrl) {
-      return response;
-    }
-
-    requestUrl = authenticatedUrl;
-    requestAccept = "application/vnd.github.raw+json";
-    requestHeaders = buildRequestHeaders(
-      {
-        Accept: requestAccept,
-        "User-Agent": GITHUB_USER_AGENT,
-        Authorization: `token ${options.token}`,
-      },
+  try {
+    let requestUrl = url;
+    let requestAccept = options.accept;
+    let requestHeaders = buildRequestHeaders(
+      createGitHubHeaders(url, requestAccept, options.token),
       options.extraHeaders,
       false,
     );
-    response = await send(requestUrl, requestHeaders);
-  }
+    let response = await send(requestUrl, requestHeaders);
 
-  // Gate on the headers actually sent so the escalated request is covered too.
-  if (
-    requestHeaders.Authorization &&
-    (response.status === 401 || response.status === 403)
-  ) {
-    response = await retryGitHubRequestAnonymously(response, true, () =>
-      send(
-        requestUrl,
-        buildRequestHeaders(
-          {
-            Accept: requestAccept,
-            "User-Agent": GITHUB_USER_AGENT,
-          },
-          options.extraHeaders,
-          true,
-        ),
-      ),
-    );
-  }
+    if (
+      response.status === 404 &&
+      Boolean(options.token) &&
+      isRawGitHubUrl(url)
+    ) {
+      const authenticatedUrl =
+        options.authenticatedUrl || buildAuthenticatedContentUrl(url);
+      if (!authenticatedUrl) {
+        return response;
+      }
 
-  const triedTokens = new Set<string>();
-  let activeToken = options.token;
-  if (activeToken) {
-    triedTokens.add(activeToken);
-  }
-
-  for (
-    let attempt = 0;
-    activeToken &&
-    [401, 403, 404].includes(response.status) &&
-    attempt < GITHUB_TOKEN_FALLBACK_MAX_ATTEMPTS;
-    attempt++
-  ) {
-    const fallback = await resolveGitHubTokenAfterFailure(
-      activeToken,
-      triedTokens,
-    );
-    if (!fallback || triedTokens.has(fallback.token)) {
-      break;
-    }
-    triedTokens.add(fallback.token);
-    activeToken = fallback.token;
-    logger.info(
-      `[Resource Ninja] GitHub returned ${response.status} for ${describeGitHubRequest(requestUrl)}; retrying with the next credential source: ${fallback.source}`,
-    );
-    response = await send(
-      requestUrl,
-      buildRequestHeaders(
-        createGitHubHeaders(requestUrl, requestAccept, fallback.token),
+      requestUrl = authenticatedUrl;
+      requestAccept = "application/vnd.github.raw+json";
+      requestHeaders = buildRequestHeaders(
+        {
+          Accept: requestAccept,
+          "User-Agent": GITHUB_USER_AGENT,
+          Authorization: `token ${options.token}`,
+        },
         options.extraHeaders,
         false,
-      ),
-    );
-  }
+      );
+      response = await send(requestUrl, requestHeaders);
+    }
 
-  return response;
+    // Gate on the headers actually sent so the escalated request is covered too.
+    if (
+      requestHeaders.Authorization &&
+      (response.status === 401 || response.status === 403)
+    ) {
+      response = await retryGitHubRequestAnonymously(response, true, () =>
+        send(
+          requestUrl,
+          buildRequestHeaders(
+            {
+              Accept: requestAccept,
+              "User-Agent": GITHUB_USER_AGENT,
+            },
+            options.extraHeaders,
+            true,
+          ),
+        ),
+      );
+    }
+
+    const triedTokens = new Set<string>();
+    let activeToken = options.token;
+    if (activeToken) {
+      triedTokens.add(activeToken);
+    }
+
+    for (
+      let attempt = 0;
+      activeToken &&
+      [401, 403, 404].includes(response.status) &&
+      attempt < GITHUB_TOKEN_FALLBACK_MAX_ATTEMPTS;
+      attempt++
+    ) {
+      const fallback = await resolveWithinGitHubOperation(
+        resolveGitHubTokenAfterFailure(activeToken, triedTokens),
+        budget,
+        describeGitHubRequest(requestUrl),
+      );
+      if (!fallback || triedTokens.has(fallback.token)) {
+        break;
+      }
+      triedTokens.add(fallback.token);
+      activeToken = fallback.token;
+      logger.info(
+        `[Resource Ninja] GitHub returned ${response.status} for ${describeGitHubRequest(requestUrl)}; retrying with the next credential source: ${fallback.source}`,
+      );
+      response = await send(
+        requestUrl,
+        buildRequestHeaders(
+          createGitHubHeaders(requestUrl, requestAccept, fallback.token),
+          options.extraHeaders,
+          false,
+        ),
+      );
+    }
+
+    return response;
+  } catch (error) {
+    if (operationTimedOut) {
+      throw createGitHubTimeoutError(describeGitHubRequest(url));
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+    callerSignal?.removeEventListener("abort", abortFromCaller);
+  }
 }

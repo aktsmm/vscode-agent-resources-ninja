@@ -2,6 +2,7 @@
 // Webview で SKILL.md の内容を表示
 
 import * as vscode from "vscode";
+import { randomBytes } from "crypto";
 import {
   loadSkillIndex,
   getSkillGitHubUrlAsync,
@@ -16,19 +17,14 @@ import {
 import messages, { isJapanese } from "./i18n";
 import { getGitHubToken } from "./githubAuth";
 import { fetchGitHubWithOptionalAuthRetry } from "./githubFetch";
+import { normalizeStarCount } from "./indexDataNormalization";
 
 let previewPanel: vscode.WebviewPanel | undefined;
 let previewMessageListener: vscode.Disposable | undefined;
 let previewRequestCounter = 0;
 
 function getNonce(): string {
-  const alphabet =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let result = "";
-  for (let i = 0; i < 32; i++) {
-    result += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
-  }
-  return result;
+  return randomBytes(16).toString("hex");
 }
 
 function escapeHtml(text: string): string {
@@ -263,9 +259,10 @@ export function markdownToHtml(markdown: string): string {
   const normalized = markdown.replace(/\r\n/g, "\n");
 
   const placeholders = new Map<string, string>();
+  const placeholderToken = randomBytes(16).toString("hex");
   let placeholderId = 0;
   const makePlaceholder = (html: string): string => {
-    const key = `@@SKILL_NINJA_PH_${placeholderId++}@@`;
+    const key = `@@SKILL_NINJA_PH_${placeholderToken}_${placeholderId++}@@`;
     placeholders.set(key, html);
     return key;
   };
@@ -354,6 +351,11 @@ function getWebviewContent(
     ?.map((requiredSkill) => escapeHtml(requiredSkill))
     .join(", ");
   const safeBundle = skill.bundle ? escapeHtml(skill.bundle) : "";
+  const normalizedStars = normalizeStarCount(skill.stars);
+  const safeStars =
+    normalizedStars === undefined
+      ? ""
+      : escapeHtml(normalizedStars.toLocaleString());
   const starIcon = isFavorite ? "★" : "☆";
   const starClass = isFavorite ? "favorite" : "";
 
@@ -512,8 +514,8 @@ function getWebviewContent(
   <div class="meta">
     <strong>${messages.sourceLabel()}:</strong> ${safeSource} | 
     <strong>${messages.categoriesLabel()}:</strong> ${safeCategories || messages.noneLabel()}${
-      skill.stars
-        ? ` | <strong>${messages.starsLabel()}:</strong> ⭐ ${skill.stars.toLocaleString()}`
+      safeStars
+        ? ` | <strong>${messages.starsLabel()}:</strong> ⭐ ${safeStars}`
         : ""
     }${skill.isOrg ? ` | 🏢 ${messages.organizationLabel()}` : ""}${
       safeBundle
