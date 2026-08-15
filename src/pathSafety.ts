@@ -1,6 +1,7 @@
 // Path containment helpers for content that arrives from third-party repositories.
 // Kept free of `vscode` imports so plain-Node regression scripts can load the real code.
 
+import { lstatSync, realpathSync } from "fs";
 import * as path from "path";
 
 const WINDOWS_RESERVED_DEVICE_NAMES = new Set([
@@ -99,6 +100,55 @@ export function isDeletableWithin(
     rootFsPath,
     candidateFsPath,
     process.platform,
+  );
+}
+
+function getProjectedRealPath(candidateFsPath: string): string | undefined {
+  let existingAncestor = path.resolve(candidateFsPath);
+  const missingSegments: string[] = [];
+
+  while (true) {
+    try {
+      lstatSync(existingAncestor);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        return undefined;
+      }
+      const parent = path.dirname(existingAncestor);
+      if (parent === existingAncestor) {
+        return undefined;
+      }
+      missingSegments.unshift(path.basename(existingAncestor));
+      existingAncestor = parent;
+      continue;
+    }
+
+    try {
+      return path.join(realpathSync(existingAncestor), ...missingSegments);
+    } catch {
+      // lstat sees broken links, while realpath refuses their unresolved target.
+      return undefined;
+    }
+  }
+}
+
+/**
+ * Resolves the nearest existing ancestor of both paths and requires the
+ * candidate's projected real path to stay strictly below the projected root.
+ */
+export function isRealPathStrictlyInside(
+  rootFsPath: string,
+  candidateFsPath: string,
+): boolean {
+  if (!rootFsPath || !candidateFsPath) {
+    return false;
+  }
+  const projectedRoot = getProjectedRealPath(rootFsPath);
+  const projectedCandidate = getProjectedRealPath(candidateFsPath);
+  return !!(
+    projectedRoot &&
+    projectedCandidate &&
+    isDeletableWithin(projectedRoot, projectedCandidate)
   );
 }
 

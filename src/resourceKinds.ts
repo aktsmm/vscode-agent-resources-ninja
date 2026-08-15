@@ -177,6 +177,14 @@ export function isHookConfigFilePath(resourcePath: string): boolean {
   return !isResourceMetadataSidecarPath(lowerPath);
 }
 
+export function isFileBackedHookResourcePath(resourcePath: string): boolean {
+  const normalizedPath = resourcePath.toLowerCase().replace(/\\/g, "/");
+  return (
+    normalizedPath.endsWith(".json") &&
+    !isResourceMetadataSidecarPath(normalizedPath)
+  );
+}
+
 export function getMcpConfigMetadata(
   content: string,
   fallbackName: string,
@@ -1273,6 +1281,9 @@ export function getResourceMetadataPath(
     return `${normalizedPath.replace(/\/SKILL\.md$/i, "")}/.skill-meta.json`;
   }
   if (kind === "hook") {
+    if (isFileBackedHookResourcePath(normalizedPath)) {
+      return `${normalizedPath}.resource-ninja.json`;
+    }
     return `${normalizedPath.replace(/\/README\.md$/i, "")}/.resource-ninja.json`;
   }
   if (kind === "plugin") {

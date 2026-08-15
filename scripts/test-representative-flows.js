@@ -446,8 +446,14 @@ test("resource group reinstall explains empty remote-installed groups", () => {
 test("batch reinstall paths report partial failures instead of false success", () => {
   assert.match(extensionSource, /const failedResources: string\[\] = \[\];/);
   assert.match(extensionSource, /const failedSkills: string\[\] = \[\];/);
-  assert.match(extensionSource, /if \(failedResources\.length > 0\) \{/);
-  assert.match(extensionSource, /if \(failedSkills\.length > 0\) \{/);
+  assert.match(
+    extensionSource,
+    /if \(failedResources\.length > 0 \|\| cancelled\) \{/,
+  );
+  assert.match(
+    extensionSource,
+    /if \(failedSkills\.length > 0 \|\| cancelled\) \{/,
+  );
   assert.match(extensionSource, /getBatchFailureMessage\(/);
   assert.match(extensionSource, /showWarningMessage\(/);
 });

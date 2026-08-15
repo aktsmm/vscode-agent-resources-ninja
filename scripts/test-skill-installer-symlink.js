@@ -33,6 +33,7 @@ const {
   isContainedPath,
   isContainedPathOnPlatform,
   isDeletableWithinOnPlatform,
+  isRealPathStrictlyInside,
   shouldFoldPathCase,
 } = requireTypeScriptModule(path.join(__dirname, "..", "src", "pathSafety.ts"));
 
@@ -233,6 +234,60 @@ test("isDeletableWithin refuses the allowed root itself", () => {
     false,
     "a case-different spelling of the root is still the root on Windows",
   );
+});
+
+test("realpath containment rejects links outside and unresolved links", () => {
+  const fixtureRoot = fs.mkdtempSync(
+    path.join(require("os").tmpdir(), "resource-ninja-path-safety-"),
+  );
+  const allowedRoot = path.join(fixtureRoot, "allowed");
+  const outsideRoot = path.join(fixtureRoot, "outside");
+  fs.mkdirSync(allowedRoot);
+  fs.mkdirSync(outsideRoot);
+
+  try {
+    assert.strictEqual(
+      isRealPathStrictlyInside(
+        allowedRoot,
+        path.join(allowedRoot, "missing", "SKILL.md"),
+      ),
+      true,
+      "a not-yet-created descendant projects below the allowed root",
+    );
+    assert.strictEqual(
+      isRealPathStrictlyInside(allowedRoot, allowedRoot),
+      false,
+      "the root itself is never a strictly contained target",
+    );
+
+    const outsideLink = path.join(allowedRoot, "outside-link");
+    fs.symlinkSync(outsideRoot, outsideLink, "junction");
+    assert.strictEqual(
+      isRealPathStrictlyInside(
+        allowedRoot,
+        path.join(outsideLink, "payload.txt"),
+      ),
+      false,
+      "an intermediate junction must not escape the allowed root",
+    );
+
+    const brokenLink = path.join(allowedRoot, "broken-link");
+    fs.symlinkSync(
+      path.join(fixtureRoot, "missing-target"),
+      brokenLink,
+      "junction",
+    );
+    assert.strictEqual(
+      isRealPathStrictlyInside(
+        allowedRoot,
+        path.join(brokenLink, "payload.txt"),
+      ),
+      false,
+      "a link whose real target cannot be resolved must be rejected",
+    );
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
 });
 
 test("isContainedPath rejects prefix siblings, parents, and traversal", () => {

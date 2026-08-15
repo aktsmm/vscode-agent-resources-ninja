@@ -15,6 +15,7 @@
 
 const assert = require("assert");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const Module = require("module");
 const ts = require("typescript");
@@ -145,6 +146,19 @@ function createVscodeStub(writes, options = {}) {
   };
 }
 
+function createDiskVscodeStub() {
+  const stub = createVscodeStub(new Map());
+  stub.Uri.joinPath = (base, ...segments) =>
+    makeUri(path.join(base.fsPath, ...segments));
+  stub.workspace.fs.readFile = async (uri) => fs.promises.readFile(uri.fsPath);
+  stub.workspace.fs.delete = async (uri, options = {}) =>
+    fs.promises.rm(uri.fsPath, {
+      recursive: options.recursive === true,
+      force: false,
+    });
+  return stub;
+}
+
 function loadInstaller(writes, options = {}) {
   const srcDir = path.join(__dirname, "..", "src");
   const resourceKindsModule = requireTypeScriptModule(
@@ -169,7 +183,7 @@ function loadInstaller(writes, options = {}) {
   );
 
   return requireTypeScriptModule(path.join(srcDir, "skillInstaller.ts"), {
-    vscode: createVscodeStub(writes, options),
+    vscode: options.vscodeStub || createVscodeStub(writes, options),
     "./pathSafety": requireTypeScriptModule(
       path.join(srcDir, "pathSafety.ts"),
       {},
@@ -235,7 +249,7 @@ function loadInstaller(writes, options = {}) {
       resolveConfiguredUri: () => makeUri("/tmp/resource"),
       resolveSkillsDirectoryUri: () => makeUri("/tmp/.github/skills"),
     },
-    "./resourceKinds": {
+    "./resourceKinds": options.resourceKindsStub || {
       ...resourceKindsModule,
       detectResourceKindFromPath: () => "skill",
       getPluginRootFromManifestPath: () => undefined,
@@ -1813,6 +1827,72 @@ async function run() {
       assert.deepStrictEqual(clean.uiWarnings, []);
       passed++;
     }
+
+    // --- Test 26: legacy plugin hook は ownership metadata が一致するときだけ削除する ---
+    {
+      const fixtureRoot = fs.mkdtempSync(
+        path.join(os.tmpdir(), "resource-ninja-legacy-hook-"),
+      );
+      try {
+        const hooksRoot = path.join(fixtureRoot, "hooks");
+        fs.mkdirSync(hooksRoot);
+        const targetPath = path.join(hooksRoot, "build-perf-cpp-hooks.json");
+        const legacyPath = path.join(hooksRoot, "hooks.json");
+        const resourceKinds = requireTypeScriptModule(
+          path.join(__dirname, "..", "src", "resourceKinds.ts"),
+        );
+        const metadataPath = resourceKinds.getResourceMetadataPath(
+          legacyPath,
+          "hook",
+        );
+        const skill = {
+          kind: "hook",
+          name: "build-perf-cpp-hooks",
+          source: "github-copilot-plugins",
+          path: "plugins/build-perf-cpp/hooks/hooks.json",
+          pluginRoot: "plugins/build-perf-cpp",
+          categories: [],
+          description: "Build performance hooks",
+        };
+        const { removeOwnedLegacyPluginResource } = loadInstaller(new Map(), {
+          vscodeStub: createDiskVscodeStub(),
+          resourceKindsStub: resourceKinds,
+        });
+
+        fs.writeFileSync(targetPath, '{"new":true}');
+        fs.writeFileSync(legacyPath, '{"legacy":true}');
+        fs.writeFileSync(
+          metadataPath,
+          JSON.stringify({
+            kind: "hook",
+            source: skill.source,
+            remotePath: skill.path,
+            pluginRoot: skill.pluginRoot,
+          }),
+        );
+        await removeOwnedLegacyPluginResource(makeUri(targetPath), skill);
+        assert.strictEqual(fs.existsSync(targetPath), true);
+        assert.strictEqual(fs.existsSync(legacyPath), false);
+        assert.strictEqual(fs.existsSync(metadataPath), false);
+
+        fs.writeFileSync(legacyPath, '{"unowned":true}');
+        fs.writeFileSync(
+          metadataPath,
+          JSON.stringify({
+            kind: "hook",
+            source: "different-source",
+            remotePath: skill.path,
+            pluginRoot: skill.pluginRoot,
+          }),
+        );
+        await removeOwnedLegacyPluginResource(makeUri(targetPath), skill);
+        assert.strictEqual(fs.existsSync(legacyPath), true);
+        assert.strictEqual(fs.existsSync(metadataPath), true);
+        passed++;
+      } finally {
+        fs.rmSync(fixtureRoot, { recursive: true, force: true });
+      }
+    }
   } finally {
     if (originalFetch) {
       global.fetch = originalFetch;
@@ -1822,7 +1902,7 @@ async function run() {
   }
 
   console.log(
-    `PASS: test-skill-installer-remote-fallback.js (${passed}/25 cases)`,
+    `PASS: test-skill-installer-remote-fallback.js (${passed}/26 cases)`,
   );
 }
 

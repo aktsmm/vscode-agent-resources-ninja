@@ -422,6 +422,132 @@ async function main() {
         );
       },
     },
+    {
+      name: "getDefaultBranch expires only an unverified fallback",
+      run: async () => {
+        let now = 1_000;
+        let apiAvailable = false;
+        const fetchCalls = [];
+        global.fetch = async (url, options = {}) => {
+          fetchCalls.push({
+            url: String(url),
+            method: options.method || "GET",
+          });
+          if (options.method === "HEAD") {
+            return new Response("Not Found", { status: 404 });
+          }
+          return apiAvailable
+            ? new Response(JSON.stringify({ default_branch: "trunk" }), {
+                status: 200,
+                headers: { "content-type": "application/json" },
+              })
+            : new Response("Unavailable", { status: 404 });
+        };
+
+        const skillIndexModule = requireTypeScriptModule(
+          path.join(__dirname, "..", "src", "skillIndex.ts"),
+          {
+            vscode: {},
+            "./githubFetch": githubFetchModule,
+            "./logger": {
+              logger: {
+                info: () => undefined,
+                warn: () => undefined,
+                error: () => undefined,
+              },
+            },
+            "./sharedResourceIndexStore": {
+              loadSharedStoresIntoSkillIndex: async (index) => index,
+              syncSharedStoresFromSkillIndex: async () => undefined,
+            },
+          },
+        );
+        const repoUrl = "https://github.com/example/repo-negative-ttl";
+        const readBranch = () =>
+          skillIndexModule.getDefaultBranch(
+            repoUrl,
+            undefined,
+            "skills/example/SKILL.md",
+            () => now,
+          );
+
+        assert.strictEqual(await readBranch(), "main");
+        const callsAfterFallback = fetchCalls.length;
+        apiAvailable = true;
+        assert.strictEqual(await readBranch(), "main");
+        assert.strictEqual(
+          fetchCalls.length,
+          callsAfterFallback,
+          "the short-lived fallback should prevent an immediate retry storm",
+        );
+
+        now += skillIndexModule.DEFAULT_BRANCH_NEGATIVE_CACHE_TTL_MS;
+        assert.strictEqual(await readBranch(), "trunk");
+        const callsAfterRecovery = fetchCalls.length;
+        now += skillIndexModule.DEFAULT_BRANCH_NEGATIVE_CACHE_TTL_MS * 10;
+        assert.strictEqual(await readBranch(), "trunk");
+        assert.strictEqual(
+          fetchCalls.length,
+          callsAfterRecovery,
+          "a branch confirmed by the API should remain positively cached",
+        );
+      },
+    },
+    {
+      name: "getDefaultBranch expires a fallback from missing API branch data",
+      run: async () => {
+        let now = 5_000;
+        let apiBranch;
+        let fetchCount = 0;
+        global.fetch = async (_url, options = {}) => {
+          fetchCount++;
+          if (options.method === "HEAD") {
+            return new Response("Not Found", { status: 404 });
+          }
+          return new Response(JSON.stringify({ default_branch: apiBranch }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        };
+
+        const skillIndexModule = requireTypeScriptModule(
+          path.join(__dirname, "..", "src", "skillIndex.ts"),
+          {
+            vscode: {},
+            "./githubFetch": githubFetchModule,
+            "./logger": {
+              logger: {
+                info: () => undefined,
+                warn: () => undefined,
+                error: () => undefined,
+              },
+            },
+            "./sharedResourceIndexStore": {
+              loadSharedStoresIntoSkillIndex: async (index) => index,
+              syncSharedStoresFromSkillIndex: async () => undefined,
+            },
+          },
+        );
+        const repoUrl = "https://github.com/example/repo-empty-api-branch";
+        const readBranch = () =>
+          skillIndexModule.getDefaultBranch(
+            repoUrl,
+            undefined,
+            "skills/example/SKILL.md",
+            () => now,
+          );
+
+        assert.strictEqual(await readBranch(), "main");
+        const callsAfterFallback = fetchCount;
+        apiBranch = "trunk";
+        assert.strictEqual(await readBranch(), "main");
+        assert.strictEqual(fetchCount, callsAfterFallback);
+
+        now += skillIndexModule.DEFAULT_BRANCH_NEGATIVE_CACHE_TTL_MS;
+        assert.strictEqual(await readBranch(), "trunk");
+        assert.ok(fetchCount > callsAfterFallback);
+      },
+    },
   ];
 
   try {

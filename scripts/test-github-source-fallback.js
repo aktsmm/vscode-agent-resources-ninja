@@ -72,6 +72,7 @@ const {
 });
 const {
   classifyGitHubFailure,
+  classifyGitHubTransportFailure,
   createGitHubResponseError,
   retryGitHubRequestAnonymously,
 } = githubResponseModule;
@@ -98,7 +99,8 @@ const {
       () =>
         fetchGitHubWithTimeout("https://api.github.com/repos/octo/repo", {}, 5),
       (error) =>
-        error.message === "Request timeout: api.github.com/repos/octo/repo",
+        error.message === "Request timeout: api.github.com/repos/octo/repo" &&
+        error.code === "ETIMEDOUT",
     );
   });
 
@@ -377,14 +379,12 @@ const {
     assert.strictEqual(requests.length, 1);
   });
 
-  await test("retries a 429 once with an injected clock", async () => {
+  await test("does not retry a 429 response", async () => {
     const requests = [];
     const sleeps = [];
     global.fetch = async (url, options = {}) => {
       requests.push({ url: String(url), headers: options.headers || {} });
-      return requests.length === 1
-        ? response(429, "Too Many Requests", { "retry-after": "2" })
-        : response(200, "ok");
+      return response(429, "Too Many Requests", { "retry-after": "2" });
     };
 
     const result = await fetchGitHubWithOptionalAuthRetry(
@@ -399,9 +399,9 @@ const {
       },
     );
 
-    assert.strictEqual(result.status, 200);
-    assert.strictEqual(requests.length, 2);
-    assert.deepStrictEqual(sleeps, [2000]);
+    assert.strictEqual(result.status, 429);
+    assert.strictEqual(requests.length, 1);
+    assert.deepStrictEqual(sleeps, []);
   });
 
   await test("gives up instead of waiting out a long rate-limit reset", async () => {
@@ -598,9 +598,11 @@ const {
         request: async () => {
           timeoutCalls += 1;
           if (timeoutCalls === 1) {
-            throw new Error(
+            const error = new Error(
               "Request timeout: https://api.github.com/repos/octo/public",
             );
+            error.code = "ETIMEDOUT";
+            throw error;
           }
           return response(200, "ok");
         },
@@ -677,7 +679,7 @@ const {
     global.fetch = async (url, options = {}) => {
       requests.push({ url: String(url), headers: options.headers || {} });
       if (requests.length === 1) {
-        return response(429, "Too Many Requests", { "retry-after": "1" });
+        return response(503, "Service Unavailable");
       }
       return requests.length === 2
         ? response(404, "Not Found")
@@ -698,7 +700,7 @@ const {
 
       assert.strictEqual(result.status, 200);
       const logged = loggedLines.join("\n");
-      assert.match(logged, /GitHub returned 429 .*retrying in 1000ms/);
+      assert.match(logged, /GitHub returned 503 .*retrying in 500ms/);
       assert.match(logged, /next credential source: gh-cli/);
       assert.match(logged, /api\.github\.com\/repos\/octo\/private/);
       assert.doesNotMatch(
@@ -711,7 +713,7 @@ const {
     }
   });
 
-  await test("classifies SAML and rate-limit responses", async () => {
+  await test("classifies SAML, rate-limit, server, and transport failures", async () => {
     assert.strictEqual(
       classifyGitHubFailure(
         response(403, "SAML enforcement"),
@@ -725,6 +727,23 @@ const {
         "rate limit",
       ),
       "rate-limit",
+    );
+    assert.strictEqual(
+      classifyGitHubFailure(response(503, "Service Unavailable"), ""),
+      "server-error",
+    );
+    const timeoutError = new Error("timed out");
+    timeoutError.code = "ETIMEDOUT";
+    assert.strictEqual(
+      classifyGitHubTransportFailure(timeoutError),
+      "transport",
+    );
+    const controller = new AbortController();
+    controller.abort();
+    assert.strictEqual(
+      classifyGitHubTransportFailure(timeoutError, controller.signal),
+      "other",
+      "caller cancellation must not be retried as a transport failure",
     );
   });
 

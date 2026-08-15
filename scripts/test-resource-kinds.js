@@ -45,6 +45,7 @@ const {
   isBuiltInResourcePath,
   isNestedResourcePathUnderSkillRoot,
   shouldReplaceBuiltInResourcePath,
+  isFileBackedHookResourcePath,
 } = requireTypeScriptModule(
   path.join(__dirname, "..", "src", "resourceKinds.ts"),
 );
@@ -704,6 +705,20 @@ test("a plugin sidecar resolves the same whether the caller has the root or the 
 
 test("resource metadata sidecars sit next to installed resources", () => {
   assert.strictEqual(
+    isFileBackedHookResourcePath("/custom/target/plugin-hooks.json"),
+    true,
+  );
+  assert.strictEqual(
+    isFileBackedHookResourcePath(".github/hooks/pre-review/README.md"),
+    false,
+  );
+  assert.strictEqual(
+    isFileBackedHookResourcePath(
+      ".github/hooks/policy.json.resource-ninja.json",
+    ),
+    false,
+  );
+  assert.strictEqual(
     getResourceMetadataPath(
       ".github/instructions/bicep-code-best-practices.instructions.md",
       "instruction",
@@ -713,6 +728,19 @@ test("resource metadata sidecars sit next to installed resources", () => {
   assert.strictEqual(
     getResourceMetadataPath(".github/hooks/pre-review/README.md", "hook"),
     ".github/hooks/pre-review/.resource-ninja.json",
+  );
+  assert.strictEqual(
+    getResourceMetadataPath(".github/hooks/copilot-cli-policy.json", "hook"),
+    ".github/hooks/copilot-cli-policy.json.resource-ninja.json",
+  );
+  assert.strictEqual(
+    getResourceMetadataPath(".github\\hooks\\copilot-cli-policy.json", "hook"),
+    ".github/hooks/copilot-cli-policy.json.resource-ninja.json",
+  );
+  assert.strictEqual(
+    getResourceMetadataPath("/custom/target/plugin-hooks.json", "hook"),
+    "/custom/target/plugin-hooks.json.resource-ninja.json",
+    "a custom hook target remains file-backed outside a hooks directory",
   );
   assert.strictEqual(
     getResourceMetadataPath(".github/mcp/github-server.json", "mcp"),

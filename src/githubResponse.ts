@@ -1,5 +1,7 @@
 export type GitHubFailureKind =
   | "rate-limit"
+  | "server-error"
+  | "transport"
   | "sso-required"
   | "classic-pat-forbidden"
   | "auth-required"
@@ -61,7 +63,37 @@ export function classifyGitHubFailure(
     return "auth-required";
   }
 
+  if (response.status >= 500 && response.status <= 599) {
+    return "server-error";
+  }
+
   return "other";
+}
+
+const TRANSPORT_ERROR_CODES = new Set([
+  "EAI_AGAIN",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EHOSTUNREACH",
+  "ENETDOWN",
+  "ENETUNREACH",
+  "ETIMEDOUT",
+]);
+
+export function classifyGitHubTransportFailure(
+  error: unknown,
+  signal?: AbortSignal,
+): GitHubFailureKind {
+  if (signal?.aborted || !(error instanceof Error)) {
+    return "other";
+  }
+  if (error.name === "AbortError") {
+    return "other";
+  }
+  const code = (error as NodeJS.ErrnoException).code;
+  return error instanceof TypeError || (code && TRANSPORT_ERROR_CODES.has(code))
+    ? "transport"
+    : "other";
 }
 
 function getRateLimitResetAt(
@@ -86,15 +118,17 @@ export function createGitHubResponseError(
   const detail =
     kind === "rate-limit"
       ? `GitHub API rate limit exceeded${resetAt ? ` until ${resetAt}` : ""}`
-      : kind === "sso-required"
-        ? "GitHub organization SSO authorization is required"
-        : kind === "classic-pat-forbidden"
-          ? "GitHub organization policy rejected the classic PAT"
-          : kind === "auth-required"
-            ? "GitHub authentication or repository permission is required"
-            : kind === "not-found"
-              ? "GitHub resource was not found"
-              : `GitHub API request failed (${response.status})`;
+      : kind === "server-error"
+        ? `GitHub server error (${response.status})`
+        : kind === "sso-required"
+          ? "GitHub organization SSO authorization is required"
+          : kind === "classic-pat-forbidden"
+            ? "GitHub organization policy rejected the classic PAT"
+            : kind === "auth-required"
+              ? "GitHub authentication or repository permission is required"
+              : kind === "not-found"
+                ? "GitHub resource was not found"
+                : `GitHub API request failed (${response.status})`;
 
   return new GitHubResponseError(
     kind,

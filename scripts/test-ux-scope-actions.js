@@ -588,7 +588,7 @@ test("plugin cleanup refreshes instruction index when skills were deleted", () =
 
 test("hook plugin cleanup removes folders but keeps JSON configs file-scoped", () => {
   assert.match(extensionSource, /const isDirectoryBackedHook/);
-  assert.match(extensionSource, /!isHookConfigFilePath\(fullPath\)/);
+  assert.match(extensionSource, /!isFileBackedHookResourcePath\(fullPath\)/);
   assert.match(
     extensionSource,
     /kind === "skill" \|\| isDirectoryBackedHook[\s\S]*path\.dirname\(fullPath\)[\s\S]*: fullPath/,

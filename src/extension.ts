@@ -112,7 +112,7 @@ import {
   getPluginRootFsPathFromManifestPath,
   getResourceIdentityKeys,
   getResourceMetadataPath,
-  isHookConfigFilePath,
+  isFileBackedHookResourcePath,
 } from "./resourceKinds";
 import { scanUserResources, UserResource } from "./userResourceScanner";
 import {
@@ -143,7 +143,11 @@ import {
   resolveInstructionFileUri,
 } from "./customizationPaths";
 import { getVsCodeUserDataPath } from "./userDataPaths";
-import { isDeletableWithin } from "./pathSafety";
+import { isDeletableWithin, isRealPathStrictlyInside } from "./pathSafety";
+import {
+  formatBatchCancellationSuffix,
+  formatBatchFailureMessage,
+} from "./batchProgress";
 import {
   getPluginLocationsToRegister,
   mergePluginLocations,
@@ -442,7 +446,7 @@ async function deleteInstalledResourceByPath(
   allowedRootFsPath: string,
 ): Promise<void> {
   const isDirectoryBackedHook =
-    kind === "hook" && !isHookConfigFilePath(fullPath);
+    kind === "hook" && !isFileBackedHookResourcePath(fullPath);
   // A plugin is scanned by its manifest, but the installed unit is the whole folder.
   const pluginRootFsPath =
     kind === "plugin"
@@ -456,7 +460,10 @@ async function deleteInstalledResourceByPath(
         ? path.dirname(fullPath)
         : fullPath),
   );
-  if (!isDeletableWithin(allowedRootFsPath, targetUri.fsPath)) {
+  if (
+    !isDeletableWithin(allowedRootFsPath, targetUri.fsPath) ||
+    !isRealPathStrictlyInside(allowedRootFsPath, targetUri.fsPath)
+  ) {
     throw new Error(
       `Refused to delete ${targetUri.fsPath} outside ${allowedRootFsPath}`,
     );
@@ -1480,11 +1487,20 @@ export async function activate(
     total: number,
     failedNames: string[],
   ): string {
-    const failed = total - success;
-    const summary = failedNames.slice(0, 3).join(", ");
-    return isJapanese()
-      ? `${scopeLabel}: ${success}/${total} 件成功、${failed} 件失敗${summary ? ` (${summary}${failedNames.length > 3 ? "..." : ""})` : ""}`
-      : `${scopeLabel}: ${success}/${total} succeeded, ${failed} failed${summary ? ` (${summary}${failedNames.length > 3 ? "..." : ""})` : ""}`;
+    return formatBatchFailureMessage(
+      scopeLabel,
+      success,
+      total,
+      failedNames,
+      isJapanese(),
+    );
+  }
+
+  function getBatchCancellationSuffix(
+    processed: number,
+    requested: number,
+  ): string {
+    return formatBatchCancellationSuffix(processed, requested, isJapanese());
   }
 
   function isRemoteInstalledUserResource(resource: UserResource): boolean {
@@ -1872,7 +1888,8 @@ export async function activate(
 
       const resourceUri = vscode.Uri.file(resource.fullPath);
       const isDirectoryBackedHook =
-        resource.kind === "hook" && !isHookConfigFilePath(resource.fullPath);
+        resource.kind === "hook" &&
+        !isFileBackedHookResourcePath(resource.fullPath);
       // A plugin is scanned by its manifest, but the installed unit is the whole folder.
       const pluginRootFsPath =
         resource.kind === "plugin"
@@ -1893,7 +1910,10 @@ export async function activate(
         | undefined;
       let hookConfigSummary: string | undefined;
       try {
-        if (!isDeletableWithin(resource.rootFsPath, targetUri.fsPath)) {
+        if (
+          !isDeletableWithin(resource.rootFsPath, targetUri.fsPath) ||
+          !isRealPathStrictlyInside(resource.rootFsPath, targetUri.fsPath)
+        ) {
           throw new Error(
             `Refused to delete ${targetUri.fsPath} outside ${resource.rootFsPath}`,
           );
@@ -2214,6 +2234,8 @@ export async function activate(
       }
 
       let success = 0;
+      let completed = 0;
+      let cancelled = false;
       const failedResources: string[] = [];
       await vscode.window.withProgress(
         {
@@ -2221,11 +2243,14 @@ export async function activate(
           title: isJapanese()
             ? `${groupLabel} を再インストール中...`
             : `Reinstalling ${groupLabel}...`,
-          cancellable: false,
+          cancellable: true,
         },
-        async (progress) => {
-          let completed = 0;
+        async (progress, token) => {
           for (const resource of remoteTargets) {
+            if (token.isCancellationRequested) {
+              cancelled = true;
+              break;
+            }
             progress.report({
               message: `${resource.name} (${completed + 1}/${remoteTargets.length})`,
               increment: 100 / remoteTargets.length,
@@ -2260,14 +2285,15 @@ export async function activate(
       userResourcesProvider.refresh();
       browseProvider.refresh();
       workspaceProvider.refresh();
-      if (failedResources.length > 0) {
+      if (failedResources.length > 0 || cancelled) {
+        const total = cancelled ? completed : remoteTargets.length;
         vscode.window.showWarningMessage(
-          getBatchFailureMessage(
+          `${getBatchFailureMessage(
             groupLabel,
             success,
-            remoteTargets.length,
+            total,
             failedResources,
-          ),
+          )}${cancelled ? getBatchCancellationSuffix(completed, remoteTargets.length) : ""}`,
         );
       } else {
         vscode.window.showInformationMessage(
@@ -2396,27 +2422,51 @@ export async function activate(
       }
 
       let failed = 0;
+      let completed = 0;
+      let cancelled = false;
       let deletedSkills = 0;
+      const failedResources: string[] = [];
       const deletedFsPaths: string[] = [];
-      for (const resource of resources) {
-        try {
-          await deleteInstalledResourceByPath(
-            resource.kind,
-            resource.fullPath,
-            resource.rootFsPath,
-          );
-          deletedFsPaths.push(resource.fullPath);
-          if (resource.kind === "skill") {
-            deletedSkills++;
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: isJapanese()
+            ? `プラグイン "${pluginId}" のリソースを削除中...`
+            : `Deleting resources from plugin "${pluginId}"...`,
+          cancellable: true,
+        },
+        async (progress, token) => {
+          for (const resource of resources) {
+            if (token.isCancellationRequested) {
+              cancelled = true;
+              break;
+            }
+            progress.report({
+              message: `${resource.name} (${completed + 1}/${resources.length})`,
+              increment: 100 / resources.length,
+            });
+            try {
+              await deleteInstalledResourceByPath(
+                resource.kind,
+                resource.fullPath,
+                resource.rootFsPath,
+              );
+              deletedFsPaths.push(resource.fullPath);
+              if (resource.kind === "skill") {
+                deletedSkills++;
+              }
+            } catch (error) {
+              failed++;
+              failedResources.push(resource.name);
+              logger.error(
+                `[Resource Ninja] Failed to delete plugin resource ${resource.name}:`,
+                error,
+              );
+            }
+            completed++;
           }
-        } catch (error) {
-          failed++;
-          logger.error(
-            `[Resource Ninja] Failed to delete plugin resource ${resource.name}:`,
-            error,
-          );
-        }
-      }
+        },
+      );
 
       await unregisterPluginLocations(deletedFsPaths, pluginId);
 
@@ -2434,11 +2484,26 @@ export async function activate(
       ) {
         await updateInstructionFile(wsFolder.uri, context);
       }
-      vscode.window.showInformationMessage(
-        isJapanese()
-          ? `プラグイン "${pluginId}" の ${resources.length - failed}/${resources.length} 個のリソースを削除しました`
-          : `Deleted ${resources.length - failed}/${resources.length} resources from plugin "${pluginId}"`,
-      );
+      const success = completed - failed;
+      if (failedResources.length > 0 || cancelled) {
+        const total = cancelled ? completed : resources.length;
+        vscode.window.showWarningMessage(
+          `${getBatchFailureMessage(
+            isJapanese()
+              ? `プラグイン "${pluginId}" のリソース削除`
+              : `Delete plugin "${pluginId}" resources`,
+            success,
+            total,
+            failedResources,
+          )}${cancelled ? getBatchCancellationSuffix(completed, resources.length) : ""}`,
+        );
+      } else {
+        vscode.window.showInformationMessage(
+          isJapanese()
+            ? `プラグイン "${pluginId}" の ${success}/${resources.length} 個のリソースを削除しました`
+            : `Deleted ${success}/${resources.length} resources from plugin "${pluginId}"`,
+        );
+      }
     },
   );
 
@@ -5419,6 +5484,8 @@ export async function activate(
       }
 
       let success = 0;
+      let completed = 0;
+      let cancelled = false;
       const failedSkills: string[] = [];
 
       await vscode.window.withProgress(
@@ -5427,11 +5494,14 @@ export async function activate(
           title: isJapanese()
             ? "スキルを再インストール中..."
             : "Reinstalling skills...",
-          cancellable: false,
+          cancellable: true,
         },
-        async (progress) => {
-          let completed = 0;
+        async (progress, token) => {
           for (const meta of installedMeta) {
+            if (token.isCancellationRequested) {
+              cancelled = true;
+              break;
+            }
             progress.report({
               message: `${meta.name} (${completed + 1}/${
                 installedMeta.length
@@ -5471,20 +5541,21 @@ export async function activate(
 
       installedProvider.refresh();
       browseProvider.refresh();
-      if (failedSkills.length > 0) {
+      if (failedSkills.length > 0 || cancelled) {
+        const total = cancelled ? completed : installedMeta.length;
         vscode.window.showWarningMessage(
-          getBatchFailureMessage(
+          `${getBatchFailureMessage(
             isJapanese() ? "スキル再インストール" : "Skill reinstall",
             success,
-            installedMeta.length,
+            total,
             failedSkills,
-          ),
+          )}${cancelled ? getBatchCancellationSuffix(completed, installedMeta.length) : ""}`,
         );
       } else {
         vscode.window.showInformationMessage(
           isJapanese()
-            ? `${installedMeta.length} 個のスキルを再インストールしました`
-            : `Reinstalled ${installedMeta.length} skills`,
+            ? `${success} 個のスキルを再インストールしました`
+            : `Reinstalled ${success} skills`,
         );
       }
     },
@@ -5819,6 +5890,8 @@ export async function activate(
       }
 
       let success = 0;
+      let completed = 0;
+      let cancelled = false;
       const failedResources: string[] = [];
 
       await vscode.window.withProgress(
@@ -5827,11 +5900,14 @@ export async function activate(
           title: isJapanese()
             ? `${kindLabel} グループを再インストール中...`
             : `Reinstalling ${kindLabel} group...`,
-          cancellable: false,
+          cancellable: true,
         },
-        async (progress) => {
-          let completed = 0;
+        async (progress, token) => {
           for (const child of remoteInstalledItems) {
+            if (token.isCancellationRequested) {
+              cancelled = true;
+              break;
+            }
             progress.report({
               message: `${child.skill?.name || child.label} (${completed + 1}/${remoteInstalledItems.length})`,
               increment: 100 / remoteInstalledItems.length,
@@ -5856,14 +5932,15 @@ export async function activate(
 
       workspaceProvider.refresh();
       browseProvider.refresh();
-      if (failedResources.length > 0) {
+      if (failedResources.length > 0 || cancelled) {
+        const total = cancelled ? completed : remoteInstalledItems.length;
         vscode.window.showWarningMessage(
-          getBatchFailureMessage(
+          `${getBatchFailureMessage(
             kindLabel,
             success,
-            remoteInstalledItems.length,
+            total,
             failedResources,
-          ),
+          )}${cancelled ? getBatchCancellationSuffix(completed, remoteInstalledItems.length) : ""}`,
         );
       } else {
         vscode.window.showInformationMessage(
@@ -5916,25 +5993,34 @@ export async function activate(
         return;
       }
 
+      let success = 0;
+      let completed = 0;
+      let cancelled = false;
+      const failedSkills: string[] = [];
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
           title: isJapanese()
             ? "全スキルを削除中..."
             : "Deleting all skills...",
-          cancellable: false,
+          cancellable: true,
         },
-        async (progress) => {
-          let completed = 0;
+        async (progress, token) => {
           for (const skillName of installed) {
+            if (token.isCancellationRequested) {
+              cancelled = true;
+              break;
+            }
             progress.report({
               message: `${skillName} (${completed + 1}/${installed.length})`,
               increment: 100 / installed.length,
             });
             try {
               await uninstallSkill(skillName, wsFolder.uri);
+              success++;
             } catch (error) {
               logger.error(`Failed to uninstall ${skillName}:`, error);
+              failedSkills.push(skillName);
             }
             completed++;
           }
@@ -5942,17 +6028,29 @@ export async function activate(
       );
 
       const config = vscode.workspace.getConfiguration("resourceNinja");
-      if (config.get<boolean>("autoUpdateInstruction")) {
+      if (success > 0 && config.get<boolean>("autoUpdateInstruction")) {
         await updateInstructionFile(wsFolder.uri, context);
       }
 
       workspaceProvider.refresh();
       browseProvider.refresh();
-      vscode.window.showInformationMessage(
-        isJapanese()
-          ? `${installed.length} 個のスキルを削除しました`
-          : `Deleted ${installed.length} skills`,
-      );
+      if (failedSkills.length > 0 || cancelled) {
+        const total = cancelled ? completed : installed.length;
+        vscode.window.showWarningMessage(
+          `${getBatchFailureMessage(
+            isJapanese() ? "スキル一括削除" : "Skill uninstall",
+            success,
+            total,
+            failedSkills,
+          )}${cancelled ? getBatchCancellationSuffix(completed, installed.length) : ""}`,
+        );
+      } else {
+        vscode.window.showInformationMessage(
+          isJapanese()
+            ? `${success} 個のスキルを削除しました`
+            : `Deleted ${success} skills`,
+        );
+      }
     },
   );
 
@@ -6116,6 +6214,7 @@ export async function activate(
 
       let completed = 0;
       let failed = 0;
+      let cancelled = false;
       let installedSkills = 0;
       const failedResources: string[] = [];
       const mcpConfigSummaries: string[] = [];
@@ -6131,10 +6230,14 @@ export async function activate(
             : isPluginPick
               ? `Installing selected contents from ${bundle.name}...`
               : `Installing ${bundle.name}...`,
-          cancellable: false,
+          cancellable: true,
         },
-        async (progress) => {
+        async (progress, token) => {
           for (const selectedItem of selectedItems) {
+            if (token.isCancellationRequested) {
+              cancelled = true;
+              break;
+            }
             const skill = selectedItem.skill;
             progress.report({
               message: `${skill.name} (${completed + 1}/${selectedItems.length})`,
@@ -6196,15 +6299,15 @@ export async function activate(
         const choice = await vscode.window.showWarningMessage(
           isJapanese()
             ? `${bundle.name}: ${completed - failed}/${
-                selectedItems.length
+                completed
               } 個インストール完了（${failed} 個失敗: ${failedSummary}${
                 failedResources.length > 3 ? "..." : ""
-              }）。上流の plugin/resource path が変わっている可能性があります。`
+              }）${cancelled ? getBatchCancellationSuffix(completed, selectedItems.length) : ""}。上流の plugin/resource path が変わっている可能性があります。`
             : `${bundle.name}: ${completed - failed}/${
-                selectedItems.length
+                completed
               } installed (${failed} failed: ${failedSummary}${
                 failedResources.length > 3 ? "..." : ""
-              }). Upstream plugin/resource paths may have changed.`,
+              })${cancelled ? getBatchCancellationSuffix(completed, selectedItems.length) : ""}. Upstream plugin/resource paths may have changed.`,
           updateSource,
         );
         if (choice === updateSource) {
@@ -6229,6 +6332,12 @@ export async function activate(
           );
           browseProvider.refresh();
         }
+      } else if (cancelled) {
+        vscode.window.showWarningMessage(
+          `${bundle.name}: ${completed}/${completed} ${
+            isJapanese() ? "件インストール完了" : "installed"
+          }${getBatchCancellationSuffix(completed, selectedItems.length)}`,
+        );
       } else {
         const skippedSummary = missingResources.length
           ? isJapanese()
@@ -6328,23 +6437,32 @@ export async function activate(
         return;
       }
 
+      let success = 0;
+      let completed = 0;
+      let cancelled = false;
+      const failedSkills: string[] = [];
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
           title: isJapanese() ? "スキルを削除中..." : "Deleting skills...",
-          cancellable: false,
+          cancellable: true,
         },
-        async (progress) => {
-          let completed = 0;
+        async (progress, token) => {
           for (const item of selected) {
+            if (token.isCancellationRequested) {
+              cancelled = true;
+              break;
+            }
             progress.report({
               message: `${item.label} (${completed + 1}/${selected.length})`,
               increment: 100 / selected.length,
             });
             try {
               await uninstallSkill(item.label, wsFolder.uri);
+              success++;
             } catch (error) {
               logger.error(`Failed to uninstall ${item.label}:`, error);
+              failedSkills.push(item.label);
             }
             completed++;
           }
@@ -6352,17 +6470,29 @@ export async function activate(
       );
 
       const config = vscode.workspace.getConfiguration("resourceNinja");
-      if (config.get<boolean>("autoUpdateInstruction")) {
+      if (success > 0 && config.get<boolean>("autoUpdateInstruction")) {
         await updateInstructionFile(wsFolder.uri, context);
       }
 
       workspaceProvider.refresh();
       browseProvider.refresh();
-      vscode.window.showInformationMessage(
-        isJapanese()
-          ? `${selected.length} 個のスキルを削除しました`
-          : `Deleted ${selected.length} skills`,
-      );
+      if (failedSkills.length > 0 || cancelled) {
+        const total = cancelled ? completed : selected.length;
+        vscode.window.showWarningMessage(
+          `${getBatchFailureMessage(
+            isJapanese() ? "スキル選択削除" : "Selected skill uninstall",
+            success,
+            total,
+            failedSkills,
+          )}${cancelled ? getBatchCancellationSuffix(completed, selected.length) : ""}`,
+        );
+      } else {
+        vscode.window.showInformationMessage(
+          isJapanese()
+            ? `${success} 個のスキルを削除しました`
+            : `Deleted ${success} skills`,
+        );
+      }
     },
   );
 
@@ -6405,6 +6535,8 @@ export async function activate(
 
       const index = await loadSkillIndex(context);
       let success = 0;
+      let completed = 0;
+      let cancelled = false;
       const failedSkills: string[] = [];
 
       await vscode.window.withProgress(
@@ -6413,11 +6545,14 @@ export async function activate(
           title: isJapanese()
             ? "スキルを再インストール中..."
             : "Reinstalling skills...",
-          cancellable: false,
+          cancellable: true,
         },
-        async (progress) => {
-          let completed = 0;
+        async (progress, token) => {
           for (const item of selected) {
+            if (token.isCancellationRequested) {
+              cancelled = true;
+              break;
+            }
             progress.report({
               message: `${item.label} (${completed + 1}/${selected.length})`,
               increment: 100 / selected.length,
@@ -6460,14 +6595,15 @@ export async function activate(
 
       workspaceProvider.refresh();
       browseProvider.refresh();
-      if (failedSkills.length > 0) {
+      if (failedSkills.length > 0 || cancelled) {
+        const total = cancelled ? completed : selected.length;
         vscode.window.showWarningMessage(
-          getBatchFailureMessage(
+          `${getBatchFailureMessage(
             isJapanese() ? "スキル再インストール" : "Skill reinstall",
             success,
-            selected.length,
+            total,
             failedSkills,
-          ),
+          )}${cancelled ? getBatchCancellationSuffix(completed, selected.length) : ""}`,
         );
       } else {
         vscode.window.showInformationMessage(

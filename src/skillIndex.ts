@@ -678,8 +678,27 @@ export async function saveSkillIndex(
   await syncSharedStoresFromSkillIndex(context, normalizedIndex);
 }
 
-// デフォルトブランチのキャッシュ（リポジトリURL → ブランチ名）
-const branchCache = new Map<string, string>();
+export const DEFAULT_BRANCH_NEGATIVE_CACHE_TTL_MS = 30_000;
+
+interface BranchCacheEntry {
+  branch: string;
+  expiresAt?: number;
+}
+
+// 確認済みブランチは保持し、推測フォールバックだけ短時間で失効させる。
+const branchCache = new Map<string, BranchCacheEntry>();
+
+function getCachedBranch(repoUrl: string, now: number): string | undefined {
+  const cached = branchCache.get(repoUrl);
+  if (!cached) {
+    return undefined;
+  }
+  if (cached.expiresAt !== undefined && cached.expiresAt <= now) {
+    branchCache.delete(repoUrl);
+    return undefined;
+  }
+  return cached.branch;
+}
 
 /**
  * URL が存在するか HEAD リクエストで確認
@@ -766,10 +785,12 @@ export async function getDefaultBranch(
   repoUrl: string,
   token?: string,
   testPath?: string, // 存在確認用のパス（例: "skills/xxx/SKILL.md"）
+  now: () => number = Date.now,
 ): Promise<string> {
   // キャッシュチェック
-  if (branchCache.has(repoUrl)) {
-    return branchCache.get(repoUrl)!;
+  const cachedBranch = getCachedBranch(repoUrl, now());
+  if (cachedBranch) {
+    return cachedBranch;
   }
 
   const match = repoUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
@@ -787,7 +808,7 @@ export async function getDefaultBranch(
     const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${testFile}`;
 
     if (await checkUrlExists(rawUrl, token)) {
-      branchCache.set(repoUrl, branch);
+      branchCache.set(repoUrl, { branch });
       return branch;
     }
   }
@@ -801,16 +822,21 @@ export async function getDefaultBranch(
     });
     if (response.ok) {
       const data = (await response.json()) as { default_branch?: string };
-      const branch = data.default_branch || "main";
-      branchCache.set(repoUrl, branch);
-      return branch;
+      const branch = data.default_branch?.trim();
+      if (branch) {
+        branchCache.set(repoUrl, { branch });
+        return branch;
+      }
     }
   } catch {
     // API エラー時はフォールバック
   }
 
   // フォールバック
-  branchCache.set(repoUrl, "main");
+  branchCache.set(repoUrl, {
+    branch: "main",
+    expiresAt: now() + DEFAULT_BRANCH_NEGATIVE_CACHE_TTL_MS,
+  });
   return "main";
 }
 
@@ -922,7 +948,7 @@ export function getSkillGitHubUrl(
     return skill.url;
   }
 
-  const cachedBranch = branchCache.get(source.url);
+  const cachedBranch = getCachedBranch(source.url, Date.now());
   const branch = cachedBranch || source.branch;
   if (branch) {
     const storedUrl = rewriteStoredGitHubUrl(skill, source.url, branch);
@@ -969,7 +995,7 @@ export function getSkillRawUrl(
     return getRawUrlFromSkillUrl(skill);
   }
 
-  const cachedBranch = branchCache.get(source.url);
+  const cachedBranch = getCachedBranch(source.url, Date.now());
   const branch = cachedBranch || source.branch;
   if (branch) {
     return (

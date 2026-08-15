@@ -713,6 +713,16 @@ test("uninstall by path avoids duplicating configured skills directory", () => {
 
 // The copy this file used to carry had lost this exclusion, so pin it directly.
 test("hook config detection excludes resource metadata sidecars", () => {
+  test("hook deletion shares the file-backed metadata path rule", () => {
+    assert.match(
+      extensionSource,
+      /kind === "hook" && !isFileBackedHookResourcePath\(fullPath\)/,
+    );
+    assert.match(
+      extensionSource,
+      /resource\.kind === "hook" &&\s*!isFileBackedHookResourcePath\(resource\.fullPath\)/,
+    );
+  });
   assert.strictEqual(
     isHookConfigFilePath("hooks/copilot-cli-policy.json"),
     true,
@@ -1006,6 +1016,112 @@ test("the batch install registers what each install reported, and only when clea
     body,
     /\} else \{\s*failed\+\+;\s*failedResources\.push\(skill\.name\);\s*\}/,
     "an install that was not clean must be counted with the batch failures",
+  );
+  assert.match(body, /cancellable:\s*true/);
+  assert.match(body, /async \(progress, token\)/);
+  assert.match(body, /if \(token\.isCancellationRequested\)/);
+  assert.match(
+    body,
+    /completed - failed\}\/\$\{\s*completed/,
+    "a partial batch summary must use the processed count as its denominator",
+  );
+});
+
+test("batch reinstall commands stop between resources and report unprocessed items", () => {
+  const commands = [
+    [
+      "reinstallUserResourceGroupCmd",
+      "const reinstallUserResourceGroupCmd = vscode.commands.registerCommand(",
+      "// Command: Refresh Local",
+    ],
+    [
+      "reinstallResourceGroupCmd",
+      "const reinstallResourceGroupCmd = vscode.commands.registerCommand(",
+      "// Command: Uninstall all skills",
+    ],
+    [
+      "reinstallAllCmd",
+      "const reinstallAllCmd = vscode.commands.registerCommand(",
+      "// Command: Reinstall single remote-installed resource",
+    ],
+    [
+      "reinstallMultipleCmd",
+      "const reinstallMultipleCmd = vscode.commands.registerCommand(",
+      "// Command: Show installed skills",
+    ],
+  ];
+
+  for (const [label, startMarker, endMarker] of commands) {
+    const start = extensionSource.indexOf(startMarker);
+    assert.ok(start !== -1, `${label} not found`);
+    const body = extensionSource.slice(
+      start,
+      extensionSource.indexOf(endMarker, start),
+    );
+    assert.match(body, /cancellable:\s*true/, `${label} must be cancellable`);
+    assert.match(body, /async \(progress, token\)/);
+    assert.match(body, /if \(token\.isCancellationRequested\)/);
+    assert.match(body, /cancelled \? completed/);
+    assert.match(body, /getBatchCancellationSuffix\(completed,/);
+  }
+});
+
+test("batch uninstall commands report failures and stop between skills", () => {
+  const commands = [
+    [
+      "uninstallAllCmd",
+      "const uninstallAllCmd = vscode.commands.registerCommand(",
+      "// Command: Install Curated Set",
+    ],
+    [
+      "uninstallMultipleCmd",
+      "const uninstallMultipleCmd = vscode.commands.registerCommand(",
+      "// Command: Reinstall multiple skills",
+    ],
+  ];
+
+  for (const [label, startMarker, endMarker] of commands) {
+    const start = extensionSource.indexOf(startMarker);
+    assert.ok(start !== -1, `${label} not found`);
+    const body = extensionSource.slice(
+      start,
+      extensionSource.indexOf(endMarker, start),
+    );
+    assert.match(body, /cancellable:\s*true/, `${label} must be cancellable`);
+    assert.match(body, /async \(progress, token\)/);
+    assert.match(body, /if \(token\.isCancellationRequested\)/);
+    assert.match(body, /failedSkills\.push\(/);
+    assert.match(body, /if \(failedSkills\.length > 0 \|\| cancelled\)/);
+    assert.match(body, /cancelled \? completed/);
+    assert.match(body, /getBatchFailureMessage\(/);
+    assert.match(body, /getBatchCancellationSuffix\(completed,/);
+    assert.ok(
+      !/Deleted \$\{(?:installed|selected)\.length\} skills/.test(body),
+      `${label} must not claim every requested deletion succeeded`,
+    );
+  }
+});
+
+test("plugin resource deletion reports partial and cancelled batches", () => {
+  const start = extensionSource.indexOf(
+    "const deletePluginResourcesCmd = vscode.commands.registerCommand(",
+  );
+  assert.ok(start !== -1, "deletePluginResourcesCmd not found");
+  const body = extensionSource.slice(
+    start,
+    extensionSource.indexOf("// Command: Open skill folder", start),
+  );
+
+  assert.match(body, /cancellable:\s*true/);
+  assert.match(body, /async \(progress, token\)/);
+  assert.match(body, /if \(token\.isCancellationRequested\)/);
+  assert.match(body, /failedResources\.push\(resource\.name\)/);
+  assert.match(body, /const success = completed - failed/);
+  assert.match(body, /if \(failedResources\.length > 0 \|\| cancelled\)/);
+  assert.match(body, /cancelled \? completed : resources\.length/);
+  assert.match(
+    body,
+    /getBatchCancellationSuffix\(completed, resources\.length\)/,
   );
 });
 

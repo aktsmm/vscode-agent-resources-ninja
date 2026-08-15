@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.45] - 2026-08-15
+
+### Changed
+
+- 🛡️ **Safer Resource Operations and Recoverable Batches** - Resource installation and recursive deletion now resolve the nearest existing ancestor with `lstat` and `realpath`, reject broken links, and refuse junction or symlink paths that escape the allowed root. GitHub failures now distinguish server and transport errors, retry only those bounded transient kinds, mark internal timeouts as `ETIMEDOUT`, and expire every unverified default-branch fallback after 30 seconds, including an API response with missing branch data. Batch installs, reinstalls, skill deletions, and plugin-resource deletions can now be canceled between resources. Partial summaries use behavior-tested processed counts, report unprocessed items separately, and no longer claim failed deletions succeeded / リソースのインストールと再帰削除で、存在する最寄り祖先を `lstat` と `realpath` で解決し、壊れたリンクを拒否するとともに、許可ルート外を指す junction / symlink 経由の操作を拒否するようにしました。GitHub の失敗は server error と transport error を区別し、この一時的な種別だけを上限付きで再試行します。内部 timeout には `ETIMEDOUT` を付け、API responseにbranch情報が無い場合を含む未確認のdefault branch fallbackは30秒で失効します。一括install / reinstall / skill削除 / plugin resource削除はリソース間でキャンセルできます。部分完了summaryはbehavior test済みの処理済み件数を分母にして未処理件数を別表示し、削除失敗を成功と誤表示しません。
+
+- 📦 **Clean Development Dependency Audit** - Refreshed development dependencies within their existing compatible ranges, including fixed `brace-expansion` and `js-yaml` releases. The complete dependency audit and the runtime-only audit now both report zero vulnerabilities; the lockfile keeps public registry URLs and SHA-512 integrity / 既存の互換range内でdevelopment dependenciesを更新し、修正版`brace-expansion`と`js-yaml`を取り込みました。全依存auditとruntime限定auditはいずれも脆弱性0件となり、lockfileは公開registry URLとSHA-512 integrityを維持します。
+
+### Fixed
+
+- 🪝 **Hook Config Metadata and Legacy Migration** - JSON hook configs now store their resource metadata in an adjacent `<hook>.json.resource-ninja.json` sidecar instead of attempting to write below the JSON file as though it were a directory. File-backed hook detection is shared by metadata and deletion, including custom target folders, so deleting a hook JSON never targets its parent directory. Installer, workspace scanner, user scanner, deletion, and legacy plugin-hook migration share this contract. A filesystem-backed fixture verifies that migration removes an owned legacy hook and sidecar while preserving an unowned file / JSON hook configのresource metadataを、JSON fileをdirectory扱いした配下ではなく、隣接する`<hook>.json.resource-ninja.json` sidecarへ保存するよう修正しました。custom target folderを含め、file-backed hook判定をmetadataと削除で共有するため、hook JSON削除時に親directoryを対象にしません。installer、workspace scanner、user scanner、削除、legacy plugin hook移行はこの契約を共有します。filesystem-backed fixtureで、所有権が一致するlegacy hookとsidecarだけを削除し、所有していないfileは保持することを検証します。
+
 ## [0.2.44] - 2026-08-14
 
 ### Added

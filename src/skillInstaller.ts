@@ -53,6 +53,7 @@ import { getVsCodeUserDataPath } from "./userDataPaths";
 import {
   isContainedPath,
   isDeletableWithin,
+  isRealPathStrictlyInside,
   isSafePathSegment,
 } from "./pathSafety";
 import {
@@ -153,13 +154,32 @@ function isDeleteTargetAllowed(
   allowedRootUri: vscode.Uri,
   operation: string,
 ): boolean {
-  if (isDeletableWithin(allowedRootUri.fsPath, targetUri.fsPath)) {
+  if (
+    isDeletableWithin(allowedRootUri.fsPath, targetUri.fsPath) &&
+    isRealPathStrictlyInside(allowedRootUri.fsPath, targetUri.fsPath)
+  ) {
     return true;
   }
   logger.error(
     `[Resource Ninja] Refused ${operation}: ${targetUri.fsPath} resolves outside ${allowedRootUri.fsPath}`,
   );
   return false;
+}
+
+function assertRealPathStrictlyInside(
+  targetUri: vscode.Uri,
+  allowedRootUri: vscode.Uri,
+  operation: string,
+): void {
+  if (
+    isContainedPath(allowedRootUri.fsPath, targetUri.fsPath) &&
+    isRealPathStrictlyInside(allowedRootUri.fsPath, targetUri.fsPath)
+  ) {
+    return;
+  }
+  throw new Error(
+    `Refused ${operation}: ${targetUri.fsPath} resolves outside ${allowedRootUri.fsPath}`,
+  );
 }
 
 async function deleteUriIfCreated(
@@ -552,7 +572,7 @@ async function deleteResourceInstallMetadata(
   }
 }
 
-async function removeOwnedLegacyPluginResource(
+export async function removeOwnedLegacyPluginResource(
   targetUri: vscode.Uri,
   skill: Skill,
 ): Promise<void> {
@@ -888,37 +908,9 @@ export function getResourceTargetUri(
   }
 }
 
-/**
- * 再帰削除を許してよい範囲。`getResourceTargetUri` が最終セグメントを足す前に使う
- * 親ディレクトリと同じ式で、リソース名に依存せず求める。
- */
-function getResourceInstallRootUri(
-  workspaceUri: vscode.Uri,
-  config: vscode.WorkspaceConfiguration,
-  skill: Skill,
-  options: InstallSkillOptions = {},
-): vscode.Uri {
-  const kind = getResourceKind(skill);
-  const targetScope = options.targetScope || "workspace";
-
-  if (targetScope === "custom" && options.customTargetUri) {
-    return options.customTargetUri;
-  }
-
-  if (targetScope === "globalHome" || targetScope === "userData") {
-    const root = resolveConfiguredUri(
-      workspaceUri,
-      getConfiguredGlobalHomeDirectory(config),
-      DEFAULT_GLOBAL_HOME_DIRECTORY,
-    );
-    return vscode.Uri.joinPath(root, kind === "plugin" ? "plugins" : "skills");
-  }
-
-  if (kind === "plugin") {
-    return vscode.Uri.joinPath(workspaceUri, ".github", "plugins");
-  }
-
-  return resolveSkillsDirectoryUri(workspaceUri, config);
+/** Keep safety checks bound to the destination selected by the target resolver. */
+function getResourceInstallRootUri(targetUri: vscode.Uri): vscode.Uri {
+  return getParentDirectoryUri(targetUri);
 }
 
 /**
@@ -1119,7 +1111,10 @@ async function downloadDirectory(
     }
 
     const localFilePath = vscode.Uri.joinPath(localPath, entry.name);
-    if (!isContainedPath(downloadRootPath.fsPath, localFilePath.fsPath)) {
+    if (
+      !isContainedPath(downloadRootPath.fsPath, localFilePath.fsPath) ||
+      !isRealPathStrictlyInside(downloadRootPath.fsPath, localFilePath.fsPath)
+    ) {
       const msg = `Rejected entry "${entry.name}": resolves outside ${downloadRootPath.fsPath}`;
       logger.warn(
         `[Resource Ninja] Skipped entry "${entry.name}" from ${owner}/${repo}/${remotePath}: resolves outside ${downloadRootPath.fsPath}`,
@@ -1146,6 +1141,11 @@ async function downloadDirectory(
 
     logger.info(`[Resource Ninja] Downloading file: ${entry.name}`);
     const content = await fetchFileContent(entry.download_url, token);
+    assertRealPathStrictlyInside(
+      localFilePath,
+      downloadRootPath,
+      "download write",
+    );
     await vscode.workspace.fs.writeFile(
       localFilePath,
       Buffer.from(content, "utf-8"),
@@ -1202,6 +1202,11 @@ async function downloadDirectory(
       continue;
     }
     try {
+      assertRealPathStrictlyInside(
+        localFilePath,
+        downloadRootPath,
+        "download directory creation",
+      );
       await vscode.workspace.fs.createDirectory(localFilePath);
       const subResult = await downloadDirectory(
         owner,
@@ -1252,11 +1257,12 @@ export async function installSkill(
   const config = vscode.workspace.getConfiguration("resourceNinja");
   const resourceKind = getResourceKind(skill);
   const skillPath = getResourceTargetUri(workspaceUri, config, skill, options);
-  const installRootUri = getResourceInstallRootUri(
-    workspaceUri,
-    config,
-    skill,
-    options,
+  const installRootUri = getResourceInstallRootUri(skillPath);
+
+  assertRealPathStrictlyInside(
+    skillPath,
+    installRootUri,
+    "resource installation",
   );
 
   if (resourceKind === "skill") {
@@ -1409,6 +1415,11 @@ export async function installSkill(
         } else {
           const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${remotePath}`;
           const content = await fetchFileContent(rawUrl, token);
+          assertRealPathStrictlyInside(
+            skillPath,
+            installRootUri,
+            "resource write",
+          );
           await vscode.workspace.fs.writeFile(
             skillPath,
             Buffer.from(content, "utf-8"),

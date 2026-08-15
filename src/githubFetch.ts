@@ -1,5 +1,10 @@
 import { resolveGitHubTokenAfterFailure } from "./githubAuth";
-import { retryGitHubRequestAnonymously } from "./githubResponse";
+import {
+  classifyGitHubFailure,
+  classifyGitHubTransportFailure,
+  GitHubFailureKind,
+  retryGitHubRequestAnonymously,
+} from "./githubResponse";
 import { logger } from "./logger";
 
 const GITHUB_USER_AGENT = "VSCode-AgentResourcesNinja";
@@ -43,7 +48,11 @@ export async function fetchGitHubWithTimeout(
     return await fetch(url, { ...init, signal: controller.signal });
   } catch (error) {
     if (timedOut) {
-      throw new Error(`Request timeout: ${describeGitHubRequest(url)}`);
+      const timeoutError = new Error(
+        `Request timeout: ${describeGitHubRequest(url)}`,
+      ) as NodeJS.ErrnoException;
+      timeoutError.code = "ETIMEDOUT";
+      throw timeoutError;
     }
     throw error;
   } finally {
@@ -102,9 +111,16 @@ export function createGitHubHeaders(
   return headers;
 }
 
-/** 429 と一過性のゲートウェイ失敗だけを対象にする。401/403/404 は auth fallback の担当。 */
+const RETRYABLE_GITHUB_FAILURE_KINDS: ReadonlySet<GitHubFailureKind> = new Set([
+  "server-error",
+  "transport",
+]);
+
+/** 5xx だけを対象にする。rate-limit/auth/not-found/other は上位へ返す。 */
 export function isRetryableGitHubStatus(status: number): boolean {
-  return status === 429 || status === 502 || status === 503 || status === 504;
+  return RETRYABLE_GITHUB_FAILURE_KINDS.has(
+    classifyGitHubFailure({ status, headers: new Headers() }, ""),
+  );
 }
 
 function normalizeMaxAttempts(value: number | undefined): number {
@@ -166,26 +182,6 @@ export function getGitHubRetryDelayMs(
     readRetryAfterMs(response, now) ?? readRateLimitResetMs(response, now);
   const delay = explicit ?? getBackoffDelayMs(attempt, random);
   return delay > GITHUB_RETRY_MAX_WAIT_MS ? undefined : delay;
-}
-
-function isTransientNetworkError(
-  error: unknown,
-  signal: AbortSignal | undefined,
-): boolean {
-  if (signal?.aborted) {
-    return false;
-  }
-  if (!(error instanceof Error)) {
-    return false;
-  }
-  // 呼び出し側のキャンセルは再試行しない。内部タイムアウトだけ一過性として扱う。
-  if (error.name === "AbortError") {
-    return false;
-  }
-  if (error.message.startsWith("Request timeout: ")) {
-    return true;
-  }
-  return error instanceof TypeError;
 }
 
 function defaultSleep(ms: number): Promise<void> {
@@ -251,7 +247,11 @@ async function sendGitHubRequestWithRetry(
     try {
       response = await perform();
     } catch (error) {
-      if (attempt >= maxAttempts || !isTransientNetworkError(error, signal)) {
+      const failureKind = classifyGitHubTransportFailure(error, signal);
+      if (
+        attempt >= maxAttempts ||
+        !RETRYABLE_GITHUB_FAILURE_KINDS.has(failureKind)
+      ) {
         throw error;
       }
       const delay = getBackoffDelayMs(attempt, random());
