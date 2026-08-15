@@ -37,3 +37,6 @@ MIGRATION_NOTES.md
 # Copilot agent artifacts (keep local in public repos)
 /research/
 /output_sessions/
+
+# Internal sibling-extension handoff notes
+/docs/agent-skills-ninja-v0.2.47-porting-notes.md
