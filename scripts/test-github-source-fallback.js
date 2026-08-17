@@ -830,6 +830,59 @@ const {
     .sort();
   assert.deepStrictEqual(bareFetchFiles, ["githubAuth.ts", "githubFetch.ts"]);
 
+  await test("the retry-not-before ladder follows GitHub's documented order", () => {
+    const nowMs = Date.parse("2026-06-24T12:00:00.000Z");
+    const withHeaders = (entries) => ({ headers: new Headers(entries) });
+
+    assert.strictEqual(
+      githubResponseModule.getGitHubRetryNotBefore(
+        withHeaders({ "retry-after": "120" }),
+        nowMs,
+      ),
+      "2026-06-24T12:02:00.000Z",
+      "numeric retry-after wins",
+    );
+    assert.strictEqual(
+      githubResponseModule.getGitHubRetryNotBefore(
+        withHeaders({ "retry-after": "Wed, 24 Jun 2026 12:05:00 GMT" }),
+        nowMs,
+      ),
+      "2026-06-24T12:05:00.000Z",
+      "HTTP-date retry-after is accepted",
+    );
+    assert.strictEqual(
+      githubResponseModule.getGitHubRetryNotBefore(
+        withHeaders({
+          "x-ratelimit-remaining": "0",
+          "x-ratelimit-reset": String(
+            Math.floor(Date.parse("2026-06-24T12:45:00.000Z") / 1000),
+          ),
+        }),
+        nowMs,
+      ),
+      "2026-06-24T12:45:00.000Z",
+      "the reset header is used once the window is exhausted",
+    );
+    assert.strictEqual(
+      githubResponseModule.getGitHubRetryNotBefore(withHeaders({}), nowMs),
+      "2026-06-24T12:01:00.000Z",
+      "a secondary limit with no headers still waits the documented minimum",
+    );
+    assert.strictEqual(
+      githubResponseModule.getGitHubRetryNotBefore(
+        withHeaders({
+          "x-ratelimit-remaining": "12",
+          "x-ratelimit-reset": String(
+            Math.floor(Date.parse("2026-06-24T12:45:00.000Z") / 1000),
+          ),
+        }),
+        nowMs,
+      ),
+      "2026-06-24T12:01:00.000Z",
+      "a reset header with quota left is not a deadline",
+    );
+  });
+
   global.fetch = originalFetch;
   console.log("GitHub source fallback tests passed");
 })().catch((error) => {

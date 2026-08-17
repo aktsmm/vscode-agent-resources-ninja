@@ -63,6 +63,8 @@ export function collectStaleSources(
 ): SourceFreshnessInfo[] {
   return index.sources
     .map((source) => {
+      // Deliberately not `lastScannedAt`: scanning one source would otherwise
+      // mark every source that has no timestamp of its own as fresh.
       const timestamp = getSourceFreshnessTimestamp(
         source,
         scanMeta,
@@ -75,6 +77,38 @@ export function collectStaleSources(
       };
     })
     .filter((entry) => entry.stale);
+}
+
+/**
+ * Oldest first, never-indexed before everything else, ties keeping the caller's
+ * order. A run cut short by a rate limit then spends its budget on the sources
+ * that are furthest behind instead of the same head of the list every time.
+ */
+export function sortSourcesByFreshness(
+  sources: readonly Source[],
+  scanMeta?: Record<string, ScanMeta>,
+): Source[] {
+  return sources
+    .map((source, position) => ({
+      source,
+      position,
+      timestampMs: parseTimestampMs(
+        getSourceFreshnessTimestamp(source, scanMeta, undefined),
+      ),
+    }))
+    .sort((left, right) => {
+      if (left.timestampMs !== right.timestampMs) {
+        if (left.timestampMs === undefined) {
+          return -1;
+        }
+        if (right.timestampMs === undefined) {
+          return 1;
+        }
+        return left.timestampMs - right.timestampMs;
+      }
+      return left.position - right.position;
+    })
+    .map((entry) => entry.source);
 }
 
 export function stampIndexedSources(

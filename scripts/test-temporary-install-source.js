@@ -157,6 +157,9 @@ async function main() {
             "Temporary rawUrl install should not need getSourceBranch",
           );
         },
+        RETIRED_SOURCE_ALIASES: {
+          "microsoft-copilot-for-azure-plugin": "microsoft-azure-skills",
+        },
       },
       "./i18n": {
         isJapanese: () => false,

@@ -66,6 +66,9 @@ function collectResourceKindsImportNames() {
 
 function createModule() {
   const writes = [];
+  const realSourceFreshness = requireTypeScriptModule(
+    path.join(__dirname, "..", "src", "sourceFreshness.ts"),
+  );
   const resourceKindsModule = requireTypeScriptModule(RESOURCE_KINDS_PATH);
   const githubResponseModule = requireTypeScriptModule(
     path.join(__dirname, "..", "src", "githubResponse.ts"),
@@ -168,10 +171,12 @@ function createModule() {
     "./sharedResourceIndexStore": {
       shouldRunSharedScan: async () => true,
       updateSharedScanMetadata: async () => undefined,
+      readSharedResourceIndex: async () => undefined,
       loadSharedStoresIntoSkillIndex: async (_context, index) => index,
       syncSharedStoresFromSkillIndex: async () => undefined,
     },
     "./sourceFreshness": {
+      ...realSourceFreshness,
       stampIndexedSources: (sources) => sources,
     },
     "./logger": {
@@ -376,6 +381,7 @@ async function testFullUpdateStopsAfterRateLimit() {
   const currentIndex = {
     version: "1.0.0",
     lastUpdated: "2026-06-20",
+    lastScannedAt: "2026-06-20T00:00:00.000Z",
     sources: [
       {
         id: "rate-limited",
@@ -442,10 +448,71 @@ async function testFullUpdateStopsAfterRateLimit() {
     result.index.skills.map((skill) => skill.name).sort(),
     ["existing-first", "existing-second"],
   );
+  assert.strictEqual(
+    result.index.lastScannedAt,
+    "2026-06-20T00:00:00.000Z",
+    "a run that scanned nothing must not advance the index scan timestamp",
+  );
   assert.deepStrictEqual(progressEvents, [
     { message: "Updating Rate Limited..." },
     { increment: 50 },
   ]);
+}
+
+async function testFullUpdateScansOldestSourceFirst() {
+  const { moduleExports } = createModule();
+  const fetchCalls = [];
+  global.fetch = async (url) => {
+    fetchCalls.push(url);
+    return response(403, "API rate limit exceeded", {
+      "x-ratelimit-remaining": "0",
+      "x-ratelimit-reset": "1785344400",
+    });
+  };
+
+  const makeSource = (id, lastIndexedAt) => ({
+    id,
+    name: id,
+    url: `https://github.com/octo/${id}`,
+    type: "official",
+    branch: "main",
+    description: id,
+    ...(lastIndexedAt ? { lastIndexedAt } : {}),
+  });
+
+  const currentIndex = {
+    version: "1.0.0",
+    lastUpdated: "2026-06-20",
+    sources: [
+      makeSource("fresh", "2026-06-20T00:00:00.000Z"),
+      makeSource("stale", "2026-01-01T00:00:00.000Z"),
+      makeSource("never"),
+    ],
+    skills: [],
+    categories: [],
+    bundles: [],
+  };
+
+  const result = await moduleExports.updateIndexFromSourcesWithResult(
+    { globalStorageUri: { fsPath: path.join("D:", "tmp", "storage") } },
+    currentIndex,
+    undefined,
+    { forceScan: true },
+  );
+
+  assert.ok(
+    fetchCalls[0].startsWith("https://api.github.com/repos/octo/never"),
+    `the never-indexed source must be attempted first, got ${fetchCalls[0]}`,
+  );
+  assert.deepStrictEqual(
+    result.failures.map((failure) => failure.entry.id),
+    ["never"],
+  );
+  assert.deepStrictEqual(
+    result.skipped.map((source) => source.id),
+    ["stale", "fresh"],
+    "skipped must follow the scan order, oldest first, not the stored order",
+  );
 }
 
 async function testSingleSourceProgressAdvancesAfterScan() {
@@ -889,6 +956,7 @@ async function main() {
   await testPrivateSourceUsesContentsFallback();
   await testPublicRawDoesNotAttachToken();
   await testFullUpdateStopsAfterRateLimit();
+  await testFullUpdateScansOldestSourceFirst();
   await testSingleSourceProgressAdvancesAfterScan();
   await testRemoveSourceRemovesOnlyIndexedEntries();
   await testMutationBoundariesRejectMalformedIndexShape();

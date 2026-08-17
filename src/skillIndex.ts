@@ -179,12 +179,23 @@ export interface Bundle {
 // インデックス全体の型定義
 export interface SkillIndex {
   version: string;
+  /** 同梱カタログの発行日。merge で同梱側の値へ上書きされる */
   lastUpdated: string;
+  /** この端末で source を最後に scan した ISO 時刻 */
+  lastScannedAt?: string;
   sources: Source[];
   skills: Skill[];
   categories: Category[];
   bundles?: Bundle[]; // Bundle一覧
 }
+
+/**
+ * 退役した preset source id と、その配信を引き継いだ source id の対応。
+ * installed metadata の正規化と cached index の統合で共有する。
+ */
+export const RETIRED_SOURCE_ALIASES: Readonly<Record<string, string>> = {
+  "microsoft-copilot-for-azure-plugin": "microsoft-azure-skills",
+};
 
 function getArrayField<T>(
   index: Partial<SkillIndex> | undefined,
@@ -251,6 +262,7 @@ function normalizeSkillIndex(index: Partial<SkillIndex>): SkillIndex {
   return {
     version: index.version || "1.0.0",
     lastUpdated: index.lastUpdated || new Date().toISOString().split("T")[0],
+    lastScannedAt: index.lastScannedAt,
     sources: getNormalizedArrayField<Source>(index, "sources").map(
       (source) => ({
         ...source,
@@ -394,11 +406,58 @@ export function mergeSkillIndexes(
     ]),
   );
 
+  // 退役した preset source のうち、後継 source が同梱カタログに存在するものだけを
+  // 統合対象にする。ユーザー追加 source は id が衝突しても対象にしない。
+  const consolidatableSourceIds = new Set(
+    getIndexSources(localIndex)
+      .filter((source) => {
+        const canonicalId = RETIRED_SOURCE_ALIASES[source.id];
+        return (
+          canonicalId !== undefined &&
+          source.type !== "user-added" &&
+          !bundledSourcesById.has(source.id) &&
+          bundledSourcesById.has(canonicalId)
+        );
+      })
+      .map((source) => source.id),
+  );
+
+  // 後継側に同じリソースが揃っているものだけ落とす。旧 source にしか無い配信物は、
+  // 後継 repository に同じ path がある保証が無いので残す。
+  const canonicalResourceKeys = new Set(
+    [...getIndexResources(localIndex), ...getIndexResources(bundledIndex)].map(
+      (resource) => createSkillKey(resource),
+    ),
+  );
+  const retainedLocalSkills = getIndexResources(localIndex).filter((skill) => {
+    if (!consolidatableSourceIds.has(skill.source)) {
+      return true;
+    }
+    return !canonicalResourceKeys.has(
+      createSkillKey({
+        ...skill,
+        source: RETIRED_SOURCE_ALIASES[skill.source],
+      }),
+    );
+  });
+
+  const retainedSkillSourceIds = new Set(
+    retainedLocalSkills.map((resource) => resource.source),
+  );
+  const retainedLocalBundles = getIndexBundles(localIndex).filter(
+    (bundle) =>
+      !consolidatableSourceIds.has(bundle.source) ||
+      retainedSkillSourceIds.has(bundle.source),
+  );
+
   // ローカルのソース ID セット
   const localSourceIds = new Set(getIndexSources(localIndex).map((s) => s.id));
+  const localBundleSourceIds = new Set(
+    retainedLocalBundles.map((bundle) => bundle.source),
+  );
   const localCategoryIds = new Set(localCategories.map((c) => c.id));
   const localBundleKeys = new Set(
-    getIndexBundles(localIndex).map((bundle) => createBundleKey(bundle)),
+    retainedLocalBundles.map((bundle) => createBundleKey(bundle)),
   );
 
   // バンドル版の新しいソースを追加
@@ -413,28 +472,44 @@ export function mergeSkillIndexes(
   );
 
   // 既存ソースをバンドル版で補完・更新
-  const updatedSources = getIndexSources(localIndex).map((localSource) => {
-    const bundledSource = bundledSourcesById.get(localSource.id);
-    if (bundledSource) {
-      return {
-        ...localSource,
-        ...bundledSource,
-        description_ja:
-          bundledSource.description_ja || localSource.description_ja,
-        // Repository facts are resolved by a scan; a bundled preset ships
-        // curation only and must not overwrite what the runtime verified.
-        // Once an identity is recorded the runtime owns the URL so a followed
-        // rename is not reverted; repointing a preset uses a new source id.
-        repoId: localSource.repoId ?? bundledSource.repoId,
-        lastIndexedAt: localSource.lastIndexedAt ?? bundledSource.lastIndexedAt,
-        url:
-          localSource.repoId === undefined
-            ? bundledSource.url
-            : localSource.url,
-      };
-    }
-    return localSource;
-  });
+  // 退役した preset source は bundled index から消えても cached index に残り続け、
+  // 中身ゼロのエントリとして表示され続けるため、痕跡が無いものだけ取り除く。
+  const updatedSources = getIndexSources(localIndex)
+    .filter((localSource) => {
+      if (
+        bundledSourcesById.has(localSource.id) ||
+        localSource.type === "user-added"
+      ) {
+        return true;
+      }
+      return (
+        retainedSkillSourceIds.has(localSource.id) ||
+        localBundleSourceIds.has(localSource.id)
+      );
+    })
+    .map((localSource) => {
+      const bundledSource = bundledSourcesById.get(localSource.id);
+      if (bundledSource) {
+        return {
+          ...localSource,
+          ...bundledSource,
+          description_ja:
+            bundledSource.description_ja || localSource.description_ja,
+          // Repository facts are resolved by a scan; a bundled preset ships
+          // curation only and must not overwrite what the runtime verified.
+          // Once an identity is recorded the runtime owns the URL so a followed
+          // rename is not reverted; repointing a preset uses a new source id.
+          repoId: localSource.repoId ?? bundledSource.repoId,
+          lastIndexedAt:
+            localSource.lastIndexedAt ?? bundledSource.lastIndexedAt,
+          url:
+            localSource.repoId === undefined
+              ? bundledSource.url
+              : localSource.url,
+        };
+      }
+      return localSource;
+    });
 
   // 既存カテゴリをバンドル版で補完・更新
   const updatedCategories = localCategories.map((localCategory) => {
@@ -454,14 +529,14 @@ export function mergeSkillIndexes(
   // バンドル版の新しいスキルを追加
   // 既存ソースでも新スキルが追加されるため、source+name で欠分を補完する
   const localSkillKeys = new Set(
-    getIndexResources(localIndex).map((skill) => createSkillKey(skill)),
+    retainedLocalSkills.map((skill) => createSkillKey(skill)),
   );
   const newSkills = getIndexResources(bundledIndex).filter(
     (skill) => !localSkillKeys.has(createSkillKey(skill)),
   );
 
   // 既存スキルをバンドル版で補完・更新
-  const updatedSkills = getIndexResources(localIndex).map((localSkill) => {
+  const updatedSkills = retainedLocalSkills.map((localSkill) => {
     const bundledSkill = bundledSkillsByKey.get(createSkillKey(localSkill));
     if (bundledSkill) {
       return {
@@ -493,7 +568,7 @@ export function mergeSkillIndexes(
   });
 
   // 既存バンドルをバンドル版で補完・更新
-  const updatedBundles = (localIndex.bundles || []).map((localBundle) => {
+  const updatedBundles = retainedLocalBundles.map((localBundle) => {
     const bundledBundle = bundledBundlesByKey.get(createBundleKey(localBundle));
     if (bundledBundle) {
       return {
@@ -506,6 +581,12 @@ export function mergeSkillIndexes(
     return localBundle;
   });
 
+  const mergedBundles = [...updatedBundles, ...newBundles];
+  // Consolidation can legitimately empty the list, so an empty result is only
+  // "nothing to say" when no local bundle was dropped.
+  const droppedLocalBundles =
+    retainedLocalBundles.length < getIndexBundles(localIndex).length;
+
   return {
     ...localIndex,
     version: bundledIndex.version,
@@ -514,8 +595,8 @@ export function mergeSkillIndexes(
     categories: [...updatedCategories, ...newCategories],
     skills: [...updatedSkills, ...newSkills],
     bundles:
-      updatedBundles.length > 0 || newBundles.length > 0
-        ? [...updatedBundles, ...newBundles]
+      mergedBundles.length > 0 || droppedLocalBundles
+        ? mergedBundles
         : localIndex.bundles,
   };
 }

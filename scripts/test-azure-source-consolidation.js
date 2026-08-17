@@ -28,7 +28,10 @@ assert.ok(
 const canonicalSource = index.sources.find(
   (source) => source.id === canonicalSourceId,
 );
-assert.ok(canonicalSource, "Canonical Microsoft Azure source should be bundled");
+assert.ok(
+  canonicalSource,
+  "Canonical Microsoft Azure source should be bundled",
+);
 assert.deepStrictEqual(canonicalSource.includePaths, [
   "skills/",
   ".mcp.json",
@@ -54,13 +57,23 @@ assert.ok(
   "Canonical Azure source should retain its MCP config",
 );
 
+const indexSource = fs.readFileSync(
+  path.join(__dirname, "..", "src", "skillIndex.ts"),
+  "utf8",
+);
+assert.match(
+  indexSource,
+  /"microsoft-copilot-for-azure-plugin": "microsoft-azure-skills"/,
+  "The retired source alias must stay defined in the shared index module",
+);
+
 const installerSource = fs.readFileSync(
   path.join(__dirname, "..", "src", "skillInstaller.ts"),
   "utf8",
 );
 assert.match(
   installerSource,
-  /"microsoft-copilot-for-azure-plugin": "microsoft-azure-skills"/,
+  /RETIRED_SOURCE_ALIASES,\s*\n\} from "\.\/skillIndex";/,
   "Installed metadata from the retired source should migrate to the canonical source",
 );
 

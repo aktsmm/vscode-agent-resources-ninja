@@ -779,4 +779,104 @@ test("global resource home tree description is not repetitive", () => {
   );
 });
 
+test("an empty remote source is flagged only when it truly holds nothing", () => {
+  assert.match(
+    treeProviderSource,
+    /const hasBundles = getIndexBundles\(this\.skillIndex\)\.some\(/,
+    "the empty-source check must look past resources, since a bundle-only source is not broken",
+  );
+  assert.match(
+    treeProviderSource,
+    /if \(!resourceKind && count === 0 && !hasBundles\)/,
+    "only the repository-level row with no resources and no bundles gets the warning",
+  );
+  assert.match(treeProviderSource, /getEmptySourceHint\(source\)/);
+  assert.match(
+    treeProviderSource,
+    /source\.lastIndexedAt\?\.split\("T"\)\[0\]/,
+    "the hint must state when the source was last indexed",
+  );
+});
+
+test("the empty source hint stays neutral about the cause in both locales", () => {
+  const hint = treeProviderSource.slice(
+    treeProviderSource.indexOf("private getEmptySourceHint("),
+  );
+  assert.match(hint, /この端末ではまだインデックスされていません/);
+  assert.match(hint, /never indexed on this machine/);
+  assert.match(hint, /インデックス更新/);
+  assert.match(hint, /Run Update Index to rescan/);
+  for (const blamed of ["失敗", "エラー", "failed", "error"]) {
+    assert.ok(
+      !hint.slice(0, hint.indexOf("\n  }")).includes(blamed),
+      `the hint must not blame a cause it cannot know: ${blamed}`,
+    );
+  }
+});
+
+test("the automatic rate-limit resume is visible while it runs", () => {
+  assert.match(
+    extensionSource,
+    /location: vscode\.ProgressLocation\.Window,\s*\n\s*title: formatRateLimitResumeProgress\(sourceIds\.length\)/,
+    "an unrequested background run must report progress without stealing focus",
+  );
+  assert.doesNotMatch(
+    extensionSource,
+    /title: formatRateLimitResumeProgress[\s\S]{0,120}ProgressLocation\.Notification/,
+    "the resume must not open a modal-style notification progress",
+  );
+});
+
+test("both terminal outcomes of a promised retry reach the user", () => {
+  assert.match(
+    extensionSource,
+    /showInformationMessage\(\s*\n?\s*formatRateLimitResumeOutcome\(\s*\n?\s*"recovered"/,
+    "a successful resume must close the loop it promised",
+  );
+  assert.match(
+    extensionSource,
+    /showWarningMessage\(\s*\n?\s*formatRateLimitResumeOutcome\("rate-limited-again", 0\),/,
+    "a resume that fails again must say so instead of only logging",
+  );
+  assert.match(
+    extensionSource,
+    /if \(result\.succeeded\.length > 0\) \{/,
+    "a resume that recovered nothing must not claim a recovery",
+  );
+});
+
+test("resume and busy notices are localized in both languages", () => {
+  for (const [name, ja, en] of [
+    [
+      "formatRateLimitResumeProgress",
+      /レート制限後の再開中/,
+      /Resuming after the rate limit/,
+    ],
+    [
+      "formatRateLimitResumeOutcome",
+      /再開もレート制限に達しました/,
+      /hit the rate limit again/,
+    ],
+    [
+      "formatSourceUpdateBusyNotice",
+      /別のソース更新が実行中/,
+      /Another source update is already running/,
+    ],
+  ]) {
+    const start = extensionSource.indexOf(`function ${name}(`);
+    assert.ok(start > 0, `${name} should exist`);
+    const body = extensionSource.slice(start, start + 900);
+    assert.match(body, ja, `${name} needs Japanese copy`);
+    assert.match(body, en, `${name} needs English copy`);
+  }
+});
+
+test("a user-invoked update that cannot start says so", () => {
+  assert.match(
+    extensionSource,
+    /if \(!updateResult\) \{[\s\S]{0,200}showInformationMessage\(\s*\n?\s*formatSourceUpdateBusyNotice\(\),/,
+    "the manual update command must not fail silently when the guard rejects it",
+  );
+});
+
 console.log("RESULT=PASS");

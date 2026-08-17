@@ -450,4 +450,230 @@ test("a followed rename survives the bundled preset, but an unverified source ta
   );
 });
 
+test("a retired preset source is dropped only when it has no resources left", () => {
+  const localIndex = {
+    version: "1.0.0",
+    lastUpdated: "2026-03-01",
+    sources: [
+      {
+        id: "retired-empty",
+        name: "Retired Empty",
+        url: "https://github.com/acme/retired-empty",
+        type: "official",
+        description: "retired",
+      },
+      {
+        id: "retired-with-resources",
+        name: "Retired With Resources",
+        url: "https://github.com/acme/retired-with-resources",
+        type: "official",
+        description: "retired",
+      },
+      {
+        id: "retired-with-bundle",
+        name: "Retired With Bundle",
+        url: "https://github.com/acme/retired-with-bundle",
+        type: "official",
+        description: "retired",
+      },
+      {
+        id: "user-empty",
+        name: "User Empty",
+        url: "https://github.com/acme/user-empty",
+        type: "user-added",
+        description: "user",
+      },
+    ],
+    categories: [],
+    skills: [
+      {
+        name: "kept-skill",
+        source: "retired-with-resources",
+        path: "skills/kept-skill",
+        categories: [],
+        description: "kept",
+      },
+    ],
+    bundles: [
+      {
+        id: "kept-bundle",
+        name: "Kept Bundle",
+        source: "retired-with-bundle",
+        description: "bundle",
+        skills: [],
+      },
+    ],
+  };
+
+  const bundledIndex = {
+    version: "1.1.0",
+    lastUpdated: "2026-03-10",
+    sources: [],
+    categories: [],
+    skills: [],
+    bundles: [],
+  };
+
+  const merged = mergeSkillIndexes(localIndex, bundledIndex);
+
+  assert.deepStrictEqual(
+    Array.from(merged.sources.map((source) => source.id)),
+    ["retired-with-resources", "retired-with-bundle", "user-empty"],
+    "only a retired preset source without resources or bundles should be dropped",
+  );
+});
+
+test("a retired preset source is consolidated only for resources the successor already ships", () => {
+  const localIndex = {
+    version: "1.0.0",
+    lastUpdated: "2026-03-01",
+    sources: [
+      {
+        id: "microsoft-copilot-for-azure-plugin",
+        name: "Retired Azure Plugin",
+        url: "https://github.com/microsoft/GitHub-Copilot-for-Azure",
+        type: "official",
+        description: "retired",
+      },
+      {
+        id: "microsoft-azure-skills",
+        name: "Microsoft Azure Skills",
+        url: "https://github.com/microsoft/azure-skills",
+        type: "official",
+        description: "canonical",
+      },
+    ],
+    categories: [],
+    skills: [
+      {
+        name: "azure-quota",
+        source: "microsoft-copilot-for-azure-plugin",
+        path: "plugin/skills/azure-quota",
+        categories: [],
+        description: "duplicated by the successor",
+      },
+      {
+        name: "legacy-only",
+        source: "microsoft-copilot-for-azure-plugin",
+        path: "plugin/skills/legacy-only",
+        categories: [],
+        description: "no successor counterpart",
+      },
+      {
+        name: "azure-quota",
+        source: "microsoft-azure-skills",
+        path: "skills/azure-quota",
+        categories: [],
+        description: "canonical copy",
+      },
+    ],
+    bundles: [],
+  };
+
+  const bundledIndex = {
+    version: "1.1.0",
+    lastUpdated: "2026-03-10",
+    sources: [localIndex.sources[1]],
+    categories: [],
+    skills: [localIndex.skills[2]],
+    bundles: [],
+  };
+
+  const merged = mergeSkillIndexes(localIndex, bundledIndex);
+
+  assert.deepStrictEqual(
+    Array.from(
+      merged.skills.map((skill) => `${skill.source}:${skill.name}`),
+    ).sort(),
+    [
+      "microsoft-azure-skills:azure-quota",
+      "microsoft-copilot-for-azure-plugin:legacy-only",
+    ],
+    "only the resource the successor already ships should be dropped",
+  );
+  assert.deepStrictEqual(
+    Array.from(merged.sources.map((source) => source.id)),
+    ["microsoft-copilot-for-azure-plugin", "microsoft-azure-skills"],
+    "a retired source that still holds an exclusive resource must stay",
+  );
+});
+
+test("a retired source id owned by a user-added source is never consolidated", () => {
+  const localIndex = {
+    version: "1.0.0",
+    lastUpdated: "2026-03-01",
+    sources: [
+      {
+        id: "microsoft-copilot-for-azure-plugin",
+        name: "My Fork",
+        url: "https://github.com/acme/my-fork",
+        type: "user-added",
+        description: "user",
+      },
+      {
+        id: "microsoft-azure-skills",
+        name: "Microsoft Azure Skills",
+        url: "https://github.com/microsoft/azure-skills",
+        type: "official",
+        description: "canonical",
+      },
+    ],
+    categories: [],
+    skills: [
+      {
+        name: "azure-quota",
+        source: "microsoft-copilot-for-azure-plugin",
+        path: "skills/azure-quota",
+        categories: [],
+        description: "user copy",
+      },
+      {
+        name: "azure-quota",
+        source: "microsoft-azure-skills",
+        path: "skills/azure-quota",
+        categories: [],
+        description: "canonical copy",
+      },
+    ],
+    bundles: [],
+  };
+
+  const bundledIndex = {
+    version: "1.1.0",
+    lastUpdated: "2026-03-10",
+    sources: [localIndex.sources[1]],
+    categories: [],
+    skills: [localIndex.skills[1]],
+    bundles: [],
+  };
+
+  const merged = mergeSkillIndexes(localIndex, bundledIndex);
+
+  assert.strictEqual(merged.skills.length, 2);
+  assert.deepStrictEqual(
+    Array.from(merged.sources.map((source) => source.id)),
+    ["microsoft-copilot-for-azure-plugin", "microsoft-azure-skills"],
+  );
+});
+
+test("the local scan timestamp survives a merge", () => {
+  const makeIndex = (extra) => ({
+    version: "1.0.0",
+    lastUpdated: "2026-03-01",
+    sources: [],
+    categories: [],
+    skills: [],
+    bundles: [],
+    ...extra,
+  });
+
+  const merged = mergeSkillIndexes(
+    makeIndex({ lastScannedAt: "2026-08-17T04:05:06.000Z" }),
+    makeIndex({ version: "1.1.0", lastUpdated: "2026-03-10" }),
+  );
+
+  assert.strictEqual(merged.lastScannedAt, "2026-08-17T04:05:06.000Z");
+  assert.strictEqual(merged.lastUpdated, "2026-03-10");
+});
+
 console.log("RESULT=PASS");

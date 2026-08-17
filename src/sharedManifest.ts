@@ -54,6 +54,7 @@ export const SHARED_RESOURCE_INDEX_FILE = "index.json";
 export const SHARED_RESOURCE_INDEX_TEMP_FILE = "index.json.tmp";
 export const SHARED_SOURCES_MANIFEST_TEMP_FILE = "sources.json.tmp";
 export const SHARED_STORE_LOCK_FILE = "index.lock";
+export const SHARED_RATE_LIMIT_RESUME_FILE = "rate-limit-resume.json";
 export const SHARED_STORE_RETRY_DELAY_MS = 100;
 export const SHARED_STORE_LOCK_RETRY_COUNT = 5;
 export const SHARED_STORE_LOCK_STALE_MS = 60 * 1000;

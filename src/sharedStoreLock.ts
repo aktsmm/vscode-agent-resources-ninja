@@ -22,10 +22,17 @@ function getSharedStoreLockPath(): string {
   return path.join(getAgentNinjaSharedDirectoryPath(), SHARED_STORE_LOCK_FILE);
 }
 
+/** Our own payload is well under 1 KB; anything larger is not a lock we wrote. */
+const SHARED_STORE_LOCK_MAX_BYTES = 4 * 1024;
+
 async function safeReadLockPayload(
   lockPath: string,
 ): Promise<SharedStoreLockPayload | undefined> {
   try {
+    const stats = await fs.stat(lockPath);
+    if (stats.size > SHARED_STORE_LOCK_MAX_BYTES) {
+      return undefined;
+    }
     const content = await fs.readFile(lockPath, "utf8");
     return JSON.parse(content) as SharedStoreLockPayload;
   } catch {

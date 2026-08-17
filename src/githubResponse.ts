@@ -12,10 +12,13 @@ export interface GitHubResponseErrorDetails {
   /** The failure that started the credential walk, when the surfaced one hides it. */
   rootCauseKind?: GitHubFailureKind;
   ssoAuthorizationUrl?: string;
+  /** Earliest instant a retry is allowed, per GitHub's documented rate-limit ladder. */
+  retryNotBefore?: string;
 }
 
 export class GitHubResponseError extends Error {
   public readonly rootCauseKind?: GitHubFailureKind;
+  public readonly retryNotBefore?: string;
   declare readonly ssoAuthorizationUrl?: string;
 
   constructor(
@@ -28,6 +31,7 @@ export class GitHubResponseError extends Error {
     super(message);
     this.name = "GitHubResponseError";
     this.rootCauseKind = details?.rootCauseKind;
+    this.retryNotBefore = details?.retryNotBefore;
     // Non-enumerable so serializing this error cannot leak the pending SSO authorization.
     Object.defineProperty(this, "ssoAuthorizationUrl", {
       value: details?.ssoAuthorizationUrl,
@@ -253,6 +257,41 @@ function getRateLimitResetAt(
   return new Date(resetSeconds * 1000).toISOString();
 }
 
+/** GitHub's documented minimum wait when no header says when to come back. */
+export const GITHUB_RATE_LIMIT_FALLBACK_WAIT_MS = 60_000;
+
+/**
+ * Follows GitHub's documented order: `retry-after`, then `x-ratelimit-reset`
+ * once the window is exhausted, then a conservative minimum wait. Secondary
+ * limits often send only `retry-after`, so reading the reset header alone
+ * leaves those retries with no deadline at all.
+ */
+export function getGitHubRetryNotBefore(
+  response: Pick<Response, "headers">,
+  nowMs: number = Date.now(),
+): string {
+  const retryAfter = response.headers.get("retry-after");
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds)) {
+      return new Date(nowMs + Math.max(0, seconds * 1000)).toISOString();
+    }
+    const dateMs = Date.parse(retryAfter);
+    if (Number.isFinite(dateMs)) {
+      return new Date(Math.max(nowMs, dateMs)).toISOString();
+    }
+  }
+
+  if (response.headers.get("x-ratelimit-remaining") === "0") {
+    const resetAt = getRateLimitResetAt(response);
+    if (resetAt) {
+      return resetAt;
+    }
+  }
+
+  return new Date(nowMs + GITHUB_RATE_LIMIT_FALLBACK_WAIT_MS).toISOString();
+}
+
 export function createGitHubResponseError(
   response: Pick<Response, "status" | "headers">,
   bodyText: string,
@@ -284,6 +323,8 @@ export function createGitHubResponseError(
     resetAt,
     {
       rootCauseKind: rootCause?.kind,
+      retryNotBefore:
+        kind === "rate-limit" ? getGitHubRetryNotBefore(response) : undefined,
       ssoAuthorizationUrl:
         rootCause?.ssoAuthorizationUrl ??
         extractSsoAuthorizationUrl(response.headers),

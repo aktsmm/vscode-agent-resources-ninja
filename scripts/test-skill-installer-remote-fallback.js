@@ -211,6 +211,9 @@ function loadInstaller(writes, options = {}) {
       loadSkillIndex: async () => options.skillIndex || { sources: [] },
       getSourceBranch: async (source) => source.branch || "main",
       getResourceKind: (resource) => resource.kind || "skill",
+      RETIRED_SOURCE_ALIASES: {
+        "microsoft-copilot-for-azure-plugin": "microsoft-azure-skills",
+      },
     },
     "./i18n": {
       isJapanese: () => false,
@@ -457,6 +460,9 @@ function loadWindowsInstaller(recorded, options = {}) {
       }),
       getSourceBranch: async () => "main",
       getResourceKind: () => options.resourceKind || "skill",
+      RETIRED_SOURCE_ALIASES: {
+        "microsoft-copilot-for-azure-plugin": "microsoft-azure-skills",
+      },
     },
     "./i18n": { isJapanese: () => false, messages: {} },
     "./githubAuth": {

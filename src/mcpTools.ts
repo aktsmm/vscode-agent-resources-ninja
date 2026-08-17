@@ -148,7 +148,11 @@ function getIndexUpdateInfo(index: SkillIndex): {
   isOutdated: boolean;
   warning: string;
 } {
-  const lastUpdated = index.lastUpdated || "unknown";
+  const lastUpdated = (
+    index.lastScannedAt ||
+    index.lastUpdated ||
+    "unknown"
+  ).split("T")[0];
   let daysOld = 0;
   let isOutdated = false;
 

@@ -9,6 +9,7 @@ import {
   loadSkillIndex,
   Source,
   getSourceBranch,
+  RETIRED_SOURCE_ALIASES,
 } from "./skillIndex";
 import { isJapanese, messages } from "./i18n";
 import {
@@ -2135,10 +2136,6 @@ export interface SkillMeta {
   skillFilePath?: string; // SKILL.md の実パス
   [key: string]: unknown;
 }
-
-const RETIRED_SOURCE_ALIASES: Readonly<Record<string, string>> = {
-  "microsoft-copilot-for-azure-plugin": "microsoft-azure-skills",
-};
 
 export function normalizeSkillMetaSource(
   meta: Pick<Partial<SkillMeta>, "source" | "remotePath">,

@@ -1318,7 +1318,34 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
     } else {
       item.iconPath = new vscode.ThemeIcon("repo");
     }
+
+    const hasBundles = getIndexBundles(this.skillIndex).some(
+      (bundle) => bundle.source === source.id,
+    );
+    if (!resourceKind && count === 0 && !hasBundles) {
+      item.iconPath = new vscode.ThemeIcon(
+        "warning",
+        new vscode.ThemeColor("charts.orange"),
+      );
+      item.tooltip = `${item.tooltip}\n\n${this.getEmptySourceHint(source)}`;
+    }
+
     return item;
+  }
+
+  private getEmptySourceHint(source: Source): string {
+    const isJa = isJapanese();
+    const indexedAt = source.lastIndexedAt?.split("T")[0];
+    if (isJa) {
+      const when = indexedAt
+        ? `最終インデックス: ${indexedAt}`
+        : "この端末ではまだインデックスされていません";
+      return `インデックス済みリソースがありません（${when}）。「インデックス更新」で再スキャンできます。`;
+    }
+    const when = indexedAt
+      ? `last indexed ${indexedAt}`
+      : "never indexed on this machine";
+    return `No indexed resources (${when}). Run Update Index to rescan.`;
   }
 
   private addBundleSection(items: SkillTreeItem[]): void {

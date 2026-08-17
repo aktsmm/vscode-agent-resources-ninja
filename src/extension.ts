@@ -162,8 +162,15 @@ import {
   resolveOutputFormat,
 } from "./toolDetector";
 import {
+  claimRateLimitResumeRecord,
+  clearRateLimitResumeRecord,
   getStandaloneSharedModeSummary,
+  RATE_LIMIT_RESUME_CLAIM_STALE_MS,
+  RateLimitResumeRecord,
+  readRateLimitResumeRecord,
   readSharedResourceIndex,
+  renewRateLimitResumeClaim,
+  saveRateLimitResumeRecord,
 } from "./sharedResourceIndexStore";
 import { readSharedSourcesManifest } from "./sharedSourcesManifestStore";
 import {
@@ -175,7 +182,11 @@ import {
   GitHubResponseError,
   isGitHubResponseError,
 } from "./githubResponse";
-import { runSourceIndexUpdateBatch } from "./sourceIndexUpdateBatch";
+import {
+  planRateLimitResume,
+  planRateLimitResumeArming,
+  runSourceIndexUpdateBatch,
+} from "./sourceIndexUpdateBatch";
 import {
   isEmptySourceScanError,
   isSourceRepositoryChangedError,
@@ -430,6 +441,58 @@ function shouldOfferGitHubAuth(error: unknown): error is GitHubResponseError {
       "auth-required",
     ].includes(getGitHubEffectiveFailureKind(error))
   );
+}
+
+/**
+ * Stated separately from the failure reason: the reason line follows the root
+ * cause, so an SSO rejection that later surfaced as a rate limit would otherwise
+ * leave the user with no idea a retry is already scheduled.
+ */
+function formatRateLimitResumeNotice(retryNotBefore: string): string {
+  const at = formatSourceIndexResetAt(
+    retryNotBefore,
+    isJapanese() ? "ja" : "en",
+  );
+  return isJapanese()
+    ? `レート制限の解除後、${at} に自動で再開します。`
+    : `Will resume automatically after the rate limit resets at ${at}.`;
+}
+
+function formatRateLimitResumeProgress(sourceCount: number): string {
+  return isJapanese()
+    ? `レート制限後の再開中: ${sourceCount} 件のソース`
+    : `Resuming after the rate limit: ${sourceCount} source(s)`;
+}
+
+function formatSourceUpdateBusyNotice(): string {
+  return isJapanese()
+    ? "別のソース更新が実行中のため、今回の更新は開始しませんでした。完了後にもう一度実行してください。"
+    : "Another source update is already running, so this one did not start. Try again once it finishes.";
+}
+
+/** The user was promised a retry, so both terminal outcomes have to close the loop. */
+function formatRateLimitResumeOutcome(
+  outcome: "recovered" | "rate-limited-again",
+  succeededCount: number,
+): string {
+  if (outcome === "recovered") {
+    return isJapanese()
+      ? `レート制限で保留していた ${succeededCount} 件のソースを更新しました。`
+      : `Updated ${succeededCount} source(s) that were deferred by the rate limit.`;
+  }
+  return isJapanese()
+    ? "再開もレート制限に達しました。自動再試行は行いません。残りは「インデックス更新」で手動実行してください。"
+    : "The resume hit the rate limit again, so no further automatic retry runs. Finish the rest with Update Index.";
+}
+
+async function formatUnauthenticatedRateLimitHint(): Promise<string> {
+  const resolved = await resolveGitHubToken();
+  if (resolved.token) {
+    return "";
+  }
+  return isJapanese()
+    ? "未認証は 60 リクエスト/時間、GitHub トークンを設定すると 5,000 リクエスト/時間になります。"
+    : "Unauthenticated requests get 60/hour; a GitHub token raises it to 5,000/hour.";
 }
 
 function collectMissingIndexedInstalledSkillSources(
@@ -1055,6 +1118,214 @@ export async function activate(
     recentlyInstalled,
   );
 
+  const resumeSessionId = `${process.pid}-${Math.random().toString(36).slice(2)}`;
+  let rateLimitResumeTimer: ReturnType<typeof setTimeout> | undefined;
+  let rateLimitResumeDisposed = false;
+  let sourceUpdateInFlight = false;
+  context.subscriptions.push(
+    new vscode.Disposable(() => {
+      rateLimitResumeDisposed = true;
+      if (rateLimitResumeTimer) {
+        clearTimeout(rateLimitResumeTimer);
+        rateLimitResumeTimer = undefined;
+      }
+    }),
+  );
+
+  // One guard for the manual update, the startup stale refresh and the resume,
+  // so the three cannot overlap and multiply the request load inside one host.
+  const runExclusiveSourceUpdate = async <T>(
+    run: () => Promise<T>,
+  ): Promise<T | undefined> => {
+    if (sourceUpdateInFlight) {
+      logger.info(
+        "[Source Index] Skipped a source update because another one is already running.",
+      );
+      return undefined;
+    }
+    sourceUpdateInFlight = true;
+    try {
+      return await run();
+    } finally {
+      sourceUpdateInFlight = false;
+      // Event-driven rather than polled: whatever was waiting for the guard is
+      // picked up here instead of re-arming a timer while the guard is held.
+      void armRateLimitResumeTimer().catch((error) => {
+        logger.warn(
+          "[Source Index] Failed to re-arm the rate-limit resume timer:",
+          error,
+        );
+      });
+    }
+  };
+
+  const armRateLimitResumeTimer = async (): Promise<void> => {
+    const record = await readRateLimitResumeRecord();
+    if (rateLimitResumeTimer) {
+      clearTimeout(rateLimitResumeTimer);
+      rateLimitResumeTimer = undefined;
+    }
+
+    // Reading the record is async, so the host can be disposed meanwhile.
+    const arming = planRateLimitResumeArming(record, {
+      sessionId: resumeSessionId,
+      claimStaleMs: RATE_LIMIT_RESUME_CLAIM_STALE_MS,
+      disposed: rateLimitResumeDisposed,
+    });
+    if (arming.action === "skip") {
+      return;
+    }
+
+    logger.info(
+      `[Source Index] Rate-limit resume armed for ${record?.sourceIds.length} source(s) in ${Math.round(arming.delayMs / 1000)}s (not before ${record?.retryNotBefore}${arming.waitingOnForeignClaim ? ", waiting on another window's claim" : ""}).`,
+    );
+    rateLimitResumeTimer = setTimeout(() => {
+      rateLimitResumeTimer = undefined;
+      void tryResumeRateLimitedUpdate().catch((error) => {
+        logger.warn("[Source Index] Rate-limit resume failed:", error);
+      });
+    }, arming.delayMs);
+  };
+
+  const scheduleRateLimitResume = async (
+    failures: readonly { entry: Source; error: unknown }[],
+    skipped: readonly Source[],
+    previousAttempts = 0,
+  ): Promise<RateLimitResumeRecord | undefined> => {
+    const record = planRateLimitResume(failures, skipped, {
+      previousAttempts,
+    });
+    if (!record) {
+      return undefined;
+    }
+
+    await saveRateLimitResumeRecord(record);
+    logger.warn(
+      `[Source Index] Rate limit detected at ${record.createdAt}; ${record.sourceIds.length} source(s) deferred until ${record.retryNotBefore}.`,
+    );
+    await armRateLimitResumeTimer();
+    return record;
+  };
+
+  async function tryResumeRateLimitedUpdate(): Promise<void> {
+    const pending = await readRateLimitResumeRecord();
+    if (pending?.attempts) {
+      // Automatic retry is spent; keep the store clean instead of re-reading a
+      // record that no trigger is ever allowed to consume.
+      await clearRateLimitResumeRecord({
+        createdAt: pending.createdAt,
+        claimedBy: pending.claimedBy ?? resumeSessionId,
+      });
+      logger.warn(
+        "[Source Index] Automatic rate-limit resume is exhausted; run Update Index manually to finish the remaining sources.",
+      );
+      return;
+    }
+
+    // The claim is taken inside the guard, so a rejected run never leaves the
+    // record claimed with nothing running.
+    await runExclusiveSourceUpdate(async () => {
+      const claimed = await claimRateLimitResumeRecord(resumeSessionId);
+      if (!claimed) {
+        return;
+      }
+
+      let claimLost = false;
+      const heartbeat = setInterval(() => {
+        void renewRateLimitResumeClaim(resumeSessionId, claimed.createdAt).then(
+          (renewed) => {
+            if (!renewed) {
+              // Another window owns the record now; stop touching shared state.
+              claimLost = true;
+              clearInterval(heartbeat);
+              logger.warn(
+                "[Source Index] Lost the rate-limit resume claim; this window will not update the shared record.",
+              );
+            }
+          },
+        );
+      }, RATE_LIMIT_RESUME_CLAIM_STALE_MS / 3);
+
+      try {
+        if (!skillIndex) {
+          skillIndex = await loadSkillIndex(context);
+        }
+        const knownIds = new Set(skillIndex.sources.map((source) => source.id));
+        const sourceIds = claimed.sourceIds.filter((id) => knownIds.has(id));
+        if (sourceIds.length === 0) {
+          if (!claimLost) {
+            await clearRateLimitResumeRecord({
+              createdAt: claimed.createdAt,
+              claimedBy: resumeSessionId,
+            });
+          }
+          return;
+        }
+
+        logger.info(
+          `[Source Index] Resuming ${sourceIds.length} rate-limited source(s) at ${new Date().toISOString()} (deferred since ${claimed.createdAt}, not before ${claimed.retryNotBefore}).`,
+        );
+        // Window-location progress: the user did not start this run, so it must
+        // be visible without stealing focus.
+        const result = await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Window,
+            title: formatRateLimitResumeProgress(sourceIds.length),
+          },
+          async () =>
+            updateIndexFromSourcesWithResult(
+              context,
+              skillIndex!,
+              undefined,
+              // Non-forced so a source another window already refreshed is not rescanned.
+              { forceScan: false, sourceIds },
+            ),
+        );
+        skillIndex = result.index;
+        browseProvider.refresh();
+
+        if (claimLost) {
+          return;
+        }
+
+        if (planRateLimitResume(result.failures, result.skipped)) {
+          await scheduleRateLimitResume(
+            result.failures,
+            result.skipped,
+            claimed.attempts + 1,
+          );
+          logger.warn(
+            "[Source Index] The resume hit the rate limit again; no further automatic retry will be scheduled.",
+          );
+          const detailAction = messages.actionShowDetails();
+          const choice = await vscode.window.showWarningMessage(
+            formatRateLimitResumeOutcome("rate-limited-again", 0),
+            detailAction,
+          );
+          if (choice === detailAction) {
+            logger.show(true);
+          }
+          return;
+        }
+
+        await clearRateLimitResumeRecord({
+          createdAt: claimed.createdAt,
+          claimedBy: resumeSessionId,
+        });
+        logger.info(
+          `[Source Index] Resume completed: ${result.succeeded.length} succeeded, ${result.failures.length} failed.`,
+        );
+        if (result.succeeded.length > 0) {
+          void vscode.window.showInformationMessage(
+            formatRateLimitResumeOutcome("recovered", result.succeeded.length),
+          );
+        }
+      } finally {
+        clearInterval(heartbeat);
+      }
+    });
+  }
+
   const refreshInstructionSync = async (): Promise<void> => {
     workspaceProvider.refresh();
     userResourcesProvider.refresh();
@@ -1245,6 +1516,10 @@ export async function activate(
     }
     startupIndexMaintenanceStarted = true;
 
+    // Resuming also re-arms when the deadline has not passed yet, otherwise a
+    // host that opened before it would leave the record with no trigger at all.
+    await tryResumeRateLimitedUpdate();
+
     try {
       let index = skillIndex || (await loadSkillIndex(context));
       skillIndex = index;
@@ -1387,29 +1662,34 @@ export async function activate(
           cancellable: false,
         },
         async (progress) =>
-          runSourceIndexUpdateBatch(
-            selected,
-            index,
-            async (nextIndex, source) =>
-              updateIndexFromSingleSource(
-                context,
-                nextIndex,
-                source.id,
-                {
-                  report(value) {
-                    progress.report({
-                      ...value,
-                      increment: scaleSourceIndexProgressIncrement(
-                        selected.length,
-                        value.increment,
-                      ),
-                    });
+          runExclusiveSourceUpdate(() =>
+            runSourceIndexUpdateBatch(
+              selected,
+              index,
+              async (nextIndex, source) =>
+                updateIndexFromSingleSource(
+                  context,
+                  nextIndex,
+                  source.id,
+                  {
+                    report(value) {
+                      progress.report({
+                        ...value,
+                        increment: scaleSourceIndexProgressIncrement(
+                          selected.length,
+                          value.increment,
+                        ),
+                      });
+                    },
                   },
-                },
-                { forceScan: true },
-              ),
+                  { forceScan: true },
+                ),
+            ),
           ),
       );
+      if (!batchResult) {
+        return;
+      }
       const { value: nextIndex, succeeded, failures, skipped } = batchResult;
       index = nextIndex;
       skillIndex = index;
@@ -1445,18 +1725,28 @@ export async function activate(
         const actions = shouldOfferGitHubAuth(firstFailure.error)
           ? [detailAction, authAction]
           : [detailAction];
+        const resumeRecord = await scheduleRateLimitResume(failures, skipped);
+        const extraLines = resumeRecord
+          ? [
+              formatRateLimitResumeNotice(resumeRecord.retryNotBefore),
+              await formatUnauthenticatedRateLimitHint(),
+            ].filter(Boolean)
+          : [];
         const action = await vscode.window.showWarningMessage(
-          messages.staleSourceIndexPartialFailed(
-            succeeded.length,
-            failures.length,
-            selected.length,
-            failures
-              .slice(0, 3)
-              .map((failure) => getSourceUpdateDisplayName(failure.entry))
-              .join(", "),
-            formatSourceUpdateFailureReason(firstFailure.error),
-            skipped.length,
-          ),
+          [
+            messages.staleSourceIndexPartialFailed(
+              succeeded.length,
+              failures.length,
+              selected.length,
+              failures
+                .slice(0, 3)
+                .map((failure) => getSourceUpdateDisplayName(failure.entry))
+                .join(", "),
+              formatSourceUpdateFailureReason(firstFailure.error),
+              skipped.length,
+            ),
+            ...extraLines,
+          ].join(" "),
           ...actions,
         );
         if (action === detailAction) {
@@ -6769,10 +7059,19 @@ export async function activate(
             cancellable: false,
           },
           async (progress) =>
-            updateIndexFromSourcesWithResult(context, skillIndex!, progress, {
-              forceScan: true,
-            }),
+            runExclusiveSourceUpdate(() =>
+              updateIndexFromSourcesWithResult(context, skillIndex!, progress, {
+                forceScan: true,
+              }),
+            ),
         );
+        if (!updateResult) {
+          // The user asked for this one, so a guard rejection cannot be silent.
+          await vscode.window.showInformationMessage(
+            formatSourceUpdateBusyNotice(),
+          );
+          return undefined;
+        }
         skillIndex = updateResult.index;
         const newCount = getIndexResources(skillIndex).length;
         const diff = newCount - oldCount;
@@ -6804,18 +7103,31 @@ export async function activate(
           const actions = shouldOfferGitHubAuth(firstFailure.error)
             ? [detailAction, authAction]
             : [detailAction];
+          const resumeRecord = await scheduleRateLimitResume(
+            updateResult.failures,
+            updateResult.skipped,
+          );
+          const extraLines = resumeRecord
+            ? [
+                formatRateLimitResumeNotice(resumeRecord.retryNotBefore),
+                await formatUnauthenticatedRateLimitHint(),
+              ].filter(Boolean)
+            : [];
           const action = await vscode.window.showWarningMessage(
-            messages.staleSourceIndexPartialFailed(
-              updateResult.succeeded.length,
-              updateResult.failures.length,
-              totalSources,
-              updateResult.failures
-                .slice(0, 3)
-                .map((failure) => getSourceUpdateDisplayName(failure.entry))
-                .join(", "),
-              formatSourceUpdateFailureReason(firstFailure.error),
-              updateResult.skipped.length,
-            ),
+            [
+              messages.staleSourceIndexPartialFailed(
+                updateResult.succeeded.length,
+                updateResult.failures.length,
+                totalSources,
+                updateResult.failures
+                  .slice(0, 3)
+                  .map((failure) => getSourceUpdateDisplayName(failure.entry))
+                  .join(", "),
+                formatSourceUpdateFailureReason(firstFailure.error),
+                updateResult.skipped.length,
+              ),
+              ...extraLines,
+            ].join(" "),
             ...actions,
           );
           if (action === detailAction) {

@@ -15,6 +15,7 @@ import {
   getSharedResourceIndexUri,
   ResourceEntry,
   SCAN_DEDUP_WINDOW_MS,
+  SHARED_RATE_LIMIT_RESUME_FILE,
   SHARED_RESOURCE_INDEX_SCHEMA_VERSION,
   SHARED_RESOURCE_INDEX_TEMP_FILE,
   SharedResourceIndex,
@@ -348,6 +349,245 @@ export async function loadSharedStoresIntoSkillIndex(
   }
 
   return nextIndex;
+}
+
+/**
+ * A refresh cut short by a GitHub rate limit leaves this behind so the sources it
+ * never reached can be picked up once the window resets.
+ */
+export interface RateLimitResumeRecord {
+  version: 1;
+  sourceIds: string[];
+  retryNotBefore: string;
+  createdAt: string;
+  /** Automatic resumes already spent on this record. */
+  attempts: number;
+  claimedBy?: string;
+  claimedAt?: string;
+}
+
+/** One primary window plus margin; anything further out is a corrupt record. */
+export const RATE_LIMIT_RESUME_MAX_WAIT_MS = 75 * 60 * 1000;
+/** A claimer that never finished must not strand the record forever. */
+export const RATE_LIMIT_RESUME_CLAIM_STALE_MS = 10 * 60 * 1000;
+/**
+ * The record shares a directory with a sibling extension, so it is parsed as
+ * untrusted input: a record for every bundled source is under 2 KB, and these
+ * caps stop a malformed or hostile file from being parsed or replayed at all.
+ */
+export const RATE_LIMIT_RESUME_MAX_FILE_BYTES = 64 * 1024;
+export const RATE_LIMIT_RESUME_MAX_SOURCE_IDS = 500;
+const RATE_LIMIT_RESUME_MAX_FIELD_LENGTH = 256;
+
+function getRateLimitResumePath(): string {
+  return `${getAgentNinjaSharedDirectoryPath()}/${SHARED_RATE_LIMIT_RESUME_FILE}`;
+}
+
+export function normalizeRateLimitResumeRecord(
+  candidate: unknown,
+  nowMs: number = Date.now(),
+): RateLimitResumeRecord | undefined {
+  if (!candidate || typeof candidate !== "object") {
+    return undefined;
+  }
+
+  const record = candidate as Partial<RateLimitResumeRecord>;
+  if (record.version !== 1 || !Array.isArray(record.sourceIds)) {
+    return undefined;
+  }
+
+  const sourceIds: string[] = [];
+  for (const id of record.sourceIds) {
+    if (
+      typeof id !== "string" ||
+      id.length === 0 ||
+      id.length > RATE_LIMIT_RESUME_MAX_FIELD_LENGTH ||
+      sourceIds.includes(id)
+    ) {
+      continue;
+    }
+    if (sourceIds.length >= RATE_LIMIT_RESUME_MAX_SOURCE_IDS) {
+      return undefined;
+    }
+    sourceIds.push(id);
+  }
+  if (sourceIds.length === 0) {
+    return undefined;
+  }
+
+  const readBoundedField = (value: unknown): string | undefined =>
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= RATE_LIMIT_RESUME_MAX_FIELD_LENGTH
+      ? value
+      : undefined;
+
+  const retryNotBeforeMs =
+    typeof record.retryNotBefore === "string"
+      ? Date.parse(record.retryNotBefore)
+      : NaN;
+  if (
+    !Number.isFinite(retryNotBeforeMs) ||
+    retryNotBeforeMs - nowMs > RATE_LIMIT_RESUME_MAX_WAIT_MS
+  ) {
+    return undefined;
+  }
+
+  return {
+    version: 1,
+    sourceIds,
+    retryNotBefore: new Date(retryNotBeforeMs).toISOString(),
+    createdAt:
+      readBoundedField(record.createdAt) ?? new Date(nowMs).toISOString(),
+    attempts:
+      typeof record.attempts === "number" && Number.isFinite(record.attempts)
+        ? Math.max(0, Math.floor(record.attempts))
+        : 0,
+    claimedBy: readBoundedField(record.claimedBy),
+    claimedAt: readBoundedField(record.claimedAt),
+  };
+}
+
+async function readRateLimitResumeFile(
+  nowMs: number,
+): Promise<RateLimitResumeRecord | undefined> {
+  const filePath = getRateLimitResumePath();
+  try {
+    // Checked before reading: this runs during activation, so an oversized file
+    // must never be pulled into memory or parsed.
+    const stats = await fs.stat(filePath);
+    if (stats.size > RATE_LIMIT_RESUME_MAX_FILE_BYTES) {
+      logger.warn(
+        `[Resource Ninja] Ignoring the rate-limit resume record: ${stats.size} bytes exceeds the ${RATE_LIMIT_RESUME_MAX_FILE_BYTES} byte limit.`,
+      );
+      return undefined;
+    }
+
+    const content = await fs.readFile(filePath, "utf8");
+    return normalizeRateLimitResumeRecord(JSON.parse(content), nowMs);
+  } catch {
+    return undefined;
+  }
+}
+
+export async function readRateLimitResumeRecord(
+  nowMs: number = Date.now(),
+): Promise<RateLimitResumeRecord | undefined> {
+  return readRateLimitResumeFile(nowMs);
+}
+
+export async function saveRateLimitResumeRecord(
+  record: RateLimitResumeRecord,
+): Promise<void> {
+  await withSharedStoreLock(SELF_EXTENSION_ID, async () => {
+    await fs.mkdir(getAgentNinjaSharedDirectoryPath(), { recursive: true });
+    await fs.writeFile(
+      getRateLimitResumePath(),
+      JSON.stringify(record, null, 2),
+      "utf8",
+    );
+  });
+}
+
+/**
+ * Owner- and generation-checked, so a host that lost its claim cannot delete the
+ * record the new owner is working on.
+ */
+export async function clearRateLimitResumeRecord(owner?: {
+  createdAt: string;
+  claimedBy: string;
+}): Promise<void> {
+  await withSharedStoreLock(SELF_EXTENSION_ID, async () => {
+    if (owner) {
+      const current = await readRateLimitResumeFile(Date.now());
+      if (
+        current &&
+        (current.createdAt !== owner.createdAt ||
+          current.claimedBy !== owner.claimedBy)
+      ) {
+        return;
+      }
+    }
+    await fs.rm(getRateLimitResumePath(), { force: true });
+  });
+}
+
+/**
+ * Read, validate and claim in a single cross-process transaction, so two windows
+ * reaching the deadline together cannot both resume and double the request load
+ * while GitHub still considers the client rate limited.
+ */
+export async function claimRateLimitResumeRecord(
+  claimedBy: string,
+  nowMs: number = Date.now(),
+): Promise<RateLimitResumeRecord | undefined> {
+  return withSharedStoreLock(SELF_EXTENSION_ID, async () => {
+    const record = await readRateLimitResumeFile(nowMs);
+    // A resume that was itself rate-limited does not get another automatic try,
+    // no matter which trigger asks or how often the host restarts.
+    if (
+      !record ||
+      record.attempts > 0 ||
+      Date.parse(record.retryNotBefore) > nowMs
+    ) {
+      return undefined;
+    }
+
+    const claimedAtMs = record.claimedAt ? Date.parse(record.claimedAt) : NaN;
+    const claimIsLive =
+      record.claimedBy !== undefined &&
+      record.claimedBy !== claimedBy &&
+      Number.isFinite(claimedAtMs) &&
+      nowMs - claimedAtMs < RATE_LIMIT_RESUME_CLAIM_STALE_MS;
+    if (claimIsLive) {
+      return undefined;
+    }
+
+    const claimed: RateLimitResumeRecord = {
+      ...record,
+      claimedBy,
+      claimedAt: new Date(nowMs).toISOString(),
+    };
+    await fs.mkdir(getAgentNinjaSharedDirectoryPath(), { recursive: true });
+    await fs.writeFile(
+      getRateLimitResumePath(),
+      JSON.stringify(claimed, null, 2),
+      "utf8",
+    );
+    return claimed;
+  });
+}
+
+/**
+ * A claim expires so a dead host cannot strand the record, so a resume that runs
+ * longer than that window has to keep saying it is still alive.
+ */
+export async function renewRateLimitResumeClaim(
+  claimedBy: string,
+  createdAt: string,
+  nowMs: number = Date.now(),
+): Promise<boolean> {
+  return withSharedStoreLock(SELF_EXTENSION_ID, async () => {
+    const record = await readRateLimitResumeFile(nowMs);
+    if (
+      !record ||
+      record.createdAt !== createdAt ||
+      record.claimedBy !== claimedBy
+    ) {
+      return false;
+    }
+
+    await fs.writeFile(
+      getRateLimitResumePath(),
+      JSON.stringify(
+        { ...record, claimedAt: new Date(nowMs).toISOString() },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    return true;
+  });
 }
 
 export async function shouldRunSharedScan(

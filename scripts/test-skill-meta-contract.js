@@ -13,6 +13,10 @@ const localSkillScannerSource = fs.readFileSync(
   path.join(repoRoot, "src", "localSkillScanner.ts"),
   "utf8",
 );
+const skillIndexSource = fs.readFileSync(
+  path.join(repoRoot, "src", "skillIndex.ts"),
+  "utf8",
+);
 
 function test(name, fn) {
   try {
@@ -86,7 +90,7 @@ test("resource install sidecar metadata normalizes source and carries plugin fie
 
 test("retired source metadata migrates to the canonical source", () => {
   assert.match(
-    skillInstallerSource,
+    skillIndexSource,
     /"microsoft-copilot-for-azure-plugin": "microsoft-azure-skills"/,
   );
   assert.match(

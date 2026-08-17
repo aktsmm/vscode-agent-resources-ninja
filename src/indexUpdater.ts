@@ -75,10 +75,11 @@ import {
   isGitHubResponseError,
 } from "./githubResponse";
 import {
+  readSharedResourceIndex,
   shouldRunSharedScan,
   updateSharedScanMetadata,
 } from "./sharedResourceIndexStore";
-import { stampIndexedSources } from "./sourceFreshness";
+import { sortSourcesByFreshness, stampIndexedSources } from "./sourceFreshness";
 import {
   createEmptySourceScanError,
   assertSourceRepositoryIdentity,
@@ -107,14 +108,6 @@ function assertMutableIndexShape(
       `[Resource Ninja] Cannot ${operation}: resource index field "bundles" must be an array when present.`,
     );
   }
-}
-
-function getLocalDateString(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
 }
 
 function normalizeResourceDescription(
@@ -1842,7 +1835,7 @@ export async function updateSingleSource(
         s.id === sourceId ? mergeScannedSource(s, result.source) : s,
       ),
       skills: [...otherSkills, ...updatedSkills],
-      lastUpdated: new Date().toISOString().split("T")[0],
+      lastScannedAt: indexedAt,
     };
 
     // バンドル更新も処理
@@ -1898,7 +1891,12 @@ export async function updateIndexFromSourcesWithResult(
   context: vscode.ExtensionContext,
   currentIndex: SkillIndex,
   progress?: vscode.Progress<{ message?: string; increment?: number }>,
-  options?: { forceScan?: boolean; allowEmptyResult?: boolean },
+  options?: {
+    forceScan?: boolean;
+    allowEmptyResult?: boolean;
+    /** Restrict the run to these sources, used when resuming after a rate limit. */
+    sourceIds?: readonly string[];
+  },
 ): Promise<SourceIndexUpdateAllResult> {
   assertMutableIndexShape(currentIndex, "update all sources");
   resetGitHubCredentialBlocklist();
@@ -1916,11 +1914,21 @@ export async function updateIndexFromSourcesWithResult(
   const updatedSkills: Skill[] = [];
   const updatedBundles: Bundle[] = [];
   const scannedSourcesById = new Map<string, Source>();
-  const totalSources = currentIndex.sources.length;
   const scannedSourceIds: string[] = [];
   const succeeded: Source[] = [];
   const failures: Array<{ entry: Source; error: unknown }> = [];
   let skipped: Source[] = [];
+
+  const sharedIndex = await readSharedResourceIndex();
+  const scanOrder = options?.sourceIds
+    ? sortSourcesByFreshness(
+        currentIndex.sources.filter((source) =>
+          options.sourceIds?.includes(source.id),
+        ),
+        sharedIndex?.scanMeta,
+      )
+    : sortSourcesByFreshness(currentIndex.sources, sharedIndex?.scanMeta);
+  const totalSources = scanOrder.length;
 
   const preserveExistingSource = (source: Source): void => {
     updatedSkills.push(
@@ -1933,12 +1941,15 @@ export async function updateIndexFromSourcesWithResult(
     );
   };
 
-  for (
-    let sourceIndex = 0;
-    sourceIndex < currentIndex.sources.length;
-    sourceIndex += 1
-  ) {
-    const source = currentIndex.sources[sourceIndex];
+  // A subset run must not drop the sources it never looked at.
+  for (const source of currentIndex.sources) {
+    if (!scanOrder.some((entry) => entry.id === source.id)) {
+      preserveExistingSource(source);
+    }
+  }
+
+  for (let sourceIndex = 0; sourceIndex < scanOrder.length; sourceIndex += 1) {
+    const source = scanOrder[sourceIndex];
     try {
       progress?.report({
         message: messages.updatingSource(source.name),
@@ -2017,7 +2028,7 @@ export async function updateIndexFromSourcesWithResult(
       failures.push({ entry: source, error });
       preserveExistingSource(source);
       if (isGitHubResponseError(error) && error.kind === "rate-limit") {
-        skipped = currentIndex.sources.slice(sourceIndex + 1);
+        skipped = scanOrder.slice(sourceIndex + 1);
         for (const skippedSource of skipped) {
           preserveExistingSource(skippedSource);
         }
@@ -2039,7 +2050,10 @@ export async function updateIndexFromSourcesWithResult(
   const indexedAt = new Date().toISOString();
   const updatedIndex: SkillIndex = {
     ...currentIndex,
-    lastUpdated: getLocalDateString(),
+    // A run where every source failed or was skipped scanned nothing, so it must
+    // not claim the index is fresh.
+    lastScannedAt:
+      scannedSourceIds.length > 0 ? indexedAt : currentIndex.lastScannedAt,
     sources: stampIndexedSources(
       currentIndex.sources,
       scannedSourceIds,
@@ -2184,7 +2198,7 @@ export async function updateIndexFromSingleSource(
   const indexedAt = new Date().toISOString();
   const updatedIndex: SkillIndex = {
     ...currentIndex,
-    lastUpdated: new Date().toISOString().split("T")[0],
+    lastScannedAt: indexedAt,
     sources: stampIndexedSources(
       currentIndex.sources,
       [sourceId],
@@ -2278,7 +2292,7 @@ export async function addSource(
 
   const updatedIndex: SkillIndex = {
     ...currentIndex,
-    lastUpdated: new Date().toISOString().split("T")[0],
+    lastScannedAt: indexedAt,
     sources: updatedSources,
     skills: updatedSkills,
     bundles: updatedBundles.length > 0 ? updatedBundles : currentIndex.bundles,
@@ -2330,7 +2344,6 @@ export async function removeSource(
 
   const updatedIndex: SkillIndex = {
     ...currentIndex,
-    lastUpdated: new Date().toISOString().split("T")[0],
     sources: updatedSources,
     skills: updatedSkills,
     bundles: updatedBundles.length > 0 ? updatedBundles : undefined,

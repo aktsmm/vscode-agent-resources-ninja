@@ -282,6 +282,99 @@ async function main() {
     }
   });
 
+  await test("loadSkillIndex keeps the local scan timestamp across a merge and persist", async () => {
+    const tempRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "resource-index-scanned-"),
+    );
+    const extensionRoot = path.join(tempRoot, "extension");
+    const globalStorageRoot = path.join(tempRoot, "global-storage");
+    fs.mkdirSync(path.join(extensionRoot, "resources"), { recursive: true });
+    fs.mkdirSync(globalStorageRoot, { recursive: true });
+
+    const bundledIndex = {
+      version: "1.3.0",
+      lastUpdated: "2026-06-30",
+      sources: [
+        {
+          id: "bundled-source",
+          name: "Bundled Source",
+          url: "https://github.com/example/bundled-source",
+          type: "official",
+          description: "Bundled source",
+        },
+      ],
+      skills: [],
+      categories: [],
+      bundles: [],
+    };
+    const localIndex = {
+      version: "1.2.0",
+      lastUpdated: "2026-06-01",
+      lastScannedAt: "2026-08-17T04:05:06.000Z",
+      sources: bundledIndex.sources,
+      skills: [],
+      categories: [],
+      bundles: [],
+    };
+
+    fs.writeFileSync(
+      path.join(extensionRoot, "resources", "skill-index.json"),
+      `${JSON.stringify(bundledIndex, null, 2)}\n`,
+      "utf8",
+    );
+    const localIndexPath = path.join(globalStorageRoot, "skill-index.json");
+    fs.writeFileSync(
+      localIndexPath,
+      `${JSON.stringify(localIndex, null, 2)}\n`,
+      "utf8",
+    );
+
+    const moduleWithFs = requireTypeScriptModule(
+      path.join(repoRoot, "src", "skillIndex.ts"),
+      {
+        vscode: makeVscodeStub(),
+        "./githubFetch": {
+          createGitHubHeaders: () => ({}),
+          fetchGitHubWithOptionalAuthRetry: async () => ({ ok: false }),
+        },
+        "./logger": {
+          logger: {
+            info: () => undefined,
+            warn: () => undefined,
+            error: () => undefined,
+          },
+        },
+        "./sharedResourceIndexStore": {
+          loadSharedStoresIntoSkillIndex: async (_context, index) => index,
+          syncSharedStoresFromSkillIndex: async () => undefined,
+        },
+      },
+    );
+
+    try {
+      const loaded = await moduleWithFs.loadSkillIndex({
+        extensionUri: makeUri(extensionRoot),
+        globalStorageUri: makeUri(globalStorageRoot),
+      });
+
+      assert.strictEqual(loaded.lastScannedAt, "2026-08-17T04:05:06.000Z");
+      assert.strictEqual(
+        loaded.lastUpdated,
+        "2026-06-30",
+        "lastUpdated must follow the bundled catalog",
+      );
+
+      const persisted = JSON.parse(fs.readFileSync(localIndexPath, "utf8"));
+      assert.strictEqual(
+        persisted.lastScannedAt,
+        "2026-08-17T04:05:06.000Z",
+        "the persisted index must not drop the local scan timestamp",
+      );
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   console.log("RESULT=PASS");
 }
 

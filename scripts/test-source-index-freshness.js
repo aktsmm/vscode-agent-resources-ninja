@@ -151,6 +151,120 @@ test("missing per-source timestamp falls back to scanMeta then global lastUpdate
   );
 });
 
+test("scanning one source does not make untimestamped sources look fresh", () => {
+  const sources = [
+    {
+      id: "scanned",
+      name: "Scanned",
+      url: "https://github.com/a/scanned",
+      type: "github",
+      description: "scanned",
+      lastIndexedAt: "2026-06-24T00:00:00.000Z",
+    },
+    {
+      id: "legacy",
+      name: "Legacy",
+      url: "https://github.com/a/legacy",
+      type: "github",
+      description: "legacy",
+    },
+  ];
+
+  const stale = freshness.collectStaleSources(
+    {
+      sources,
+      lastUpdated: "2025-01-01",
+      lastScannedAt: "2026-06-24T00:00:00.000Z",
+    },
+    {},
+    { nowMs, maxAgeMs },
+  );
+
+  assert.deepStrictEqual(
+    stale.map((entry) => entry.source.id),
+    ["legacy"],
+    "a source with no timestamp of its own must not inherit an index-wide scan time",
+  );
+});
+
+test("sortSourcesByFreshness puts never-indexed first and keeps ties stable", () => {
+  const sources = [
+    {
+      id: "recent",
+      name: "Recent",
+      url: "https://github.com/a/recent",
+      type: "github",
+      description: "recent",
+      lastIndexedAt: "2026-06-20T00:00:00.000Z",
+    },
+    {
+      id: "never-a",
+      name: "Never A",
+      url: "https://github.com/a/never-a",
+      type: "github",
+      description: "never a",
+    },
+    {
+      id: "oldest",
+      name: "Oldest",
+      url: "https://github.com/a/oldest",
+      type: "github",
+      description: "oldest",
+      lastIndexedAt: "2026-01-01T00:00:00.000Z",
+    },
+    {
+      id: "never-b",
+      name: "Never B",
+      url: "https://github.com/a/never-b",
+      type: "github",
+      description: "never b",
+    },
+    {
+      id: "shared-meta",
+      name: "Shared Meta",
+      url: "https://github.com/a/shared-meta",
+      type: "github",
+      description: "shared meta",
+    },
+  ];
+
+  const ordered = freshness.sortSourcesByFreshness(sources, {
+    "shared-meta": { lastScannedAt: "2026-03-01T00:00:00.000Z" },
+  });
+
+  assert.deepStrictEqual(
+    ordered.map((source) => source.id),
+    ["never-a", "never-b", "oldest", "shared-meta", "recent"],
+  );
+});
+
+test("sortSourcesByFreshness does not mutate the input", () => {
+  const sources = [
+    {
+      id: "b",
+      name: "B",
+      url: "https://github.com/a/b",
+      type: "github",
+      description: "b",
+      lastIndexedAt: "2026-06-20T00:00:00.000Z",
+    },
+    {
+      id: "a",
+      name: "A",
+      url: "https://github.com/a/a",
+      type: "github",
+      description: "a",
+      lastIndexedAt: "2026-01-01T00:00:00.000Z",
+    },
+  ];
+
+  freshness.sortSourcesByFreshness(sources);
+  assert.deepStrictEqual(
+    sources.map((source) => source.id),
+    ["b", "a"],
+  );
+});
+
 test("stampIndexedSources only stamps successful source IDs", () => {
   const sources = [
     {
