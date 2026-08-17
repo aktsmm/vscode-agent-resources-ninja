@@ -29,16 +29,42 @@ function parseTimestampMs(value: string | undefined): number | undefined {
   return Number.isFinite(timestampMs) ? timestampMs : undefined;
 }
 
+export interface SourceFreshnessOptions {
+  /**
+   * This extension's id. A `lastIndexedAt` stamped by a different extension is
+   * not our scan evidence, so it is ignored here. Omitting the id keeps every
+   * timestamp self-owned, which is what a caller without coexistence context wants.
+   */
+  selfExtensionId?: string;
+}
+
+/**
+ * A source is only as fresh as the last scan of that source. The catalog publish
+ * date is deliberately not a fallback: it would make a source nobody ever scanned
+ * look up to date.
+ *
+ * A record with no `lastIndexedBy` is legacy data written before attribution
+ * existed, so it counts as ours; treating it as foreign would turn every existing
+ * source stale at once.
+ */
 export function getSourceFreshnessTimestamp(
-  source: Pick<Source, "id" | "lastIndexedAt">,
+  source: Pick<Source, "id" | "lastIndexedAt" | "lastIndexedBy">,
   scanMeta: Record<string, ScanMeta> | undefined,
-  indexLastUpdated: string | undefined,
+  options?: SourceFreshnessOptions,
 ): string | undefined {
-  return (
-    source.lastIndexedAt ||
-    scanMeta?.[source.id]?.lastScannedAt ||
-    indexLastUpdated
-  );
+  const selfExtensionId = options?.selfExtensionId;
+  const stampedByUs =
+    !source.lastIndexedBy ||
+    !selfExtensionId ||
+    source.lastIndexedBy === selfExtensionId;
+
+  if (stampedByUs && source.lastIndexedAt) {
+    return source.lastIndexedAt;
+  }
+
+  // A foreign stamp still means the shared store holds a real scan, so the shared
+  // index is consulted instead of rescanning work the sibling already did.
+  return scanMeta?.[source.id]?.lastScannedAt;
 }
 
 export function isSourceIndexStale(
@@ -57,19 +83,15 @@ export function isSourceIndexStale(
 }
 
 export function collectStaleSources(
-  index: Pick<SkillIndex, "sources" | "lastUpdated">,
+  index: Pick<SkillIndex, "sources">,
   scanMeta?: Record<string, ScanMeta>,
-  options?: { nowMs?: number; maxAgeMs?: number },
+  options?: { nowMs?: number; maxAgeMs?: number; selfExtensionId?: string },
 ): SourceFreshnessInfo[] {
   return index.sources
     .map((source) => {
-      // Deliberately not `lastScannedAt`: scanning one source would otherwise
-      // mark every source that has no timestamp of its own as fresh.
-      const timestamp = getSourceFreshnessTimestamp(
-        source,
-        scanMeta,
-        index.lastUpdated,
-      );
+      const timestamp = getSourceFreshnessTimestamp(source, scanMeta, {
+        selfExtensionId: options?.selfExtensionId,
+      });
       return {
         source,
         timestamp,
@@ -87,13 +109,14 @@ export function collectStaleSources(
 export function sortSourcesByFreshness(
   sources: readonly Source[],
   scanMeta?: Record<string, ScanMeta>,
+  options?: SourceFreshnessOptions,
 ): Source[] {
   return sources
     .map((source, position) => ({
       source,
       position,
       timestampMs: parseTimestampMs(
-        getSourceFreshnessTimestamp(source, scanMeta, undefined),
+        getSourceFreshnessTimestamp(source, scanMeta, options),
       ),
     }))
     .sort((left, right) => {
@@ -115,6 +138,7 @@ export function stampIndexedSources(
   sources: Source[],
   sourceIds: readonly string[],
   indexedAt: string,
+  indexedBy?: string,
 ): Source[] {
   if (sourceIds.length === 0) {
     return sources;
@@ -123,7 +147,7 @@ export function stampIndexedSources(
   const stampedSourceIds = new Set(sourceIds);
   return sources.map((source) =>
     stampedSourceIds.has(source.id)
-      ? { ...source, lastIndexedAt: indexedAt }
+      ? { ...source, lastIndexedAt: indexedAt, lastIndexedBy: indexedBy }
       : source,
   );
 }

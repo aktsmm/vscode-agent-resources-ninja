@@ -106,6 +106,7 @@ import {
   isSiblingActive,
   publishBeacon,
   readSiblingBeacon,
+  SELF_EXTENSION_ID,
   subscribeOwnershipChanges,
 } from "./coexistence";
 import {
@@ -169,10 +170,35 @@ import {
   RateLimitResumeRecord,
   readRateLimitResumeRecord,
   readSharedResourceIndex,
+  readSharedResourceIndexResult,
   renewRateLimitResumeClaim,
   saveRateLimitResumeRecord,
 } from "./sharedResourceIndexStore";
-import { readSharedSourcesManifest } from "./sharedSourcesManifestStore";
+import {
+  readSharedSourcesManifest,
+  SharedSourcesManifestReadResult,
+} from "./sharedSourcesManifestStore";
+
+/**
+ * A rejected manifest is not the same as an absent one: reporting it as "not
+ * initialized" invites the user to reset sharing, which is exactly the action that
+ * would overwrite the sibling extension's sources.
+ */
+function describeSharedSourcesManifestStatus(
+  result: SharedSourcesManifestReadResult,
+): string {
+  if (result.status === "missing") {
+    return "not initialized";
+  }
+  if (result.status === "rejected") {
+    return `unreadable and left untouched (${result.reason})`;
+  }
+  const rejectedSuffix =
+    result.rejectedEntryCount > 0
+      ? `, ${result.rejectedEntryCount} entries ignored as unverifiable`
+      : "";
+  return `${result.manifest.sources.length} sources${rejectedSuffix}`;
+}
 import {
   collectStaleSources,
   selectStaleSourcesForStartup,
@@ -1583,10 +1609,9 @@ export async function activate(
       }
 
       const sharedIndex = await readSharedResourceIndex();
-      const staleSources = collectStaleSources(
-        index,
-        sharedIndex?.scanMeta,
-      ).map((entry) => entry.source);
+      const staleSources = collectStaleSources(index, sharedIndex?.scanMeta, {
+        selfExtensionId: SELF_EXTENSION_ID,
+      }).map((entry) => entry.source);
       if (staleSources.length === 0) {
         return;
       }
@@ -8464,7 +8489,7 @@ export async function activate(
       const siblingDetected = await isSiblingActive(context);
       const owner = await getEffectiveOwner(context);
       const sourcesManifest = await readSharedSourcesManifest();
-      const sharedIndex = await readSharedResourceIndex();
+      const sharedIndex = await readSharedResourceIndexResult();
       const sharedSummary = getStandaloneSharedModeSummary(context);
       const excludedKinds = config.get<string[]>("kindsExcluded", []);
       const standaloneExcludedKinds = siblingDetected ? [] : excludedKinds;
@@ -8489,8 +8514,14 @@ export async function activate(
         `- Owner: ${owner}`,
         `- Sibling active: ${siblingDetected ? "yes" : "no"}`,
         `- Shared dir: ${sharedSummary.sharedDir}`,
-        `- Shared sources manifest: ${sourcesManifest ? `${sourcesManifest.sources.length} sources` : "not initialized"}`,
-        `- Shared resource index: ${sharedIndex ? `${sharedIndex.lastFullScan}` : "not initialized"}`,
+        `- Shared sources manifest: ${describeSharedSourcesManifestStatus(sourcesManifest)}`,
+        `- Shared resource index: ${
+          sharedIndex.status === "valid"
+            ? sharedIndex.index.lastFullScan
+            : sharedIndex.status === "missing"
+              ? "not initialized"
+              : `unreadable and left untouched (${sharedIndex.reason})`
+        }`,
         `- Instruction block kinds (workspace): ${workspaceInstructionKinds.join(", ")}`,
         `- Instruction block kinds (global home): ${globalInstructionKinds.join(", ")}`,
         ...(standaloneExcludedKinds.length > 0

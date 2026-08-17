@@ -62,6 +62,7 @@ import {
 export { checkGitHubAuth } from "./githubAuth";
 import { LICENSE_EXTRACTION, INDEX_LIMITS } from "./constants";
 import { logger } from "./logger";
+import { SELF_EXTENSION_ID } from "./coexistence";
 import { resetGitHubCredentialBlocklist } from "./githubCredentialBlocklist";
 import {
   fetchGitHubWithOptionalAuthRetry,
@@ -1831,6 +1832,7 @@ export async function updateSingleSource(
         currentIndex.sources,
         [sourceId],
         indexedAt,
+        SELF_EXTENSION_ID,
       ).map((s) =>
         s.id === sourceId ? mergeScannedSource(s, result.source) : s,
       ),
@@ -1926,8 +1928,11 @@ export async function updateIndexFromSourcesWithResult(
           options.sourceIds?.includes(source.id),
         ),
         sharedIndex?.scanMeta,
+        { selfExtensionId: SELF_EXTENSION_ID },
       )
-    : sortSourcesByFreshness(currentIndex.sources, sharedIndex?.scanMeta);
+    : sortSourcesByFreshness(currentIndex.sources, sharedIndex?.scanMeta, {
+        selfExtensionId: SELF_EXTENSION_ID,
+      });
   const totalSources = scanOrder.length;
 
   const preserveExistingSource = (source: Source): void => {
@@ -2058,6 +2063,7 @@ export async function updateIndexFromSourcesWithResult(
       currentIndex.sources,
       scannedSourceIds,
       indexedAt,
+      SELF_EXTENSION_ID,
     ).map((source) => {
       const scanned = scannedSourcesById.get(source.id);
       return scanned ? mergeScannedSource(source, scanned) : source;
@@ -2173,6 +2179,7 @@ export async function updateIndexFromSingleSource(
         currentIndex.sources,
         [sourceId],
         guardedAt,
+        SELF_EXTENSION_ID,
       ).map((s) =>
         s.id === sourceId ? mergeScannedSource(s, result.source) : s,
       ),
@@ -2203,6 +2210,7 @@ export async function updateIndexFromSingleSource(
       currentIndex.sources,
       [sourceId],
       indexedAt,
+      SELF_EXTENSION_ID,
     ).map((s) =>
       s.id === sourceId ? mergeScannedSource(s, result.source) : s,
     ),
@@ -2261,7 +2269,11 @@ export async function addSource(
   const indexedAt = new Date().toISOString();
   // New sources are not in the existing array yet, so stamp the scanned source
   // before inserting it instead of using stampIndexedSources().
-  const indexedSource = { ...result.source, lastIndexedAt: indexedAt };
+  const indexedSource = {
+    ...result.source,
+    lastIndexedAt: indexedAt,
+    lastIndexedBy: SELF_EXTENSION_ID,
+  };
 
   if (existingSourceIndex >= 0) {
     // 既存ソースを更新（curation 設定は保持する）
@@ -2272,6 +2284,7 @@ export async function addSource(
         result.source,
       ),
       lastIndexedAt: indexedAt,
+      lastIndexedBy: SELF_EXTENSION_ID,
     };
   } else {
     // 新規ソースを追加

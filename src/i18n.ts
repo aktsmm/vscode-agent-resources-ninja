@@ -65,7 +65,10 @@ const jaMessages = {
   githubAuthGuidanceNone:
     "gh CLIで認証するか、private repository用のfine-grained PATをGitHub Token設定へ保存してください。",
   githubAuthStatusAuthenticated: "GitHub認証は有効です（source: {0}）。",
+  sharedStoreSyncPaused:
+    "共有ストアへの同期を中断しました。共有ファイルを読み取れないためです（{0}）。他のツールのデータを壊さないようファイルはそのままにしてあり、ローカルのリソースは引き続き使えます。",
   actionShowDetails: "詳細を表示",
+  actionShowCoexistenceStatus: "共存ステータスを表示",
   actionConfigureGitHubAuth: "GitHub 認証を設定",
   actionOpenGitHubTokenPage: "GitHub のトークン設定を開く",
   actionOpenSsoSession: "organization の SSO 認可を開く",
@@ -277,7 +280,10 @@ const enMessages: MessageDictionary = {
     "Authenticate with gh CLI, or save a fine-grained PAT with access to the private repository in the GitHub Token setting.",
   githubAuthStatusAuthenticated:
     "GitHub authentication is working (source: {0}).",
+  sharedStoreSyncPaused:
+    "Syncing to the shared store is paused because the shared file cannot be read ({0}). The file was left untouched so another tool's data is not destroyed, and your local resources keep working.",
   actionShowDetails: "Show Details",
+  actionShowCoexistenceStatus: "Show Coexistence Status",
   actionConfigureGitHubAuth: "Configure GitHub Authentication",
   actionOpenGitHubTokenPage: "Open GitHub Token Settings",
   actionOpenSsoSession: "Open Organization SSO Authorization",
@@ -563,7 +569,10 @@ export const messages = {
   githubAuthGuidanceNone: () => localize("githubAuthGuidanceNone"),
   githubAuthStatusAuthenticated: (source: string) =>
     localize("githubAuthStatusAuthenticated", source),
+  sharedStoreSyncPaused: (reason: string) =>
+    localize("sharedStoreSyncPaused", reason),
   actionShowDetails: () => localize("actionShowDetails"),
+  actionShowCoexistenceStatus: () => localize("actionShowCoexistenceStatus"),
   actionConfigureGitHubAuth: () => localize("actionConfigureGitHubAuth"),
   actionOpenGitHubTokenPage: () => localize("actionOpenGitHubTokenPage"),
   actionOpenSsoSession: () => localize("actionOpenSsoSession"),

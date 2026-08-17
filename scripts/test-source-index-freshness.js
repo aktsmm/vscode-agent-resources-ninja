@@ -120,16 +120,14 @@ test("per-source timestamp takes precedence over shared scan and global fallback
     lastIndexedAt: "2026-06-01T00:00:00.000Z",
   };
   assert.strictEqual(
-    freshness.getSourceFreshnessTimestamp(
-      source,
-      { "source-a": { lastScannedAt: "2026-01-01T00:00:00.000Z" } },
-      "2025-01-01",
-    ),
+    freshness.getSourceFreshnessTimestamp(source, {
+      "source-a": { lastScannedAt: "2026-01-01T00:00:00.000Z" },
+    }),
     "2026-06-01T00:00:00.000Z",
   );
 });
 
-test("missing per-source timestamp falls back to scanMeta then global lastUpdated", () => {
+test("missing per-source timestamp falls back to scanMeta but never to the catalog date", () => {
   const source = {
     id: "source-a",
     name: "Source A",
@@ -138,16 +136,71 @@ test("missing per-source timestamp falls back to scanMeta then global lastUpdate
     description: "Source A",
   };
   assert.strictEqual(
-    freshness.getSourceFreshnessTimestamp(
-      source,
-      { "source-a": { lastScannedAt: "2026-06-02T00:00:00.000Z" } },
-      "2026-01-01",
-    ),
+    freshness.getSourceFreshnessTimestamp(source, {
+      "source-a": { lastScannedAt: "2026-06-02T00:00:00.000Z" },
+    }),
     "2026-06-02T00:00:00.000Z",
   );
   assert.strictEqual(
-    freshness.getSourceFreshnessTimestamp(source, {}, "2026-01-01"),
-    "2026-01-01",
+    freshness.getSourceFreshnessTimestamp(source, {}),
+    undefined,
+    "the bundled catalog publish date is not a scan time and must not make a never-scanned source look fresh",
+  );
+});
+
+test("a timestamp stamped by another extension is not our scan evidence", () => {
+  const source = {
+    id: "source-a",
+    name: "Source A",
+    url: "https://github.com/a/source",
+    type: "github",
+    description: "Source A",
+    lastIndexedAt: "2026-06-20T00:00:00.000Z",
+    lastIndexedBy: "yamapan.agent-skills-ninja",
+  };
+
+  assert.strictEqual(
+    freshness.getSourceFreshnessTimestamp(source, undefined, {
+      selfExtensionId: "yamapan.agent-resources-ninja",
+    }),
+    undefined,
+  );
+
+  assert.strictEqual(
+    freshness.getSourceFreshnessTimestamp(
+      source,
+      { "source-a": { lastScannedAt: "2026-06-19T00:00:00.000Z" } },
+      { selfExtensionId: "yamapan.agent-resources-ninja" },
+    ),
+    "2026-06-19T00:00:00.000Z",
+    "the shared index still proves the sibling scanned it, so the work is not repeated",
+  );
+
+  assert.strictEqual(
+    freshness.getSourceFreshnessTimestamp(source, undefined, {
+      selfExtensionId: "yamapan.agent-skills-ninja",
+    }),
+    "2026-06-20T00:00:00.000Z",
+    "our own stamp is our own evidence",
+  );
+});
+
+test("a legacy timestamp with no writer recorded counts as ours", () => {
+  const source = {
+    id: "legacy",
+    name: "Legacy",
+    url: "https://github.com/a/legacy",
+    type: "github",
+    description: "legacy",
+    lastIndexedAt: "2026-06-20T00:00:00.000Z",
+  };
+
+  assert.strictEqual(
+    freshness.getSourceFreshnessTimestamp(source, undefined, {
+      selfExtensionId: "yamapan.agent-resources-ninja",
+    }),
+    "2026-06-20T00:00:00.000Z",
+    "every record written before attribution existed looks like this; treating it as foreign would turn all sources stale at once",
   );
 });
 

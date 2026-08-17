@@ -118,6 +118,12 @@ const store = requireTypeScriptModule(
         error: () => undefined,
       },
     },
+    "./i18n": {
+      messages: {
+        actionShowDetails: () => "Show Details",
+        sharedStoreSyncPaused: (reason) => `paused: ${reason}`,
+      },
+    },
     "./skillIndex": {
       getIndexResources: () => [],
       getResourceKind: (resource) => resource?.kind || "skill",

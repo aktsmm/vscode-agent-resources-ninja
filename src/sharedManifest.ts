@@ -13,6 +13,7 @@ export type SourceEntry = Pick<
   | "scanner"
   | "branch"
   | "lastIndexedAt"
+  | "lastIndexedBy"
   | "description"
   | "description_ja"
   | "includePaths"
@@ -55,6 +56,14 @@ export const SHARED_RESOURCE_INDEX_TEMP_FILE = "index.json.tmp";
 export const SHARED_SOURCES_MANIFEST_TEMP_FILE = "sources.json.tmp";
 export const SHARED_STORE_LOCK_FILE = "index.lock";
 export const SHARED_RATE_LIMIT_RESUME_FILE = "rate-limit-resume.json";
+/**
+ * The shared directory is writable by any tool on the machine, so both files are
+ * parsed as untrusted input and an oversized one is rejected before it is read.
+ * The bundled catalog ships 24 sources and a few hundred resources, so these caps
+ * sit far above any legitimate file.
+ */
+export const SHARED_SOURCES_MANIFEST_MAX_BYTES = 1024 * 1024;
+export const SHARED_RESOURCE_INDEX_MAX_BYTES = 32 * 1024 * 1024;
 export const SHARED_STORE_RETRY_DELAY_MS = 100;
 export const SHARED_STORE_LOCK_RETRY_COUNT = 5;
 export const SHARED_STORE_LOCK_STALE_MS = 60 * 1000;

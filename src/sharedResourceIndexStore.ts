@@ -6,6 +6,7 @@ import {
   getConfiguredUseSharedSourcesManifest,
 } from "./customizationPaths";
 import { logger } from "./logger";
+import { messages } from "./i18n";
 import { buildSelfBeacon, RESOURCE_NINJA_KINDS } from "./coexistence";
 import {
   createEmptySharedResourceBuckets,
@@ -16,6 +17,7 @@ import {
   ResourceEntry,
   SCAN_DEDUP_WINDOW_MS,
   SHARED_RATE_LIMIT_RESUME_FILE,
+  SHARED_RESOURCE_INDEX_MAX_BYTES,
   SHARED_RESOURCE_INDEX_SCHEMA_VERSION,
   SHARED_RESOURCE_INDEX_TEMP_FILE,
   SharedResourceIndex,
@@ -26,6 +28,7 @@ import {
   Skill,
   SkillIndex,
   Source,
+  ResourceKind,
   getIndexResources,
   getResourceKind,
 } from "./skillIndex";
@@ -35,9 +38,162 @@ import {
   writeSharedSourcesManifest,
 } from "./sharedSourcesManifestStore";
 
-async function renameBrokenFile(filePath: string): Promise<void> {
-  const brokenPath = `${filePath}.broken-${Date.now()}`;
-  await fs.rename(filePath, brokenPath);
+export type SharedResourceIndexReadResult =
+  | { status: "missing" }
+  | { status: "rejected"; reason: string }
+  | { status: "valid"; index: SharedResourceIndex };
+
+/**
+ * Set once this extension's own sources have reached `sources.json`. Before that,
+ * the shared file cannot be read as a statement about sources it never saw.
+ */
+export const SHARED_SOURCES_MANIFEST_RECONCILED_KEY =
+  "resourceNinja.sharedSourcesManifestReconciled";
+
+/** The rejection reason the user was last told about, so the notice cannot nag. */
+export const SHARED_STORE_REJECTION_NOTICE_KEYS = {
+  sources: "resourceNinja.sharedStoreRejectionNotice.sources",
+  index: "resourceNinja.sharedStoreRejectionNotice.index",
+} as const;
+
+export type SharedStoreKind = keyof typeof SHARED_STORE_REJECTION_NOTICE_KEYS;
+
+export type SharedStoreRejectionNotice =
+  | { action: "notify"; reason: string }
+  | { action: "clear" }
+  | { action: "skip" };
+
+/**
+ * Refusing to write is the correct response to an unreadable shared file, but it
+ * stops syncing for good, so the user has to be told once. A repeat of the same
+ * reason stays silent; a new reason, or a break after a success, speaks again.
+ */
+export function planSharedStoreRejectionNotice(
+  writeStatus: "written" | "rejected",
+  reason: string | undefined,
+  lastNotifiedReason: string | undefined,
+): SharedStoreRejectionNotice {
+  if (writeStatus === "written") {
+    return lastNotifiedReason === undefined
+      ? { action: "skip" }
+      : { action: "clear" };
+  }
+
+  const currentReason = reason ?? "unknown";
+  return currentReason === lastNotifiedReason
+    ? { action: "skip" }
+    : { action: "notify", reason: currentReason };
+}
+
+/** Each shared file is tracked on its own so one recovering cannot silence the other. */
+async function applySharedStoreRejectionNotice(
+  context: vscode.ExtensionContext,
+  store: SharedStoreKind,
+  writeStatus: "written" | "rejected",
+  reason: string | undefined,
+): Promise<void> {
+  const stateKey = SHARED_STORE_REJECTION_NOTICE_KEYS[store];
+  const notice = planSharedStoreRejectionNotice(
+    writeStatus,
+    reason,
+    context.globalState.get<string>(stateKey),
+  );
+
+  if (notice.action === "skip") {
+    return;
+  }
+  if (notice.action === "clear") {
+    await context.globalState.update(stateKey, undefined);
+    return;
+  }
+
+  await context.globalState.update(stateKey, notice.reason);
+  const statusAction = messages.actionShowCoexistenceStatus();
+  const detailAction = messages.actionShowDetails();
+  void vscode.window
+    .showWarningMessage(
+      messages.sharedStoreSyncPaused(notice.reason),
+      statusAction,
+      detailAction,
+    )
+    .then((choice) => {
+      if (choice === statusAction) {
+        void vscode.commands.executeCommand(
+          "resourceNinja.showCoexistenceStatus",
+        );
+      } else if (choice === detailAction) {
+        logger.show(true);
+      }
+    });
+}
+
+/** Long enough for any curated entry; anything longer is not data we wrote. */
+const SHARED_RESOURCE_MAX_FIELD_LENGTH = 2048;
+const SHARED_RESOURCE_SOURCE_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
+
+function isBoundedString(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= SHARED_RESOURCE_MAX_FIELD_LENGTH &&
+    !value.includes("\0")
+  );
+}
+
+/** A path decides what gets downloaded and written, so it stays inside the repo. */
+function isSafeResourcePath(value: unknown): value is string {
+  if (!isBoundedString(value)) {
+    return false;
+  }
+  const normalized = value.replace(/\\/g, "/");
+  if (
+    normalized.startsWith("/") ||
+    normalized.startsWith("~") ||
+    /^[A-Za-z]:/.test(normalized)
+  ) {
+    return false;
+  }
+  return !normalized.split("/").some((segment) => segment === "..");
+}
+
+function isSafeResourceUrl(value: unknown): boolean {
+  if (value === undefined) {
+    return true;
+  }
+  if (!isBoundedString(value)) {
+    return false;
+  }
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The shared index is writable by any tool on the machine and its entries are
+ * re-served as runtime resources, so an entry is only usable when every field that
+ * steers a download or a write survives validation.
+ */
+export function isUsableSharedResourceEntry(
+  entry: unknown,
+): entry is ResourceEntry {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return false;
+  }
+  const candidate = entry as Record<string, unknown>;
+  return (
+    isBoundedString(candidate.name) &&
+    typeof candidate.source === "string" &&
+    SHARED_RESOURCE_SOURCE_PATTERN.test(candidate.source) &&
+    isSafeResourcePath(candidate.path) &&
+    (candidate.remotePath === undefined ||
+      isSafeResourcePath(candidate.remotePath)) &&
+    (candidate.kind === undefined ||
+      RESOURCE_NINJA_KINDS.includes(candidate.kind as ResourceKind)) &&
+    isSafeResourceUrl(candidate.url) &&
+    isSafeResourceUrl(candidate.rawUrl)
+  );
 }
 
 function normalizeSharedResourceIndex(
@@ -55,7 +211,7 @@ function normalizeSharedResourceIndex(
   for (const kind of RESOURCE_NINJA_KINDS) {
     const entries = candidate.byKind?.[kind];
     normalizedByKind[kind] = Array.isArray(entries)
-      ? entries.filter((entry): entry is ResourceEntry => !!entry)
+      ? entries.filter(isUsableSharedResourceEntry)
       : [];
   }
 
@@ -135,7 +291,29 @@ export function buildSharedResourceIndexFromSkillIndex(
       }
     : createEmptySharedResourceIndex(SELF_EXTENSION_ID);
 
+  const currentSourceIds = new Set(
+    currentIndex.sources.map((source) => source.id),
+  );
+
+  // A resource carries no writer, so ownership is read from the scan record of its
+  // source. Anything we do not own cannot be rebuilt from our index and is carried
+  // over instead of dropped; the two shared settings are independent, so the shared
+  // index is routinely enabled without the shared sources manifest.
+  const ownsSource = (sourceId: string): boolean => {
+    if (currentSourceIds.has(sourceId)) {
+      return true;
+    }
+    const scannedBy = previousIndex?.scanMeta[sourceId]?.lastScannedBy;
+    return !scannedBy || scannedBy === SELF_EXTENSION_ID;
+  };
+
+  // A previous load copies foreign resources into our runtime index, so rebuilding
+  // every resource here and then carrying the foreign ones over would write each of
+  // them twice, and again on every save.
   for (const resource of getIndexResources(currentIndex)) {
+    if (!ownsSource(resource.source)) {
+      continue;
+    }
     const kind = getResourceKind(resource);
     nextIndex.byKind[kind].push({ ...resource, kind });
     if (resource.description_ja) {
@@ -144,11 +322,23 @@ export function buildSharedResourceIndexFromSkillIndex(
     }
   }
 
-  const currentSourceIds = new Set(
-    currentIndex.sources.map((source) => source.id),
-  );
+  if (previousIndex) {
+    for (const [kind, resources] of Object.entries(previousIndex.byKind)) {
+      const resourceKind = kind as ResourceKind;
+      const bucket = nextIndex.byKind[resourceKind];
+      if (!bucket || !Array.isArray(resources)) {
+        continue;
+      }
+      for (const resource of resources) {
+        if (!ownsSource(resource.source)) {
+          bucket.push({ ...resource, kind: resource.kind || resourceKind });
+        }
+      }
+    }
+  }
+
   for (const sourceId of Object.keys(nextIndex.scanMeta)) {
-    if (!currentSourceIds.has(sourceId)) {
+    if (!currentSourceIds.has(sourceId) && ownsSource(sourceId)) {
       delete nextIndex.scanMeta[sourceId];
     }
   }
@@ -157,36 +347,63 @@ export function buildSharedResourceIndexFromSkillIndex(
   return nextIndex;
 }
 
-export async function readSharedResourceIndex(): Promise<
-  SharedResourceIndex | undefined
-> {
-  const fileUri = getSharedResourceIndexUri();
+/**
+ * Reads the shared resource index without ever modifying it. A file that cannot be
+ * used is reported as `rejected` and left where it is, so a reader can never evict
+ * a file another process is repairing.
+ */
+export async function readSharedResourceIndexResult(): Promise<SharedResourceIndexReadResult> {
+  const filePath = getSharedResourceIndexUri().fsPath;
+  let handle;
   try {
-    const content = await vscode.workspace.fs.readFile(fileUri);
+    handle = await fs.open(filePath, "r");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (
+      /ENOENT|FileNotFound/i.test(message) ||
+      (error as { code?: string })?.code === "ENOENT"
+    ) {
+      return { status: "missing" };
+    }
+    return { status: "rejected", reason: `unreadable: ${message}` };
+  }
+
+  try {
+    // Sized through the open handle so an oversized file is never pulled into
+    // memory or parsed during activation.
+    const stats = await handle.stat();
+    if (stats.size > SHARED_RESOURCE_INDEX_MAX_BYTES) {
+      const reason = `${stats.size} bytes exceeds the ${SHARED_RESOURCE_INDEX_MAX_BYTES} byte limit`;
+      logger.warn(
+        `[Resource Ninja] Shared resource index rejected (${reason}).`,
+      );
+      return { status: "rejected", reason };
+    }
+
     const parsed = normalizeSharedResourceIndex(
-      JSON.parse(Buffer.from(content).toString("utf8")),
+      JSON.parse(await handle.readFile("utf8")),
     );
     if (!parsed) {
       logger.warn("[Resource Ninja] Shared resource index schema mismatch.");
+      return { status: "rejected", reason: "schema mismatch" };
     }
-    return parsed;
+    return { status: "valid", index: parsed };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (/ENOENT|FileNotFound/i.test(message)) {
-      return undefined;
-    }
-
-    try {
-      await renameBrokenFile(fileUri.fsPath);
-    } catch {
-      // Ignore rename failures and fall back to bundled/local data.
-    }
+    const reason = error instanceof Error ? error.message : String(error);
     logger.warn(
-      "[Resource Ninja] Failed to parse shared resource index:",
-      error,
+      `[Resource Ninja] Shared resource index rejected (${reason}). The file is left untouched.`,
     );
-    return undefined;
+    return { status: "rejected", reason };
+  } finally {
+    await handle.close();
   }
+}
+
+export async function readSharedResourceIndex(): Promise<
+  SharedResourceIndex | undefined
+> {
+  const result = await readSharedResourceIndexResult();
+  return result.status === "valid" ? result.index : undefined;
 }
 
 export async function writeSharedResourceIndex(
@@ -244,22 +461,59 @@ export async function syncSharedStoresFromSkillIndex(
         lastUpdated: new Date().toISOString(),
         updatedBy: SELF_EXTENSION_ID,
       };
-      await writeSharedSourcesManifest(manifest);
+      // Read before write to apply raw-preserving merge (A-6).
+      // Without this, concurrent writes to the shared manifest are lost.
+      const writeResult = await writeSharedSourcesManifest(manifest);
+      if (writeResult?.status === "written") {
+        await context.globalState.update(
+          SHARED_SOURCES_MANIFEST_RECONCILED_KEY,
+          true,
+        );
+      }
+
+      await applySharedStoreRejectionNotice(
+        context,
+        "sources",
+        writeResult?.status === "written" ? "written" : "rejected",
+        writeResult?.status === "rejected" ? writeResult.reason : undefined,
+      );
     }
 
     if (useSharedResourceIndex) {
-      const previousSharedIndex = await readSharedResourceIndex();
-      const nextSharedIndex = buildSharedResourceIndexFromSkillIndex(
-        currentIndex,
-        previousSharedIndex,
-      );
-      if (
-        !previousSharedIndex?.lastFullScan ||
-        previousSharedIndex.lastFullScan === new Date(0).toISOString()
-      ) {
-        nextSharedIndex.lastFullScan = new Date().toISOString();
+      const previousResult = await readSharedResourceIndexResult();
+      // Rebuilding from our own data would replace every resource and scan record
+      // only the sibling extension holds, so an unreadable file is never overwritten.
+      if (previousResult.status === "rejected") {
+        logger.warn(
+          `[Resource Ninja] Refusing to rewrite the shared resource index (${previousResult.reason}).`,
+        );
+        await applySharedStoreRejectionNotice(
+          context,
+          "index",
+          "rejected",
+          previousResult.reason,
+        );
+      } else {
+        const previousSharedIndex =
+          previousResult.status === "valid" ? previousResult.index : undefined;
+        const nextSharedIndex = buildSharedResourceIndexFromSkillIndex(
+          currentIndex,
+          previousSharedIndex,
+        );
+        if (
+          !previousSharedIndex?.lastFullScan ||
+          previousSharedIndex.lastFullScan === new Date(0).toISOString()
+        ) {
+          nextSharedIndex.lastFullScan = new Date().toISOString();
+        }
+        await writeSharedResourceIndex(nextSharedIndex);
+        await applySharedStoreRejectionNotice(
+          context,
+          "index",
+          "written",
+          undefined,
+        );
       }
-      await writeSharedResourceIndex(nextSharedIndex);
     }
   } catch (error) {
     logger.warn(
@@ -269,33 +523,68 @@ export async function syncSharedStoresFromSkillIndex(
   }
 }
 
+/** Ids present on disk, including entries this extension refused to use. */
+export function collectManifestEntryIds(
+  rawEntries: readonly unknown[],
+): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const rawEntry of rawEntries) {
+    if (!rawEntry || typeof rawEntry !== "object" || Array.isArray(rawEntry)) {
+      continue;
+    }
+    const id = (rawEntry as Record<string, unknown>).id;
+    if (typeof id === "string" && id.length > 0) {
+      ids.add(id);
+    }
+  }
+  return ids;
+}
+
 /**
  * The manifest decides which sources exist, but a field the writer did not know
  * about must not clear the locally known value. Keeps repo identity intact when an
  * older extension shares the same store.
  */
-function mergeSharedManifestSources(
+export function mergeSharedManifestSources(
   localSources: Source[],
   manifestSources: SourceEntry[],
+  manifestEntryIds: ReadonlySet<string>,
+  options?: { keepUnlistedLocalSources?: boolean },
 ): Source[] {
   const localSourcesById = new Map(
     localSources.map((source) => [source.id, source]),
   );
 
-  return manifestSources.map((incoming) => {
+  const merged = manifestSources.map((incoming) => {
     const local = localSourcesById.get(incoming.id);
     if (!local) {
       return { ...incoming } as Source;
     }
 
-    const merged: Source = { ...local };
+    const mergedSource: Source = { ...local };
     for (const [key, value] of Object.entries(incoming)) {
       if (value !== undefined) {
-        (merged as unknown as Record<string, unknown>)[key] = value;
+        (mergedSource as unknown as Record<string, unknown>)[key] = value;
       }
     }
-    return merged;
+    return mergedSource;
   });
+
+  // An entry that is on disk but failed validation is unusable, not deleted.
+  // Dropping the local source here would also persist the loss into the local index.
+  // Until our own sources have reached the shared file at least once, its silence
+  // says nothing about them either, so absence cannot mean removal yet.
+  const mergedIds = new Set(merged.map((source) => source.id));
+  for (const local of localSources) {
+    if (mergedIds.has(local.id)) {
+      continue;
+    }
+    if (options?.keepUnlistedLocalSources || manifestEntryIds.has(local.id)) {
+      merged.push(local);
+    }
+  }
+
+  return merged;
 }
 
 export async function loadSharedStoresIntoSkillIndex(
@@ -309,19 +598,29 @@ export async function loadSharedStoresIntoSkillIndex(
   let nextIndex = currentIndex;
 
   if (useSharedSourcesManifest) {
-    const manifest = await readSharedSourcesManifest();
-    if (manifest) {
+    const reconciled =
+      context.globalState.get<boolean>(
+        SHARED_SOURCES_MANIFEST_RECONCILED_KEY,
+      ) === true;
+    const result = await readSharedSourcesManifest();
+    if (result.status === "valid") {
       nextIndex = {
         ...nextIndex,
         sources: mergeSharedManifestSources(
           nextIndex.sources,
-          manifest.sources,
+          result.manifest.sources,
+          collectManifestEntryIds(result.rawEntries),
+          { keepUnlistedLocalSources: !reconciled },
         ),
       };
-    } else {
+    } else if (result.status === "missing") {
       try {
         await bootstrapSharedSourcesManifest(
           currentIndex.sources.map((source) => ({ ...source })),
+        );
+        await context.globalState.update(
+          SHARED_SOURCES_MANIFEST_RECONCILED_KEY,
+          true,
         );
       } catch (error) {
         logger.warn(
@@ -329,14 +628,20 @@ export async function loadSharedStoresIntoSkillIndex(
           error,
         );
       }
+    } else {
+      // Bootstrapping over a file we merely failed to read would replace every
+      // source only the sibling extension knows about with our own list.
+      logger.warn(
+        `[Resource Ninja] Keeping local sources: the shared sources manifest was rejected (${result.reason}).`,
+      );
     }
   }
 
   if (useSharedResourceIndex) {
-    const sharedIndex = await readSharedResourceIndex();
-    if (sharedIndex) {
-      nextIndex = applySharedResourceIndexToSkillIndex(nextIndex, sharedIndex);
-    } else {
+    const result = await readSharedResourceIndexResult();
+    if (result.status === "valid") {
+      nextIndex = applySharedResourceIndexToSkillIndex(nextIndex, result.index);
+    } else if (result.status === "missing") {
       try {
         await bootstrapSharedResourceIndex(nextIndex);
       } catch (error) {
@@ -345,6 +650,10 @@ export async function loadSharedStoresIntoSkillIndex(
           error,
         );
       }
+    } else {
+      logger.warn(
+        `[Resource Ninja] Keeping local resources: the shared resource index was rejected (${result.reason}).`,
+      );
     }
   }
 
@@ -624,9 +933,18 @@ export async function updateSharedScanMetadata(
   }
 
   try {
+    const previousResult = await readSharedResourceIndexResult();
+    if (previousResult.status === "rejected") {
+      logger.warn(
+        `[Resource Ninja] Refusing to update shared scan metadata (${previousResult.reason}).`,
+      );
+      return;
+    }
+
     const existingIndex =
-      (await readSharedResourceIndex()) ||
-      buildSharedResourceIndexFromSkillIndex(currentIndex);
+      previousResult.status === "valid"
+        ? previousResult.index
+        : buildSharedResourceIndexFromSkillIndex(currentIndex);
     const nextIndex = buildSharedResourceIndexFromSkillIndex(
       currentIndex,
       existingIndex,

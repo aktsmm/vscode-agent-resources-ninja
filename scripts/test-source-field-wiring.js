@@ -216,4 +216,40 @@ test("mergeScannedSource preserves every Source field a scan does not own", () =
   assert.strictEqual(merged.url, "https://github.com/acme/scanned");
 });
 
+test("every write of lastIndexedAt also records who indexed it", () => {
+  // Freshness ignores a timestamp another extension stamped, so a scan that
+  // writes the time without the writer leaves a stale attribution behind and
+  // makes our own scan stop counting as our evidence.
+  const offenders = [];
+
+  for (const relativePath of [
+    "src/indexUpdater.ts",
+    "src/skillIndex.ts",
+    "src/sourceFreshness.ts",
+  ]) {
+    const sourceFile = parseFile(relativePath);
+    const literals = collectNodes(sourceFile, (node) =>
+      ts.isObjectLiteralExpression(node),
+    );
+
+    for (const literal of literals) {
+      const names = literal.properties
+        .map((property) => property.name && property.name.getText())
+        .filter(Boolean);
+      if (names.includes("lastIndexedAt") && !names.includes("lastIndexedBy")) {
+        const { line } = sourceFile.getLineAndCharacterOfPosition(
+          literal.getStart(),
+        );
+        offenders.push(`${relativePath}:${line + 1}`);
+      }
+    }
+  }
+
+  assert.deepStrictEqual(
+    offenders,
+    [],
+    "these object literals set lastIndexedAt without lastIndexedBy",
+  );
+});
+
 console.log("\nAll source field wiring tests passed.");

@@ -179,6 +179,7 @@ function createModule() {
       ...realSourceFreshness,
       stampIndexedSources: (sources) => sources,
     },
+    "./coexistence": { SELF_EXTENSION_ID: "yamapan.agent-resources-ninja" },
     "./logger": {
       logger: {
         info: () => undefined,

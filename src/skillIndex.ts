@@ -144,6 +144,7 @@ export interface Source {
   scanner?: SourceScanner; // リポジトリ名に依存しないスキャン方式の宣言
   branch?: string; // 明示的なデフォルトブランチ（省略時は runtime で解決）
   lastIndexedAt?: string; // ソース単位の最終 index 更新日時
+  lastIndexedBy?: string; // lastIndexedAt を書いた拡張の id（同居時の鮮度の帰属）
   includePaths?: string[]; // Only index resources under these path prefixes
   excludePaths?: string[]; // Exclude resources under these path prefixes
   description: string;
@@ -502,6 +503,8 @@ export function mergeSkillIndexes(
           repoId: localSource.repoId ?? bundledSource.repoId,
           lastIndexedAt:
             localSource.lastIndexedAt ?? bundledSource.lastIndexedAt,
+          lastIndexedBy:
+            localSource.lastIndexedBy ?? bundledSource.lastIndexedBy,
           url:
             localSource.repoId === undefined
               ? bundledSource.url
@@ -639,6 +642,7 @@ function shouldPersistMergedIndex(
       localSource.scanner !== mergedSource.scanner ||
       localSource.branch !== mergedSource.branch ||
       localSource.lastIndexedAt !== mergedSource.lastIndexedAt ||
+      localSource.lastIndexedBy !== mergedSource.lastIndexedBy ||
       localSource.description !== mergedSource.description ||
       localSource.description_ja !== mergedSource.description_ja ||
       !areStringArraysEqual(

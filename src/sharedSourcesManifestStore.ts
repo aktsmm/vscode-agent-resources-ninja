@@ -1,11 +1,11 @@
 import * as fs from "fs/promises";
-import * as vscode from "vscode";
 import { SELF_EXTENSION_ID } from "./coexistence";
 import {
   createEmptySharedSourcesManifest,
   getAgentNinjaSharedDirectoryPath,
   getSharedSourcesManifestUri,
   SHARED_MANIFEST_SCHEMA_VERSION,
+  SHARED_SOURCES_MANIFEST_MAX_BYTES,
   SHARED_SOURCES_MANIFEST_TEMP_FILE,
   SharedSourcesManifest,
   SourceEntry,
@@ -14,9 +14,71 @@ import type { SourceScanner } from "./skillIndex";
 import { logger } from "./logger";
 import { withSharedStoreLock } from "./sharedStoreLock";
 
-async function renameBrokenFile(filePath: string): Promise<void> {
-  const brokenPath = `${filePath}.broken-${Date.now()}`;
-  await fs.rename(filePath, brokenPath);
+/** Every field the manifest schema knows about; anything else belongs to another writer. */
+const KNOWN_SOURCE_ENTRY_KEYS: readonly string[] = [
+  "id",
+  "name",
+  "url",
+  "type",
+  "repoId",
+  "scanner",
+  "branch",
+  "lastIndexedAt",
+  "lastIndexedBy",
+  "description",
+  "description_ja",
+  "includePaths",
+  "excludePaths",
+];
+
+/** Assigning these on a plain object rewrites its prototype, so they never round-trip. */
+const UNSAFE_OBJECT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+const SOURCE_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
+const GITHUB_REPO_URL_PATTERN =
+  /^https:\/\/github\.com\/[A-Za-z0-9._-]{1,100}\/[A-Za-z0-9._-]{1,100}$/;
+const MAX_FIELD_LENGTH = 512;
+const MAX_PATH_ENTRIES = 64;
+/** A file with more entries than this is treated as hostile rather than curated. */
+export const MAX_SHARED_SOURCE_ENTRIES = 500;
+
+export type SharedSourcesManifestReadResult =
+  | { status: "missing" }
+  | { status: "rejected"; reason: string }
+  | {
+      status: "valid";
+      manifest: SharedSourcesManifest;
+      /** Verbatim entries as they were read, so a rewrite cannot drop foreign data. */
+      rawEntries: unknown[];
+      /** How many entries failed validation and are therefore not usable. */
+      rejectedEntryCount: number;
+    };
+
+export type SharedSourcesManifestWriteResult =
+  | { status: "written"; lastUpdated: string }
+  | { status: "rejected"; reason: string };
+
+/**
+ * The `lastUpdated` of the manifest this process last observed. Removing an entry
+ * is only safe while that view is current: an id missing from our own list is a
+ * deliberate local removal, but after a sibling writes it could just as easily be
+ * a source we have not loaded yet.
+ */
+let lastObservedManifestVersion: string | undefined;
+let hasObservedManifest = false;
+
+/** Test seam: the observed version is process state and must not leak between cases. */
+export function resetSharedSourcesManifestSession(): void {
+  lastObservedManifestVersion = undefined;
+  hasObservedManifest = false;
+}
+
+function readBoundedString(value: unknown): string | undefined {
+  return typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= MAX_FIELD_LENGTH
+    ? value
+    : undefined;
 }
 
 // The shared store is writable by any tool on the machine, so a repository id is
@@ -39,7 +101,144 @@ function normalizeScanner(value: unknown): SourceScanner | undefined {
     : undefined;
 }
 
-function normalizeSourceEntry(source: SourceEntry): SourceEntry {
+/**
+ * Path prefixes decide what this extension downloads, so an externally written
+ * value may only ever point inside the repository it belongs to.
+ */
+function isSafeRelativePath(value: unknown): value is string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > MAX_FIELD_LENGTH ||
+    value.includes("\0")
+  ) {
+    return false;
+  }
+
+  const normalized = value.replace(/\\/g, "/");
+  if (
+    normalized.startsWith("/") ||
+    normalized.startsWith("~") ||
+    /^[A-Za-z]:/.test(normalized)
+  ) {
+    return false;
+  }
+
+  return !normalized.split("/").some((segment) => segment === "..");
+}
+
+function normalizePathList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.length > MAX_PATH_ENTRIES) {
+    return undefined;
+  }
+  return value.every(isSafeRelativePath) ? [...(value as string[])] : undefined;
+}
+
+interface InspectedSourceEntry {
+  /** Present only when the entry carries every field the runtime requires. */
+  entry?: SourceEntry;
+  /** The known fields that passed validation, used to rebuild a safe rewrite. */
+  known: Record<string, unknown>;
+  /** Fields written by some other tool, preserved untouched. */
+  unknown: Record<string, unknown>;
+}
+
+/**
+ * Splits one raw entry into "safe to use", "safe to keep" and "drop". An entry
+ * that fails validation is never used at runtime, but it is still another
+ * writer's data and is carried through a rewrite verbatim.
+ */
+function inspectSourceEntry(raw: unknown): InspectedSourceEntry {
+  const known: Record<string, unknown> = {};
+  const unknown: Record<string, unknown> = {};
+
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { known, unknown };
+  }
+
+  const candidate = raw as Record<string, unknown>;
+  for (const [key, value] of Object.entries(candidate)) {
+    if (UNSAFE_OBJECT_KEYS.has(key) || KNOWN_SOURCE_ENTRY_KEYS.includes(key)) {
+      continue;
+    }
+    unknown[key] = value;
+  }
+
+  const id =
+    typeof candidate.id === "string" && SOURCE_ID_PATTERN.test(candidate.id)
+      ? candidate.id
+      : undefined;
+  const name = readBoundedString(candidate.name);
+  const url =
+    typeof candidate.url === "string" &&
+    GITHUB_REPO_URL_PATTERN.test(candidate.url)
+      ? candidate.url
+      : undefined;
+  const type = readBoundedString(candidate.type);
+  const description =
+    typeof candidate.description === "string" &&
+    candidate.description.length <= MAX_FIELD_LENGTH
+      ? candidate.description
+      : undefined;
+
+  const validated: Record<string, unknown> = {
+    id,
+    name,
+    url,
+    type,
+    repoId: normalizeRepoId(candidate.repoId),
+    scanner: normalizeScanner(candidate.scanner),
+    branch: readBoundedString(candidate.branch),
+    lastIndexedAt: readBoundedString(candidate.lastIndexedAt),
+    lastIndexedBy: readBoundedString(candidate.lastIndexedBy),
+    description,
+    description_ja: readBoundedString(candidate.description_ja),
+    includePaths: normalizePathList(candidate.includePaths),
+    excludePaths: normalizePathList(candidate.excludePaths),
+  };
+  for (const [key, value] of Object.entries(validated)) {
+    if (value !== undefined) {
+      known[key] = value;
+    }
+  }
+
+  if (!id || !name || !url || !type) {
+    return { known, unknown };
+  }
+
+  // An unsafe path is a reason to reject the entry: it should never be used at
+  // runtime or written back to disk as a usable resource.
+  if (
+    (candidate.includePaths !== undefined &&
+      validated.includePaths === undefined) ||
+    (candidate.excludePaths !== undefined &&
+      validated.excludePaths === undefined)
+  ) {
+    return { known, unknown };
+  }
+
+  return {
+    entry: {
+      id,
+      name,
+      url,
+      type,
+      repoId: validated.repoId as number | undefined,
+      scanner: validated.scanner as SourceScanner | undefined,
+      branch: validated.branch as string | undefined,
+      lastIndexedAt: validated.lastIndexedAt as string | undefined,
+      lastIndexedBy: validated.lastIndexedBy as string | undefined,
+      description: description ?? "",
+      description_ja: validated.description_ja as string | undefined,
+      includePaths: validated.includePaths as string[] | undefined,
+      excludePaths: validated.excludePaths as string[] | undefined,
+    },
+    known,
+    unknown,
+  };
+}
+
+export function normalizeSourceEntry(source: SourceEntry): SourceEntry {
   return {
     id: source.id,
     name: source.name,
@@ -49,6 +248,7 @@ function normalizeSourceEntry(source: SourceEntry): SourceEntry {
     scanner: normalizeScanner(source.scanner),
     branch: source.branch,
     lastIndexedAt: source.lastIndexedAt,
+    lastIndexedBy: source.lastIndexedBy,
     description: source.description,
     description_ja: source.description_ja,
     includePaths: source.includePaths,
@@ -56,92 +256,302 @@ function normalizeSourceEntry(source: SourceEntry): SourceEntry {
   };
 }
 
-function normalizeSharedSourcesManifest(
-  raw: unknown,
-): SharedSourcesManifest | undefined {
-  if (!raw || typeof raw !== "object") {
-    return undefined;
+function toDefinedFields(entry: SourceEntry): Record<string, unknown> {
+  const fields: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(normalizeSourceEntry(entry))) {
+    if (value !== undefined) {
+      fields[key] = value;
+    }
   }
-  const candidate = raw as Partial<SharedSourcesManifest>;
+  return fields;
+}
+
+/**
+ * Rebuilds the entry list for a rewrite without losing anything the reader could
+ * not interpret. Our validated values win on the fields we own, fields written by
+ * someone else survive untouched, and an entry we could not validate is copied
+ * through as-is.
+ */
+export function mergeSourceEntriesForRewrite(
+  rawEntries: readonly unknown[],
+  ownEntries: readonly SourceEntry[],
+  options: { allowRemoval: boolean },
+): Record<string, unknown>[] {
+  const ownById = new Map(ownEntries.map((entry) => [entry.id, entry]));
+  const emittedIds = new Set<string>();
+  const merged: Record<string, unknown>[] = [];
+
+  for (const rawEntry of rawEntries) {
+    const inspected = inspectSourceEntry(rawEntry);
+    const rawId = inspected.entry?.id;
+
+    // An entry we cannot interpret is someone else's data: never used, never dropped.
+    if (!rawId) {
+      if (
+        rawEntry &&
+        typeof rawEntry === "object" &&
+        !Array.isArray(rawEntry)
+      ) {
+        const preserved: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(
+          rawEntry as Record<string, unknown>,
+        )) {
+          if (!UNSAFE_OBJECT_KEYS.has(key)) {
+            preserved[key] = value;
+          }
+        }
+        merged.push(preserved);
+      }
+      continue;
+    }
+
+    const own = ownById.get(rawId);
+    if (!own) {
+      // Only a current view can tell a local removal apart from a source the
+      // sibling added since we last read the file.
+      if (!options.allowRemoval) {
+        merged.push({ ...inspected.unknown, ...inspected.known });
+      }
+      continue;
+    }
+
+    merged.push({
+      ...inspected.unknown,
+      ...inspected.known,
+      ...toDefinedFields(own),
+    });
+    emittedIds.add(rawId);
+  }
+
+  for (const own of ownEntries) {
+    if (!emittedIds.has(own.id)) {
+      merged.push(toDefinedFields(own));
+    }
+  }
+
+  return merged;
+}
+
+type ManifestFileRead =
+  | { status: "missing" }
+  | { status: "rejected"; reason: string }
+  | { status: "read"; content: string };
+
+async function readManifestFile(filePath: string): Promise<ManifestFileRead> {
+  let handle;
+  try {
+    handle = await fs.open(filePath, "r");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (
+      /ENOENT|FileNotFound/i.test(message) ||
+      (error as { code?: string })?.code === "ENOENT"
+    ) {
+      return { status: "missing" };
+    }
+    return { status: "rejected", reason: `unreadable: ${message}` };
+  }
+
+  try {
+    // Sized through the open handle so the check cannot be raced by a rewrite
+    // between the stat and the read.
+    const stats = await handle.stat();
+    if (stats.size > SHARED_SOURCES_MANIFEST_MAX_BYTES) {
+      return {
+        status: "rejected",
+        reason: `${stats.size} bytes exceeds the ${SHARED_SOURCES_MANIFEST_MAX_BYTES} byte limit`,
+      };
+    }
+    return { status: "read", content: await handle.readFile("utf8") };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { status: "rejected", reason: `unreadable: ${message}` };
+  } finally {
+    await handle.close();
+  }
+}
+
+function parseManifestRoot(content: string):
+  | { status: "rejected"; reason: string }
+  | {
+      status: "parsed";
+      sources: unknown[];
+      lastUpdated?: string;
+      updatedBy?: string;
+    } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { status: "rejected", reason: `invalid JSON: ${reason}` };
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { status: "rejected", reason: "manifest is not an object" };
+  }
+
+  const candidate = parsed as Partial<SharedSourcesManifest>;
   if (candidate.schemaVersion !== SHARED_MANIFEST_SCHEMA_VERSION) {
-    return undefined;
+    return { status: "rejected", reason: "schema version mismatch" };
   }
   if (!Array.isArray(candidate.sources)) {
-    return undefined;
+    return { status: "rejected", reason: "sources is not an array" };
+  }
+  if (candidate.sources.length > MAX_SHARED_SOURCE_ENTRIES) {
+    return {
+      status: "rejected",
+      reason: `${candidate.sources.length} entries exceeds the ${MAX_SHARED_SOURCE_ENTRIES} entry limit`,
+    };
   }
 
   return {
-    schemaVersion: SHARED_MANIFEST_SCHEMA_VERSION,
-    sources: candidate.sources.map((source) =>
-      normalizeSourceEntry(source as SourceEntry),
-    ),
+    status: "parsed",
+    sources: candidate.sources,
     lastUpdated:
       typeof candidate.lastUpdated === "string"
         ? candidate.lastUpdated
-        : new Date().toISOString(),
+        : undefined,
     updatedBy:
-      typeof candidate.updatedBy === "string"
-        ? candidate.updatedBy
-        : SELF_EXTENSION_ID,
+      typeof candidate.updatedBy === "string" ? candidate.updatedBy : undefined,
   };
 }
 
-export async function readSharedSourcesManifest(): Promise<
-  SharedSourcesManifest | undefined
-> {
-  const fileUri = getSharedSourcesManifestUri();
-  try {
-    const content = await vscode.workspace.fs.readFile(fileUri);
-    const parsed = normalizeSharedSourcesManifest(
-      JSON.parse(Buffer.from(content).toString("utf8")),
-    );
-    if (!parsed) {
-      logger.warn("[Resource Ninja] Shared sources manifest schema mismatch.");
-    }
-    return parsed;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (/ENOENT|FileNotFound/i.test(message)) {
-      return undefined;
-    }
+/**
+ * Reads the shared manifest without ever modifying it. A file we cannot use is
+ * reported as `rejected` and left exactly where it is, because a reader has no way
+ * to tell a corrupt file apart from one another process is in the middle of
+ * repairing.
+ */
+export async function readSharedSourcesManifest(): Promise<SharedSourcesManifestReadResult> {
+  const filePath = getSharedSourcesManifestUri().fsPath;
+  const file = await readManifestFile(filePath);
 
-    try {
-      await renameBrokenFile(fileUri.fsPath);
-    } catch {
-      // Ignore rename failures and fall back to bundled/local data.
-    }
-    logger.warn(
-      "[Resource Ninja] Failed to parse shared sources manifest:",
-      error,
-    );
-    return undefined;
+  if (file.status === "missing") {
+    lastObservedManifestVersion = undefined;
+    hasObservedManifest = true;
+    return { status: "missing" };
   }
+
+  if (file.status === "rejected") {
+    logger.warn(
+      `[Resource Ninja] Shared sources manifest rejected (${file.reason}). The file is left untouched.`,
+    );
+    return { status: "rejected", reason: file.reason };
+  }
+
+  const root = parseManifestRoot(file.content);
+  if (root.status === "rejected") {
+    logger.warn(
+      `[Resource Ninja] Shared sources manifest rejected (${root.reason}). The file is left untouched.`,
+    );
+    return { status: "rejected", reason: root.reason };
+  }
+
+  const usableSources: SourceEntry[] = [];
+  let rejectedEntryCount = 0;
+  for (const rawEntry of root.sources) {
+    const inspected = inspectSourceEntry(rawEntry);
+    if (inspected.entry) {
+      usableSources.push(inspected.entry);
+    } else {
+      rejectedEntryCount += 1;
+    }
+  }
+  if (rejectedEntryCount > 0) {
+    logger.warn(
+      `[Resource Ninja] Ignoring ${rejectedEntryCount} shared source entries that failed validation. They stay on disk untouched.`,
+    );
+  }
+
+  const lastUpdated = root.lastUpdated ?? new Date().toISOString();
+  lastObservedManifestVersion = lastUpdated;
+  hasObservedManifest = true;
+
+  return {
+    status: "valid",
+    manifest: {
+      schemaVersion: SHARED_MANIFEST_SCHEMA_VERSION,
+      sources: usableSources,
+      lastUpdated,
+      updatedBy: root.updatedBy ?? SELF_EXTENSION_ID,
+    },
+    rawEntries: root.sources,
+    rejectedEntryCount,
+  };
 }
 
+/**
+ * The single writer for `sources.json`. Re-reads the file under the lock and
+ * merges into it, so a concurrent writer's entries are never replaced by our own
+ * view of the world.
+ */
 export async function writeSharedSourcesManifest(
   manifest: SharedSourcesManifest,
-): Promise<void> {
-  const normalizedManifest: SharedSourcesManifest = {
-    schemaVersion: SHARED_MANIFEST_SCHEMA_VERSION,
-    sources: manifest.sources.map(normalizeSourceEntry),
-    lastUpdated: manifest.lastUpdated,
-    updatedBy: manifest.updatedBy,
-  };
+): Promise<SharedSourcesManifestWriteResult> {
+  const ownEntries = manifest.sources.map(normalizeSourceEntry);
   const sharedDir = getAgentNinjaSharedDirectoryPath();
-  const fileUri = getSharedSourcesManifestUri();
+  const filePath = getSharedSourcesManifestUri().fsPath;
   const tempPath = `${sharedDir}/${SHARED_SOURCES_MANIFEST_TEMP_FILE}`;
 
-  await withSharedStoreLock(SELF_EXTENSION_ID, async () => {
+  return withSharedStoreLock(SELF_EXTENSION_ID, async () => {
+    const current = await readManifestFile(filePath);
+    if (current.status === "rejected") {
+      logger.warn(
+        `[Resource Ninja] Refusing to rewrite the shared sources manifest (${current.reason}).`,
+      );
+      return { status: "rejected", reason: current.reason };
+    }
+
+    let rawEntries: unknown[] = [];
+    let onDiskLastUpdated: string | undefined;
+    if (current.status === "read") {
+      const root = parseManifestRoot(current.content);
+      if (root.status === "rejected") {
+        logger.warn(
+          `[Resource Ninja] Refusing to rewrite the shared sources manifest (${root.reason}).`,
+        );
+        return { status: "rejected", reason: root.reason };
+      }
+      rawEntries = root.sources;
+      onDiskLastUpdated = root.lastUpdated;
+    }
+
+    const allowRemoval =
+      hasObservedManifest && onDiskLastUpdated === lastObservedManifestVersion;
+    const mergedSources = mergeSourceEntriesForRewrite(rawEntries, ownEntries, {
+      allowRemoval,
+    });
+    const lastUpdated = manifest.lastUpdated || new Date().toISOString();
+
     await fs.mkdir(sharedDir, { recursive: true });
     await fs.writeFile(
       tempPath,
-      JSON.stringify(normalizedManifest, null, 2),
+      JSON.stringify(
+        {
+          schemaVersion: SHARED_MANIFEST_SCHEMA_VERSION,
+          sources: mergedSources,
+          lastUpdated,
+          updatedBy: manifest.updatedBy,
+        },
+        null,
+        2,
+      ),
       "utf8",
     );
-    await fs.rename(tempPath, fileUri.fsPath);
+    await fs.rename(tempPath, filePath);
+
+    lastObservedManifestVersion = lastUpdated;
+    hasObservedManifest = true;
+    return { status: "written", lastUpdated };
   });
 }
 
+/**
+ * Only ever called when the manifest is genuinely absent. A file we merely failed
+ * to read must not be replaced with our own source list, because that would drop
+ * every source only the sibling extension knows about.
+ */
 export async function bootstrapSharedSourcesManifest(
   sources: SourceEntry[],
 ): Promise<SharedSourcesManifest> {

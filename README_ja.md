@@ -534,13 +534,14 @@ workspace skill を主 Workspace Skill Directory 以外に置く場合は、`add
 
 明示的な **Update Index** は、設定済み source を古い順にすべて force scan します。rate limit で中断した実行が、いちばん遅れている source に予算を使えるようにするためです。進捗は各 source の処理完了後に進み、結果は **Agent Resources Ninja** Output Channel に `OK` / `FAILED` / `SKIPPED` として記録されます。失敗した source の既存 entry は保持し、GitHub rate limit を検出した場合は残りの request を停止して未試行として報告したうえで、制限解除後の自動再開を予約します。通知と `#updateResourceIndex` tool は、部分成功を全成功と表示せず、日英の1件の結果 summary に統合します。summary の **GitHub 認証を設定** は、2つ目のエラーダイアログを表示せず該当設定を直接開きます。
 
-更新が index を黙って壊さないよう、5 つの保護が入っています。
+更新が index を黙って壊さないよう、6 つの保護が入っています。
 
 - **空スキャン保護** - スキャンは成功したがリソースが 0 件だった場合、既存のリソースを削除しません。全体更新はそのまま保持して Output Channel に記録し、単一 source の更新は結果を報告して **空の結果を反映** を提示します。縮退は意図的な操作のときだけ起きます。
 - **リポジトリ同一性** - source は index した GitHub repository id を覚えています。後からその URL が別 repository に解決された場合は更新を拒否するため、削除や rename で空いた名前が第三者に再登録されて同じ source として配信されることがありません。同じ source を再追加すると **別リポジトリへの差し替えを承認** を選べます。repository の rename では id が変わらないため、rename は自動で追従し URL も更新されます。
 - **起動時の上限** - 起動時の更新は 1 回あたり最大 5 source までとし、開始位置をローテーションします。GitHub の quota を一度に使い切らず、失敗し続ける source が後続を止めることもありません。繰り越した source は Output Channel に出力され、次回以降の起動で処理されます。
 - **レート制限バックオフ** - `429` / `502` / `503` / `504` は上限付きのバックオフで再試行します。`Retry-After` と rate limit の reset を尊重し、20 秒を超える待機は諦めます。待機、次の認証ソースへの切り替え、再試行の打ち切りはいずれも Output Channel に記録されます。記録するのは host と path だけで、トークンや query string は出力しません。
 - **自動再開** - rate limit で更新が止まった場合、制限に当たった source と未試行の source を記録し、制限解除後に自動で再試行します。期限は `Retry-After`、`x-ratelimit-reset`、1 分の最小待機の順で決まり、それより前には再試行しません。実行中はステータスバーに進捗を表示し、結果は成否どちらも通知します。再開が再び制限された場合は連鎖せずに停止します。
+- **正直な鮮度判定** - source が新鮮と判定されるのは、この端末で実際に scan した場合だけです。同梱カタログの発行日は scan 時刻として扱わないため、一度も index していない source がカタログ日付に隠れて新鮮に見えることはなく、stale として報告されます。各時刻には「どの拡張が書いたか」も記録します。姉妹拡張が書いた時刻はこの拡張自身の scan としては数えず、代わりに共有 scan cache を参照するため、`useSharedResourceIndex` が有効なら姉妹拡張の直近の scan をすぐにやり直すことはありません。明示的な **Update Index** は常に再 scan します。
 
 > 設定画面では上記の順序で表示されます
 
@@ -568,7 +569,13 @@ workspace skill を主 Workspace Skill Directory 以外に置く場合は、`add
 
 旧 `resourceNinja.kindsExcluded` は standalone モードでの互換レイヤーとして引き続き使えますが、既定の掲載ポリシーは `instructionBlock.*` 設定で制御します。legacy exclusion で `skill` が消えることはなく、skill-only sibling extension と同居中は無視されます。
 
-remote source 一覧と cache を両拡張で共有したい場合は、`resourceNinja.useSharedSourcesManifest` と `resourceNinja.useSharedResourceIndex` を有効化できます。
+remote source 一覧と cache を両拡張で共有したい場合は、`resourceNinja.useSharedSourcesManifest` と `resourceNinja.useSharedResourceIndex` を有効化できます。どちらも既定では無効です。これらのファイルは端末上のどのツールからも書き込める場所にあるため、信頼できない入力として扱い、完全な正とはみなしません。
+
+- **読めなかったファイルには上書きしません。** parse に失敗した、サイズ上限を超えた、または想定外の schema を持つ共有ファイルは、報告だけしてそのまま残し、この拡張自身の内容から作り直さずにそのファイルの同期を停止します。姉妹拡張だけが知る情報をすべて捨てることになるためです。2 つのファイルは独立に扱うため、片方が読めなくてももう片方は止まりません。ファイルが本当に存在しない場合は、失うものがないため現在の内容から作成します。
+- **書き込みは置換ではなく merge です。** `sources.json` では、他拡張が書いたエントリとフィールドはそのまま残り、この拡張は自分が所有するフィールドだけを上書きします。`index.json` は再生成可能な scan cache なので、この拡張が持つ source のエントリは現在の内容で書き直しますが、所有していない source のリソースと scan 記録は削除せず保持します。
+- **検証に落ちた source エントリは削除せず無視します。** `sources.json` では source id、repository URL、include / exclude パスを使用前に検査し、落ちたものは実行時に使わず、ファイルへはそのまま書き戻します。
+- **載っていないことを削除とみなしません。** 共有は既定で無効なため、有効化前に追加した source は共有ファイルに存在しません。「載っていない」が削除を意味し始めるのは、この拡張自身の source が一度そのファイルへ反映されて以降です。
+- **同期が止まったことを黙っていません。** 共有ファイルを読めない場合はそのファイルの同期を停止し、ファイルごとに 1 回だけ **共存ステータスを表示** と **詳細を表示** 付きの通知を出します（理由が変われば再度通知します）。停止中もローカルのリソースはそのまま使えます。再開するには対象ファイルを修復または削除してください。現在の状態と理由は `Resource NINJA: Show Coexistence Status` で確認できます。
 
 生成される同期先ファイルには管理セクションが入ります。`coexistenceMode = auto` では `agent-ninja-START` / `agent-ninja-END`、`independent` モードでは従来の `resource-ninja-START` / `resource-ninja-END` を使います。手動編集は管理セクション外で行うか、ファイル全体を手動管理したい場合は自動更新を無効にしてください。生成済みセクションを安全にリセットしたいときは、`Resource NINJA: 管理マーカーブロックを削除` を実行してから `Update Resource Output` で再生成してください。
 
