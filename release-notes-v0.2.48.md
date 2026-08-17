@@ -33,6 +33,7 @@
 ## Artifact
 
 - VSIX: `artifacts/vsix/agent-resources-ninja-0.2.48.vsix`
-- Size: pending
-- SHA256: pending
-- Payload: pending
+- Size: 481,653 bytes
+- SHA256: `157A53CD8F0E33FCD0F36494F22E5D038130838EE50C57CDFC51438C39753001`
+- Payload: 12 files; compiled entrypoint, package metadata, locales, icon assets, license, README, changelog, and Resource Index present; no source maps, source/test directories, or release notes
+- Release hygiene check: PASS
