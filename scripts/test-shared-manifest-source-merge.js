@@ -497,7 +497,11 @@ test("a foreign resource already loaded into our index is not written twice", ()
   // A previous load copies the sibling's resources into our runtime index, so a
   // rebuild that emits everything and then carries the foreign ones over would
   // duplicate them, and duplicate again on every save.
-  const foreign = { name: "sibling-only", source: "sibling-src", kind: "skill" };
+  const foreign = {
+    name: "sibling-only",
+    source: "sibling-src",
+    kind: "skill",
+  };
   const previous = {
     schemaVersion: 1,
     lastFullScan: "2026-08-01T00:00:00.000Z",
