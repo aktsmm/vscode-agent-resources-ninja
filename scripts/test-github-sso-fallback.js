@@ -44,10 +44,14 @@ const repoRoot = path.resolve(__dirname, "..");
 const githubResponse = requireTypeScriptModule(
   path.join(repoRoot, "src", "githubResponse.ts"),
 );
+const githubCredentialBlocklist = requireTypeScriptModule(
+  path.join(repoRoot, "src", "githubCredentialBlocklist.ts"),
+);
 const githubFetch = requireTypeScriptModule(
   path.join(repoRoot, "src", "githubFetch.ts"),
   {
     "./githubResponse": githubResponse,
+    "./githubCredentialBlocklist": githubCredentialBlocklist,
     "./logger": { logger: { info() {}, warn() {}, error() {} } },
     "./githubAuth": { resolveGitHubTokenAfterFailure: async () => undefined },
   },
@@ -99,6 +103,8 @@ function createRecordingRequest(handlers) {
 }
 
 async function test(name, fn) {
+  // Cases reuse one owner, so a block left by an earlier case would strip the token.
+  githubCredentialBlocklist.resetGitHubCredentialBlocklist();
   try {
     await fn();
     console.log(`PASS ${name}`);

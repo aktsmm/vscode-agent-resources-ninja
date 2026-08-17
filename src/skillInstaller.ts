@@ -17,6 +17,7 @@ import {
   resolveGitHubToken,
 } from "./githubAuth";
 import { fetchGitHubWithOptionalAuthRetry } from "./githubFetch";
+import { resetGitHubCredentialBlocklist } from "./githubCredentialBlocklist";
 import { createGitHubResponseError } from "./githubResponse";
 import {
   GitHubDirectoryEntry,
@@ -1274,6 +1275,7 @@ export async function installSkill(
   context: vscode.ExtensionContext,
   options: InstallSkillOptions = {},
 ): Promise<InstallSkillResult> {
+  resetGitHubCredentialBlocklist();
   const config = vscode.workspace.getConfiguration("resourceNinja");
   const resourceKind = getResourceKind(skill);
   const skillPath = getResourceTargetUri(workspaceUri, config, skill, options);

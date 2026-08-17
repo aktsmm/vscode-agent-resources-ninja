@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { messages } from "./i18n";
+import { resetGitHubCredentialBlocklist } from "./githubCredentialBlocklist";
 import {
   createGitHubResponseError,
   GitHubFailureKind,
@@ -151,6 +152,7 @@ export async function deleteStoredGitHubToken(): Promise<boolean> {
 }
 
 export async function clearStoredGitHubTokenWithFeedback(): Promise<void> {
+  resetGitHubCredentialBlocklist();
   try {
     const configuredDeleted = await deleteConfiguredGitHubTokens();
     const storedDeleted = await deleteStoredGitHubToken();
@@ -246,12 +248,14 @@ export function getGitHubAuthRecoveryPolicy(input: {
   hasClearableToken: boolean;
   ghCliAvailable: boolean;
   failureKind?: GitHubFailureKind;
+  hasSsoAuthorizationUrl?: boolean;
 }): {
   showSettings: boolean;
   showGhLogin: boolean;
   showGhInstall: boolean;
   showClearToken: boolean;
   showGitHubTokenPage: boolean;
+  showOpenSsoSession: boolean;
 } {
   const canUseGhCli = input.source !== "env";
   return {
@@ -264,6 +268,9 @@ export function getGitHubAuthRecoveryPolicy(input: {
     showGitHubTokenPage:
       input.failureKind === "sso-required" ||
       input.failureKind === "classic-pat-forbidden",
+    showOpenSsoSession:
+      input.failureKind === "sso-required" &&
+      Boolean(input.hasSsoAuthorizationUrl),
   };
 }
 

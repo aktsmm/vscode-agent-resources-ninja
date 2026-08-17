@@ -38,6 +38,8 @@ function response(status, body = "", headers = {}) {
 }
 
 async function test(name, fn) {
+  // Cases share owners, so a block recorded by an earlier case would strip the token.
+  githubCredentialBlocklistModule.resetGitHubCredentialBlocklist();
   try {
     await fn();
     console.log(`PASS ${name}`);
@@ -50,6 +52,9 @@ async function test(name, fn) {
 const root = path.join(__dirname, "..");
 const githubResponseModule = requireTypeScriptModule(
   path.join(root, "src", "githubResponse.ts"),
+);
+const githubCredentialBlocklistModule = requireTypeScriptModule(
+  path.join(root, "src", "githubCredentialBlocklist.ts"),
 );
 let resolveFallback = async () => undefined;
 const loggedLines = [];
@@ -64,6 +69,7 @@ const {
   GITHUB_REQUEST_TIMEOUT_MS,
 } = requireTypeScriptModule(path.join(root, "src", "githubFetch.ts"), {
   "./githubResponse": githubResponseModule,
+  "./githubCredentialBlocklist": githubCredentialBlocklistModule,
   "./logger": { logger: loggerSpy },
   "./githubAuth": {
     resolveGitHubTokenAfterFailure: async (failedToken) =>
@@ -301,6 +307,8 @@ const {
       response(403, "Resource protected by organization SAML enforcement"),
       response(401, "Bad credentials"),
     ]) {
+      // The SAML iteration blocks this owner, so the stale-token case starts clean.
+      githubCredentialBlocklistModule.resetGitHubCredentialBlocklist();
       const requests = [];
       global.fetch = async (url, options = {}) => {
         requests.push({ url: String(url), headers: options.headers || {} });

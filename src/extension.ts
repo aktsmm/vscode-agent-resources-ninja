@@ -170,7 +170,11 @@ import {
   collectStaleSources,
   selectStaleSourcesForStartup,
 } from "./sourceFreshness";
-import { GitHubResponseError, isGitHubResponseError } from "./githubResponse";
+import {
+  getGitHubEffectiveFailureKind,
+  GitHubResponseError,
+  isGitHubResponseError,
+} from "./githubResponse";
 import { runSourceIndexUpdateBatch } from "./sourceIndexUpdateBatch";
 import {
   isEmptySourceScanError,
@@ -398,7 +402,7 @@ function formatSourceUpdateFailureReason(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
   }
 
-  switch (error.kind) {
+  switch (getGitHubEffectiveFailureKind(error)) {
     case "rate-limit":
       return error.resetAt
         ? `${messages.githubRateLimitReason()} (${messages.githubRateLimitResetAt(
@@ -424,7 +428,7 @@ function shouldOfferGitHubAuth(error: unknown): error is GitHubResponseError {
       "sso-required",
       "classic-pat-forbidden",
       "auth-required",
-    ].includes(error.kind)
+    ].includes(getGitHubEffectiveFailureKind(error))
   );
 }
 

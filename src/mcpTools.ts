@@ -34,9 +34,11 @@ import {
   searchGitHub,
   addSource,
   removeSource,
+  getGitHubAuthFailureReason,
   type SourceIndexUpdateAllResult,
 } from "./indexUpdater";
 import { isJapanese } from "./i18n";
+import { isGitHubResponseError } from "./githubResponse";
 import { getGitHubToken } from "./githubAuth";
 import { logger } from "./logger";
 import { scanLocalSkills } from "./localSkillScanner";
@@ -58,7 +60,11 @@ export function localizeMcpText(en: string, ja: string): string {
 }
 
 export function formatMcpError(en: string, ja: string, error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
+  const fallback = error instanceof Error ? error.message : String(error);
+  // GitHub failures reuse the GUI reason mapping so both surfaces name the same root cause.
+  const message = isGitHubResponseError(error)
+    ? getGitHubAuthFailureReason(error)
+    : fallback;
   return `${localizeMcpText(en, ja)}: ${message}`;
 }
 

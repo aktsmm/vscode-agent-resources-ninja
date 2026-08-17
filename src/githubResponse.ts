@@ -8,15 +8,32 @@ export type GitHubFailureKind =
   | "not-found"
   | "other";
 
+export interface GitHubResponseErrorDetails {
+  /** The failure that started the credential walk, when the surfaced one hides it. */
+  rootCauseKind?: GitHubFailureKind;
+  ssoAuthorizationUrl?: string;
+}
+
 export class GitHubResponseError extends Error {
+  public readonly rootCauseKind?: GitHubFailureKind;
+  declare readonly ssoAuthorizationUrl?: string;
+
   constructor(
     public readonly kind: GitHubFailureKind,
     public readonly status: number,
     message: string,
     public readonly resetAt?: string,
+    details?: GitHubResponseErrorDetails,
   ) {
     super(message);
     this.name = "GitHubResponseError";
+    this.rootCauseKind = details?.rootCauseKind;
+    // Non-enumerable so serializing this error cannot leak the pending SSO authorization.
+    Object.defineProperty(this, "ssoAuthorizationUrl", {
+      value: details?.ssoAuthorizationUrl,
+      enumerable: false,
+      configurable: true,
+    });
   }
 }
 
@@ -24,6 +41,62 @@ export function isGitHubResponseError(
   error: unknown,
 ): error is GitHubResponseError {
   return error instanceof GitHubResponseError;
+}
+
+/**
+ * Presentation and recovery-policy code should explain the root cause; control
+ * flow must keep reading `kind`, which still carries the surfaced failure.
+ */
+export function getGitHubEffectiveFailureKind(
+  error: GitHubResponseError,
+): GitHubFailureKind {
+  return error.rootCauseKind ?? error.kind;
+}
+
+/** Lower means closer to the root cause of a credential walk. */
+const GITHUB_FAILURE_ROOT_CAUSE_RANK: Record<GitHubFailureKind, number> = {
+  "sso-required": 0,
+  "classic-pat-forbidden": 1,
+  "auth-required": 2,
+  "not-found": 3,
+  "rate-limit": 4,
+  "server-error": 5,
+  transport: 6,
+  other: 7,
+};
+
+export function rankGitHubFailureKind(kind: GitHubFailureKind): number {
+  return GITHUB_FAILURE_ROOT_CAUSE_RANK[kind];
+}
+
+export interface GitHubRootCause {
+  kind: GitHubFailureKind;
+  ssoAuthorizationUrl?: string;
+}
+
+// A WeakMap keeps frozen test doubles assignable and leaves the response shape untouched.
+const gitHubRootCauses = new WeakMap<object, GitHubRootCause>();
+
+export function annotateGitHubRootCause(
+  response: object,
+  rootCause: GitHubRootCause,
+): void {
+  try {
+    gitHubRootCauses.set(response, rootCause);
+  } catch {
+    // Diagnostics must never break a request.
+  }
+}
+
+/** `Response.clone()` produces a new object, so read this from the original response. */
+export function getGitHubRootCause(
+  response: object,
+): GitHubRootCause | undefined {
+  try {
+    return gitHubRootCauses.get(response);
+  } catch {
+    return undefined;
+  }
 }
 
 export function classifyGitHubFailure(
@@ -80,6 +153,79 @@ const TRANSPORT_ERROR_CODES = new Set([
   "ETIMEDOUT",
 ]);
 
+export async function classifyGitHubResponse(
+  response: Response,
+): Promise<GitHubFailureKind> {
+  let bodyText = "";
+  try {
+    bodyText = await response.clone().text();
+  } catch {
+    bodyText = "";
+  }
+  return classifyGitHubFailure(response, bodyText);
+}
+
+const SSO_AUTHORIZATION_PATH_PATTERN = /^\/orgs\/[^/]+\/sso$/;
+
+/** A URL from a response header must not carry whitespace or control characters. */
+function hasUnsafeUrlCharacters(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0;
+    if (code <= 0x20 || code === 0x7f) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Reads the organization SSO authorization URL from `X-GitHub-SSO`. The
+ * `authorization_request` value is kept because it binds the pending
+ * authorization to the rejected credential, so it must never be logged.
+ */
+export function extractSsoAuthorizationUrl(
+  headers: Pick<Headers, "get">,
+): string | undefined {
+  const header = headers.get("x-github-sso");
+  if (!header) {
+    return undefined;
+  }
+
+  const candidate = header
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.toLowerCase().startsWith("url="))
+    ?.slice("url=".length)
+    .trim();
+  if (!candidate || hasUnsafeUrlCharacters(candidate)) {
+    return undefined;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return undefined;
+  }
+
+  if (
+    parsed.origin !== "https://github.com" ||
+    parsed.username ||
+    parsed.password ||
+    !SSO_AUTHORIZATION_PATH_PATTERN.test(parsed.pathname)
+  ) {
+    return undefined;
+  }
+
+  // Rebuilding drops the fragment and every parameter except the one we need.
+  const sanitized = new URL(`https://github.com${parsed.pathname}`);
+  const authorizationRequest = parsed.searchParams.get("authorization_request");
+  if (authorizationRequest) {
+    sanitized.searchParams.set("authorization_request", authorizationRequest);
+  }
+  return sanitized.toString();
+}
+
 export function classifyGitHubTransportFailure(
   error: unknown,
   signal?: AbortSignal,
@@ -130,11 +276,18 @@ export function createGitHubResponseError(
                 ? "GitHub resource was not found"
                 : `GitHub API request failed (${response.status})`;
 
+  const rootCause = getGitHubRootCause(response);
   return new GitHubResponseError(
     kind,
     response.status,
     `${context}: ${detail}`,
     resetAt,
+    {
+      rootCauseKind: rootCause?.kind,
+      ssoAuthorizationUrl:
+        rootCause?.ssoAuthorizationUrl ??
+        extractSsoAuthorizationUrl(response.headers),
+    },
   );
 }
 

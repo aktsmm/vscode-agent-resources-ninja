@@ -16,6 +16,7 @@ import {
 } from "./skillIndex";
 import messages, { isJapanese } from "./i18n";
 import { getGitHubToken } from "./githubAuth";
+import { resetGitHubCredentialBlocklist } from "./githubCredentialBlocklist";
 import { fetchGitHubWithOptionalAuthRetry } from "./githubFetch";
 import { normalizeStarCount } from "./indexDataNormalization";
 
@@ -564,6 +565,7 @@ export async function showSkillPreview(
   skill: Skill,
   context: vscode.ExtensionContext,
 ): Promise<void> {
+  resetGitHubCredentialBlocklist();
   const token = await getGitHubToken();
 
   // スキルインデックスからソース情報を取得

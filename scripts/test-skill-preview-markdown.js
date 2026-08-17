@@ -65,6 +65,9 @@ const { markdownToHtml } = requireTypeScriptModule(
     },
     "./i18n": { default: {}, isJapanese: () => false },
     "./githubAuth": { getGitHubToken: async () => undefined },
+    "./githubCredentialBlocklist": requireTypeScriptModule(
+      path.join(__dirname, "..", "src", "githubCredentialBlocklist.ts"),
+    ),
     "./githubFetch": {
       fetchGitHubWithOptionalAuthRetry: async () => undefined,
     },

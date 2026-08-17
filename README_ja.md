@@ -717,6 +717,8 @@ Ref 出力を使う場合は、必要に応じて **Ref Catalog Detail Format** 
 
 GitHub raw file は最初に匿名で取得し、private file が `404` を返した場合は設定済み認証で再試行します。さらに `401`、`403`、private `404` の後は、次の異なる credential を試します。それでも `404` または「見つかりません」と表示される場合、private repository では **設定を開く** から認証を設定してから **インデックス更新** や **バグ報告** を選んでください。認証設定済みの場合は、index path が古いか、token に **Contents: Read** 権限がない可能性があります。bug report には認証状態と credential source だけを記録し、token 値は含めません。
 
+organization SSO または classic PAT policy に拒否された credential は、その repository owner 単位で 10 分間記憶されます。同じ scan の毎 file で同じ拒否を繰り返さないためです。抑止が始まると **Agent Resources Ninja** output channel に owner と拒否理由を示す 1 行を記録するため、後から `404` の原因を追えます。index 更新、source 追加、resource の install、resource preview の表示、GitHub 検索、保存済み token のクリア、**organization の SSO 認可を開く** のいずれかを開始すると、この記録は即座に消えます。repository scan や default branch の取得などの共通 helper は、source / file / lookup ごとに実行されるため意図的に消去しません。記録は memory 上のみに存在し、output channel に書かれない token fingerprint を key にします。
+
 > **注記**: このMachine scope設定値は起動時にVS Code SecretStorageへ転記され、後方互換のためにのみ保持されます。トークンは SecretStorage → `GH_TOKEN` → `GITHUB_TOKEN` → GitHub CLI → この設定 の順で解決されます。legacy設定へ入力するとSecretStorageへコピーされるため、Clearするまで実効上の最優先になります。新規設定ではGitHub CLIまたは環境変数の利用を推奨します。
 
 認証復旧時は **Agent Resources Ninja: 保存・設定済み GitHub トークンをクリア** を使ってください。SecretStorageのコピーとMachine scopeのlegacy `resourceNinja.githubToken`値を削除します。`GH_TOKEN` / `GITHUB_TOKEN`やGitHub CLI credentialは変更しません。旧`.vscode/settings.json`に既にあるtoken entryはMachine scope設定では無視されますが、平文のままファイルに残るため手動で削除してください。環境変数が古い場合は更新または解除してVS Codeをreloadしてください。`GH_TOKEN`は`GITHUB_TOKEN`より優先され、どちらもGitHub CLIより優先されます。

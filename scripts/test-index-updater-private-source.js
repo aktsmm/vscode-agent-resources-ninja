@@ -70,10 +70,14 @@ function createModule() {
   const githubResponseModule = requireTypeScriptModule(
     path.join(__dirname, "..", "src", "githubResponse.ts"),
   );
+  const githubCredentialBlocklistModule = requireTypeScriptModule(
+    path.join(__dirname, "..", "src", "githubCredentialBlocklist.ts"),
+  );
   const githubFetchModule = requireTypeScriptModule(
     path.join(__dirname, "..", "src", "githubFetch.ts"),
     {
       "./githubResponse": githubResponseModule,
+      "./githubCredentialBlocklist": githubCredentialBlocklistModule,
       "./logger": { logger: { info() {}, warn() {}, error() {} } },
       "./githubAuth": {
         resolveGitHubTokenAfterFailure: async () => undefined,
@@ -179,6 +183,7 @@ function createModule() {
     },
     "./githubFetch": githubFetchModule,
     "./githubResponse": githubResponseModule,
+    "./githubCredentialBlocklist": githubCredentialBlocklistModule,
     "./sourceUpdateReconcile": sourceUpdateReconcileModule,
     "./indexDataNormalization": indexDataNormalizationModule,
   });

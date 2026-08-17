@@ -177,10 +177,15 @@ function loadInstaller(writes, options = {}) {
     path.join(srcDir, "githubResponse.ts"),
     {},
   );
+  const githubCredentialBlocklist = requireTypeScriptModule(
+    path.join(srcDir, "githubCredentialBlocklist.ts"),
+    {},
+  );
   const githubFetch = requireTypeScriptModule(
     path.join(srcDir, "githubFetch.ts"),
     {
       "./githubResponse": githubResponse,
+      "./githubCredentialBlocklist": githubCredentialBlocklist,
       "./logger": { logger },
       "./githubAuth": {
         resolveGitHubTokenAfterFailure:
@@ -201,6 +206,7 @@ function loadInstaller(writes, options = {}) {
     ),
     "./githubFetch": githubFetch,
     "./githubResponse": githubResponse,
+    "./githubCredentialBlocklist": githubCredentialBlocklist,
     "./skillIndex": {
       loadSkillIndex: async () => options.skillIndex || { sources: [] },
       getSourceBranch: async (source) => source.branch || "main",
@@ -344,10 +350,15 @@ function loadWindowsInstaller(recorded, options = {}) {
     path.join(srcDir, "githubResponse.ts"),
     {},
   );
+  const githubCredentialBlocklist = requireTypeScriptModule(
+    path.join(srcDir, "githubCredentialBlocklist.ts"),
+    {},
+  );
   const githubFetch = requireTypeScriptModule(
     path.join(srcDir, "githubFetch.ts"),
     {
       "./githubResponse": githubResponse,
+      "./githubCredentialBlocklist": githubCredentialBlocklist,
       "./logger": { logger: { info() {}, warn() {}, error() {} } },
       "./githubAuth": { resolveGitHubTokenAfterFailure: async () => undefined },
     },
@@ -429,6 +440,7 @@ function loadWindowsInstaller(recorded, options = {}) {
     ),
     "./githubFetch": githubFetch,
     "./githubResponse": githubResponse,
+    "./githubCredentialBlocklist": githubCredentialBlocklist,
     "./githubDirectoryTraversal": requireTypeScriptModule(
       path.join(srcDir, "githubDirectoryTraversal.ts"),
       {},

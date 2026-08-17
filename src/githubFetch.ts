@@ -1,8 +1,20 @@
 import { resolveGitHubTokenAfterFailure } from "./githubAuth";
 import {
+  getGitHubBlocklistOwner,
+  getGitHubCredentialBlocklistEpoch,
+  GITHUB_CREDENTIAL_BLOCK_TTL_MS,
+  isGitHubCredentialBlocked,
+  markGitHubCredentialBlocked,
+} from "./githubCredentialBlocklist";
+import {
+  annotateGitHubRootCause,
   classifyGitHubFailure,
+  classifyGitHubResponse,
   classifyGitHubTransportFailure,
+  extractSsoAuthorizationUrl,
   GitHubFailureKind,
+  GitHubRootCause,
+  rankGitHubFailureKind,
   retryGitHubRequestAnonymously,
 } from "./githubResponse";
 import { logger } from "./logger";
@@ -401,10 +413,46 @@ export async function fetchGitHubWithOptionalAuthRetry(
     );
 
   try {
+    // Captured once: a reset during this operation must not be undone by a late mark.
+    const blocklistEpoch = getGitHubCredentialBlocklistEpoch();
+    let rootCause: GitHubRootCause | undefined;
+
+    const recordCredentialFailure = async (
+      targetUrl: string,
+      token: string | undefined,
+      candidate: Response,
+    ): Promise<void> => {
+      if (!token || (candidate.status !== 401 && candidate.status !== 403)) {
+        return;
+      }
+      const kind = await classifyGitHubResponse(candidate);
+      // A plain permission gap must not blocklist an entire owner.
+      if (kind !== "sso-required" && kind !== "classic-pat-forbidden") {
+        return;
+      }
+      if (markGitHubCredentialBlocked(targetUrl, token, blocklistEpoch)) {
+        logger.info(
+          `[Resource Ninja] GitHub rejected the active credential for ${getGitHubBlocklistOwner(targetUrl)} (${kind}); it is suppressed for that owner for ${Math.round(GITHUB_CREDENTIAL_BLOCK_TTL_MS / 60000)} minutes, or until the next index update, install, preview, GitHub search, credential reset, or SSO authorization`,
+        );
+      }
+      if (
+        !rootCause ||
+        rankGitHubFailureKind(kind) < rankGitHubFailureKind(rootCause.kind)
+      ) {
+        rootCause = {
+          kind,
+          ssoAuthorizationUrl: extractSsoAuthorizationUrl(candidate.headers),
+        };
+      }
+    };
+
     let requestUrl = url;
     let requestAccept = options.accept;
+    let activeToken = isGitHubCredentialBlocked(url, options.token)
+      ? undefined
+      : options.token;
     let requestHeaders = buildRequestHeaders(
-      createGitHubHeaders(url, requestAccept, options.token),
+      createGitHubHeaders(url, requestAccept, activeToken),
       options.extraHeaders,
       false,
     );
@@ -421,16 +469,30 @@ export async function fetchGitHubWithOptionalAuthRetry(
         return response;
       }
 
+      // The escalation still happens for a blocked credential: it moves the
+      // request onto the API URL, which is the only URL a later credential can
+      // authenticate against. Only the Authorization header is withheld, and an
+      // anonymous API request answers 404 rather than 403, so branch fallback
+      // keeps working.
+      const escalationToken = isGitHubCredentialBlocked(
+        authenticatedUrl,
+        options.token,
+      )
+        ? undefined
+        : options.token;
       requestUrl = authenticatedUrl;
       requestAccept = "application/vnd.github.raw+json";
+      activeToken = escalationToken;
       requestHeaders = buildRequestHeaders(
         {
           Accept: requestAccept,
           "User-Agent": GITHUB_USER_AGENT,
-          Authorization: `token ${options.token}`,
+          ...(escalationToken
+            ? { Authorization: `token ${escalationToken}` }
+            : {}),
         },
         options.extraHeaders,
-        false,
+        !escalationToken,
       );
       response = await send(requestUrl, requestHeaders);
     }
@@ -440,6 +502,7 @@ export async function fetchGitHubWithOptionalAuthRetry(
       requestHeaders.Authorization &&
       (response.status === 401 || response.status === 403)
     ) {
+      await recordCredentialFailure(requestUrl, activeToken, response);
       response = await retryGitHubRequestAnonymously(response, true, () =>
         send(
           requestUrl,
@@ -456,20 +519,20 @@ export async function fetchGitHubWithOptionalAuthRetry(
     }
 
     const triedTokens = new Set<string>();
-    let activeToken = options.token;
-    if (activeToken) {
-      triedTokens.add(activeToken);
+    if (options.token) {
+      triedTokens.add(options.token);
     }
+    let walkToken = options.token;
 
     for (
       let attempt = 0;
-      activeToken &&
+      walkToken &&
       [401, 403, 404].includes(response.status) &&
       attempt < GITHUB_TOKEN_FALLBACK_MAX_ATTEMPTS;
       attempt++
     ) {
       const fallback = await resolveWithinGitHubOperation(
-        resolveGitHubTokenAfterFailure(activeToken, triedTokens),
+        resolveGitHubTokenAfterFailure(walkToken, triedTokens),
         budget,
         describeGitHubRequest(requestUrl),
       );
@@ -477,7 +540,10 @@ export async function fetchGitHubWithOptionalAuthRetry(
         break;
       }
       triedTokens.add(fallback.token);
-      activeToken = fallback.token;
+      walkToken = fallback.token;
+      if (isGitHubCredentialBlocked(requestUrl, fallback.token)) {
+        continue;
+      }
       logger.info(
         `[Resource Ninja] GitHub returned ${response.status} for ${describeGitHubRequest(requestUrl)}; retrying with the next credential source: ${fallback.source}`,
       );
@@ -489,6 +555,12 @@ export async function fetchGitHubWithOptionalAuthRetry(
           false,
         ),
       );
+      await recordCredentialFailure(requestUrl, fallback.token, response);
+    }
+
+    // Annotate only 401/403 so a 404 keeps the meaning branch fallback relies on.
+    if (rootCause && (response.status === 401 || response.status === 403)) {
+      annotateGitHubRootCause(response, rootCause);
     }
 
     return response;

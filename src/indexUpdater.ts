@@ -62,6 +62,7 @@ import {
 export { checkGitHubAuth } from "./githubAuth";
 import { LICENSE_EXTRACTION, INDEX_LIMITS } from "./constants";
 import { logger } from "./logger";
+import { resetGitHubCredentialBlocklist } from "./githubCredentialBlocklist";
 import {
   fetchGitHubWithOptionalAuthRetry,
   fetchGitHubWithTimeout,
@@ -69,6 +70,7 @@ import {
 } from "./githubFetch";
 import {
   createGitHubResponseError,
+  getGitHubEffectiveFailureKind,
   GitHubResponseError,
   isGitHubResponseError,
 } from "./githubResponse";
@@ -1764,6 +1766,7 @@ export async function updateSingleSource(
   options?: { allowEmptyResult?: boolean },
 ): Promise<{ index: SkillIndex; addedSkills: number; removedSkills: number }> {
   assertMutableIndexShape(currentIndex, `update source ${sourceId}`);
+  resetGitHubCredentialBlocklist();
   const token = await getGitHubToken();
 
   const source = currentIndex.sources.find((s) => s.id === sourceId);
@@ -1898,6 +1901,7 @@ export async function updateIndexFromSourcesWithResult(
   options?: { forceScan?: boolean; allowEmptyResult?: boolean },
 ): Promise<SourceIndexUpdateAllResult> {
   assertMutableIndexShape(currentIndex, "update all sources");
+  resetGitHubCredentialBlocklist();
   const token = await getGitHubToken();
 
   // 既存スキルの説明をマップとして保持（ローカライズされた説明を保持するため）
@@ -2071,6 +2075,7 @@ export async function updateIndexFromSingleSource(
   options?: { forceScan?: boolean; allowEmptyResult?: boolean },
 ): Promise<SkillIndex> {
   assertMutableIndexShape(currentIndex, `update source ${sourceId}`);
+  resetGitHubCredentialBlocklist();
   const token = await getGitHubToken();
 
   const source = currentIndex.sources.find((s) => s.id === sourceId);
@@ -2208,6 +2213,7 @@ export async function addSource(
   options?: { allowRepositoryChange?: boolean },
 ): Promise<{ index: SkillIndex; addedSkills: number }> {
   assertMutableIndexShape(currentIndex, "add source");
+  resetGitHubCredentialBlocklist();
   // repoUrlが文字列かどうか検証
   if (!repoUrl || typeof repoUrl !== "string") {
     throw new Error("repoUrl must be a valid string");
@@ -2356,6 +2362,7 @@ export async function searchGitHub(
     defaultBranch?: string;
   }>
 > {
+  resetGitHubCredentialBlocklist();
   // クエリをキーワードに分割（3文字以上のみ、ノイズ削減）
   const rawKeywords = query
     .toLowerCase()
@@ -2811,11 +2818,11 @@ function getGitHubAuthGuidance(source: GitHubTokenSource): string {
   }
 }
 
-function getGitHubAuthFailureReason(error?: unknown): string {
+export function getGitHubAuthFailureReason(error?: unknown): string {
   if (!isGitHubResponseError(error)) {
     return messages.authRequired();
   }
-  switch (error.kind) {
+  switch (getGitHubEffectiveFailureKind(error)) {
     case "rate-limit":
       return error.resetAt
         ? `${messages.githubRateLimitReason()} (${messages.githubRateLimitResetAt(
@@ -2840,14 +2847,21 @@ export async function showAuthHelp(error?: unknown): Promise<void> {
   const installGhCliLabel = messages.actionInstallGhCli();
   const clearStoredTokenLabel = messages.actionClearStoredGitHubToken();
   const openGitHubTokenPageLabel = messages.actionOpenGitHubTokenPage();
+  const openSsoSessionLabel = messages.actionOpenSsoSession();
   const cancelLabel = messages.actionCancel();
   const hasClearableToken = await hasClearableGitHubToken();
   const ghCliAvailable = source === "env" ? false : await isGhCliAvailable();
+  const ssoAuthorizationUrl = isGitHubResponseError(error)
+    ? error.ssoAuthorizationUrl
+    : undefined;
   const policy = getGitHubAuthRecoveryPolicy({
     source,
     hasClearableToken,
     ghCliAvailable,
-    failureKind: isGitHubResponseError(error) ? error.kind : undefined,
+    failureKind: isGitHubResponseError(error)
+      ? getGitHubEffectiveFailureKind(error)
+      : undefined,
+    hasSsoAuthorizationUrl: Boolean(ssoAuthorizationUrl),
   });
 
   const action = await vscode.window.showErrorMessage(
@@ -2856,6 +2870,7 @@ export async function showAuthHelp(error?: unknown): Promise<void> {
       getGitHubAuthSourceLabel(source),
       getGitHubAuthGuidance(source),
     ),
+    ...(policy.showOpenSsoSession ? [openSsoSessionLabel] : []),
     ...(policy.showSettings ? [openSettingsLabel] : []),
     ...(policy.showGhLogin ? [authWithGhCliLabel] : []),
     ...(policy.showGhInstall ? [installGhCliLabel] : []),
@@ -2864,7 +2879,11 @@ export async function showAuthHelp(error?: unknown): Promise<void> {
     cancelLabel,
   );
 
-  if (action === openSettingsLabel) {
+  if (action === openSsoSessionLabel && ssoAuthorizationUrl) {
+    // The credential may be authorized right after this, so stop suppressing it.
+    resetGitHubCredentialBlocklist();
+    await vscode.env.openExternal(vscode.Uri.parse(ssoAuthorizationUrl));
+  } else if (action === openSettingsLabel) {
     await openGitHubAuthSettings();
   } else if (action === authWithGhCliLabel) {
     const terminal = vscode.window.createTerminal("GitHub Auth");

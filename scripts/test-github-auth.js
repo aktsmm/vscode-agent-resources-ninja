@@ -143,12 +143,17 @@ const githubResponse = requireTypeScriptModule(
   path.join(__dirname, "..", "src", "githubResponse.ts"),
 );
 
+const githubCredentialBlocklist = requireTypeScriptModule(
+  path.join(__dirname, "..", "src", "githubCredentialBlocklist.ts"),
+);
+
 const githubAuth = requireTypeScriptModule(
   path.join(__dirname, "..", "src", "githubAuth.ts"),
   {
     vscode: vscodeStub,
     "./i18n": i18nStub,
     "./githubResponse": githubResponse,
+    "./githubCredentialBlocklist": githubCredentialBlocklist,
   },
 );
 
@@ -447,6 +452,7 @@ const tests = [
           showGhInstall: false,
           showClearToken: false,
           showGitHubTokenPage: false,
+          showOpenSsoSession: false,
         },
       );
       assert.deepStrictEqual(
@@ -462,7 +468,28 @@ const tests = [
           showGhInstall: true,
           showClearToken: true,
           showGitHubTokenPage: true,
+          showOpenSsoSession: false,
         },
+      );
+      assert.deepStrictEqual(
+        githubAuth.getGitHubAuthRecoveryPolicy({
+          source: "secret",
+          hasClearableToken: true,
+          ghCliAvailable: false,
+          failureKind: "sso-required",
+          hasSsoAuthorizationUrl: true,
+        }).showOpenSsoSession,
+        true,
+      );
+      assert.deepStrictEqual(
+        githubAuth.getGitHubAuthRecoveryPolicy({
+          source: "secret",
+          hasClearableToken: true,
+          ghCliAvailable: false,
+          failureKind: "auth-required",
+          hasSsoAuthorizationUrl: true,
+        }).showOpenSsoSession,
+        false,
       );
     },
   },
