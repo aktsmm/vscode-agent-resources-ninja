@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.51] - 2026-08-18
+
+### Fixed
+
+- 🧭 **The Shared Store Could Point a Download at Another Repository** - A source entry in the shared `sources.json` is written by any tool on the machine, but its repository owner, repository name and branch were only length-checked. An owner or repository of `..`, or a branch such as `../../other/repo/main`, was accepted and then interpolated straight into a `raw.githubusercontent.com` path, so a download could be steered somewhere the source never named. Owner, repository and branch are now validated as their own values, an entry that fails is never used at runtime while still being written back untouched, and every raw URL escapes the branch per path segment so an ordinary name like `feature/x` keeps working / 共有 `sources.json` の source エントリは端末上のどのツールからも書き込めますが、repository の owner、repository 名、branch は長さしか検査していませんでした。owner や repository が `..`、branch が `../../other/repo/main` のような値でも通り、そのまま `raw.githubusercontent.com` のパスへ展開されるため、source が指していない場所からダウンロードさせられる余地がありました。owner / repository / branch をそれぞれ独立に検証し、検証に落ちたエントリは実行時に一切使わず、書き戻しではそのまま保持します。raw URL は branch をパスセグメント単位でエスケープするため、`feature/x` のような通常の branch 名はこれまでどおり動作します。
+
+- 🔒 **A Lock Could Be Taken and Still Be Written Through** - The cross-process lock carried no generation, so an extension that lost the lock could not tell, kept writing, and deleted whoever held it next on the way out. The lock now carries a generation that is published atomically, is never taken from a living process inside the stale window, is refreshed by a heartbeat while it is held, is checked again immediately before a commit, and is only deleted by the holder it belongs to. The payload, the timing windows and the reclaim file name deliberately match the skill-only sibling extension, and a contract test fails if either side drifts / プロセス間 lock に世代が無いため、lock を失った拡張がそれを検知できないまま書き込みを続け、終了時には次の保持者の lock まで削除していました。lock は取得ごとの世代を持ち、原子的に公開され、stale 期間内は生存プロセスから奪わず、保持中は heartbeat で更新し、commit の直前に再確認し、自分の世代の lock だけを削除します。payload、各種しきい値、回収ファイル名は skill 専用の姉妹拡張と意図的に一致させており、どちらかがずれた場合は契約テストが失敗します。
+
+- 🤝 **Each Extension Deleted the Other's Scanner Setting** - Both extensions implement scanners the other does not, and an unrecognised scanner name was dropped instead of kept, so every save silently erased the other side's configuration. A scanner we cannot run is now treated as another writer's data: it never reaches our runtime, and it survives our rewrite untouched / 両拡張は互いに実装していない scanner を持ちますが、認識できない scanner 名は保持されず破棄されていたため、保存のたびに相手側の設定を黙って消していました。実行できない scanner は他の書き手のデータとして扱い、こちらの実行時には一切使わず、書き戻しでもそのまま残します。
+
+- 🔔 **One Shared File Pausing Took the Other Down With It** - The two shared files are synced one after the other inside a single guard, so a lock failure while writing the sources manifest skipped the resource index entirely and produced no pause notice at all. Each file is now guarded on its own. Losing a race for the shared lock is left to the next sync and only recorded in the log, because it resolves itself and is not the permanent pause the notification exists for / 2 つの共有ファイルは 1 つの guard の中で順に同期していたため、sources マニフェスト書き込み時の lock 失敗がリソースインデックスの同期ごと飛ばし、pause 通知も一切出ませんでした。ファイルごとに個別に guard します。共有 lock の取得競合は次回の同期で解消するため、通知は出さずログにのみ記録します。通知は恒久的に同期が止まった場合のためのものです。
+
+- 🔁 **The Same Source Id Twice Produced Two Sources** - A shared manifest listing one id more than once turned into duplicate entries in the runtime list. The first entry for an id now wins and the repeats are ignored / 共有マニフェストに同じ id が複数回並んでいると、実行時の一覧に重複したエントリができていました。同じ id は最初のエントリを採用し、以降は無視します。
+
+- ↔️ **We Could Publish an Entry We Would Then Refuse to Read** - Entries coming in were validated but our own entries going out were not, so a source carrying a branch the reader rejects would have been written to the shared file and then dropped whole on the next read. Outgoing entries are now held to the same rule, and an unusable branch is dropped on its own so the source survives and falls back to the repository default / 受け取るエントリは検証していた一方、こちらから書き出す自分のエントリは検証していなかったため、読み取り側が拒否する branch を持つ source をそのまま共有ファイルへ書き、次の読み取りでエントリごと落とす可能性がありました。書き出すエントリにも同じ規則を適用し、使えない branch だけを落として source 自体は残し、repository の既定 branch へフォールバックします。
+
+- 🔍 **Search Could Throw on a Damaged Index** - Resource search read the source list straight off the index in three places, so an index whose `sources` was missing, was not an array, or held holes could throw instead of returning results. Search now uses the guarded accessor everywhere and skips entries that are not usable, and a wholly unusable index simply returns nothing / リソース検索は 3 箇所でインデックスから source 一覧を直接参照していたため、`sources` が欠損・非配列・要素が壊れているインデックスで例外が出ることがありました。全箇所でガード付きのアクセサを使い、利用できない要素は読み飛ばします。インデックス全体が使えない場合は空の結果を返します。
+
+### Changed
+
+- 🔑 **Token Setup Led With the Legacy Option** - The GitHub Token section listed the VS Code setting first even though the surrounding text recommends GitHub CLI, and its example used a placeholder shaped like a real classic token. GitHub CLI is now the first option, the environment variable is second, the VS Code setting is last and labelled as kept for backward compatibility, and the example no longer resembles a token / GitHub Token の節は、本文で GitHub CLI を推奨しているにもかかわらず VS Code 設定を最初に並べており、例のプレースホルダーも実在の classic token と同じ形をしていました。GitHub CLI を方法 1、環境変数を方法 2、VS Code 設定を最後に置いて後方互換のために残していることを明記し、例はトークンに見えない表記へ変更しました。
+
 ## [0.2.50] - 2026-08-18
 
 ### Fixed

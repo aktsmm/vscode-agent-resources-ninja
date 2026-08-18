@@ -578,7 +578,7 @@ Optional shared metadata is available through `resourceNinja.useSharedSourcesMan
 
 - **Nothing is overwritten that could not be read.** A shared file that fails to parse, exceeds its size limit, or carries an unexpected schema is reported and left exactly as it is, and syncing for that file stops rather than rebuilding it from this extension's own view, because that would discard everything only the sibling extension knows about. The two files are handled independently, so one being unreadable does not stop the other. A file that is genuinely absent is still created from the current data, since there is nothing to lose.
 - **A write merges, it does not replace.** In `sources.json`, entries and fields written by the other extension survive untouched, and this extension only overwrites the fields it owns. `index.json` is a rebuildable scan cache, so entries for sources this extension carries are rewritten from its current view, but resources and scan records belonging to sources it does not own are kept rather than deleted.
-- **A source entry that fails validation is ignored, not deleted.** In `sources.json`, source ids, repository URLs, and include/exclude paths are checked before use; anything that fails is skipped at runtime and still written back unchanged.
+- **A source entry that fails validation is ignored, not deleted.** In `sources.json`, source ids, repository owners and names, branches, and include/exclude paths are checked before use; anything that fails is skipped at runtime and still written back unchanged.
 - **Your own sources are not deleted by silence.** Because sharing is off by default, sources added beforehand are absent from the shared file. That absence only starts to mean removal after this extension's own sources have reached the file at least once.
 - **A paused sync says so.** If a shared file cannot be read, syncing for it stops and a notification appears once per file with **Show Coexistence Status** and **Show Details**, and again if the reason changes. Local resources keep working while it is paused. Repair or remove the file to resume; run `Resource NINJA: Show Coexistence Status` to see the current state and the reason.
 
@@ -712,37 +712,43 @@ When Ref output is on, adjust **Ref Catalog Detail Format** if you want a lighte
 
 > **Recommended**: A GitHub Token raises API limits from 60 to 5000 requests/hour. It is also required when you intentionally add private repositories as resource sources.
 
-Set up a GitHub Token for more reliable search and private source indexing:
-
-### Option 1: VS Code Settings
-
-Find `Agent Resources Ninja: GitHub Token` in settings and enter your token:
-
-```json
-{
-  "resourceNinja.githubToken": "ghp_xxxxxxxxxxxx"
-}
-```
+Tokens are resolved in the order SecretStorage → `GH_TOKEN` → `GITHUB_TOKEN` → GitHub CLI → the legacy VS Code setting. Pick the first option below that fits your setup.
 
 👉 [Create a GitHub Token](https://github.com/settings/tokens/new?description=Agent%20Resources%20Ninja)
 
 For public resources, leave scopes unchecked. To index a private repository, use a fine-grained PAT scoped to the selected repository with **Contents: Read** permission, or a classic PAT with the broader `repo` scope when that is the only viable option. If the repository belongs to an organization, the token may also need SSO or organization approval.
 
-Raw GitHub file downloads start anonymously. When a private file returns `404`, Resource Ninja retries with configured authentication and then tries the next distinct credential after a `401`, `403`, or private `404`. If an install still reports `404` or "not found", use **Open Settings** to configure authentication before choosing **Update Index** or **Report Bug**. With authentication already configured, the index path may be stale or the token may lack **Contents: Read** access. Bug reports include only the authentication state and credential source and never include the token value.
-
-A credential that GitHub rejects for organization SSO or classic-PAT policy is remembered for that repository owner for 10 minutes, so the same rejection is not repeated for every file of the same scan. When suppression starts, the **Agent Resources Ninja** output channel records one line naming the owner and the rejection reason, so a later `404` is traceable. Starting an index update, adding a source, installing a resource, opening a resource preview, running a GitHub search, clearing the stored token, or opening **Open Organization SSO Authorization** clears that record immediately. Shared helpers such as a repository scan or a default-branch lookup deliberately do not clear it, because they run once per source, file, or lookup. The record lives only in memory and is keyed by a token fingerprint that is never written to the output channel.
-
-> **Note**: This machine-scoped setting is mirrored into VS Code SecretStorage on startup and kept only for backward compatibility. Tokens are resolved in the order SecretStorage → `GH_TOKEN` → `GITHUB_TOKEN` → GitHub CLI → this setting. Entering the legacy setting copies it into SecretStorage, so it has the highest effective priority until cleared. New setups should prefer GitHub CLI or an environment variable.
-
-Use **Agent Resources Ninja: Clear Stored and Configured GitHub Token** during authentication recovery. It removes the SecretStorage copy and the machine-scoped legacy `resourceNinja.githubToken` value. It does not modify `GH_TOKEN` / `GITHUB_TOKEN` or GitHub CLI credentials. Older token entries already present in `.vscode/settings.json` are ignored by the machine-scoped setting but remain plaintext in that file; remove those entries manually. If an environment variable is stale, update or unset it and reload VS Code; `GH_TOKEN` takes precedence over `GITHUB_TOKEN` and both override GitHub CLI.
-
-### Option 2: GitHub CLI (Recommended)
+### Option 1: GitHub CLI (Recommended)
 
 ```bash
 gh auth login
 ```
 
-> If GitHub CLI is installed, the token is automatically retrieved (no configuration needed)
+> If GitHub CLI is installed, the token is retrieved automatically and nothing has to be configured in VS Code.
+
+### Option 2: Environment Variable
+
+Set `GH_TOKEN` (or `GITHUB_TOKEN`) in the environment VS Code is launched from, then reload VS Code. `GH_TOKEN` takes precedence over `GITHUB_TOKEN`, and both override GitHub CLI.
+
+### Option 3: VS Code Settings (legacy)
+
+> **Kept for backward compatibility.** New setups should use Option 1 or Option 2. This machine-scoped setting is mirrored into VS Code SecretStorage on startup, and entering it copies the value into SecretStorage, so it keeps the highest effective priority until cleared.
+
+Find `Agent Resources Ninja: GitHub Token` in settings and enter your token:
+
+```json
+{
+  "resourceNinja.githubToken": "<your-github-token>"
+}
+```
+
+### Authentication Recovery
+
+Raw GitHub file downloads start anonymously. When a private file returns `404`, Resource Ninja retries with configured authentication and then tries the next distinct credential after a `401`, `403`, or private `404`. If an install still reports `404` or "not found", use **Open Settings** to configure authentication before choosing **Update Index** or **Report Bug**. With authentication already configured, the index path may be stale or the token may lack **Contents: Read** access. Bug reports include only the authentication state and credential source and never include the token value.
+
+A credential that GitHub rejects for organization SSO or classic-PAT policy is remembered for that repository owner for 10 minutes, so the same rejection is not repeated for every file of the same scan. When suppression starts, the **Agent Resources Ninja** output channel records one line naming the owner and the rejection reason, so a later `404` is traceable. Starting an index update, adding a source, installing a resource, opening a resource preview, running a GitHub search, clearing the stored token, or opening **Open Organization SSO Authorization** clears that record immediately. Shared helpers such as a repository scan or a default-branch lookup deliberately do not clear it, because they run once per source, file, or lookup. The record lives only in memory and is keyed by a token fingerprint that is never written to the output channel.
+
+Use **Agent Resources Ninja: Clear Stored and Configured GitHub Token** during authentication recovery. It removes the SecretStorage copy and the machine-scoped legacy `resourceNinja.githubToken` value. It does not modify `GH_TOKEN` / `GITHUB_TOKEN` or GitHub CLI credentials. Older token entries already present in `.vscode/settings.json` are ignored by the machine-scoped setting but remain plaintext in that file; remove those entries manually. If an environment variable is stale, update or unset it and reload VS Code; `GH_TOKEN` takes precedence over `GITHUB_TOKEN` and both override GitHub CLI.
 
 ## 🛠️ Development
 
