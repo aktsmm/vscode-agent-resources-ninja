@@ -22,6 +22,14 @@ export interface SkillQuickPickItem extends vscode.QuickPickItem {
 }
 
 /**
+ * A cached or shared index is untrusted input, so an array of the right shape can
+ * still hold holes. Dropping them here keeps every lookup below free of null checks.
+ */
+function isRecord<T>(value: T): value is T & object {
+  return !!value && typeof value === "object";
+}
+
+/**
  * ソースタイプの優先度を取得
  */
 function getSourceTypePriority(sourceId: string, sources: Source[]): number {
@@ -145,8 +153,8 @@ export function searchSkills(
   kindFilter?: ResourceKind,
 ): SkillQuickPickItem[] {
   // インデックスが未ロードまたは不正な場合は例外を投げず空結果を返す
-  const indexResources = getIndexResources(index);
-  const indexSources = getIndexSources(index);
+  const indexResources = getIndexResources(index).filter(isRecord);
+  const indexSources = getIndexSources(index).filter(isRecord);
   if (!index || indexResources.length === 0) {
     return [];
   }
@@ -163,7 +171,7 @@ export function searchSkills(
     const visibleResources = sorted.slice(0, 100);
     const duplicateNameCounts = getDuplicateNameCounts(visibleResources);
     return visibleResources.map((skill) =>
-      skillToQuickPickItem(skill, index.sources, duplicateNameCounts),
+      skillToQuickPickItem(skill, indexSources, duplicateNameCounts),
     );
   }
 
@@ -183,14 +191,14 @@ export function searchSkills(
     // まずスコアで比較（高い順）
     if (b.score !== a.score) return b.score - a.score;
 
-    return compareSearchTieBreakers(a.skill, b.skill, index.sources);
+    return compareSearchTieBreakers(a.skill, b.skill, indexSources);
   });
 
   // 最大100件に制限
   const visibleResources = scoredSkills.slice(0, 100).map(({ skill }) => skill);
   const duplicateNameCounts = getDuplicateNameCounts(visibleResources);
   return visibleResources.map((skill) =>
-    skillToQuickPickItem(skill, index.sources, duplicateNameCounts),
+    skillToQuickPickItem(skill, indexSources, duplicateNameCounts),
   );
 }
 

@@ -302,4 +302,39 @@ test("long source names are shortened in QuickPick descriptions", () => {
   );
 });
 
+test("a broken sources list degrades the labels instead of throwing", () => {
+  for (const sources of [undefined, 42, "nope"]) {
+    const results = searchSkills({ ...index, sources }, "");
+    assert.ok(
+      results.length > 0,
+      "resources are still searchable when only the source list is unusable",
+    );
+    assert.ok(results[0].label, "every item still has a label");
+  }
+});
+
+test("holes in the sources list do not reach the lookups", () => {
+  const results = searchSkills(
+    { ...index, sources: [null, 42, {}, ...index.sources] },
+    "",
+  );
+  assert.ok(results.length > 0);
+  assert.ok(results[0].description);
+});
+
+test("holes in the resources list are skipped", () => {
+  const results = searchSkills(
+    { ...index, skills: [null, undefined, ...index.skills] },
+    "",
+  );
+  assert.strictEqual(results.length, index.skills.length);
+});
+
+test("a wholly unusable index returns no results", () => {
+  assert.deepStrictEqual(searchSkills(undefined, ""), []);
+  assert.deepStrictEqual(searchSkills({}, ""), []);
+  assert.deepStrictEqual(searchSkills({ sources: 42, skills: "x" }, ""), []);
+  assert.deepStrictEqual(searchSkills({ skills: [null] }, ""), []);
+});
+
 console.log("RESULT=PASS");
