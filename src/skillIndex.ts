@@ -3,6 +3,7 @@
 
 import * as vscode from "vscode";
 import { fetchGitHubWithOptionalAuthRetry } from "./githubFetch";
+import { encodeGitRefForPath } from "./gitHubRefSafety";
 import { logger } from "./logger";
 import {
   loadSharedStoresIntoSkillIndex,
@@ -835,7 +836,7 @@ function rewriteStoredGitHubUrl(
   }
 
   const suffix = match.groups?.suffix || "";
-  return `${repoUrl}/${match[1]}/${branch}${suffix}`;
+  return `${repoUrl}/${match[1]}/${encodeGitRefForPath(branch)}${suffix}`;
 }
 
 function getRawUrlFromSkillUrl(
@@ -856,7 +857,7 @@ function getRawUrlFromSkillUrl(
   }
 
   const [, owner, repo, branch, path] = match;
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}/${path}`;
 }
 
 /**
@@ -997,7 +998,7 @@ export function buildGitHubRawUrl(
 
   const [, owner, repo] = match;
   const contentPath = getResourceContentPath(resource, fileName);
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${contentPath}`;
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}/${contentPath}`;
 }
 
 /**

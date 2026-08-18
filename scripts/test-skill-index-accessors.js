@@ -88,6 +88,9 @@ const skillIndex = requireTypeScriptModule(
         joinPath: (...parts) => ({ parts }),
       },
     },
+    "./gitHubRefSafety": requireTypeScriptModule(
+      path.join(repoRoot, "src", "gitHubRefSafety.ts"),
+    ),
     "./githubFetch": {
       createGitHubHeaders: () => ({}),
       fetchGitHubWithOptionalAuthRetry: async () => ({ ok: false }),
@@ -233,6 +236,9 @@ async function main() {
       path.join(repoRoot, "src", "skillIndex.ts"),
       {
         vscode: makeVscodeStub(),
+        "./gitHubRefSafety": requireTypeScriptModule(
+          path.join(repoRoot, "src", "gitHubRefSafety.ts"),
+        ),
         "./githubFetch": {
           createGitHubHeaders: () => ({}),
           fetchGitHubWithOptionalAuthRetry: async () => ({ ok: false }),
@@ -333,6 +339,9 @@ async function main() {
       path.join(repoRoot, "src", "skillIndex.ts"),
       {
         vscode: makeVscodeStub(),
+        "./gitHubRefSafety": requireTypeScriptModule(
+          path.join(repoRoot, "src", "gitHubRefSafety.ts"),
+        ),
         "./githubFetch": {
           createGitHubHeaders: () => ({}),
           fetchGitHubWithOptionalAuthRetry: async () => ({ ok: false }),

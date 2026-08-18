@@ -61,6 +61,7 @@ import {
 } from "./githubAuth";
 export { checkGitHubAuth } from "./githubAuth";
 import { LICENSE_EXTRACTION, INDEX_LIMITS } from "./constants";
+import { encodeGitRefForPath } from "./gitHubRefSafety";
 import { logger } from "./logger";
 import { SELF_EXTENSION_ID } from "./coexistence";
 import { resetGitHubCredentialBlocklist } from "./githubCredentialBlocklist";
@@ -238,7 +239,7 @@ function buildRawContentUrl(
   branch: string,
   filePath: string,
 ): string {
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${normalizeGitHubContentPath(filePath)}`;
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}/${normalizeGitHubContentPath(filePath)}`;
 }
 
 function normalizeGitHubContentPath(filePath: string): string {
@@ -2712,7 +2713,7 @@ export async function searchGitHub(
     let skillNameFromMeta = result.name;
 
     try {
-      const rawUrl = `https://raw.githubusercontent.com/${result.repo}/${result.defaultBranch}/${result.itemPath}`;
+      const rawUrl = `https://raw.githubusercontent.com/${result.repo}/${encodeGitRefForPath(result.defaultBranch ?? "main")}/${result.itemPath}`;
       const contentResponse = await fetchGitHubWithOptionalAuthRetry(rawUrl, {
         accept: "text/plain",
         token,

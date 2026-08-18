@@ -61,6 +61,9 @@ const skillIndexModule = requireTypeScriptModule(
   path.join(__dirname, "..", "src", "skillIndex.ts"),
   {
     vscode: {},
+    "./gitHubRefSafety": requireTypeScriptModule(
+      path.join(__dirname, "..", "src", "gitHubRefSafety.ts"),
+    ),
     "./githubFetch": {
       fetchGitHubWithOptionalAuthRetry: async (url, options = {}) =>
         fetch(url, { method: options.method }),

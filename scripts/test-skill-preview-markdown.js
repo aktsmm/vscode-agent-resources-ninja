@@ -71,6 +71,9 @@ const { markdownToHtml } = requireTypeScriptModule(
     "./githubFetch": {
       fetchGitHubWithOptionalAuthRetry: async () => undefined,
     },
+    "./gitHubRefSafety": requireTypeScriptModule(
+      path.join(__dirname, "..", "src", "gitHubRefSafety.ts"),
+    ),
     "./indexDataNormalization": indexDataNormalization,
   },
 );

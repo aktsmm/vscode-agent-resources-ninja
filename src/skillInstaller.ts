@@ -65,6 +65,7 @@ import {
   removePluginLocations,
   supportsPluginLocations,
 } from "./pluginLocations";
+import { encodeGitRefForPath } from "./gitHubRefSafety";
 import { logger } from "./logger";
 import { openBugReport as openBugReportIssue } from "./bugReport";
 import {
@@ -1436,7 +1437,7 @@ export async function installSkill(
             token,
           );
         } else {
-          const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${remotePath}`;
+          const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}/${remotePath}`;
           const content = await fetchFileContent(rawUrl, token);
           assertRealPathStrictlyInside(
             skillPath,
@@ -1497,7 +1498,7 @@ export async function installSkill(
 
     // パスが .md で終わる場合は単独ファイル
     if (remotePath.endsWith(".md")) {
-      const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${remotePath}`;
+      const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}/${remotePath}`;
       logger.info(`[Resource Ninja] Downloading single file: ${rawUrl}`);
       try {
         const content = await fetchFileContent(rawUrl, token);
@@ -2927,7 +2928,7 @@ export async function recoverPrimarySkillMdFromRaw(
   token?: string,
 ): Promise<boolean> {
   const cleanPath = (remotePath || "").replace(/^\/+|\/+$/g, "");
-  const rawBase = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}`;
+  const rawBase = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}`;
   const rawUrl = cleanPath
     ? `${rawBase}/${cleanPath}/SKILL.md`
     : `${rawBase}/SKILL.md`;

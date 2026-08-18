@@ -141,6 +141,10 @@ async function main() {
     path.join(__dirname, "..", "src", "skillInstaller.ts"),
     {
       vscode: vscodeStub,
+      "./gitHubRefSafety": requireTypeScriptModule(
+        path.join(__dirname, "..", "src", "gitHubRefSafety.ts"),
+        {},
+      ),
       "./pathSafety": requireTypeScriptModule(
         path.join(__dirname, "..", "src", "pathSafety.ts"),
         {},

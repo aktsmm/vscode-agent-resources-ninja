@@ -18,6 +18,7 @@ import messages, { isJapanese } from "./i18n";
 import { getGitHubToken } from "./githubAuth";
 import { resetGitHubCredentialBlocklist } from "./githubCredentialBlocklist";
 import { fetchGitHubWithOptionalAuthRetry } from "./githubFetch";
+import { encodeGitRefForPath } from "./gitHubRefSafety";
 import { normalizeStarCount } from "./indexDataNormalization";
 
 let previewPanel: vscode.WebviewPanel | undefined;
@@ -232,7 +233,7 @@ async function fetchSkillContent(
         // HEAD リクエストまたは API でデフォルトブランチを動的取得
         const branch = await getSourceBranch(sourceInfo, token, skill.path);
         const contentPath = getResourceContentPath(skill);
-        rawUrl = `https://raw.githubusercontent.com/${ownerRepo}/${branch}/${contentPath}`;
+        rawUrl = `https://raw.githubusercontent.com/${ownerRepo}/${encodeGitRefForPath(branch)}/${contentPath}`;
       } else {
         throw new Error(`Invalid source URL: ${sourceInfo.url}`);
       }

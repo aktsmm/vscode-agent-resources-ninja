@@ -23,7 +23,10 @@ import {
   SharedResourceIndex,
   SourceEntry,
 } from "./sharedManifest";
-import { withSharedStoreLock } from "./sharedStoreLock";
+import {
+  describeSharedStoreLockFailure,
+  withSharedStoreLock,
+} from "./sharedStoreLock";
 import {
   Skill,
   SkillIndex,
@@ -64,6 +67,15 @@ export type SharedStoreRejectionNotice =
   | { action: "skip" };
 
 /**
+ * Losing a race for the shared lock is resolved by the next sync, so it is not the
+ * permanent pause this notice exists for and must not spend the user's attention.
+ */
+const TRANSIENT_WRITE_FAILURE_REASONS = new Set([
+  "lease-lost",
+  "lock-unavailable",
+]);
+
+/**
  * Refusing to write is the correct response to an unreadable shared file, but it
  * stops syncing for good, so the user has to be told once. A repeat of the same
  * reason stays silent; a new reason, or a break after a success, speaks again.
@@ -80,6 +92,10 @@ export function planSharedStoreRejectionNotice(
   }
 
   const currentReason = reason ?? "unknown";
+  if (TRANSIENT_WRITE_FAILURE_REASONS.has(currentReason)) {
+    // Leaves an existing notice alone: this run learned nothing about that reason.
+    return { action: "skip" };
+  }
   return currentReason === lastNotifiedReason
     ? { action: "skip" }
     : { action: "notify", reason: currentReason };
@@ -406,9 +422,13 @@ export async function readSharedResourceIndex(): Promise<
   return result.status === "valid" ? result.index : undefined;
 }
 
+export type SharedResourceIndexWriteResult =
+  | { status: "written" }
+  | { status: "rejected"; reason: string };
+
 export async function writeSharedResourceIndex(
   sharedIndex: SharedResourceIndex,
-): Promise<void> {
+): Promise<SharedResourceIndexWriteResult> {
   const normalizedIndex = normalizeSharedResourceIndex(sharedIndex);
   if (!normalizedIndex) {
     throw new Error("Invalid shared resource index payload");
@@ -418,15 +438,30 @@ export async function writeSharedResourceIndex(
   const fileUri = getSharedResourceIndexUri();
   const tempPath = `${sharedDir}/${SHARED_RESOURCE_INDEX_TEMP_FILE}`;
 
-  await withSharedStoreLock(SELF_EXTENSION_ID, async () => {
-    await fs.mkdir(sharedDir, { recursive: true });
-    await fs.writeFile(
-      tempPath,
-      JSON.stringify(normalizedIndex, null, 2),
-      "utf8",
+  try {
+    await withSharedStoreLock(SELF_EXTENSION_ID, async (lease) => {
+      await fs.mkdir(sharedDir, { recursive: true });
+      lease.assertHeld();
+      await fs.writeFile(
+        tempPath,
+        JSON.stringify(normalizedIndex, null, 2),
+        "utf8",
+      );
+      // Nothing may be awaited between this check and the rename.
+      await lease.assertStillOwned();
+      await fs.rename(tempPath, fileUri.fsPath);
+    });
+    return { status: "written" };
+  } catch (error) {
+    const reason = describeSharedStoreLockFailure(error);
+    if (!reason) {
+      throw error;
+    }
+    logger.warn(
+      `[Resource Ninja] Did not write the shared resource index (${reason}).`,
     );
-    await fs.rename(tempPath, fileUri.fsPath);
-  });
+    return { status: "rejected", reason };
+  }
 }
 
 export async function bootstrapSharedResourceIndex(
@@ -451,8 +486,10 @@ export async function syncSharedStoresFromSkillIndex(
     return;
   }
 
-  try {
-    if (useSharedSourcesManifest) {
+  // Each store is guarded on its own: one of them pausing must not silently take
+  // the other down with it, because they report their status independently.
+  if (useSharedSourcesManifest) {
+    try {
       const manifest = {
         schemaVersion: 1 as const,
         sources: currentIndex.sources.map(
@@ -477,9 +514,16 @@ export async function syncSharedStoresFromSkillIndex(
         writeResult?.status === "written" ? "written" : "rejected",
         writeResult?.status === "rejected" ? writeResult.reason : undefined,
       );
+    } catch (error) {
+      logger.warn(
+        "[Resource Ninja] Failed to sync the shared sources manifest. Falling back to local cache.",
+        error,
+      );
     }
+  }
 
-    if (useSharedResourceIndex) {
+  if (useSharedResourceIndex) {
+    try {
       const previousResult = await readSharedResourceIndexResult();
       // Rebuilding from our own data would replace every resource and scan record
       // only the sibling extension holds, so an unreadable file is never overwritten.
@@ -506,20 +550,20 @@ export async function syncSharedStoresFromSkillIndex(
         ) {
           nextSharedIndex.lastFullScan = new Date().toISOString();
         }
-        await writeSharedResourceIndex(nextSharedIndex);
+        const writeResult = await writeSharedResourceIndex(nextSharedIndex);
         await applySharedStoreRejectionNotice(
           context,
           "index",
-          "written",
-          undefined,
+          writeResult.status === "written" ? "written" : "rejected",
+          writeResult.status === "rejected" ? writeResult.reason : undefined,
         );
       }
+    } catch (error) {
+      logger.warn(
+        "[Resource Ninja] Failed to sync the shared resource index. Falling back to local cache.",
+        error,
+      );
     }
-  } catch (error) {
-    logger.warn(
-      "[Resource Ninja] Failed to sync shared stores. Falling back to local cache.",
-      error,
-    );
   }
 }
 

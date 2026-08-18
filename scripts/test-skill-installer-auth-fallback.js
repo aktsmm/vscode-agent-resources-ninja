@@ -102,6 +102,10 @@ async function main() {
           path.join(__dirname, "..", "src", "skillInstaller.ts"),
           {
             vscode: {},
+            "./gitHubRefSafety": requireTypeScriptModule(
+              path.join(__dirname, "..", "src", "gitHubRefSafety.ts"),
+              {},
+            ),
             "./pathSafety": requireTypeScriptModule(
               path.join(__dirname, "..", "src", "pathSafety.ts"),
               {},
@@ -379,6 +383,10 @@ async function main() {
           path.join(__dirname, "..", "src", "skillIndex.ts"),
           {
             vscode: {},
+            "./gitHubRefSafety": requireTypeScriptModule(
+              path.join(__dirname, "..", "src", "gitHubRefSafety.ts"),
+              {},
+            ),
             "./githubFetch": githubFetchModule,
             "./logger": {
               logger: {
@@ -455,6 +463,10 @@ async function main() {
           path.join(__dirname, "..", "src", "skillIndex.ts"),
           {
             vscode: {},
+            "./gitHubRefSafety": requireTypeScriptModule(
+              path.join(__dirname, "..", "src", "gitHubRefSafety.ts"),
+              {},
+            ),
             "./githubFetch": githubFetchModule,
             "./logger": {
               logger: {
@@ -521,6 +533,10 @@ async function main() {
           path.join(__dirname, "..", "src", "skillIndex.ts"),
           {
             vscode: {},
+            "./gitHubRefSafety": requireTypeScriptModule(
+              path.join(__dirname, "..", "src", "gitHubRefSafety.ts"),
+              {},
+            ),
             "./githubFetch": githubFetchModule,
             "./logger": {
               logger: {

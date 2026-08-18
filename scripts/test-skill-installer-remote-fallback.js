@@ -196,6 +196,10 @@ function loadInstaller(writes, options = {}) {
 
   return requireTypeScriptModule(path.join(srcDir, "skillInstaller.ts"), {
     vscode: options.vscodeStub || createVscodeStub(writes, options),
+    "./gitHubRefSafety": requireTypeScriptModule(
+      path.join(srcDir, "gitHubRefSafety.ts"),
+      {},
+    ),
     "./pathSafety": requireTypeScriptModule(
       path.join(srcDir, "pathSafety.ts"),
       {},
@@ -433,6 +437,10 @@ function loadWindowsInstaller(recorded, options = {}) {
 
   return requireTypeScriptModule(path.join(srcDir, "skillInstaller.ts"), {
     vscode: vscodeStub,
+    "./gitHubRefSafety": requireTypeScriptModule(
+      path.join(srcDir, "gitHubRefSafety.ts"),
+      {},
+    ),
     "./pathSafety": requireTypeScriptModule(
       path.join(srcDir, "pathSafety.ts"),
       {},

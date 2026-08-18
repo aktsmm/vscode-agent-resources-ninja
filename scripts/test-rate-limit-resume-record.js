@@ -92,7 +92,10 @@ assert.ok(
 
 const sharedStoreLock = requireTypeScriptModule(
   path.join(srcDir, "sharedStoreLock.ts"),
-  { "./sharedManifest": sharedManifest },
+  {
+    "./sharedManifest": sharedManifest,
+    "./logger": { logger: { warn: () => {} } },
+  },
 );
 
 const store = requireTypeScriptModule(

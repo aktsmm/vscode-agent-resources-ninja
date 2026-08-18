@@ -47,6 +47,9 @@ const { mergeSkillIndexes } = requireTypeScriptModule(
       workspace: { fs: {} },
       env: { language: "en" },
     },
+    "./gitHubRefSafety": requireTypeScriptModule(
+      path.join(__dirname, "..", "src", "gitHubRefSafety.ts"),
+    ),
     "./githubFetch": {
       fetchGitHubWithOptionalAuthRetry: async () => undefined,
     },

@@ -1,5 +1,6 @@
 import * as fs from "fs/promises";
 import { SELF_EXTENSION_ID } from "./coexistence";
+import { isSafeGitHubRepositoryUrl, isSafeGitRef } from "./gitHubRefSafety";
 import {
   createEmptySharedSourcesManifest,
   getAgentNinjaSharedDirectoryPath,
@@ -12,7 +13,10 @@ import {
 } from "./sharedManifest";
 import type { SourceScanner } from "./skillIndex";
 import { logger } from "./logger";
-import { withSharedStoreLock } from "./sharedStoreLock";
+import {
+  describeSharedStoreLockFailure,
+  withSharedStoreLock,
+} from "./sharedStoreLock";
 
 /** Every field the manifest schema knows about; anything else belongs to another writer. */
 const KNOWN_SOURCE_ENTRY_KEYS: readonly string[] = [
@@ -35,8 +39,9 @@ const KNOWN_SOURCE_ENTRY_KEYS: readonly string[] = [
 const UNSAFE_OBJECT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 const SOURCE_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
-const GITHUB_REPO_URL_PATTERN =
-  /^https:\/\/github\.com\/[A-Za-z0-9._-]{1,100}\/[A-Za-z0-9._-]{1,100}$/;
+// Wide enough for any scanner name either extension may add, narrow enough that a
+// value we keep for another writer cannot smuggle a path or a control character.
+const FOREIGN_SCANNER_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 const MAX_FIELD_LENGTH = 512;
 const MAX_PATH_ENTRIES = 64;
 /** A file with more entries than this is treated as hostile rather than curated. */
@@ -169,11 +174,9 @@ function inspectSourceEntry(raw: unknown): InspectedSourceEntry {
       ? candidate.id
       : undefined;
   const name = readBoundedString(candidate.name);
-  const url =
-    typeof candidate.url === "string" &&
-    GITHUB_REPO_URL_PATTERN.test(candidate.url)
-      ? candidate.url
-      : undefined;
+  const url = isSafeGitHubRepositoryUrl(candidate.url)
+    ? candidate.url
+    : undefined;
   const type = readBoundedString(candidate.type);
   const description =
     typeof candidate.description === "string" &&
@@ -188,7 +191,7 @@ function inspectSourceEntry(raw: unknown): InspectedSourceEntry {
     type,
     repoId: normalizeRepoId(candidate.repoId),
     scanner: normalizeScanner(candidate.scanner),
-    branch: readBoundedString(candidate.branch),
+    branch: isSafeGitRef(candidate.branch) ? candidate.branch : undefined,
     lastIndexedAt: readBoundedString(candidate.lastIndexedAt),
     lastIndexedBy: readBoundedString(candidate.lastIndexedBy),
     description,
@@ -202,13 +205,25 @@ function inspectSourceEntry(raw: unknown): InspectedSourceEntry {
     }
   }
 
+  // The sibling extension implements scanners we do not, and we implement one it
+  // does not. A name we cannot run is another writer's configuration, so it is kept
+  // on disk even though it never reaches our runtime.
+  if (
+    known.scanner === undefined &&
+    typeof candidate.scanner === "string" &&
+    FOREIGN_SCANNER_PATTERN.test(candidate.scanner)
+  ) {
+    known.scanner = candidate.scanner;
+  }
+
   if (!id || !name || !url || !type) {
     return { known, unknown };
   }
 
-  // An unsafe path is a reason to reject the entry: it should never be used at
-  // runtime or written back to disk as a usable resource.
+  // A branch or path prefix that steers a download is a reason to reject the entry:
+  // it should never be used at runtime or written back to disk as a usable resource.
   if (
+    (candidate.branch !== undefined && validated.branch === undefined) ||
     (candidate.includePaths !== undefined &&
       validated.includePaths === undefined) ||
     (candidate.excludePaths !== undefined &&
@@ -246,7 +261,10 @@ export function normalizeSourceEntry(source: SourceEntry): SourceEntry {
     type: source.type,
     repoId: normalizeRepoId(source.repoId),
     scanner: normalizeScanner(source.scanner),
-    branch: source.branch,
+    // Held to the same rule the reader applies, so we never publish an entry that
+    // we would then refuse to read back. Losing the branch falls back to the
+    // repository default; keeping it would lose the whole source.
+    branch: isSafeGitRef(source.branch) ? source.branch : undefined,
     lastIndexedAt: source.lastIndexedAt,
     lastIndexedBy: source.lastIndexedBy,
     description: source.description,
@@ -449,14 +467,20 @@ export async function readSharedSourcesManifest(): Promise<SharedSourcesManifest
   }
 
   const usableSources: SourceEntry[] = [];
+  const seenIds = new Set<string>();
   let rejectedEntryCount = 0;
   for (const rawEntry of root.sources) {
     const inspected = inspectSourceEntry(rawEntry);
-    if (inspected.entry) {
-      usableSources.push(inspected.entry);
-    } else {
+    if (!inspected.entry) {
       rejectedEntryCount += 1;
+      continue;
     }
+    // A repeated id is one source described twice, not two sources.
+    if (seenIds.has(inspected.entry.id)) {
+      continue;
+    }
+    seenIds.add(inspected.entry.id);
+    usableSources.push(inspected.entry);
   }
   if (rejectedEntryCount > 0) {
     logger.warn(
@@ -494,57 +518,76 @@ export async function writeSharedSourcesManifest(
   const filePath = getSharedSourcesManifestUri().fsPath;
   const tempPath = `${sharedDir}/${SHARED_SOURCES_MANIFEST_TEMP_FILE}`;
 
-  return withSharedStoreLock(SELF_EXTENSION_ID, async () => {
-    const current = await readManifestFile(filePath);
-    if (current.status === "rejected") {
-      logger.warn(
-        `[Resource Ninja] Refusing to rewrite the shared sources manifest (${current.reason}).`,
-      );
-      return { status: "rejected", reason: current.reason };
-    }
-
-    let rawEntries: unknown[] = [];
-    let onDiskLastUpdated: string | undefined;
-    if (current.status === "read") {
-      const root = parseManifestRoot(current.content);
-      if (root.status === "rejected") {
+  try {
+    return await withSharedStoreLock(SELF_EXTENSION_ID, async (lease) => {
+      const current = await readManifestFile(filePath);
+      if (current.status === "rejected") {
         logger.warn(
-          `[Resource Ninja] Refusing to rewrite the shared sources manifest (${root.reason}).`,
+          `[Resource Ninja] Refusing to rewrite the shared sources manifest (${current.reason}).`,
         );
-        return { status: "rejected", reason: root.reason };
+        return { status: "rejected", reason: current.reason };
       }
-      rawEntries = root.sources;
-      onDiskLastUpdated = root.lastUpdated;
-    }
 
-    const allowRemoval =
-      hasObservedManifest && onDiskLastUpdated === lastObservedManifestVersion;
-    const mergedSources = mergeSourceEntriesForRewrite(rawEntries, ownEntries, {
-      allowRemoval,
+      let rawEntries: unknown[] = [];
+      let onDiskLastUpdated: string | undefined;
+      if (current.status === "read") {
+        const root = parseManifestRoot(current.content);
+        if (root.status === "rejected") {
+          logger.warn(
+            `[Resource Ninja] Refusing to rewrite the shared sources manifest (${root.reason}).`,
+          );
+          return { status: "rejected", reason: root.reason };
+        }
+        rawEntries = root.sources;
+        onDiskLastUpdated = root.lastUpdated;
+      }
+
+      const allowRemoval =
+        hasObservedManifest &&
+        onDiskLastUpdated === lastObservedManifestVersion;
+      const mergedSources = mergeSourceEntriesForRewrite(
+        rawEntries,
+        ownEntries,
+        { allowRemoval },
+      );
+      const lastUpdated = manifest.lastUpdated || new Date().toISOString();
+
+      await fs.mkdir(sharedDir, { recursive: true });
+      lease.assertHeld();
+      await fs.writeFile(
+        tempPath,
+        JSON.stringify(
+          {
+            schemaVersion: SHARED_MANIFEST_SCHEMA_VERSION,
+            sources: mergedSources,
+            lastUpdated,
+            updatedBy: manifest.updatedBy,
+          },
+          null,
+          2,
+        ),
+        "utf8",
+      );
+      // Nothing may be awaited between this check and the rename.
+      await lease.assertStillOwned();
+      await fs.rename(tempPath, filePath);
+
+      lastObservedManifestVersion = lastUpdated;
+      hasObservedManifest = true;
+      return { status: "written", lastUpdated };
     });
-    const lastUpdated = manifest.lastUpdated || new Date().toISOString();
-
-    await fs.mkdir(sharedDir, { recursive: true });
-    await fs.writeFile(
-      tempPath,
-      JSON.stringify(
-        {
-          schemaVersion: SHARED_MANIFEST_SCHEMA_VERSION,
-          sources: mergedSources,
-          lastUpdated,
-          updatedBy: manifest.updatedBy,
-        },
-        null,
-        2,
-      ),
-      "utf8",
+  } catch (error) {
+    // Sharing the store means another writer can take the lock away from us. That
+    // is a paused sync the caller has to surface, not an exception.
+    const reason = describeSharedStoreLockFailure(error);
+    if (!reason) {
+      throw error;
+    }
+    logger.warn(
+      `[Resource Ninja] Did not write the shared sources manifest (${reason}).`,
     );
-    await fs.rename(tempPath, filePath);
-
-    lastObservedManifestVersion = lastUpdated;
-    hasObservedManifest = true;
-    return { status: "written", lastUpdated };
-  });
+    return { status: "rejected", reason };
+  }
 }
 
 /**

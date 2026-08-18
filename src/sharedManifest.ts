@@ -64,9 +64,15 @@ export const SHARED_RATE_LIMIT_RESUME_FILE = "rate-limit-resume.json";
  */
 export const SHARED_SOURCES_MANIFEST_MAX_BYTES = 1024 * 1024;
 export const SHARED_RESOURCE_INDEX_MAX_BYTES = 32 * 1024 * 1024;
+// Base for an exponential backoff, not a fixed wait: the lock can legitimately be
+// held for as long as a multi-megabyte write takes.
 export const SHARED_STORE_RETRY_DELAY_MS = 100;
 export const SHARED_STORE_LOCK_RETRY_COUNT = 5;
 export const SHARED_STORE_LOCK_STALE_MS = 60 * 1000;
+// Reclaimed even while the owning process is alive, so a reused pid cannot wedge
+// the store forever. Matched to the sibling extension so neither side starves.
+export const SHARED_STORE_LOCK_HARD_STALE_MS = 10 * 60 * 1000;
+export const SHARED_STORE_LOCK_HEARTBEAT_MS = 15 * 1000;
 export const SCAN_DEDUP_WINDOW_MS = 5 * 60 * 1000;
 
 export function getAgentNinjaSharedDirectoryPath(): string {

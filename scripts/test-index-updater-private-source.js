@@ -121,6 +121,9 @@ function createModule() {
 
   const moduleExports = requireTypeScriptModule(INDEX_UPDATER_PATH, {
     vscode: vscodeStub,
+    "./gitHubRefSafety": requireTypeScriptModule(
+      path.join(__dirname, "..", "src", "gitHubRefSafety.ts"),
+    ),
     "./skillIndex": {
       getResourceKind: (resource) => resource.kind || "skill",
       createBundleKey: (bundle) => `${bundle.source}:${bundle.id}`,
@@ -719,6 +722,9 @@ async function testSaveSkillIndexSyncsSharedStores() {
     path.join(__dirname, "..", "src", "skillIndex.ts"),
     {
       vscode: vscodeStub,
+      "./gitHubRefSafety": requireTypeScriptModule(
+        path.join(__dirname, "..", "src", "gitHubRefSafety.ts"),
+      ),
       "./githubFetch": {
         createGitHubHeaders: () => ({}),
         fetchGitHubWithOptionalAuthRetry: async () => ({ ok: false }),

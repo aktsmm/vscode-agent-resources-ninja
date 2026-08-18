@@ -70,12 +70,21 @@ const store = requireTypeScriptModule(
   path.join(repoRoot, "src", "sharedSourcesManifestStore.ts"),
   {
     "./coexistence": { SELF_EXTENSION_ID: SELF_ID },
+    "./gitHubRefSafety": requireTypeScriptModule(
+      path.join(repoRoot, "src", "gitHubRefSafety.ts"),
+    ),
     "./sharedManifest": sharedManifestStub,
     "./logger": {
       logger: { warn: (...args) => warnings.push(args.join(" ")) },
     },
     "./sharedStoreLock": {
-      withSharedStoreLock: async (_owner, callback) => callback(),
+      withSharedStoreLock: async (_owner, callback) =>
+        callback({
+          generation: "test-generation",
+          assertHeld: () => {},
+          assertStillOwned: async () => {},
+        }),
+      describeSharedStoreLockFailure: () => undefined,
     },
   },
 );
@@ -202,6 +211,181 @@ test("entries that steer downloads outside the repository are not usable", async
     "only the entry with a plain GitHub repo URL and relative paths is usable",
   );
   assert.strictEqual(result.rejectedEntryCount, 7);
+});
+
+test("a dot segment in the owner, repo or branch makes an entry unusable", async () => {
+  resetStore();
+  writeRawManifest({
+    schemaVersion: 1,
+    sources: [
+      { ...source, id: "dotdot-owner", url: "https://github.com/../repo" },
+      { ...source, id: "dot-owner", url: "https://github.com/./repo" },
+      { ...source, id: "dotdot-repo", url: "https://github.com/owner/.." },
+      { ...source, id: "traversal-branch", branch: "../../other/repo/main" },
+      { ...source, id: "encoded-branch", branch: "%2e%2e/x" },
+      { ...source, id: "control-branch", branch: "main\u0007" },
+      { ...source, id: "nested-branch", branch: "feature/x" },
+    ],
+    lastUpdated: "2026-06-24T12:03:30.000Z",
+    updatedBy: SIBLING_ID,
+  });
+
+  const result = await store.readSharedSourcesManifest();
+  assert.strictEqual(result.status, "valid");
+  assert.deepStrictEqual(
+    result.manifest.sources.map((entry) => entry.id),
+    ["nested-branch"],
+    "an ordinary branch containing a slash must stay usable",
+  );
+  assert.strictEqual(
+    result.manifest.sources[0].branch,
+    "feature/x",
+    "the branch value must survive validation unchanged",
+  );
+  assert.strictEqual(result.rejectedEntryCount, 6);
+});
+
+test("an entry rejected for its branch is still written back verbatim", async () => {
+  resetStore();
+  writeRawManifest({
+    schemaVersion: 1,
+    sources: [
+      {
+        id: "sibling-bad-branch",
+        name: "Sibling Bad Branch",
+        url: "https://github.com/sibling/only",
+        type: "community",
+        branch: "../../escape",
+        futureField: { anything: true },
+      },
+    ],
+    lastUpdated: "2026-06-24T12:03:45.000Z",
+    updatedBy: SIBLING_ID,
+  });
+
+  await store.readSharedSourcesManifest();
+  await store.writeSharedSourcesManifest({
+    schemaVersion: 1,
+    sources: [source],
+    lastUpdated: "2026-06-24T12:03:46.000Z",
+    updatedBy: SELF_ID,
+  });
+
+  const kept = readRawManifest().sources.find(
+    (entry) => entry.id === "sibling-bad-branch",
+  );
+  assert.ok(
+    kept,
+    "an entry we refuse to use is another writer's data, not ours",
+  );
+  assert.strictEqual(kept.branch, "../../escape");
+  assert.deepStrictEqual(kept.futureField, { anything: true });
+});
+
+test("a scanner we cannot run never reaches the runtime", async () => {
+  resetStore();
+  writeRawManifest({
+    schemaVersion: 1,
+    sources: [{ ...source, scanner: "registry-json" }],
+    lastUpdated: "2026-06-24T12:03:50.000Z",
+    updatedBy: SIBLING_ID,
+  });
+
+  const read = await store.readSharedSourcesManifest();
+  assert.strictEqual(read.status, "valid");
+  assert.strictEqual(read.manifest.sources[0].scanner, undefined);
+});
+
+test("a scanner only the sibling implements survives our rewrite", async () => {
+  resetStore();
+  writeRawManifest({
+    schemaVersion: 1,
+    sources: [
+      source,
+      {
+        id: "sibling-scanner",
+        name: "Sibling Scanner",
+        url: "https://github.com/sibling/only",
+        type: "community",
+        scanner: "registry-json",
+      },
+    ],
+    lastUpdated: "2026-06-24T12:03:51.000Z",
+    updatedBy: SIBLING_ID,
+  });
+
+  // No read first: removal is only allowed while our view of the file is current.
+  await store.writeSharedSourcesManifest({
+    schemaVersion: 1,
+    sources: [source],
+    lastUpdated: "2026-06-24T12:03:52.000Z",
+    updatedBy: SELF_ID,
+  });
+
+  const kept = readRawManifest().sources.find(
+    (entry) => entry.id === "sibling-scanner",
+  );
+  assert.ok(kept, "the sibling entry must survive the rewrite");
+  assert.strictEqual(
+    kept.scanner,
+    "registry-json",
+    "dropping it would delete the sibling's configuration on every save",
+  );
+});
+
+test("a scanner value that is not a plain name is not carried over", async () => {
+  resetStore();
+  writeRawManifest({
+    schemaVersion: 1,
+    sources: [
+      source,
+      {
+        id: "sibling-junk-scanner",
+        name: "Sibling Junk Scanner",
+        url: "https://github.com/sibling/only",
+        type: "community",
+        scanner: "../../etc/passwd",
+      },
+    ],
+    lastUpdated: "2026-06-24T12:03:53.000Z",
+    updatedBy: SIBLING_ID,
+  });
+
+  await store.writeSharedSourcesManifest({
+    schemaVersion: 1,
+    sources: [source],
+    lastUpdated: "2026-06-24T12:03:54.000Z",
+    updatedBy: SELF_ID,
+  });
+
+  const kept = readRawManifest().sources.find(
+    (entry) => entry.id === "sibling-junk-scanner",
+  );
+  assert.ok(kept, "the entry itself is still another writer's data");
+  assert.strictEqual(kept.scanner, undefined);
+});
+
+test("the same id written twice yields one runtime source", async () => {
+  resetStore();
+  writeRawManifest({
+    schemaVersion: 1,
+    sources: [
+      { ...source, name: "First" },
+      { ...source, name: "Second" },
+    ],
+    lastUpdated: "2026-06-24T12:03:54.000Z",
+    updatedBy: SIBLING_ID,
+  });
+
+  const result = await store.readSharedSourcesManifest();
+  assert.strictEqual(result.status, "valid");
+  assert.strictEqual(result.manifest.sources.length, 1);
+  assert.strictEqual(result.manifest.sources[0].name, "First");
+  assert.strictEqual(
+    result.rejectedEntryCount,
+    0,
+    "a repeated id is a duplicate, not an invalid entry",
+  );
 });
 
 test("a source only the sibling knows about survives our rewrite", async () => {
@@ -435,6 +619,33 @@ test("an entry count above the cap rejects the whole file", async () => {
   const read = await store.readSharedSourcesManifest();
   assert.strictEqual(read.status, "rejected");
   assert.match(read.reason, /entry limit/);
+});
+
+test("everything we write is something we can read back", async () => {
+  resetStore();
+  // A branch the reader refuses would cost us the whole source if we published it.
+  await store.writeSharedSourcesManifest({
+    schemaVersion: 1,
+    sources: [{ ...source, branch: "../../escape" }],
+    lastUpdated: "2026-06-24T12:03:55.000Z",
+    updatedBy: SELF_ID,
+  });
+
+  const written = readRawManifest().sources[0];
+  assert.strictEqual(
+    written.branch,
+    undefined,
+    "an unusable branch is dropped rather than published",
+  );
+
+  const result = await store.readSharedSourcesManifest();
+  assert.strictEqual(result.status, "valid");
+  assert.strictEqual(
+    result.rejectedEntryCount,
+    0,
+    "our own entry must survive its own round trip",
+  );
+  assert.strictEqual(result.manifest.sources[0].id, source.id);
 });
 
 async function main() {

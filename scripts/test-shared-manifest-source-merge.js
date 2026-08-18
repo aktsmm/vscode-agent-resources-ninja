@@ -111,7 +111,13 @@ const store = requireTypeScriptModule(
     vscode: vscodeStub,
     "./sharedManifest": sharedManifest,
     "./sharedStoreLock": {
-      withSharedStoreLock: async (_owner, callback) => callback(),
+      withSharedStoreLock: async (_owner, callback) =>
+        callback({
+          generation: "test-generation",
+          assertHeld: () => {},
+          assertStillOwned: async () => {},
+        }),
+      describeSharedStoreLockFailure: () => undefined,
     },
     "./coexistence": {
       SELF_EXTENSION_ID: "test.extension",
@@ -344,6 +350,21 @@ test("a refusal with no stated reason still notifies", () => {
     store.planSharedStoreRejectionNotice("rejected", undefined, undefined),
     { action: "notify", reason: "unknown" },
   );
+});
+
+test("losing a race for the lock is not worth a notification", () => {
+  for (const reason of ["lease-lost", "lock-unavailable"]) {
+    assert.deepStrictEqual(
+      store.planSharedStoreRejectionNotice("rejected", reason, undefined),
+      { action: "skip" },
+      `${reason} resolves on the next sync, so it is not a pause`,
+    );
+    assert.deepStrictEqual(
+      store.planSharedStoreRejectionNotice("rejected", reason, "too large"),
+      { action: "skip" },
+      "and it says nothing about a genuine pause already reported",
+    );
+  }
 });
 
 test("an unreadable shared index is never rebuilt from our own data", async () => {
