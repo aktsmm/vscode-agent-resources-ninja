@@ -832,12 +832,17 @@ function getCachedBranch(repoUrl: string, now: number): string | undefined {
 /**
  * URL が存在するか HEAD リクエストで確認
  */
-async function checkUrlExists(url: string, token?: string): Promise<boolean> {
+async function checkUrlExists(
+  url: string,
+  token?: string,
+  authenticatedUrl?: string,
+): Promise<boolean> {
   try {
     const response = await fetchGitHubWithOptionalAuthRetry(url, {
       accept: "*/*",
       token,
       method: "HEAD",
+      authenticatedUrl,
     });
     return response.ok;
   } catch {
@@ -935,8 +940,9 @@ export async function getDefaultBranch(
     // testPath があればそれを使用、なければ README を確認
     const testFile = testPath || "README.md";
     const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${encodeGitHubPathForUrl(testFile)}`;
+    const authenticatedUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeGitHubPathForUrl(testFile)}?ref=${encodeURIComponent(branch)}`;
 
-    if (await checkUrlExists(rawUrl, token)) {
+    if (await checkUrlExists(rawUrl, token, authenticatedUrl)) {
       branchCache.set(repoUrl, { branch });
       return branch;
     }

@@ -54,12 +54,21 @@ import {
 import {
   getGitHubAuthRecoveryPolicy,
   getGitHubToken,
+  getGhCliAuthStatus,
+  getGhCliTokenForUser,
   hasClearableGitHubToken,
   isGhCliAvailable,
+  isGitHubTokenValid,
   resolveGitHubToken,
+  switchGhCliAccount,
   GitHubTokenSource,
+  verifyActiveGhCliAccount,
 } from "./githubAuth";
 export { checkGitHubAuth } from "./githubAuth";
+import {
+  GitHubAuthRecoveryOutcome,
+  recoverSelectedGhCliAccount,
+} from "./authRecovery";
 import { LICENSE_EXTRACTION, INDEX_LIMITS } from "./constants";
 import { encodeGitHubPathForUrl, encodeGitRefForPath } from "./gitHubRefSafety";
 import { logger } from "./logger";
@@ -2748,10 +2757,13 @@ export async function searchGitHub(
     let skillNameFromMeta = result.name;
 
     try {
-      const rawUrl = `https://raw.githubusercontent.com/${result.repo}/${encodeGitRefForPath(result.defaultBranch ?? "main")}/${encodeGitHubPathForUrl(result.itemPath)}`;
+      const branch = result.defaultBranch ?? "main";
+      const rawUrl = `https://raw.githubusercontent.com/${result.repo}/${encodeGitRefForPath(branch)}/${encodeGitHubPathForUrl(result.itemPath)}`;
+      const authenticatedUrl = `https://api.github.com/repos/${result.repo}/contents/${encodeGitHubPathForUrl(result.itemPath)}?ref=${encodeURIComponent(branch)}`;
       const contentResponse = await fetchGitHubWithOptionalAuthRetry(rawUrl, {
         accept: "text/plain",
         token,
+        authenticatedUrl,
       });
       if (contentResponse.ok) {
         const content = await contentResponse.text();
@@ -2902,7 +2914,9 @@ export function getGitHubAuthFailureReason(error?: unknown): string {
   }
 }
 
-export async function showAuthHelp(error?: unknown): Promise<void> {
+export async function showAuthHelp(
+  error?: unknown,
+): Promise<GitHubAuthRecoveryOutcome> {
   const { source } = await resolveGitHubToken();
   const openSettingsLabel = messages.openSettings();
   const authWithGhCliLabel = messages.authWithGhCli();
@@ -2910,9 +2924,17 @@ export async function showAuthHelp(error?: unknown): Promise<void> {
   const clearStoredTokenLabel = messages.actionClearStoredGitHubToken();
   const openGitHubTokenPageLabel = messages.actionOpenGitHubTokenPage();
   const openSsoSessionLabel = messages.actionOpenSsoSession();
+  const switchGhCliAccountLabel = messages.actionSwitchGhCliAccount();
+  const switchGhCliAccountConfirmLabel =
+    messages.actionSwitchGhCliAccountConfirm();
   const cancelLabel = messages.actionCancel();
   const hasClearableToken = await hasClearableGitHubToken();
   const ghCliAvailable = source === "env" ? false : await isGhCliAvailable();
+  const ghCliStatus =
+    source === "gh-cli" ? await getGhCliAuthStatus() : undefined;
+  const ghCliCandidates = (ghCliStatus?.accounts ?? []).filter(
+    (account) => !account.active && account.state === "success",
+  );
   const ssoAuthorizationUrl = isGitHubResponseError(error)
     ? error.ssoAuthorizationUrl
     : undefined;
@@ -2926,20 +2948,64 @@ export async function showAuthHelp(error?: unknown): Promise<void> {
     hasSsoAuthorizationUrl: Boolean(ssoAuthorizationUrl),
   });
 
-  const action = await vscode.window.showErrorMessage(
+  const message = [
     messages.githubAuthHelp(
       getGitHubAuthFailureReason(error),
       getGitHubAuthSourceLabel(source),
       getGitHubAuthGuidance(source),
     ),
+    ghCliStatus?.activeLogin
+      ? messages.githubAuthActiveGhCliAccount(ghCliStatus.activeLogin)
+      : undefined,
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n");
+
+  const action = await vscode.window.showErrorMessage(
+    message,
     ...(policy.showOpenSsoSession ? [openSsoSessionLabel] : []),
     ...(policy.showSettings ? [openSettingsLabel] : []),
     ...(policy.showGhLogin ? [authWithGhCliLabel] : []),
     ...(policy.showGhInstall ? [installGhCliLabel] : []),
     ...(policy.showClearToken ? [clearStoredTokenLabel] : []),
     ...(policy.showGitHubTokenPage ? [openGitHubTokenPageLabel] : []),
+    ...(ghCliCandidates.length > 0 ? [switchGhCliAccountLabel] : []),
     cancelLabel,
   );
+
+  if (action === switchGhCliAccountLabel) {
+    const selected = await vscode.window.showQuickPick(
+      ghCliCandidates.map((account) => ({ label: account.login })),
+      { placeHolder: messages.githubAuthSelectGhCliAccount() },
+    );
+    if (!selected) {
+      return { recovered: false, reason: "dismissed" };
+    }
+
+    const outcome = await recoverSelectedGhCliAccount(selected.label, {
+      getCandidateToken: getGhCliTokenForUser,
+      validateToken: isGitHubTokenValid,
+      confirmSwitch: async (account) =>
+        (await vscode.window.showWarningMessage(
+          messages.githubAuthSwitchConfirm(account),
+          { modal: true },
+          switchGhCliAccountConfirmLabel,
+        )) === switchGhCliAccountConfirmLabel,
+      switchAccount: switchGhCliAccount,
+      verifyActiveAccount: verifyActiveGhCliAccount,
+    });
+    if (outcome.recovered) {
+      logger.info(
+        `[Resource Ninja] Switched the active gh CLI account to ${outcome.account}.`,
+      );
+    } else if (outcome.reason !== "dismissed") {
+      logger.warn(
+        `[Resource Ninja] gh CLI account recovery for ${selected.label} did not complete: ${outcome.reason}`,
+      );
+      await vscode.window.showErrorMessage(messages.githubAuthRecoveryFailed());
+    }
+    return outcome;
+  }
 
   if (action === openSsoSessionLabel && ssoAuthorizationUrl) {
     // The credential may be authorized right after this, so stop suppressing it.
@@ -2960,4 +3026,16 @@ export async function showAuthHelp(error?: unknown): Promise<void> {
       vscode.Uri.parse("https://github.com/settings/tokens"),
     );
   }
+  return {
+    recovered: false,
+    reason:
+      action === openSettingsLabel ||
+      action === authWithGhCliLabel ||
+      action === installGhCliLabel ||
+      action === clearStoredTokenLabel ||
+      action === openGitHubTokenPageLabel ||
+      action === openSsoSessionLabel
+        ? "manual-action-started"
+        : "dismissed",
+  };
 }

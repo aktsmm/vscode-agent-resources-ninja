@@ -59,6 +59,8 @@ const githubFetch = requireTypeScriptModule(
 
 const RAW_URL =
   "https://raw.githubusercontent.com/MicrosoftDocs/example/main/skills/demo/SKILL.md";
+const CONTENT_URL =
+  "https://api.github.com/repos/MicrosoftDocs/example/contents/skills/demo/SKILL.md?ref=main";
 const API_URL =
   "https://api.github.com/repos/MicrosoftDocs/example/git/trees/main";
 
@@ -124,7 +126,12 @@ async function run() {
 
     const response = await githubFetch.fetchGitHubWithOptionalAuthRetry(
       RAW_URL,
-      { accept: "text/plain", token: "ghp_example", request },
+      {
+        accept: "text/plain",
+        token: "ghp_example",
+        authenticatedUrl: CONTENT_URL,
+        request,
+      },
     );
 
     assert.strictEqual(response.status, 200);

@@ -74,27 +74,29 @@ const sharedManifestStub = {
   }),
 };
 
+const sourceStoreStubs = {
+  "./coexistence": { SELF_EXTENSION_ID: SELF_ID },
+  "./gitHubRefSafety": requireTypeScriptModule(
+    path.join(repoRoot, "src", "gitHubRefSafety.ts"),
+  ),
+  "./sharedManifest": sharedManifestStub,
+  "./logger": {
+    logger: { warn: (...args) => warnings.push(args.join(" ")) },
+  },
+  "./sharedStoreLock": {
+    withSharedStoreLock: async (_owner, callback) =>
+      callback({
+        generation: "test-generation",
+        assertHeld: () => {},
+        assertStillOwned: async () => {},
+      }),
+    describeSharedStoreWriteFailure: () => undefined,
+  },
+};
+
 const store = requireTypeScriptModule(
   path.join(repoRoot, "src", "sharedSourcesManifestStore.ts"),
-  {
-    "./coexistence": { SELF_EXTENSION_ID: SELF_ID },
-    "./gitHubRefSafety": requireTypeScriptModule(
-      path.join(repoRoot, "src", "gitHubRefSafety.ts"),
-    ),
-    "./sharedManifest": sharedManifestStub,
-    "./logger": {
-      logger: { warn: (...args) => warnings.push(args.join(" ")) },
-    },
-    "./sharedStoreLock": {
-      withSharedStoreLock: async (_owner, callback) =>
-        callback({
-          generation: "test-generation",
-          assertHeld: () => {},
-          assertStillOwned: async () => {},
-        }),
-      describeSharedStoreLockFailure: () => undefined,
-    },
-  },
+  sourceStoreStubs,
 );
 
 const source = {
@@ -166,6 +168,40 @@ test("an absent manifest is reported as missing, not rejected", async () => {
   resetStore();
   const result = await store.readSharedSourcesManifest();
   assert.strictEqual(result.status, "missing");
+});
+
+test("a persistent filesystem write failure becomes a rejected sync result", async () => {
+  resetStore();
+  const fsPromises = require("fs/promises");
+  const failingStore = requireTypeScriptModule(
+    path.join(repoRoot, "src", "sharedSourcesManifestStore.ts"),
+    {
+      ...sourceStoreStubs,
+      "fs/promises": {
+        ...fsPromises,
+        writeFile: async () => {
+          const error = new Error("read-only shared store");
+          error.code = "EACCES";
+          throw error;
+        },
+      },
+      "./sharedStoreLock": {
+        ...sourceStoreStubs["./sharedStoreLock"],
+        describeSharedStoreWriteFailure: (error) =>
+          error?.code === "EACCES" ? "write failed: EACCES" : undefined,
+      },
+    },
+  );
+
+  assert.deepStrictEqual(
+    await failingStore.writeSharedSourcesManifest({
+      schemaVersion: 1,
+      sources: [source],
+      lastUpdated: "2026-08-18T00:00:00.000Z",
+      updatedBy: SELF_ID,
+    }),
+    { status: "rejected", reason: "write failed: EACCES" },
+  );
 });
 
 test("untrusted scalar fields are not adopted at runtime", async () => {

@@ -262,6 +262,8 @@ async function main() {
             {
               accept: "text/plain",
               token: "test-token",
+              authenticatedUrl:
+                "https://api.github.com/repos/owner/private-repo/contents/SKILL.md?ref=main",
             },
           );
 
@@ -302,6 +304,8 @@ async function main() {
             {
               accept: "text/plain",
               token: "test-token",
+              authenticatedUrl:
+                "https://api.github.com/repos/owner/private-repo/contents/missing.md?ref=main",
             },
           );
 

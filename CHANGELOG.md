@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.54] - 2026-08-18
+
+### Added
+
+- 🌐 **Localized Chat Resource Labels / チャットのリソース表示をローカライズ** - The `@resources` participant now resolves its display name, description, and built-in command descriptions through the VS Code locale while keeping its invocation token unchanged / `@resources` participant の表示名、説明、組み込み command の説明を VS Code の locale で表示し、呼び出し token はこれまでどおり変更しません。
+
+- 🧭 **Production Reachability Guard / production 到達性ガード** - Authentication and shared-lock runtime exports are now checked from the extension entry graph. Exports without a production consumer fail the resource suite unless they are documented environment seams for tests / 認証と共有 lock の runtime export を extension entry の graph から検査します。production consumer が無い export は、理由付きの環境 test seam でない限り resource suite を失敗させます。
+
+- 📚 **Tracked Contributor and Release Guidance / contributor・release 規約を追跡可能に** - Essential development contracts now live in `CONTRIBUTING.md`, and versioning, packaging, publishing, and verification use `docs/release-runbook.md` as a tracked source of truth. Fresh clones no longer depend on ignored local `.github` instructions for these procedures / 主要な開発契約を `CONTRIBUTING.md`、versioning・package・publish・検証手順を `docs/release-runbook.md` の追跡可能な SSOT にしました。fresh clone がこれらの手順を ignored local `.github` instructions だけに依存しません。
+
+### Fixed
+
+- 🔑 **Recoverable gh CLI Account Switching / gh CLI アカウント切り替えによる認証復旧** - When the active `gh` account cannot access GitHub, the extension can show the active account, let the user choose and confirm a verified alternate account, and retry the failed remote operation once. Tokens are never shown or logged, and startup, installation, and diagnostic operations are not retried automatically / active な `gh` account が GitHub にアクセスできない場合、active account を表示し、検証済みの別 account をユーザーが選択・確認してから切り替え、失敗した remote 操作を 1 回だけ再試行できるようにしました。token は表示・記録せず、startup、インストール、診断操作を自動再試行しません。
+
+- 🛣️ **Private Content on Multi-segment Branches / 複数セグメント branch の private content** - Raw-content authentication no longer guesses the branch boundary from a URL. Internal callers now provide the exact Contents API URL from their known repository, ref, and path, so a branch such as `feature/x` remains intact; preview resolves that route lazily only after an anonymous raw 404 / raw content の認証時に URL から branch 境界を推測しないようにしました。内部 caller が既知の repository、ref、path から正確な Contents API URL を渡すため、`feature/x` のような branch も保持されます。preview は匿名 raw request が 404 の場合だけ遅延して認証経路を解決します。
+
+- 💾 **Persistent Shared-store Write Failures Were Silent / shared store の永続書き込み失敗を通知** - Permission, read-only filesystem, quota, I/O, and disk-full failures now pause only shared synchronization and use the existing one-time warning instead of surfacing only in logs. Local resources keep working, repeated failures do not nag, and a successful write clears the notice / 権限不足、read-only filesystem、quota、I/O、disk full による失敗は shared sync だけを中断し、ログだけでなく既存の one-time warning へ流します。ローカルリソースは引き続き利用でき、同じ失敗を繰り返し通知せず、書き込み成功後は通知状態を解除します。
+
 ## [0.2.53] - 2026-08-18
 
 ### Fixed

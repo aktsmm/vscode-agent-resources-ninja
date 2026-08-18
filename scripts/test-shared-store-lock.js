@@ -154,6 +154,21 @@ test("a lost lease is classified so the caller can report it, not crash", async 
     undefined,
     "a real fault must keep propagating",
   );
+  for (const code of ["EACCES", "EDQUOT", "EIO", "ENOSPC", "EPERM", "EROFS"]) {
+    const error = new Error(`write failed with ${code}`);
+    error.code = code;
+    assert.strictEqual(
+      lock.describeSharedStoreWriteFailure(error),
+      `write failed: ${code}`,
+    );
+  }
+  const unknownError = new Error("unexpected write failure");
+  unknownError.code = "ENOENT";
+  assert.strictEqual(
+    lock.describeSharedStoreWriteFailure(unknownError),
+    undefined,
+    "unknown or transient write errors must keep propagating",
+  );
 });
 
 test("the payload carries exactly the fields the sibling extension reads", async () => {

@@ -76,6 +76,32 @@ export function describeSharedStoreLockFailure(
     : undefined;
 }
 
+const PERSISTENT_SHARED_STORE_WRITE_ERROR_CODES = new Set([
+  "EACCES",
+  "EDQUOT",
+  "EIO",
+  "ENOSPC",
+  "EPERM",
+  "EROFS",
+]);
+
+export function describeSharedStoreWriteFailure(
+  error: unknown,
+): string | undefined {
+  const lockFailure = describeSharedStoreLockFailure(error);
+  if (lockFailure) {
+    return lockFailure;
+  }
+  if (!error || typeof error !== "object" || !("code" in error)) {
+    return undefined;
+  }
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" &&
+    PERSISTENT_SHARED_STORE_WRITE_ERROR_CODES.has(code)
+    ? `write failed: ${code}`
+    : undefined;
+}
+
 interface SharedStoreLockRuntime {
   now(): number;
   isProcessAlive(pid: number): boolean;

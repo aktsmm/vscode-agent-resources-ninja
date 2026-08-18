@@ -792,6 +792,8 @@ npm audit --audit-level=moderate
 
 パッケージ作成や Marketplace publish の前に、stale な bundled entry と期限切れ publisher credential を先に弾くため、少なくとも次を実行してください。
 
+version 更新、package、publish、GitHub Release、成果物の独立検証までの完全な手順は [docs/release-runbook.md](docs/release-runbook.md) に従ってください。
+
 ```powershell
 node scripts/audit-resource-installability.js --raw-only
 node scripts/audit-resource-installability.js --raw-only --sources pai-packs
@@ -821,6 +823,8 @@ npm run release:vsce -- verify-pat
 - mutex guard 通過後も VS Code/Electron の `EPIPE` ダイアログが出る場合は、まず通常ターミナルで `npm test` を再実行し、その後 **Output → Agent Resources Ninja** で拡張機能側の診断ログを確認してください。
 
 ## 🤝 Contributing
+
+開発規約と必須チェックは [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。リリース担当者は [release runbook](docs/release-runbook.md) に従い、生成済み VSIX の publish では特に `-VsceArgs` 配列形式を使用してください。
 
 1. Fork this repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)

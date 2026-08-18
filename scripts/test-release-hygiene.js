@@ -100,6 +100,13 @@ function assertVsixPayloadMinimal(vsixPath, label) {
   }
 
   const entries = readZipEntries(vsixPath);
+  const mainEntry = `extension/${String(packageJson.main || "")
+    .replace(/^\.\//, "")
+    .replace(/\\/g, "/")}`;
+  assert.ok(
+    packageJson.main && entries.includes(mainEntry),
+    `Missing ${label} VSIX runtime entrypoint: ${mainEntry}`,
+  );
   const forbiddenPrefixes = [
     "extension/.github/",
     "extension/.vscode/",

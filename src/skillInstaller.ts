@@ -1176,7 +1176,14 @@ async function downloadDirectory(
     }
 
     logger.info(`[Resource Ninja] Downloading file: ${entry.name}`);
-    const content = await fetchFileContent(entry.download_url, token);
+    const contentPath = [remotePath === "." ? "" : remotePath, entry.name]
+      .filter(Boolean)
+      .join("/");
+    const content = await fetchFileContent(
+      entry.download_url,
+      token,
+      buildGitHubContentsApiUrl(owner, repo, branch, contentPath),
+    );
     assertRealPathStrictlyInside(
       localFilePath,
       downloadRootPath,
@@ -1441,7 +1448,11 @@ export async function installSkill(
           );
         } else {
           const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}/${encodeGitHubPathForUrl(remotePath)}`;
-          const content = await fetchFileContent(rawUrl, token);
+          const content = await fetchFileContent(
+            rawUrl,
+            token,
+            buildGitHubContentsApiUrl(owner, repo, branch, remotePath),
+          );
           assertRealPathStrictlyInside(
             skillPath,
             installRootUri,
@@ -1504,7 +1515,11 @@ export async function installSkill(
       const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}/${encodeGitHubPathForUrl(remotePath)}`;
       logger.info(`[Resource Ninja] Downloading single file: ${rawUrl}`);
       try {
-        const content = await fetchFileContent(rawUrl, token);
+        const content = await fetchFileContent(
+          rawUrl,
+          token,
+          buildGitHubContentsApiUrl(owner, repo, branch, remotePath),
+        );
         logger.info(`[Resource Ninja] Downloaded ${content.length} bytes`);
 
         // SKILL.md として保存（メインファイル）
@@ -2935,8 +2950,13 @@ export async function recoverPrimarySkillMdFromRaw(
   const rawUrl = cleanPath
     ? `${rawBase}/${encodeGitHubPathForUrl(cleanPath)}/SKILL.md`
     : `${rawBase}/SKILL.md`;
+  const contentPath = cleanPath ? `${cleanPath}/SKILL.md` : "SKILL.md";
   try {
-    const content = await fetchFileContent(rawUrl, token);
+    const content = await fetchFileContent(
+      rawUrl,
+      token,
+      buildGitHubContentsApiUrl(owner, repo, branch, contentPath),
+    );
     if (!content || content.trim().length <= 100) {
       return false;
     }
@@ -3005,10 +3025,24 @@ async function openBugReport(
 /**
  * URL からファイル内容を取得
  */
-async function fetchFileContent(url: string, token?: string): Promise<string> {
+function buildGitHubContentsApiUrl(
+  owner: string,
+  repo: string,
+  branch: string,
+  contentPath: string,
+): string {
+  return `https://api.github.com/repos/${owner}/${repo}/contents/${encodeGitHubPathForUrl(contentPath)}?ref=${encodeURIComponent(branch)}`;
+}
+
+async function fetchFileContent(
+  url: string,
+  token?: string,
+  authenticatedUrl?: string,
+): Promise<string> {
   const response = await fetchGitHubWithOptionalAuthRetry(url, {
     accept: "text/plain",
     token,
+    authenticatedUrl,
   });
   if (!response.ok) {
     throw new Error(

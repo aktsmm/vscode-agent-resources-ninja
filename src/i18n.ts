@@ -49,6 +49,12 @@ const jaMessages = {
   githubAuthRequiredReason:
     "GitHub 認証またはリポジトリへのアクセス権が必要です",
   githubAuthHelp: "{0}\n\n現在の credential source: {1}\n{2}",
+  githubAuthActiveGhCliAccount: "gh CLI のアクティブなアカウント: {0}",
+  githubAuthSelectGhCliAccount: "切り替える gh CLI アカウントを選択",
+  githubAuthSwitchConfirm:
+    "gh CLI のアクティブなアカウントを {0} に切り替えます。続行しますか？",
+  githubAuthRecoveryFailed:
+    "GitHub 認証を復旧できませんでした。元の操作は再実行していません。",
   githubAuthSourceSecret: "VS Code SecretStorage",
   githubAuthSourceEnv: "GH_TOKEN / GITHUB_TOKEN 環境変数",
   githubAuthSourceGhCli: "gh CLI",
@@ -66,12 +72,14 @@ const jaMessages = {
     "gh CLIで認証するか、private repository用のfine-grained PATをGitHub Token設定へ保存してください。",
   githubAuthStatusAuthenticated: "GitHub認証は有効です（source: {0}）。",
   sharedStoreSyncPaused:
-    "共有ストアへの同期を中断しました。共有ファイルを読み取れないためです（{0}）。他のツールのデータを壊さないようファイルはそのままにしてあり、ローカルのリソースは引き続き使えます。",
+    "共有ストアへの同期を中断しました。共有ファイルの読み書きを安全に完了できないためです（{0}）。他のツールのデータを壊さないよう既存ファイルはそのままにしてあり、ローカルのリソースは引き続き使えます。",
   actionShowDetails: "詳細を表示",
   actionShowCoexistenceStatus: "共存ステータスを表示",
   actionConfigureGitHubAuth: "GitHub 認証を設定",
   actionOpenGitHubTokenPage: "GitHub のトークン設定を開く",
   actionOpenSsoSession: "organization の SSO 認可を開く",
+  actionSwitchGhCliAccount: "別の gh CLI アカウントに切り替える",
+  actionSwitchGhCliAccountConfirm: "このアカウントに切り替える",
   actionInstallGhCli: "GitHub CLI をインストール",
   actionClearStoredGitHubToken: "保存・設定済み GitHub トークンをクリア",
   updating: "{0} を更新中...",
@@ -263,6 +271,11 @@ const enMessages: MessageDictionary = {
   githubAuthRequiredReason:
     "GitHub authentication or repository permission is required",
   githubAuthHelp: "{0}\n\nActive credential source: {1}\n{2}",
+  githubAuthActiveGhCliAccount: "Active gh CLI account: {0}",
+  githubAuthSelectGhCliAccount: "Select a gh CLI account to switch to",
+  githubAuthSwitchConfirm: "Switch the active gh CLI account to {0}?",
+  githubAuthRecoveryFailed:
+    "GitHub authentication could not be recovered. The original operation was not retried.",
   githubAuthSourceSecret: "VS Code SecretStorage",
   githubAuthSourceEnv: "GH_TOKEN / GITHUB_TOKEN environment variables",
   githubAuthSourceGhCli: "gh CLI",
@@ -281,12 +294,14 @@ const enMessages: MessageDictionary = {
   githubAuthStatusAuthenticated:
     "GitHub authentication is working (source: {0}).",
   sharedStoreSyncPaused:
-    "Syncing to the shared store is paused because the shared file cannot be read ({0}). The file was left untouched so another tool's data is not destroyed, and your local resources keep working.",
+    "Syncing to the shared store is paused because a shared file read or write could not complete safely ({0}). Existing files were left untouched so another tool's data is not destroyed, and your local resources keep working.",
   actionShowDetails: "Show Details",
   actionShowCoexistenceStatus: "Show Coexistence Status",
   actionConfigureGitHubAuth: "Configure GitHub Authentication",
   actionOpenGitHubTokenPage: "Open GitHub Token Settings",
   actionOpenSsoSession: "Open Organization SSO Authorization",
+  actionSwitchGhCliAccount: "Switch to Another gh CLI Account",
+  actionSwitchGhCliAccountConfirm: "Switch to This Account",
   actionInstallGhCli: "Install GitHub CLI",
   actionClearStoredGitHubToken: "Clear Stored and Configured GitHub Token",
   updating: "Updating {0}...",
@@ -557,6 +572,12 @@ export const messages = {
   githubAuthRequiredReason: () => localize("githubAuthRequiredReason"),
   githubAuthHelp: (reason: string, source: string, guidance: string) =>
     localize("githubAuthHelp", reason, source, guidance),
+  githubAuthActiveGhCliAccount: (account: string) =>
+    localize("githubAuthActiveGhCliAccount", account),
+  githubAuthSelectGhCliAccount: () => localize("githubAuthSelectGhCliAccount"),
+  githubAuthSwitchConfirm: (account: string) =>
+    localize("githubAuthSwitchConfirm", account),
+  githubAuthRecoveryFailed: () => localize("githubAuthRecoveryFailed"),
   githubAuthSourceSecret: () => localize("githubAuthSourceSecret"),
   githubAuthSourceEnv: () => localize("githubAuthSourceEnv"),
   githubAuthSourceGhCli: () => localize("githubAuthSourceGhCli"),
@@ -576,6 +597,9 @@ export const messages = {
   actionConfigureGitHubAuth: () => localize("actionConfigureGitHubAuth"),
   actionOpenGitHubTokenPage: () => localize("actionOpenGitHubTokenPage"),
   actionOpenSsoSession: () => localize("actionOpenSsoSession"),
+  actionSwitchGhCliAccount: () => localize("actionSwitchGhCliAccount"),
+  actionSwitchGhCliAccountConfirm: () =>
+    localize("actionSwitchGhCliAccountConfirm"),
   actionInstallGhCli: () => localize("actionInstallGhCli"),
   actionClearStoredGitHubToken: () => localize("actionClearStoredGitHubToken"),
   updating: (name: string) => localize("updating", name),

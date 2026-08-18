@@ -25,7 +25,7 @@ import {
   SourceEntry,
 } from "./sharedManifest";
 import {
-  describeSharedStoreLockFailure,
+  describeSharedStoreWriteFailure,
   withSharedStoreLock,
 } from "./sharedStoreLock";
 import {
@@ -593,7 +593,7 @@ export async function writeSharedResourceIndex(
     });
     return { status: "written" };
   } catch (error) {
-    const reason = describeSharedStoreLockFailure(error);
+    const reason = describeSharedStoreWriteFailure(error);
     if (!reason) {
       throw error;
     }

@@ -96,6 +96,55 @@ function maskUrlEscapes(value) {
 const packageTextValues = Object.values(nls).concat(Object.values(nlsJa));
 const i18nText = i18nSource;
 
+const chatParticipant = packageJson.contributes?.chatParticipants?.[0];
+
+test("chat participant manifest presentation is localized without translating its invocation token", () => {
+  assert.ok(chatParticipant, "Missing chat participant contribution");
+  assert.strictEqual(chatParticipant.name, "resources");
+
+  const fields = [
+    ["fullName", chatParticipant.fullName, "chatParticipant.fullName"],
+    ["description", chatParticipant.description, "chatParticipant.description"],
+    [
+      "search command description",
+      chatParticipant.commands?.[0]?.description,
+      "chatParticipant.command.search.description",
+    ],
+    [
+      "install command description",
+      chatParticipant.commands?.[1]?.description,
+      "chatParticipant.command.install.description",
+    ],
+    [
+      "list command description",
+      chatParticipant.commands?.[2]?.description,
+      "chatParticipant.command.list.description",
+    ],
+    [
+      "recommend command description",
+      chatParticipant.commands?.[3]?.description,
+      "chatParticipant.command.recommend.description",
+    ],
+  ];
+
+  for (const [field, value, key] of fields) {
+    assert.strictEqual(value, `%${key}%`, `Localize ${field} through ${key}`);
+    assert.ok(
+      Object.hasOwn(nls, key),
+      `Missing English package NLS key: ${key}`,
+    );
+    assert.ok(
+      Object.hasOwn(nlsJa, key),
+      `Missing Japanese package NLS key: ${key}`,
+    );
+    assert.notStrictEqual(
+      nls[key],
+      nlsJa[key],
+      `Japanese package NLS value must differ for ${key}`,
+    );
+  }
+});
+
 test("package NLS English and Japanese keys match exactly", () => {
   assert.deepStrictEqual(Object.keys(nls).sort(), Object.keys(nlsJa).sort());
 });

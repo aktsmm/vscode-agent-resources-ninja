@@ -86,6 +86,7 @@ import {
   getGitHubAuthSourceLabel,
   fetchGitHubTextContent,
 } from "./indexUpdater";
+import { createOneShotGitHubAuthRetry } from "./authRecovery";
 import { messages, isJapanese } from "./i18n";
 import { showSkillPreview, getSkillId } from "./skillPreview";
 import {
@@ -7075,9 +7076,14 @@ export async function activate(
 
       const oldCount = getIndexResources(skillIndex).length;
       const totalSources = skillIndex.sources.length;
-
-      try {
-        const updateResult = await vscode.window.withProgress(
+      const initialSourceIds = skillIndex.sources.map((source) => source.id);
+      const retryAfterAuthRecovery = createOneShotGitHubAuthRetry();
+      const runUpdateAll = async (
+        sourceIds?: readonly string[],
+      ): Promise<
+        Awaited<ReturnType<typeof updateIndexFromSourcesWithResult>> | undefined
+      > =>
+        vscode.window.withProgress(
           {
             location: vscode.ProgressLocation.Notification,
             title: messages.updatingIndex(),
@@ -7087,9 +7093,13 @@ export async function activate(
             runExclusiveSourceUpdate(() =>
               updateIndexFromSourcesWithResult(context, skillIndex!, progress, {
                 forceScan: true,
+                sourceIds,
               }),
             ),
         );
+
+      try {
+        const updateResult = await runUpdateAll();
         if (!updateResult) {
           // The user asked for this one, so a guard rejection cannot be silent.
           await vscode.window.showInformationMessage(
@@ -7158,7 +7168,44 @@ export async function activate(
           if (action === detailAction) {
             logger.show(true);
           } else if (action === authAction) {
-            await showAuthHelp(firstFailure.error);
+            const outcome = await showAuthHelp(firstFailure.error);
+            const failedSourceIds = updateResult.failures.map(
+              (failure) => failure.entry.id,
+            );
+            await retryAfterAuthRecovery(outcome, async () => {
+              const retryResult = await runUpdateAll(failedSourceIds);
+              if (!retryResult) {
+                await vscode.window.showInformationMessage(
+                  formatSourceUpdateBusyNotice(),
+                );
+                return;
+              }
+              skillIndex = retryResult.index;
+              browseProvider.refresh();
+              if (retryResult.failures.length === 0) {
+                const retryCount = getIndexResources(skillIndex).length;
+                const retryDiff = retryCount - oldCount;
+                await vscode.window.showInformationMessage(
+                  messages.indexUpdated(
+                    oldCount,
+                    retryCount,
+                    retryDiff > 0
+                      ? `+${retryDiff}`
+                      : retryDiff === 0
+                        ? "±0"
+                        : `${retryDiff}`,
+                  ),
+                );
+              } else {
+                await vscode.window.showWarningMessage(
+                  messages.updateFailed(
+                    formatSourceUpdateFailureReason(
+                      retryResult.failures[0].error,
+                    ),
+                  ),
+                );
+              }
+            });
           }
         }
         browseProvider.refresh();
@@ -7167,7 +7214,41 @@ export async function activate(
         const errorMessage =
           error instanceof Error ? error.message : String(error);
         if (shouldOfferGitHubAuth(error)) {
-          await showAuthHelp(error);
+          const outcome = await showAuthHelp(error);
+          await retryAfterAuthRecovery(outcome, async () => {
+            const retryResult = await runUpdateAll(initialSourceIds);
+            if (!retryResult) {
+              await vscode.window.showInformationMessage(
+                formatSourceUpdateBusyNotice(),
+              );
+              return;
+            }
+            skillIndex = retryResult.index;
+            browseProvider.refresh();
+            if (retryResult.failures.length === 0) {
+              const retryCount = getIndexResources(skillIndex).length;
+              const retryDiff = retryCount - oldCount;
+              await vscode.window.showInformationMessage(
+                messages.indexUpdated(
+                  oldCount,
+                  retryCount,
+                  retryDiff > 0
+                    ? `+${retryDiff}`
+                    : retryDiff === 0
+                      ? "±0"
+                      : `${retryDiff}`,
+                ),
+              );
+            } else {
+              await vscode.window.showWarningMessage(
+                messages.updateFailed(
+                  formatSourceUpdateFailureReason(
+                    retryResult.failures[0].error,
+                  ),
+                ),
+              );
+            }
+          });
         } else {
           vscode.window.showErrorMessage(messages.updateFailed(errorMessage));
         }
@@ -7201,6 +7282,7 @@ export async function activate(
       const oldCount = getIndexResources(skillIndex).filter(
         (s) => s.source === sourceId,
       ).length;
+      const retryAfterAuthRecovery = createOneShotGitHubAuthRetry();
 
       const runSourceIndexUpdate = async (
         allowEmptyResult: boolean,
@@ -7254,13 +7336,30 @@ export async function activate(
             try {
               await runSourceIndexUpdate(true);
             } catch (retryError: unknown) {
-              vscode.window.showErrorMessage(
-                messages.updateFailed(
-                  retryError instanceof Error
-                    ? retryError.message
-                    : String(retryError),
-                ),
-              );
+              if (shouldOfferGitHubAuth(retryError)) {
+                const outcome = await showAuthHelp(retryError);
+                await retryAfterAuthRecovery(outcome, async () => {
+                  try {
+                    await runSourceIndexUpdate(true);
+                  } catch (recoveryRetryError: unknown) {
+                    await vscode.window.showErrorMessage(
+                      messages.updateFailed(
+                        recoveryRetryError instanceof Error
+                          ? recoveryRetryError.message
+                          : String(recoveryRetryError),
+                      ),
+                    );
+                  }
+                });
+              } else {
+                vscode.window.showErrorMessage(
+                  messages.updateFailed(
+                    retryError instanceof Error
+                      ? retryError.message
+                      : String(retryError),
+                  ),
+                );
+              }
             }
           }
           return;
@@ -7269,7 +7368,20 @@ export async function activate(
         const errorMessage =
           error instanceof Error ? error.message : String(error);
         if (shouldOfferGitHubAuth(error)) {
-          await showAuthHelp(error);
+          const outcome = await showAuthHelp(error);
+          await retryAfterAuthRecovery(outcome, async () => {
+            try {
+              await runSourceIndexUpdate(false);
+            } catch (retryError: unknown) {
+              await vscode.window.showErrorMessage(
+                messages.updateFailed(
+                  retryError instanceof Error
+                    ? retryError.message
+                    : String(retryError),
+                ),
+              );
+            }
+          });
         } else {
           vscode.window.showErrorMessage(messages.updateFailed(errorMessage));
         }
@@ -7331,6 +7443,7 @@ export async function activate(
       if (!skillIndex) {
         skillIndex = await loadSkillIndex(context);
       }
+      const retryAfterAuthRecovery = createOneShotGitHubAuthRetry();
 
       const runAddSource = async (
         allowRepositoryChange: boolean,
@@ -7387,7 +7500,20 @@ export async function activate(
         const errorMessage =
           error instanceof Error ? error.message : String(error);
         if (shouldOfferGitHubAuth(error)) {
-          await showAuthHelp(error);
+          const outcome = await showAuthHelp(error);
+          await retryAfterAuthRecovery(outcome, async () => {
+            try {
+              await runAddSource(false);
+            } catch (retryError: unknown) {
+              await vscode.window.showErrorMessage(
+                messages.addSourceFailed(
+                  retryError instanceof Error
+                    ? retryError.message
+                    : String(retryError),
+                ),
+              );
+            }
+          });
         } else if (errorMessage.includes("No resources found")) {
           vscode.window.showWarningMessage(messages.noSkillsInRepo());
         } else {
@@ -7403,15 +7529,18 @@ export async function activate(
   const webSearchCmd = vscode.commands.registerCommand(
     "resourceNinja.webSearch",
     async () => {
-      const token = await getGitHubToken();
-
       // 連続検索のためのループ
       let continueSearch = true;
+      let recoveryQuery: string | undefined;
+      const retryAfterAuthRecovery = createOneShotGitHubAuthRetry();
       while (continueSearch) {
-        const query = await vscode.window.showInputBox({
-          prompt: messages.webSearchPrompt(),
-          placeHolder: messages.webSearchPlaceholder(),
-        });
+        const query =
+          recoveryQuery ??
+          (await vscode.window.showInputBox({
+            prompt: messages.webSearchPrompt(),
+            placeHolder: messages.webSearchPlaceholder(),
+          }));
+        recoveryQuery = undefined;
 
         if (!query) {
           return;
@@ -7425,6 +7554,7 @@ export async function activate(
               cancellable: false,
             },
             async () => {
+              const token = await getGitHubToken();
               return await searchGitHub(query, token);
             },
           );
@@ -7678,7 +7808,13 @@ export async function activate(
           const errorMessage =
             error instanceof Error ? error.message : String(error);
           if (shouldOfferGitHubAuth(error)) {
-            await showAuthHelp(error);
+            const outcome = await showAuthHelp(error);
+            const retried = await retryAfterAuthRecovery(outcome, async () => {
+              recoveryQuery = query;
+            });
+            if (retried) {
+              continue;
+            }
           } else {
             vscode.window.showErrorMessage(messages.searchFailed(errorMessage));
           }

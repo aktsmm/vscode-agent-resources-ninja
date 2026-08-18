@@ -152,6 +152,12 @@ function createModule() {
         message: "ok",
       }),
     },
+    "./authRecovery": {
+      recoverSelectedGhCliAccount: async () => ({
+        recovered: false,
+        reason: "dismissed",
+      }),
+    },
     "./resourceKinds": resourceKindsModule,
     "./constants": {
       LICENSE_EXTRACTION: {

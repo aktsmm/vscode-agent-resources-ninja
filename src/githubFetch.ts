@@ -82,36 +82,6 @@ function isGitHubApiUrl(url: string): boolean {
   return url.startsWith(GITHUB_API_PREFIX);
 }
 
-/**
- * The ref arrives as a path segment, so it is decoded once before being encoded for
- * the query. A raw URL that reached us unescaped would otherwise add its own
- * parameters to the API request.
- */
-function encodeRefForQuery(pathSegment: string): string {
-  let decoded = pathSegment;
-  try {
-    decoded = decodeURIComponent(pathSegment);
-  } catch {
-    // A malformed escape is encoded as written rather than dropped.
-  }
-  return encodeURIComponent(decoded);
-}
-
-function buildAuthenticatedContentUrl(rawUrl: string): string | undefined {
-  try {
-    const parsed = new URL(rawUrl);
-    const segments = parsed.pathname.split("/").filter(Boolean);
-    if (segments.length < 4) {
-      return undefined;
-    }
-
-    const [owner, repo, branch, ...contentPath] = segments;
-    return `${GITHUB_API_PREFIX}repos/${owner}/${repo}/contents/${contentPath.join("/")}?ref=${encodeRefForQuery(branch)}`;
-  } catch {
-    return undefined;
-  }
-}
-
 function shouldAttachGitHubToken(url: string, token?: string): boolean {
   if (!token) {
     return false;
@@ -244,7 +214,7 @@ export interface GitHubRequestOptions {
   accept: string;
   token?: string;
   method?: string;
-  authenticatedUrl?: string;
+  authenticatedUrl?: string | (() => Promise<string | undefined>);
   signal?: AbortSignal;
   extraHeaders?: Record<string, string>;
   maxAttempts?: number;
@@ -479,7 +449,13 @@ export async function fetchGitHubWithOptionalAuthRetry(
       isRawGitHubUrl(url)
     ) {
       const authenticatedUrl =
-        options.authenticatedUrl || buildAuthenticatedContentUrl(url);
+        typeof options.authenticatedUrl === "function"
+          ? await resolveWithinGitHubOperation(
+              options.authenticatedUrl(),
+              budget,
+              "authenticated content URL",
+            )
+          : options.authenticatedUrl;
       if (!authenticatedUrl) {
         return response;
       }

@@ -14,7 +14,7 @@ import {
 import type { SourceScanner } from "./skillIndex";
 import { logger } from "./logger";
 import {
-  describeSharedStoreLockFailure,
+  describeSharedStoreWriteFailure,
   withSharedStoreLock,
 } from "./sharedStoreLock";
 
@@ -630,7 +630,7 @@ export async function writeSharedSourcesManifest(
   } catch (error) {
     // Sharing the store means another writer can take the lock away from us. That
     // is a paused sync the caller has to surface, not an exception.
-    const reason = describeSharedStoreLockFailure(error);
+    const reason = describeSharedStoreWriteFailure(error);
     if (!reason) {
       throw error;
     }

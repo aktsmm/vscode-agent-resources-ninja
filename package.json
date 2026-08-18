@@ -2,7 +2,7 @@
   "name": "agent-resources-ninja",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.53",
+  "version": "0.2.54",
   "publisher": "yamapan",
   "license": "CC-BY-NC-SA-4.0",
   "icon": "resources/icon.png",
@@ -51,25 +51,25 @@
       {
         "id": "resources",
         "name": "resources",
-        "fullName": "Agent Resources Ninja",
-        "description": "Search, install and manage agent resources",
+        "fullName": "%chatParticipant.fullName%",
+        "description": "%chatParticipant.description%",
         "isSticky": false,
         "commands": [
           {
             "name": "search",
-            "description": "Search for agent resources"
+            "description": "%chatParticipant.command.search.description%"
           },
           {
             "name": "install",
-            "description": "Install an agent resource"
+            "description": "%chatParticipant.command.install.description%"
           },
           {
             "name": "list",
-            "description": "List workspace resources"
+            "description": "%chatParticipant.command.list.description%"
           },
           {
             "name": "recommend",
-            "description": "Recommend resources for current project"
+            "description": "%chatParticipant.command.recommend.description%"
           }
         ]
       }

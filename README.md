@@ -797,6 +797,8 @@ npm audit --audit-level=moderate
 
 Use this checklist before packaging or Marketplace publish so stale bundled entries and expired publisher credentials are caught before `vsce publish`:
 
+For the complete versioning, packaging, publish, GitHub Release, and independent artifact verification procedure, follow [docs/release-runbook.md](docs/release-runbook.md).
+
 ```powershell
 node scripts/audit-resource-installability.js --raw-only
 node scripts/audit-resource-installability.js --raw-only --sources pai-packs
@@ -826,6 +828,8 @@ npm run release:vsce -- verify-pat
 - If a VS Code/Electron `EPIPE` dialog still appears after the mutex guard passes, rerun `npm test` from a normal terminal first, then check **Output → Agent Resources Ninja** for extension-level diagnostics.
 
 ## 🤝 Contributing
+
+Development conventions and required checks are tracked in [CONTRIBUTING.md](CONTRIBUTING.md). Release maintainers must use the [release runbook](docs/release-runbook.md), especially its `-VsceArgs` requirement for publishing a prebuilt VSIX.
 
 1. Fork this repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)

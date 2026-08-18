@@ -296,7 +296,14 @@ test("chat and language model list surfaces cover workspace resource kinds", () 
   const listCommand = participant?.commands?.find(
     (command) => command.name === "list",
   );
-  assert.strictEqual(listCommand?.description, "List workspace resources");
+  assert.strictEqual(
+    listCommand?.description,
+    "%chatParticipant.command.list.description%",
+  );
+  assert.strictEqual(
+    nls["chatParticipant.command.list.description"],
+    "List workspace resources",
+  );
 
   const tools = packageJson.contributes?.languageModelTools || [];
   const listTool = tools.find((tool) => tool.name === "resourceNinja_list");

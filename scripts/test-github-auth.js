@@ -3,7 +3,7 @@
 // Regression tests for src/githubAuth.ts:
 // - SecretStorage-first token resolution (secret -> env -> gh-cli -> legacy config -> none)
 // - legacy config token migration into SecretStorage
-// - bounded `gh auth token` exec options (timeout + windowsHide)
+// - bounded `gh auth token` execFile options (timeout + windowsHide)
 // - stored token deletion
 
 const assert = require("assert");
@@ -70,12 +70,13 @@ let informationMessages = [];
 let errorMessages = [];
 
 // `gh auth token` is invoked via `await import("child_process")`, which resolves
-// after the Module._load stub is restored. Monkeypatch the real singleton's exec
-// so the test never shells out to a real gh CLI.
+// after the Module._load stub is restored. Monkeypatch the real singleton's
+// execFile so the test never shells out to a real gh CLI.
 const realChildProcess = require("child_process");
-const originalExec = realChildProcess.exec;
-realChildProcess.exec = (command, options, callback) => {
-  execCalls.push({ command, options });
+const originalExecFile = realChildProcess.execFile;
+realChildProcess.execFile = (file, args, options, callback) => {
+  const command = [file, ...args].join(" ");
+  execCalls.push({ file, args, command, options });
   const cb = typeof options === "function" ? options : callback;
   if (typeof execHandler === "function") {
     execHandler(command, options, cb);
@@ -405,6 +406,13 @@ const tests = [
         execCalls[0].command,
         "gh auth token --hostname github.com",
       );
+      assert.deepStrictEqual(execCalls[0].file, "gh");
+      assert.deepStrictEqual(execCalls[0].args, [
+        "auth",
+        "token",
+        "--hostname",
+        "github.com",
+      ]);
       assert.strictEqual(execCalls[0].options.timeout, 5000);
       assert.strictEqual(execCalls[0].options.windowsHide, true);
       assert.strictEqual(
@@ -434,6 +442,167 @@ const tests = [
 
       assert.strictEqual(await githubAuth.isGhCliAvailable(), true);
       assert.strictEqual(execCalls.length, 1);
+    },
+  },
+  {
+    name: "gh CLI status parses only displayable github.com accounts",
+    run: async () => {
+      execHandler = (command, _options, callback) => {
+        assert.strictEqual(
+          command,
+          "gh auth status --hostname github.com --json hosts",
+        );
+        callback(
+          null,
+          JSON.stringify({
+            hosts: {
+              "github.com": [
+                {
+                  state: "error",
+                  active: true,
+                  login: "expired-account",
+                  token: "must-not-be-exposed",
+                },
+                { state: "success", active: false, login: "usable-account" },
+                { state: "success", active: false, login: "   " },
+              ],
+            },
+          }),
+          "",
+        );
+      };
+
+      const status = await githubAuth.getGhCliAuthStatus();
+      assert.deepStrictEqual(status, {
+        activeLogin: "expired-account",
+        accounts: [
+          { state: "error", active: true, login: "expired-account" },
+          { state: "success", active: false, login: "usable-account" },
+        ],
+      });
+      assert.deepStrictEqual(execCalls[0].args, [
+        "auth",
+        "status",
+        "--hostname",
+        "github.com",
+        "--json",
+        "hosts",
+      ]);
+      assert.strictEqual(execCalls[0].args.includes("--show-token"), false);
+    },
+  },
+  {
+    name: "malformed gh CLI status is unavailable rather than actionable",
+    run: async () => {
+      assert.strictEqual(
+        githubAuth.parseGhCliAuthStatus("not json"),
+        undefined,
+      );
+      assert.strictEqual(
+        githubAuth.parseGhCliAuthStatus(JSON.stringify({ hosts: {} })),
+        undefined,
+      );
+    },
+  },
+  {
+    name: "post-switch verification requires the selected active gh CLI account",
+    run: async () => {
+      execHandler = (command, _options, callback) => {
+        if (command.includes("auth status")) {
+          callback(
+            null,
+            JSON.stringify({
+              hosts: {
+                "github.com": [
+                  {
+                    state: "success",
+                    active: true,
+                    login: "selected-account",
+                  },
+                ],
+              },
+            }),
+            "",
+          );
+          return;
+        }
+        callback(null, "active-gh-token\n", "");
+      };
+      const originalFetch = global.fetch;
+      global.fetch = async (_url, options) => {
+        assert.strictEqual(
+          options.headers.Authorization,
+          "token active-gh-token",
+        );
+        return { ok: true };
+      };
+
+      try {
+        assert.strictEqual(
+          await githubAuth.verifyActiveGhCliAccount("selected-account"),
+          true,
+        );
+        assert.strictEqual(
+          await githubAuth.verifyActiveGhCliAccount("other-account"),
+          false,
+        );
+      } finally {
+        global.fetch = originalFetch;
+      }
+    },
+  },
+  {
+    name: "gh CLI account recovery commands use exact sanitized argument arrays",
+    run: async () => {
+      process.env.GH_TOKEN = "must-not-reach-gh";
+      process.env.GITHUB_TOKEN = "must-not-reach-gh-either";
+      execHandler = (command, _options, callback) => {
+        if (command.includes("auth status")) {
+          callback(null, JSON.stringify({ hosts: { "github.com": [] } }), "");
+          return;
+        }
+        callback(null, "account-token\n", "");
+      };
+
+      await githubAuth.getGhCliAuthStatus();
+      await githubAuth.getGhCliTokenForUser("alternate-account");
+      assert.strictEqual(
+        await githubAuth.switchGhCliAccount("alternate-account"),
+        true,
+      );
+
+      assert.deepStrictEqual(
+        execCalls.map((call) => call.args),
+        [
+          ["auth", "status", "--hostname", "github.com", "--json", "hosts"],
+          [
+            "auth",
+            "token",
+            "--hostname",
+            "github.com",
+            "--user",
+            "alternate-account",
+          ],
+          [
+            "auth",
+            "switch",
+            "--hostname",
+            "github.com",
+            "--user",
+            "alternate-account",
+          ],
+        ],
+      );
+      for (const call of execCalls) {
+        assert.strictEqual(call.options.timeout, 5000);
+        assert.strictEqual(call.options.windowsHide, true);
+        assert.strictEqual(
+          Object.keys(call.options.env).some((key) =>
+            ["GH_TOKEN", "GITHUB_TOKEN"].includes(key.toUpperCase()),
+          ),
+          false,
+        );
+      }
     },
   },
   {
@@ -746,8 +915,8 @@ async function main() {
     process.exitCode = 1;
   }
 
-  // Restore the monkeypatched exec so the harness leaves no global side effects.
-  realChildProcess.exec = originalExec;
+  // Restore the monkeypatched execFile so the harness leaves no global side effects.
+  realChildProcess.execFile = originalExecFile;
 }
 
 main().catch((error) => {

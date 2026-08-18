@@ -95,6 +95,7 @@ const sharedIndexPath = path.join(sharedDir, "index.json");
 let useSharedResourceIndex = true;
 let useSharedSourcesManifest = true;
 let sourceBootstrapResult = { status: "written" };
+let sourceWriteResult = { status: "written" };
 
 function makeContext() {
   const state = new Map();
@@ -119,7 +120,7 @@ function storeStubs(manifestOverrides = {}) {
           assertHeld: () => {},
           assertStillOwned: async () => {},
         }),
-      describeSharedStoreLockFailure: () => undefined,
+      describeSharedStoreWriteFailure: () => undefined,
     },
     "./coexistence": {
       SELF_EXTENSION_ID: "test.extension",
@@ -160,7 +161,7 @@ function storeStubs(manifestOverrides = {}) {
     },
     "./sharedSourcesManifestStore": {
       readSharedSourcesManifest: async () => ({ status: "missing" }),
-      writeSharedSourcesManifest: async () => ({ status: "written" }),
+      writeSharedSourcesManifest: async () => sourceWriteResult,
       bootstrapSharedSourcesManifest: async () => sourceBootstrapResult,
     },
   };
@@ -386,6 +387,42 @@ test("a write refused by its own limits reaches the pause notice", () => {
       store.planSharedStoreRejectionNotice("rejected", reason, undefined),
       { action: "notify", reason },
     );
+  }
+});
+
+test("a persistent sources write failure warns once and clears after recovery", async () => {
+  const context = makeContext();
+  const index = {
+    version: "1.0.0",
+    lastUpdated: "2026-08-18",
+    sources: [makeSource("local")],
+    skills: [],
+    categories: [],
+  };
+  warnings.length = 0;
+  useSharedSourcesManifest = true;
+  useSharedResourceIndex = false;
+  sourceWriteResult = {
+    status: "rejected",
+    reason: "write failed: EACCES",
+  };
+
+  try {
+    await store.syncSharedStoresFromSkillIndex(context, index);
+    await store.syncSharedStoresFromSkillIndex(context, index);
+    assert.strictEqual(warnings.length, 1, "the same write fault must not nag");
+    assert.match(warnings[0].message, /paused: write failed: EACCES/);
+
+    sourceWriteResult = { status: "written" };
+    await store.syncSharedStoresFromSkillIndex(context, index);
+    assert.strictEqual(
+      context.globalState.get(store.SHARED_STORE_REJECTION_NOTICE_KEYS.sources),
+      undefined,
+      "a successful write must clear the one-time notice state",
+    );
+  } finally {
+    useSharedResourceIndex = true;
+    sourceWriteResult = { status: "written" };
   }
 });
 
@@ -803,6 +840,45 @@ test("shared resource metadata maps are bounded", async () => {
       label,
     );
   }
+});
+
+test("a persistent index write failure reaches the pause notice plan", async () => {
+  const fsPromises = require("fs/promises");
+  const baseStubs = storeStubs();
+  const failingStore = requireTypeScriptModule(
+    path.join(srcDir, "sharedResourceIndexStore.ts"),
+    {
+      ...baseStubs,
+      "fs/promises": {
+        ...fsPromises,
+        writeFile: async () => {
+          const error = new Error("shared store is full");
+          error.code = "ENOSPC";
+          throw error;
+        },
+      },
+      "./sharedStoreLock": {
+        ...baseStubs["./sharedStoreLock"],
+        describeSharedStoreWriteFailure: (error) =>
+          error?.code === "ENOSPC" ? "write failed: ENOSPC" : undefined,
+      },
+    },
+  );
+  const index = sharedManifest.createEmptySharedResourceIndex("test.extension");
+
+  const write = await failingStore.writeSharedResourceIndex(index);
+  assert.deepStrictEqual(write, {
+    status: "rejected",
+    reason: "write failed: ENOSPC",
+  });
+  assert.deepStrictEqual(
+    failingStore.planSharedStoreRejectionNotice(
+      "rejected",
+      write.reason,
+      undefined,
+    ),
+    { action: "notify", reason: "write failed: ENOSPC" },
+  );
 });
 
 // The reader refuses an oversized file and we never overwrite a file we cannot

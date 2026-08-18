@@ -215,6 +215,18 @@ async function fetchSkillContent(
 ): Promise<string> {
   // GitHub raw URL を構築
   let rawUrl: string;
+  let authenticatedUrl: (() => Promise<string | undefined>) | undefined;
+  const sourceInfo = sources.find((source) => source.id === skill.source);
+  const sourceMatch = sourceInfo?.url.match(/github\.com\/([^/]+)\/([^/]+)/);
+  const contentPath = getResourceContentPath(skill);
+
+  if (sourceInfo && sourceMatch) {
+    const [, owner, repo] = sourceMatch;
+    authenticatedUrl = async () => {
+      const branch = await getSourceBranch(sourceInfo, token, skill.path);
+      return `https://api.github.com/repos/${owner}/${repo}/contents/${encodeGitHubPathForUrl(contentPath)}?ref=${encodeURIComponent(branch)}`;
+    };
+  }
 
   if (skill.rawUrl) {
     rawUrl = skill.rawUrl;
@@ -224,7 +236,6 @@ async function fetchSkillContent(
       .replace("/blob/", "/");
   } else {
     // source ID からソース情報を取得
-    const sourceInfo = sources.find((s) => s.id === skill.source);
     if (sourceInfo) {
       // ソース URL から owner/repo を抽出
       const match = sourceInfo.url.match(/github\.com\/([^/]+\/[^/]+)/);
@@ -232,7 +243,6 @@ async function fetchSkillContent(
         const ownerRepo = match[1];
         // HEAD リクエストまたは API でデフォルトブランチを動的取得
         const branch = await getSourceBranch(sourceInfo, token, skill.path);
-        const contentPath = getResourceContentPath(skill);
         rawUrl = `https://raw.githubusercontent.com/${ownerRepo}/${encodeGitRefForPath(branch)}/${encodeGitHubPathForUrl(contentPath)}`;
       } else {
         throw new Error(`Invalid source URL: ${sourceInfo.url}`);
@@ -245,6 +255,7 @@ async function fetchSkillContent(
   const response = await fetchGitHubWithOptionalAuthRetry(rawUrl, {
     accept: "text/plain",
     token,
+    authenticatedUrl,
   });
 
   if (!response.ok) {

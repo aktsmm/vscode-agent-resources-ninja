@@ -633,7 +633,7 @@ async function run() {
         skillPath,
         "owner",
         "private-repo",
-        "main",
+        "feature/x y",
         "skills/private-skill",
         "private-token",
       );
@@ -647,7 +647,11 @@ async function run() {
       );
       assert.strictEqual(
         requested[1].url,
-        "https://api.github.com/repos/owner/private-repo/contents/skills/private-skill/SKILL.md?ref=main",
+        "https://api.github.com/repos/owner/private-repo/contents/skills/private-skill/SKILL.md?ref=feature%2Fx%20y",
+      );
+      assert.strictEqual(
+        new URL(requested[1].url).searchParams.get("ref"),
+        "feature/x y",
       );
       assert.ok(
         writes.has("/tmp/.github/skills/private-skill/SKILL.md"),

@@ -218,6 +218,42 @@ const {
     assert.strictEqual(requests[0].headers.Authorization, undefined);
   });
 
+  await test("resolves the authenticated URL only after an anonymous raw 404", async () => {
+    let resolutions = 0;
+    const authenticatedUrl = async () => {
+      resolutions += 1;
+      return "https://api.github.com/repos/octo/private/contents/SKILL.md?ref=feature%2Fx";
+    };
+
+    global.fetch = async () => response(200, "public");
+    await fetchGitHubWithOptionalAuthRetry(
+      "https://raw.githubusercontent.com/octo/public/feature/x/SKILL.md",
+      { accept: "text/plain", token: "secret-token", authenticatedUrl },
+    );
+    assert.strictEqual(
+      resolutions,
+      0,
+      "public content must not resolve the API route",
+    );
+
+    let requests = 0;
+    global.fetch = async () => {
+      requests += 1;
+      return requests === 1
+        ? response(404, "Not Found")
+        : response(200, "private");
+    };
+    await fetchGitHubWithOptionalAuthRetry(
+      "https://raw.githubusercontent.com/octo/private/feature/x/SKILL.md",
+      { accept: "text/plain", token: "secret-token", authenticatedUrl },
+    );
+    assert.strictEqual(
+      resolutions,
+      1,
+      "private escalation resolves the API route once",
+    );
+  });
+
   await test("retries an anonymous raw 404 through the authenticated API", async () => {
     const requests = [];
     global.fetch = async (url, options = {}) => {
@@ -229,7 +265,12 @@ const {
 
     const result = await fetchGitHubWithOptionalAuthRetry(
       "https://raw.githubusercontent.com/octo/private/main/skills/demo/SKILL.md",
-      { accept: "text/plain", token: "secret-token" },
+      {
+        accept: "text/plain",
+        token: "secret-token",
+        authenticatedUrl:
+          "https://api.github.com/repos/octo/private/contents/skills/demo/SKILL.md?ref=main",
+      },
     );
 
     assert.strictEqual(result.status, 200);
@@ -238,42 +279,50 @@ const {
     assert.strictEqual(requests[1].headers.Authorization, "token secret-token");
   });
 
-  await test("normalizes the escalated ref instead of double-encoding it", async () => {
-    const escalate = async (rawUrl) => {
-      const requests = [];
-      global.fetch = async (url) => {
-        requests.push(String(url));
-        return requests.length === 1
-          ? response(404, "Not Found")
-          : response(200, "private");
-      };
-
-      await fetchGitHubWithOptionalAuthRetry(rawUrl, {
-        accept: "text/plain",
-        token: "secret-token",
-      });
-      return new URL(requests[1]);
+  await test("uses the explicit Contents URL for a multi-segment branch", async () => {
+    const requests = [];
+    global.fetch = async (url) => {
+      requests.push(String(url));
+      return requests.length === 1
+        ? response(404, "Not Found")
+        : response(200, "private");
     };
 
-    // The raw URL already carries an escaped ref, so encoding it again would
-    // request a branch that does not exist.
-    const escaped = await escalate(
-      "https://raw.githubusercontent.com/octo/private/release%231/SKILL.md",
+    const authenticatedUrl =
+      "https://api.github.com/repos/octo/private/contents/SKILL.md?ref=feature%2Fx%20y";
+    const result = await fetchGitHubWithOptionalAuthRetry(
+      "https://raw.githubusercontent.com/octo/private/feature/x%20y/SKILL.md",
+      {
+        accept: "text/plain",
+        token: "secret-token",
+        authenticatedUrl,
+      },
     );
-    assert.ok(escaped.search.endsWith("ref=release%231"));
-    assert.strictEqual(escaped.searchParams.get("ref"), "release#1");
 
-    // A raw URL that reached us unescaped must not add its own parameters.
-    const injected = await escalate(
-      "https://raw.githubusercontent.com/octo/private/feat&ref=main/SKILL.md",
+    assert.strictEqual(result.status, 200);
+    assert.strictEqual(requests[1], authenticatedUrl);
+    assert.strictEqual(
+      new URL(requests[1]).searchParams.get("ref"),
+      "feature/x y",
     );
-    assert.deepStrictEqual([...injected.searchParams.keys()], ["ref"]);
-    assert.strictEqual(injected.searchParams.get("ref"), "feat&ref=main");
+  });
 
-    const malformed = await escalate(
-      "https://raw.githubusercontent.com/octo/private/100%zz/SKILL.md",
+  await test("does not infer an authenticated URL from an ambiguous raw path", async () => {
+    const requests = [];
+    global.fetch = async (url) => {
+      requests.push(String(url));
+      return response(404, "Not Found");
+    };
+
+    const result = await fetchGitHubWithOptionalAuthRetry(
+      "https://raw.githubusercontent.com/octo/private/feature/x/SKILL.md",
+      { accept: "text/plain", token: "secret-token" },
     );
-    assert.strictEqual(malformed.searchParams.get("ref"), "100%zz");
+
+    assert.strictEqual(result.status, 404);
+    assert.deepStrictEqual(requests, [
+      "https://raw.githubusercontent.com/octo/private/feature/x/SKILL.md",
+    ]);
   });
 
   await test("retries private raw content with the next distinct credential", async () => {
@@ -296,7 +345,12 @@ const {
     try {
       const result = await fetchGitHubWithOptionalAuthRetry(
         "https://raw.githubusercontent.com/octo/private/main/SKILL.md",
-        { accept: "text/plain", token: "secret-token" },
+        {
+          accept: "text/plain",
+          token: "secret-token",
+          authenticatedUrl:
+            "https://api.github.com/repos/octo/private/contents/SKILL.md?ref=main",
+        },
       );
       assert.strictEqual(result.status, 200);
       assert.strictEqual(requests.length, 3);
@@ -329,7 +383,13 @@ const {
     try {
       const result = await fetchGitHubWithOptionalAuthRetry(
         "https://raw.githubusercontent.com/octo/private/main/SKILL.md",
-        { accept: "*/*", token: "secret-token", method: "HEAD" },
+        {
+          accept: "*/*",
+          token: "secret-token",
+          method: "HEAD",
+          authenticatedUrl:
+            "https://api.github.com/repos/octo/private/contents/SKILL.md?ref=main",
+        },
       );
       assert.strictEqual(result.status, 200);
       assert.strictEqual(requests.length, 3);
@@ -598,6 +658,8 @@ const {
         {
           accept: "text/plain",
           token: "secret-token",
+          authenticatedUrl:
+            "https://api.github.com/repos/octo/private/contents/SKILL.md?ref=main",
           sleep: async () => undefined,
           now: () => 0,
           random: () => 0,
@@ -721,6 +783,23 @@ const {
           accept: "application/json",
           operationTimeoutMs: 5,
           request: () => new Promise(() => {}),
+        },
+      ),
+      (error) =>
+        error.code === "ETIMEDOUT" && /Operation timeout/.test(error.message),
+    );
+  });
+
+  await test("times out a lazy authenticated URL factory that never resolves", async () => {
+    await assert.rejects(
+      fetchGitHubWithOptionalAuthRetry(
+        "https://raw.githubusercontent.com/octo/private/main/SKILL.md",
+        {
+          accept: "text/plain",
+          token: "secret-token",
+          operationTimeoutMs: 5,
+          request: async () => response(404, "Not Found"),
+          authenticatedUrl: () => new Promise(() => {}),
         },
       ),
       (error) =>

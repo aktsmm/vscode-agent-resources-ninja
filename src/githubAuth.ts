@@ -166,15 +166,22 @@ export async function clearStoredGitHubTokenWithFeedback(): Promise<void> {
   }
 }
 
-export async function hasStoredGitHubToken(): Promise<boolean> {
-  return Boolean(await getSecretToken());
-}
-
 export async function hasClearableGitHubToken(): Promise<boolean> {
   return Boolean((await getSecretToken()) || hasConfiguredGitHubToken());
 }
 
 const GH_CLI_SHADOWING_TOKEN_ENV_KEYS = new Set(["GH_TOKEN", "GITHUB_TOKEN"]);
+
+export interface GhCliAuthAccount {
+  login: string;
+  active: boolean;
+  state: string;
+}
+
+export interface GhCliAuthStatus {
+  activeLogin?: string;
+  accounts: readonly GhCliAuthAccount[];
+}
 
 /** gh の保存済み github.com 資格情報を参照するための子プロセス環境を作る。 */
 export function createGhCliChildEnv(
@@ -187,13 +194,15 @@ export function createGhCliChildEnv(
   );
 }
 
-/** gh CLI からトークンを取得 */
-export async function getGhCliToken(): Promise<string | null> {
+async function executeGhCli(
+  args: readonly string[],
+): Promise<string | undefined> {
   try {
-    const { exec } = await import("child_process");
-    const token = await new Promise<string>((resolve, reject) => {
-      exec(
-        "gh auth token --hostname github.com",
+    const { execFile } = await import("child_process");
+    return await new Promise<string>((resolve, reject) => {
+      execFile(
+        "gh",
+        [...args],
         {
           timeout: GITHUB_AUTH_TIMEOUT_MS,
           windowsHide: true,
@@ -208,39 +217,125 @@ export async function getGhCliToken(): Promise<string | null> {
         },
       );
     });
-    if (token && token.length > 0) {
-      return token;
-    }
   } catch {
-    // gh CLI が使えない場合は無視
+    return undefined;
   }
-  return null;
+}
+
+function parseGhCliAuthStatusEntry(
+  value: unknown,
+): GhCliAuthAccount | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const entry = value as Record<string, unknown>;
+  const login = typeof entry.login === "string" ? entry.login.trim() : "";
+  if (!login) {
+    return undefined;
+  }
+  return {
+    login,
+    active: entry.active === true,
+    state: typeof entry.state === "string" ? entry.state : "unknown",
+  };
+}
+
+export function parseGhCliAuthStatus(
+  output: string,
+): GhCliAuthStatus | undefined {
+  try {
+    const parsed = JSON.parse(output) as unknown;
+    if (!parsed || typeof parsed !== "object") {
+      return undefined;
+    }
+    const hosts = (parsed as Record<string, unknown>).hosts;
+    if (!hosts || typeof hosts !== "object") {
+      return undefined;
+    }
+    const githubComAccounts = (hosts as Record<string, unknown>)["github.com"];
+    if (!Array.isArray(githubComAccounts)) {
+      return undefined;
+    }
+    const accounts = githubComAccounts
+      .map(parseGhCliAuthStatusEntry)
+      .filter((account): account is GhCliAuthAccount => Boolean(account));
+    return {
+      activeLogin: accounts.find((account) => account.active)?.login,
+      accounts,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export async function getGhCliAuthStatus(): Promise<
+  GhCliAuthStatus | undefined
+> {
+  const output = await executeGhCli([
+    "auth",
+    "status",
+    "--hostname",
+    "github.com",
+    "--json",
+    "hosts",
+  ]);
+  return output === undefined ? undefined : parseGhCliAuthStatus(output);
+}
+
+/** gh CLI から指定ユーザー、または active user のトークンを取得する。 */
+export async function getGhCliTokenForUser(
+  user?: string,
+): Promise<string | null> {
+  const args = ["auth", "token", "--hostname", "github.com"];
+  if (user?.trim()) {
+    args.push("--user", user.trim());
+  }
+  const token = await executeGhCli(args);
+  return token && token.length > 0 ? token : null;
+}
+
+/** gh CLI から active user のトークンを取得する。 */
+export async function getGhCliToken(): Promise<string | null> {
+  return getGhCliTokenForUser();
 }
 
 export async function isGhCliAvailable(): Promise<boolean> {
+  return (await executeGhCli(["--version"])) !== undefined;
+}
+
+export async function isGitHubTokenValid(token: string): Promise<boolean> {
   try {
-    const { exec } = await import("child_process");
-    await new Promise<void>((resolve, reject) => {
-      exec(
-        "gh --version",
-        {
-          timeout: GITHUB_AUTH_TIMEOUT_MS,
-          windowsHide: true,
-          env: createGhCliChildEnv(process.env),
-        },
-        (error: Error | null) => {
-          if (error) {
-            reject(error);
-          } else {
-            resolve();
-          }
-        },
-      );
-    });
-    return true;
+    return (await validateGitHubToken(token)).ok;
   } catch {
     return false;
   }
+}
+
+export async function switchGhCliAccount(account: string): Promise<boolean> {
+  return (
+    (await executeGhCli([
+      "auth",
+      "switch",
+      "--hostname",
+      "github.com",
+      "--user",
+      account,
+    ])) !== undefined
+  );
+}
+
+export async function verifyActiveGhCliAccount(
+  account: string,
+): Promise<boolean> {
+  const status = await getGhCliAuthStatus();
+  if (status?.activeLogin !== account) {
+    return false;
+  }
+  const token = await getGhCliToken();
+  if (!token) {
+    return false;
+  }
+  return isGitHubTokenValid(token);
 }
 
 export function getGitHubAuthRecoveryPolicy(input: {
