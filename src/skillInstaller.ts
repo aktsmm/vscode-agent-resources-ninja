@@ -68,7 +68,7 @@ import {
   removePluginLocations,
   supportsPluginLocations,
 } from "./pluginLocations";
-import { encodeGitRefForPath } from "./gitHubRefSafety";
+import { encodeGitHubPathForUrl, encodeGitRefForPath } from "./gitHubRefSafety";
 import { logger } from "./logger";
 import { openBugReport as openBugReportIssue } from "./bugReport";
 import {
@@ -1440,7 +1440,7 @@ export async function installSkill(
             token,
           );
         } else {
-          const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}/${remotePath}`;
+          const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}/${encodeGitHubPathForUrl(remotePath)}`;
           const content = await fetchFileContent(rawUrl, token);
           assertRealPathStrictlyInside(
             skillPath,
@@ -1501,7 +1501,7 @@ export async function installSkill(
 
     // パスが .md で終わる場合は単独ファイル
     if (remotePath.endsWith(".md")) {
-      const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}/${remotePath}`;
+      const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}/${encodeGitHubPathForUrl(remotePath)}`;
       logger.info(`[Resource Ninja] Downloading single file: ${rawUrl}`);
       try {
         const content = await fetchFileContent(rawUrl, token);
@@ -1606,7 +1606,7 @@ export async function installSkill(
 
         // 404エラーの場合はインストールをキャンセル（フォールバック作らない）
         if (containsHttpStatus(errorMsg, 404)) {
-          const repoTreeUrl = `https://github.com/${owner}/${repo}/tree/${branch}/${remotePath}`;
+          const repoTreeUrl = `https://github.com/${owner}/${repo}/tree/${encodeGitRefForPath(branch)}/${encodeGitHubPathForUrl(remotePath)}`;
           await handleSkillNotFound(
             skillPath,
             installRootUri,
@@ -2933,7 +2933,7 @@ export async function recoverPrimarySkillMdFromRaw(
   const cleanPath = (remotePath || "").replace(/^\/+|\/+$/g, "");
   const rawBase = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}`;
   const rawUrl = cleanPath
-    ? `${rawBase}/${cleanPath}/SKILL.md`
+    ? `${rawBase}/${encodeGitHubPathForUrl(cleanPath)}/SKILL.md`
     : `${rawBase}/SKILL.md`;
   try {
     const content = await fetchFileContent(rawUrl, token);

@@ -42,11 +42,30 @@ const UNSAFE_OBJECT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 const SOURCE_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
 // Wide enough for any scanner name either extension may add, narrow enough that a
 // value we keep for another writer cannot smuggle a path or a control character.
-const FOREIGN_SCANNER_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
+// Exported so the contract test can assert the value the sibling extension uses.
+export const FOREIGN_SCANNER_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 const MAX_FIELD_LENGTH = 512;
 const MAX_PATH_ENTRIES = 64;
 /** A file with more entries than this is treated as hostile rather than curated. */
 export const MAX_SHARED_SOURCE_ENTRIES = 500;
+
+/**
+ * Reads and writes are held to the same limits. A writer looser than the reader
+ * emits a file it refuses on the next read, and refusing a file we may not repair
+ * means every entry in it is lost.
+ */
+function describeOversizedManifest(
+  entryCount: number,
+  byteLength: number,
+): string | undefined {
+  if (byteLength > SHARED_SOURCES_MANIFEST_MAX_BYTES) {
+    return `${byteLength} bytes exceeds the ${SHARED_SOURCES_MANIFEST_MAX_BYTES} byte limit`;
+  }
+  if (entryCount > MAX_SHARED_SOURCE_ENTRIES) {
+    return `${entryCount} entries exceeds the ${MAX_SHARED_SOURCE_ENTRIES} entry limit`;
+  }
+  return undefined;
+}
 
 export type SharedSourcesManifestReadResult =
   | { status: "missing" }
@@ -396,11 +415,9 @@ async function readManifestFile(filePath: string): Promise<ManifestFileRead> {
     // Sized through the open handle so the check cannot be raced by a rewrite
     // between the stat and the read.
     const stats = await handle.stat();
-    if (stats.size > SHARED_SOURCES_MANIFEST_MAX_BYTES) {
-      return {
-        status: "rejected",
-        reason: `${stats.size} bytes exceeds the ${SHARED_SOURCES_MANIFEST_MAX_BYTES} byte limit`,
-      };
+    const oversized = describeOversizedManifest(0, stats.size);
+    if (oversized) {
+      return { status: "rejected", reason: oversized };
     }
     return { status: "read", content: await handle.readFile("utf8") };
   } catch (error) {
@@ -438,11 +455,9 @@ function parseManifestRoot(content: string):
   if (!Array.isArray(candidate.sources)) {
     return { status: "rejected", reason: "sources is not an array" };
   }
-  if (candidate.sources.length > MAX_SHARED_SOURCE_ENTRIES) {
-    return {
-      status: "rejected",
-      reason: `${candidate.sources.length} entries exceeds the ${MAX_SHARED_SOURCE_ENTRIES} entry limit`,
-    };
+  const oversized = describeOversizedManifest(candidate.sources.length, 0);
+  if (oversized) {
+    return { status: "rejected", reason: oversized };
   }
 
   return {
@@ -574,22 +589,36 @@ export async function writeSharedSourcesManifest(
       );
       const lastUpdated = manifest.lastUpdated || new Date().toISOString();
 
+      // Serialized once: a second stringify would let the checked text and the
+      // written text drift apart.
+      const payload = JSON.stringify(
+        {
+          schemaVersion: SHARED_MANIFEST_SCHEMA_VERSION,
+          sources: mergedSources,
+          lastUpdated,
+          updatedBy: manifest.updatedBy,
+        },
+        null,
+        2,
+      );
+
+      // The merge adds our entries to whatever is already on disk, so the result can
+      // exceed the limits our own reader enforces. Writing it would pause sharing
+      // permanently for both extensions.
+      const oversized = describeOversizedManifest(
+        mergedSources.length,
+        new TextEncoder().encode(payload).length,
+      );
+      if (oversized) {
+        logger.warn(
+          `[Resource Ninja] Refusing to write the shared sources manifest (${oversized}).`,
+        );
+        return { status: "rejected", reason: oversized };
+      }
+
       await fs.mkdir(sharedDir, { recursive: true });
       lease.assertHeld();
-      await fs.writeFile(
-        tempPath,
-        JSON.stringify(
-          {
-            schemaVersion: SHARED_MANIFEST_SCHEMA_VERSION,
-            sources: mergedSources,
-            lastUpdated,
-            updatedBy: manifest.updatedBy,
-          },
-          null,
-          2,
-        ),
-        "utf8",
-      );
+      await fs.writeFile(tempPath, payload, "utf8");
       // Nothing may be awaited between this check and the rename.
       await lease.assertStillOwned();
       await fs.rename(tempPath, filePath);

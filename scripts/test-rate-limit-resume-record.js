@@ -318,6 +318,90 @@ async function main() {
     fs.rmSync(recordPath, { force: true });
   });
 
+  // The reader ignores an oversized record silently, so writing one would strand
+  // every deferred source. Keeping the previous record instead would resume a
+  // different source set than the one that was actually deferred.
+  await test("a record we could not read back is discarded, not kept", async () => {
+    const recordPath = path.join(sharedDir, "rate-limit-resume.json");
+    await store.saveRateLimitResumeRecord(makeRecord());
+    await store.saveRateLimitResumeRecord(
+      makeRecord({
+        sourceIds: Array.from(
+          { length: 500 },
+          (_unused, index) => `${"s".repeat(250)}-${index}`,
+        ),
+      }),
+    );
+
+    assert.strictEqual(
+      fs.existsSync(recordPath),
+      false,
+      "a stale record must not survive a refused write",
+    );
+    assert.strictEqual(await store.readRateLimitResumeRecord(nowMs), undefined);
+  });
+
+  // Claiming re-serializes the record with two more fields, so a record that was
+  // readable can cross the limit on the way back out.
+  await test("a claim that cannot be written leaves nothing to retry", async () => {
+    const recordPath = path.join(sharedDir, "rate-limit-resume.json");
+    const dueMs = Date.parse("2026-06-24T12:31:00.000Z");
+    const cap = store.RATE_LIMIT_RESUME_MAX_FILE_BYTES;
+    const sourceIds = Array.from(
+      { length: 500 },
+      (_unused, index) => `${"s".repeat(240)}-${index}`,
+    );
+    const sizeOf = (value) => Buffer.byteLength(JSON.stringify(value, null, 2));
+    const build = (count, pad) =>
+      makeRecord({
+        sourceIds: sourceIds.slice(0, count),
+        retryNotBefore: "2026-06-24T12:30:00.000Z",
+        createdAt: `2026-06-24T12:00:00.000Z${"p".repeat(pad)}`,
+      });
+
+    // As many ids as still fit, then createdAt pads one byte at a time into the
+    // narrow window where the record fits but its claimed form does not. Only the
+    // length of createdAt is checked on read, so padding it keeps the record valid.
+    let count = 0;
+    while (count < sourceIds.length && sizeOf(build(count + 1, 0)) <= cap) {
+      count += 1;
+    }
+
+    let fixture;
+    for (let pad = 0; pad <= 250 && !fixture; pad += 1) {
+      const candidate = build(count, pad);
+      const claimed = {
+        ...candidate,
+        claimedBy: "session-a",
+        claimedAt: new Date(dueMs).toISOString(),
+      };
+      if (sizeOf(candidate) <= cap && sizeOf(claimed) > cap) {
+        fixture = candidate;
+      }
+    }
+    assert.ok(
+      fixture,
+      "no fixture sits in the readable-but-unclaimable window",
+    );
+
+    fs.writeFileSync(recordPath, JSON.stringify(fixture, null, 2), "utf8");
+    assert.ok(
+      await store.readRateLimitResumeRecord(dueMs),
+      "the fixture has to be readable, or the claim never reaches the write",
+    );
+
+    assert.strictEqual(
+      await store.claimRateLimitResumeRecord("session-a", dueMs),
+      undefined,
+      "a claim that cannot be written is not a claim",
+    );
+    assert.strictEqual(
+      fs.existsSync(recordPath),
+      false,
+      "and it leaves nothing behind for the next claim to retry forever",
+    );
+  });
+
   await test("untrusted source lists are bounded and deduplicated", () => {
     assert.deepStrictEqual(
       store.normalizeRateLimitResumeRecord(

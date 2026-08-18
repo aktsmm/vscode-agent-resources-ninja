@@ -61,9 +61,11 @@ export const SHARED_RATE_LIMIT_RESUME_FILE = "rate-limit-resume.json";
  * The shared directory is writable by any tool on the machine, so both files are
  * parsed as untrusted input and an oversized one is rejected before it is read.
  * The bundled catalog ships 24 sources and a few hundred resources, so these caps
- * sit far above any legitimate file.
+ * sit far above any legitimate file. The sources cap matches the skill-only sibling
+ * extension (v0.9.45): a reader stricter than the other writer would refuse a file
+ * it is not allowed to repair, which stops sharing for good.
  */
-export const SHARED_SOURCES_MANIFEST_MAX_BYTES = 1024 * 1024;
+export const SHARED_SOURCES_MANIFEST_MAX_BYTES = 2 * 1024 * 1024;
 export const SHARED_RESOURCE_INDEX_MAX_BYTES = 32 * 1024 * 1024;
 // Base for an exponential backoff, not a fixed wait: the lock can legitimately be
 // held for as long as a multi-megabyte write takes.

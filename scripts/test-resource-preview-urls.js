@@ -338,6 +338,117 @@ test("resource URL builder handles file and directory paths consistently", () =>
   );
 });
 
+// The branch comes from the shared store, which any tool on the machine can write.
+test("resource URL builder escapes the ref per path segment", () => {
+  assert.strictEqual(
+    buildGitHubResourceUrl(
+      "https://github.com/github/awesome-copilot",
+      "feature/x",
+      { kind: "skill", path: "skills/example" },
+    ),
+    "https://github.com/github/awesome-copilot/tree/feature/x/skills/example",
+  );
+  assert.strictEqual(
+    buildGitHubResourceUrl(
+      "https://github.com/github/awesome-copilot",
+      "release#1",
+      { kind: "skill", path: "skills/example" },
+    ),
+    "https://github.com/github/awesome-copilot/tree/release%231/skills/example",
+  );
+  assert.strictEqual(
+    buildGitHubResourceUrl("https://github.com/acme/tools", "release#1", {
+      kind: "plugin",
+      path: ".",
+      pluginRoot: ".",
+    }),
+    "https://github.com/acme/tools/tree/release%231",
+  );
+
+  const withQuery = buildGitHubResourceUrl(
+    "https://github.com/github/awesome-copilot",
+    "main?x=1",
+    { kind: "prompt", path: "prompts/example.prompt.md" },
+  );
+  assert.ok(
+    !withQuery.includes("?"),
+    "a ref that starts a query string would drop the resource path",
+  );
+  assert.ok(withQuery.endsWith("/prompts/example.prompt.md"));
+});
+
+// File names come from the repository tree, where `#` and spaces are legal.
+test("resource URLs escape the content path per segment", () => {
+  const awkward = resource({
+    kind: "skill",
+    name: "awkward",
+    path: "skills/c# helpers",
+  });
+
+  assert.strictEqual(
+    getSkillRawUrl(awkward, sources),
+    "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/c%23%20helpers/SKILL.md",
+  );
+  assert.strictEqual(
+    buildGitHubResourceUrl(
+      "https://github.com/github/awesome-copilot",
+      "main",
+      { kind: "skill", path: "skills/c# helpers" },
+    ),
+    "https://github.com/github/awesome-copilot/tree/main/skills/c%23%20helpers",
+  );
+});
+
+test("every composed GitHub URL escapes its content path", () => {
+  // Each exception states why that template composes no repository path of its own.
+  const allowed = new Map([
+    // The path came back out of an existing URL, so it is already encoded.
+    ["skillIndex.ts", ["/${encodeGitRefForPath(branch)}/${path}`"]],
+    // Base only; the path is appended and encoded at the call site.
+    ["skillInstaller.ts", ["/${encodeGitRefForPath(branch)}`"]],
+  ]);
+  // Catches a literal host followed by a path. A builder that assembles the host
+  // into a variable first is out of its reach and is covered by the cases above.
+  const composesPath = (line) =>
+    line.includes("raw.githubusercontent.com/${") ||
+    /github\.com\/\$\{[^`]*\/(?:tree|blob)\//.test(line);
+
+  const offenders = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(entryPath);
+        continue;
+      }
+      if (!entry.name.endsWith(".ts")) {
+        continue;
+      }
+      fs.readFileSync(entryPath, "utf8")
+        .split(/\r?\n/)
+        .forEach((line, index) => {
+          if (
+            !composesPath(line) ||
+            line.includes("encodeGitHubPathForUrl(") ||
+            (allowed.get(entry.name) || []).some((exception) =>
+              line.includes(exception),
+            )
+          ) {
+            return;
+          }
+          offenders.push(`${entry.name}:${index + 1}`);
+        });
+    }
+  };
+  walk(path.join(__dirname, "..", "src"));
+
+  assert.deepStrictEqual(
+    offenders,
+    [],
+    "compose a raw URL through encodeGitHubPathForUrl, or add a reasoned exception",
+  );
+});
+
 (async () => {
   await testAsync(
     "async GitHub URL resolution probes master and preserves stored route",

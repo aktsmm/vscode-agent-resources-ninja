@@ -3,7 +3,7 @@
 // plain-Node regression scripts can load the real code.
 //
 // The rules are aligned with the sibling extension so one shared file cannot be read
-// two different ways: aktsmm/vscode-agent-skill-ninja v0.9.44,
+// two different ways: aktsmm/vscode-agent-skill-ninja v0.9.45,
 // `src/shared-manifest.ts` and `src/shared-sources-manifest-store.ts`.
 
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/; // eslint-disable-line no-control-regex
@@ -80,6 +80,20 @@ export function isSafeGitRef(value: unknown): value is string {
 /** Escapes each segment so a multi-segment ref such as `feature/x` stays intact. */
 export function encodeGitRefForPath(ref: string): string {
   return ref.split("/").map(encodeURIComponent).join("/");
+}
+
+/**
+ * For composing a URL from a repository path. A `#` in a file name would otherwise
+ * truncate the URL and fetch the wrong file. Never apply this to a path taken back
+ * out of an existing URL, which is already encoded.
+ */
+export function encodeGitHubPathForUrl(contentPath: string): string {
+  return contentPath
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/");
 }
 
 function isDotSegment(segment: string): boolean {

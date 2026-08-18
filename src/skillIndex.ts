@@ -3,7 +3,7 @@
 
 import * as vscode from "vscode";
 import { fetchGitHubWithOptionalAuthRetry } from "./githubFetch";
-import { encodeGitRefForPath } from "./gitHubRefSafety";
+import { encodeGitHubPathForUrl, encodeGitRefForPath } from "./gitHubRefSafety";
 import { logger } from "./logger";
 import {
   loadSharedStoresIntoSkillIndex,
@@ -934,7 +934,7 @@ export async function getDefaultBranch(
   for (const branch of branches) {
     // testPath があればそれを使用、なければ README を確認
     const testFile = testPath || "README.md";
-    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${testFile}`;
+    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${encodeGitHubPathForUrl(testFile)}`;
 
     if (await checkUrlExists(rawUrl, token)) {
       branchCache.set(repoUrl, { branch });
@@ -1016,14 +1016,15 @@ export function buildGitHubResourceUrl(
   resource: Pick<Skill, "path" | "kind" | "pluginRoot">,
 ): string {
   const baseUrl = normalizeGitHubRepoUrl(repoUrl);
+  const ref = encodeGitRefForPath(branch);
   if (getResourceKind(resource) === "plugin") {
     const pluginPath = resource.pluginRoot || resource.path;
     return pluginPath === "."
-      ? `${baseUrl}/tree/${branch}`
-      : `${baseUrl}/tree/${branch}/${pluginPath}`;
+      ? `${baseUrl}/tree/${ref}`
+      : `${baseUrl}/tree/${ref}/${encodeGitHubPathForUrl(pluginPath)}`;
   }
   const route = isResourceFilePath(resource.path) ? "blob" : "tree";
-  return `${baseUrl}/${route}/${branch}/${resource.path}`;
+  return `${baseUrl}/${route}/${ref}/${encodeGitHubPathForUrl(resource.path)}`;
 }
 
 export function buildGitHubRawUrl(
@@ -1041,7 +1042,7 @@ export function buildGitHubRawUrl(
 
   const [, owner, repo] = match;
   const contentPath = getResourceContentPath(resource, fileName);
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}/${contentPath}`;
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}/${encodeGitHubPathForUrl(contentPath)}`;
 }
 
 /**

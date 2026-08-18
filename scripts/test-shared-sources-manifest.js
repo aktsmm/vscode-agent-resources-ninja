@@ -53,9 +53,17 @@ const manifestPath = path.join(tempDir, "sources.json");
 const warnings = [];
 
 const sharedManifestStub = {
-  SHARED_MANIFEST_SCHEMA_VERSION: 1,
-  SHARED_SOURCES_MANIFEST_TEMP_FILE: "sources.json.tmp",
-  SHARED_SOURCES_MANIFEST_MAX_BYTES: 1024 * 1024,
+  // Real constants so a cap change in production is exercised here rather than mirrored.
+  ...requireTypeScriptModule(path.join(repoRoot, "src", "sharedManifest.ts"), {
+    vscode: {
+      Uri: {
+        file: (fsPath) => ({ fsPath }),
+        joinPath: (base, ...segments) => ({
+          fsPath: path.join(base.fsPath, ...segments),
+        }),
+      },
+    },
+  }),
   getAgentNinjaSharedDirectoryPath: () => tempDir,
   getSharedSourcesManifestUri: () => ({ fsPath: manifestPath }),
   createEmptySharedSourcesManifest: (updatedBy) => ({
@@ -676,6 +684,107 @@ test("an entry count above the cap rejects the whole file", async () => {
   const read = await store.readSharedSourcesManifest();
   assert.strictEqual(read.status, "rejected");
   assert.match(read.reason, /entry limit/);
+});
+
+// The merge adds our entries to whatever the sibling already wrote, so the writer
+// has to hold itself to the limits the reader enforces.
+test("a merge past the entry cap is refused instead of written", async () => {
+  resetStore();
+  writeRawManifest({
+    schemaVersion: 1,
+    sources: Array.from(
+      { length: store.MAX_SHARED_SOURCE_ENTRIES },
+      (_unused, index) => ({
+        ...source,
+        id: `sibling-${index}`,
+        lastIndexedBy: SIBLING_ID,
+      }),
+    ),
+    lastUpdated: "2026-06-24T12:17:00.000Z",
+    updatedBy: SIBLING_ID,
+  });
+  const before = fs.readFileSync(manifestPath, "utf8");
+
+  const write = await store.writeSharedSourcesManifest({
+    schemaVersion: 1,
+    sources: [{ ...source, id: "own-extra" }],
+    lastUpdated: "2026-06-24T12:17:01.000Z",
+    updatedBy: SELF_ID,
+  });
+
+  assert.strictEqual(write.status, "rejected");
+  // A lock or path failure returns the same shape, so the reason has to be checked.
+  assert.strictEqual(
+    write.reason,
+    `${store.MAX_SHARED_SOURCE_ENTRIES + 1} entries exceeds the ${store.MAX_SHARED_SOURCE_ENTRIES} entry limit`,
+  );
+  assert.strictEqual(fs.readFileSync(manifestPath, "utf8"), before);
+});
+
+test("a merge exactly at the entry cap is written and reads back", async () => {
+  resetStore();
+  writeRawManifest({
+    schemaVersion: 1,
+    sources: Array.from(
+      { length: store.MAX_SHARED_SOURCE_ENTRIES - 1 },
+      (_unused, index) => ({
+        ...source,
+        id: `sibling-${index}`,
+        lastIndexedBy: SIBLING_ID,
+      }),
+    ),
+    lastUpdated: "2026-06-24T12:17:02.000Z",
+    updatedBy: SIBLING_ID,
+  });
+
+  const write = await store.writeSharedSourcesManifest({
+    schemaVersion: 1,
+    sources: [{ ...source, id: "own-extra" }],
+    lastUpdated: "2026-06-24T12:17:03.000Z",
+    updatedBy: SELF_ID,
+  });
+
+  assert.strictEqual(write.status, "written");
+  const read = await store.readSharedSourcesManifest();
+  assert.strictEqual(read.status, "valid");
+  assert.strictEqual(
+    read.manifest.sources.length,
+    store.MAX_SHARED_SOURCE_ENTRIES,
+  );
+});
+
+test("a merge past the byte cap is refused instead of written", async () => {
+  resetStore();
+  const write = await store.writeSharedSourcesManifest({
+    schemaVersion: 1,
+    sources: Array.from({ length: 40 }, (_unused, index) => ({
+      ...source,
+      id: `own-${index}`,
+      includePaths: Array.from(
+        { length: 64 },
+        (_path, position) => `${"a".repeat(500)}/${position}`,
+      ),
+      excludePaths: Array.from(
+        { length: 64 },
+        (_path, position) => `${"b".repeat(500)}/${position}`,
+      ),
+    })),
+    lastUpdated: "2026-06-24T12:17:04.000Z",
+    updatedBy: SELF_ID,
+  });
+
+  assert.strictEqual(write.status, "rejected");
+  assert.match(
+    write.reason,
+    new RegExp(
+      `^\\d+ bytes exceeds the ${sharedManifestStub.SHARED_SOURCES_MANIFEST_MAX_BYTES} byte limit$`,
+    ),
+  );
+  assert.strictEqual(
+    fs.existsSync(manifestPath),
+    false,
+    "a refused write must not publish a file we would then reject",
+  );
 });
 
 test("everything we write is something we can read back", async () => {

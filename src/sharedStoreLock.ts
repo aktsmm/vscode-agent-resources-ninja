@@ -15,7 +15,7 @@ import { logger } from "./logger";
 // The lock is shared with the skill-only sibling extension through the same
 // `index.lock`, so the payload shape, the stale windows and the reclaim file name
 // are a cross-extension contract rather than a local detail. They are mirrored from
-// aktsmm/vscode-agent-skill-ninja v0.9.43 `src/shared-store-lock.ts`, and
+// aktsmm/vscode-agent-skill-ninja v0.9.45 `src/shared-store-lock.ts`, and
 // `scripts/test-shared-store-contract.js` fails if this side drifts.
 
 export interface SharedStoreLockPayload {

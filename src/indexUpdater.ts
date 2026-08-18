@@ -61,7 +61,7 @@ import {
 } from "./githubAuth";
 export { checkGitHubAuth } from "./githubAuth";
 import { LICENSE_EXTRACTION, INDEX_LIMITS } from "./constants";
-import { encodeGitRefForPath } from "./gitHubRefSafety";
+import { encodeGitHubPathForUrl, encodeGitRefForPath } from "./gitHubRefSafety";
 import { logger } from "./logger";
 import { SELF_EXTENSION_ID } from "./coexistence";
 import { resetGitHubCredentialBlocklist } from "./githubCredentialBlocklist";
@@ -239,18 +239,11 @@ function buildRawContentUrl(
   branch: string,
   filePath: string,
 ): string {
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}/${normalizeGitHubContentPath(filePath)}`;
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}/${encodeGitHubPathForUrl(filePath)}`;
 }
 
 function normalizeGitHubContentPath(filePath: string): string {
   return filePath.replace(/\\/g, "/").replace(/^\/+/, "");
-}
-
-function encodeGitHubContentPath(filePath: string): string {
-  return normalizeGitHubContentPath(filePath)
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
 }
 
 function joinGitHubContentPath(...parts: string[]): string {
@@ -266,7 +259,7 @@ export async function fetchGitHubTextContent(
   timeoutMs: number = GITHUB_REQUEST_TIMEOUT_MS,
 ): Promise<string | undefined> {
   const rawUrl = buildRawContentUrl(owner, repo, branch, filePath);
-  const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeGitHubContentPath(filePath)}?ref=${encodeURIComponent(branch)}`;
+  const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeGitHubPathForUrl(filePath)}?ref=${encodeURIComponent(branch)}`;
   const response = await fetchGitHubWithOptionalAuthRetry(rawUrl, {
     accept: "text/plain",
     token,
@@ -2755,7 +2748,7 @@ export async function searchGitHub(
     let skillNameFromMeta = result.name;
 
     try {
-      const rawUrl = `https://raw.githubusercontent.com/${result.repo}/${encodeGitRefForPath(result.defaultBranch ?? "main")}/${result.itemPath}`;
+      const rawUrl = `https://raw.githubusercontent.com/${result.repo}/${encodeGitRefForPath(result.defaultBranch ?? "main")}/${encodeGitHubPathForUrl(result.itemPath)}`;
       const contentResponse = await fetchGitHubWithOptionalAuthRetry(rawUrl, {
         accept: "text/plain",
         token,

@@ -232,6 +232,19 @@ function countSharedResourceEntries(raw: unknown): number | undefined {
   return entryCount;
 }
 
+/**
+ * Reads and writes are held to the same size limit. A writer looser than the reader
+ * publishes a file it refuses on the next read, and a file we cannot read is one we
+ * are not allowed to repair.
+ */
+function describeOversizedSharedResourceIndex(
+  byteLength: number,
+): string | undefined {
+  return byteLength > SHARED_RESOURCE_INDEX_MAX_BYTES
+    ? `${byteLength} bytes exceeds the ${SHARED_RESOURCE_INDEX_MAX_BYTES} byte limit`
+    : undefined;
+}
+
 function getSharedResourceIndexLimitReason(raw: unknown): string | undefined {
   if (!raw || typeof raw !== "object") {
     return undefined;
@@ -493,12 +506,12 @@ export async function readSharedResourceIndexResult(): Promise<SharedResourceInd
     // Sized through the open handle so an oversized file is never pulled into
     // memory or parsed during activation.
     const stats = await handle.stat();
-    if (stats.size > SHARED_RESOURCE_INDEX_MAX_BYTES) {
-      const reason = `${stats.size} bytes exceeds the ${SHARED_RESOURCE_INDEX_MAX_BYTES} byte limit`;
+    const oversized = describeOversizedSharedResourceIndex(stats.size);
+    if (oversized) {
       logger.warn(
-        `[Resource Ninja] Shared resource index rejected (${reason}).`,
+        `[Resource Ninja] Shared resource index rejected (${oversized}).`,
       );
-      return { status: "rejected", reason };
+      return { status: "rejected", reason: oversized };
     }
 
     const raw = JSON.parse(await handle.readFile("utf8"));
@@ -556,15 +569,24 @@ export async function writeSharedResourceIndex(
   const fileUri = getSharedResourceIndexUri();
   const tempPath = `${sharedDir}/${SHARED_RESOURCE_INDEX_TEMP_FILE}`;
 
+  // Serialized once: a second stringify would let the checked text and the written
+  // text drift apart.
+  const payload = JSON.stringify(normalizedIndex, null, 2);
+  const oversized = describeOversizedSharedResourceIndex(
+    new TextEncoder().encode(payload).length,
+  );
+  if (oversized) {
+    logger.warn(
+      `[Resource Ninja] Did not write the shared resource index (${oversized}).`,
+    );
+    return { status: "rejected", reason: oversized };
+  }
+
   try {
     await withSharedStoreLock(SELF_EXTENSION_ID, async (lease) => {
       await fs.mkdir(sharedDir, { recursive: true });
       lease.assertHeld();
-      await fs.writeFile(
-        tempPath,
-        JSON.stringify(normalizedIndex, null, 2),
-        "utf8",
-      );
+      await fs.writeFile(tempPath, payload, "utf8");
       // Nothing may be awaited between this check and the rename.
       await lease.assertStillOwned();
       await fs.rename(tempPath, fileUri.fsPath);
@@ -967,16 +989,36 @@ export async function readRateLimitResumeRecord(
   return readRateLimitResumeFile(nowMs);
 }
 
+/**
+ * The reader ignores an oversized record, and it does so silently, so a record we
+ * could not read back would strand every source it defers. Serialized once so the
+ * checked bytes are the bytes that reach disk. A refusal removes whatever is on
+ * disk: leaving the previous record would later resume a different source set than
+ * the one that was actually deferred.
+ */
+async function writeRateLimitResumeFile(
+  record: RateLimitResumeRecord,
+): Promise<boolean> {
+  const payload = JSON.stringify(record, null, 2);
+  const byteLength = new TextEncoder().encode(payload).length;
+  if (byteLength > RATE_LIMIT_RESUME_MAX_FILE_BYTES) {
+    logger.warn(
+      `[Resource Ninja] Discarded the rate-limit resume record: ${byteLength} bytes exceeds the ${RATE_LIMIT_RESUME_MAX_FILE_BYTES} byte limit.`,
+    );
+    await fs.rm(getRateLimitResumePath(), { force: true });
+    return false;
+  }
+
+  await fs.mkdir(getAgentNinjaSharedDirectoryPath(), { recursive: true });
+  await fs.writeFile(getRateLimitResumePath(), payload, "utf8");
+  return true;
+}
+
 export async function saveRateLimitResumeRecord(
   record: RateLimitResumeRecord,
 ): Promise<void> {
   await withSharedStoreLock(SELF_EXTENSION_ID, async () => {
-    await fs.mkdir(getAgentNinjaSharedDirectoryPath(), { recursive: true });
-    await fs.writeFile(
-      getRateLimitResumePath(),
-      JSON.stringify(record, null, 2),
-      "utf8",
-    );
+    await writeRateLimitResumeFile(record);
   });
 }
 
@@ -1039,13 +1081,7 @@ export async function claimRateLimitResumeRecord(
       claimedBy,
       claimedAt: new Date(nowMs).toISOString(),
     };
-    await fs.mkdir(getAgentNinjaSharedDirectoryPath(), { recursive: true });
-    await fs.writeFile(
-      getRateLimitResumePath(),
-      JSON.stringify(claimed, null, 2),
-      "utf8",
-    );
-    return claimed;
+    return (await writeRateLimitResumeFile(claimed)) ? claimed : undefined;
   });
 }
 
@@ -1068,16 +1104,10 @@ export async function renewRateLimitResumeClaim(
       return false;
     }
 
-    await fs.writeFile(
-      getRateLimitResumePath(),
-      JSON.stringify(
-        { ...record, claimedAt: new Date(nowMs).toISOString() },
-        null,
-        2,
-      ),
-      "utf8",
-    );
-    return true;
+    return await writeRateLimitResumeFile({
+      ...record,
+      claimedAt: new Date(nowMs).toISOString(),
+    });
   });
 }
 

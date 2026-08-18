@@ -108,11 +108,10 @@ function makeContext() {
   };
 }
 
-const store = requireTypeScriptModule(
-  path.join(srcDir, "sharedResourceIndexStore.ts"),
-  {
+function storeStubs(manifestOverrides = {}) {
+  return {
     vscode: vscodeStub,
-    "./sharedManifest": sharedManifest,
+    "./sharedManifest": { ...sharedManifest, ...manifestOverrides },
     "./sharedStoreLock": {
       withSharedStoreLock: async (_owner, callback) =>
         callback({
@@ -164,7 +163,12 @@ const store = requireTypeScriptModule(
       writeSharedSourcesManifest: async () => ({ status: "written" }),
       bootstrapSharedSourcesManifest: async () => sourceBootstrapResult,
     },
-  },
+  };
+}
+
+const store = requireTypeScriptModule(
+  path.join(srcDir, "sharedResourceIndexStore.ts"),
+  storeStubs(),
 );
 
 const tests = [];
@@ -366,6 +370,21 @@ test("losing a race for the lock is not worth a notification", () => {
       store.planSharedStoreRejectionNotice("rejected", reason, "too large"),
       { action: "skip" },
       "and it says nothing about a genuine pause already reported",
+    );
+  }
+});
+
+// A write refused for its own size keeps being refused, so it is a pause the user
+// has to hear about rather than a race that clears itself.
+test("a write refused by its own limits reaches the pause notice", () => {
+  for (const reason of [
+    "33554433 bytes exceeds the 33554432 byte limit",
+    "10001 resources exceeds the 10000 entry limit",
+    "501 entries exceeds the 500 entry limit",
+  ]) {
+    assert.deepStrictEqual(
+      store.planSharedStoreRejectionNotice("rejected", reason, undefined),
+      { action: "notify", reason },
     );
   }
 });
@@ -784,6 +803,56 @@ test("shared resource metadata maps are bounded", async () => {
       label,
     );
   }
+});
+
+// The reader refuses an oversized file and we never overwrite a file we cannot
+// read, so publishing one would stop sharing for good.
+test("the shared resource index byte cap applies to writes as well as reads", async () => {
+  const boundedStore = requireTypeScriptModule(
+    path.join(srcDir, "sharedResourceIndexStore.ts"),
+    storeStubs({ SHARED_RESOURCE_INDEX_MAX_BYTES: 2048 }),
+  );
+
+  const byKind = sharedManifest.createEmptySharedResourceBuckets();
+  byKind.skill = Array.from({ length: 40 }, (_unused, index) => ({
+    name: `sized-${index}`,
+    source: "src",
+    path: `skills/sized-${index}/SKILL.md`,
+    kind: "skill",
+    description: "x".repeat(200),
+  }));
+  const index = {
+    schemaVersion: sharedManifest.SHARED_RESOURCE_INDEX_SCHEMA_VERSION,
+    lastFullScan: new Date(0).toISOString(),
+    lastScannedBy: "test.extension",
+    byKind,
+    translations: { ja: {} },
+    scanMeta: {},
+  };
+
+  fs.mkdirSync(sharedDir, { recursive: true });
+  fs.rmSync(sharedIndexPath, { force: true });
+
+  const write = await boundedStore.writeSharedResourceIndex(index);
+  assert.strictEqual(write.status, "rejected");
+  assert.match(write.reason, /^\d+ bytes exceeds the 2048 byte limit$/);
+  assert.strictEqual(
+    fs.existsSync(sharedIndexPath),
+    false,
+    "a refused write must not publish a file we would then reject",
+  );
+
+  fs.writeFileSync(sharedIndexPath, JSON.stringify(index, null, 2), "utf8");
+  const read = await boundedStore.readSharedResourceIndexResult();
+  assert.strictEqual(read.status, "rejected");
+  assert.match(read.reason, /bytes exceeds the 2048 byte limit$/);
+
+  // The production cap accepts the same payload, so the bound came from the stub.
+  assert.strictEqual(
+    (await store.writeSharedResourceIndex(index)).status,
+    "written",
+  );
+  fs.rmSync(sharedIndexPath, { force: true });
 });
 
 test("invalid shared metadata values are filtered before runtime use", async () => {

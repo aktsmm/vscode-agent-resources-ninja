@@ -3,9 +3,9 @@
 // `index.lock` in the same directory, so a change here is only correct if the other
 // side changes too.
 //
-// Source of truth: aktsmm/vscode-agent-skill-ninja v0.9.43 `src/shared-store-lock.ts`
-// and v0.9.44 `src/shared-manifest.ts`. If this test fails, decide which side is
-// right before relaxing it.
+// Source of truth: aktsmm/vscode-agent-skill-ninja v0.9.45 `src/shared-store-lock.ts`
+// and `src/shared-manifest.ts`. If this test fails, decide which side is right
+// before relaxing it.
 
 const assert = require("assert");
 const fs = require("fs");
@@ -75,6 +75,19 @@ const lock = requireTypeScriptModule(path.join(srcDir, "sharedStoreLock.ts"), {
   "./logger": { logger: { warn: () => {} } },
 });
 
+const sourcesStore = requireTypeScriptModule(
+  path.join(srcDir, "sharedSourcesManifestStore.ts"),
+  {
+    "./coexistence": { SELF_EXTENSION_ID: "contract.test" },
+    "./gitHubRefSafety": requireTypeScriptModule(
+      path.join(srcDir, "gitHubRefSafety.ts"),
+    ),
+    "./sharedManifest": sharedManifest,
+    "./logger": { logger: { warn: () => {} } },
+    "./sharedStoreLock": lock,
+  },
+);
+
 const tests = [];
 function test(name, fn) {
   tests.push([name, fn]);
@@ -100,6 +113,25 @@ test("the stale windows match the sibling extension", () => {
 
 test("the reclaim file keeps the name the sibling cleans up", () => {
   assert.strictEqual(lock.SHARED_STORE_LOCK_RECLAIM_SUFFIX, ".reclaim-");
+});
+
+test("the sources manifest caps match the sibling extension", () => {
+  // A cap stricter than the other writer's rejects a file we are not allowed to
+  // repair, which stops sharing for good.
+  assert.strictEqual(
+    sharedManifest.SHARED_SOURCES_MANIFEST_MAX_BYTES,
+    2 * 1024 * 1024,
+  );
+  assert.strictEqual(sourcesStore.MAX_SHARED_SOURCE_ENTRIES, 500);
+});
+
+test("a scanner name either extension may write is accepted by both", () => {
+  assert.strictEqual(
+    sourcesStore.FOREIGN_SCANNER_PATTERN.source,
+    /^[A-Za-z0-9._-]{1,64}$/.source,
+  );
+  assert.ok(sourcesStore.FOREIGN_SCANNER_PATTERN.test("claude-commands"));
+  assert.ok(!sourcesStore.FOREIGN_SCANNER_PATTERN.test("../../etc/passwd"));
 });
 
 test("the lock payload has exactly the four fields the sibling reads", async () => {

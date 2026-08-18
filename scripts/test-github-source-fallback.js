@@ -238,6 +238,44 @@ const {
     assert.strictEqual(requests[1].headers.Authorization, "token secret-token");
   });
 
+  await test("normalizes the escalated ref instead of double-encoding it", async () => {
+    const escalate = async (rawUrl) => {
+      const requests = [];
+      global.fetch = async (url) => {
+        requests.push(String(url));
+        return requests.length === 1
+          ? response(404, "Not Found")
+          : response(200, "private");
+      };
+
+      await fetchGitHubWithOptionalAuthRetry(rawUrl, {
+        accept: "text/plain",
+        token: "secret-token",
+      });
+      return new URL(requests[1]);
+    };
+
+    // The raw URL already carries an escaped ref, so encoding it again would
+    // request a branch that does not exist.
+    const escaped = await escalate(
+      "https://raw.githubusercontent.com/octo/private/release%231/SKILL.md",
+    );
+    assert.ok(escaped.search.endsWith("ref=release%231"));
+    assert.strictEqual(escaped.searchParams.get("ref"), "release#1");
+
+    // A raw URL that reached us unescaped must not add its own parameters.
+    const injected = await escalate(
+      "https://raw.githubusercontent.com/octo/private/feat&ref=main/SKILL.md",
+    );
+    assert.deepStrictEqual([...injected.searchParams.keys()], ["ref"]);
+    assert.strictEqual(injected.searchParams.get("ref"), "feat&ref=main");
+
+    const malformed = await escalate(
+      "https://raw.githubusercontent.com/octo/private/100%zz/SKILL.md",
+    );
+    assert.strictEqual(malformed.searchParams.get("ref"), "100%zz");
+  });
+
   await test("retries private raw content with the next distinct credential", async () => {
     const requests = [];
     resolveFallback = async (failedToken) => {

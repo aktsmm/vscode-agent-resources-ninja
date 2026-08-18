@@ -82,6 +82,21 @@ function isGitHubApiUrl(url: string): boolean {
   return url.startsWith(GITHUB_API_PREFIX);
 }
 
+/**
+ * The ref arrives as a path segment, so it is decoded once before being encoded for
+ * the query. A raw URL that reached us unescaped would otherwise add its own
+ * parameters to the API request.
+ */
+function encodeRefForQuery(pathSegment: string): string {
+  let decoded = pathSegment;
+  try {
+    decoded = decodeURIComponent(pathSegment);
+  } catch {
+    // A malformed escape is encoded as written rather than dropped.
+  }
+  return encodeURIComponent(decoded);
+}
+
 function buildAuthenticatedContentUrl(rawUrl: string): string | undefined {
   try {
     const parsed = new URL(rawUrl);
@@ -91,7 +106,7 @@ function buildAuthenticatedContentUrl(rawUrl: string): string | undefined {
     }
 
     const [owner, repo, branch, ...contentPath] = segments;
-    return `${GITHUB_API_PREFIX}repos/${owner}/${repo}/contents/${contentPath.join("/")}?ref=${branch}`;
+    return `${GITHUB_API_PREFIX}repos/${owner}/${repo}/contents/${contentPath.join("/")}?ref=${encodeRefForQuery(branch)}`;
   } catch {
     return undefined;
   }
