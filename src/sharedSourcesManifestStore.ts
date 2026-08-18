@@ -26,6 +26,7 @@ const KNOWN_SOURCE_ENTRY_KEYS: readonly string[] = [
   "type",
   "repoId",
   "scanner",
+  "foreignScanner",
   "branch",
   "lastIndexedAt",
   "lastIndexedBy",
@@ -215,6 +216,10 @@ function inspectSourceEntry(raw: unknown): InspectedSourceEntry {
   ) {
     known.scanner = candidate.scanner;
   }
+  const foreignScanner =
+    validated.scanner === undefined && typeof known.scanner === "string"
+      ? known.scanner
+      : undefined;
 
   if (!id || !name || !url || !type) {
     return { known, unknown };
@@ -240,6 +245,7 @@ function inspectSourceEntry(raw: unknown): InspectedSourceEntry {
       type,
       repoId: validated.repoId as number | undefined,
       scanner: validated.scanner as SourceScanner | undefined,
+      foreignScanner,
       branch: validated.branch as string | undefined,
       lastIndexedAt: validated.lastIndexedAt as string | undefined,
       lastIndexedBy: validated.lastIndexedBy as string | undefined,
@@ -260,7 +266,10 @@ export function normalizeSourceEntry(source: SourceEntry): SourceEntry {
     url: source.url,
     type: source.type,
     repoId: normalizeRepoId(source.repoId),
-    scanner: normalizeScanner(source.scanner),
+    scanner: source.foreignScanner
+      ? undefined
+      : normalizeScanner(source.scanner),
+    foreignScanner: source.foreignScanner,
     // Held to the same rule the reader applies, so we never publish an entry that
     // we would then refuse to read back. Losing the branch falls back to the
     // repository default; keeping it would lose the whole source.
@@ -277,7 +286,7 @@ export function normalizeSourceEntry(source: SourceEntry): SourceEntry {
 function toDefinedFields(entry: SourceEntry): Record<string, unknown> {
   const fields: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(normalizeSourceEntry(entry))) {
-    if (value !== undefined) {
+    if (key !== "foreignScanner" && value !== undefined) {
       fields[key] = value;
     }
   }
@@ -333,6 +342,14 @@ export function mergeSourceEntriesForRewrite(
       continue;
     }
 
+    if (own.foreignScanner) {
+      // This scanner belongs to another writer. Preserve its complete entry;
+      // our stale cache must not overwrite scanner, freshness or path curation.
+      merged.push({ ...inspected.unknown, ...inspected.known });
+      emittedIds.add(rawId);
+      continue;
+    }
+
     merged.push({
       ...inspected.unknown,
       ...inspected.known,
@@ -343,6 +360,11 @@ export function mergeSourceEntriesForRewrite(
 
   for (const own of ownEntries) {
     if (!emittedIds.has(own.id)) {
+      if (own.foreignScanner) {
+        // The sibling removed this foreign-owned source after our last read.
+        // A stale runtime marker must not recreate it without its scanner.
+        continue;
+      }
       merged.push(toDefinedFields(own));
     }
   }
@@ -597,10 +619,9 @@ export async function writeSharedSourcesManifest(
  */
 export async function bootstrapSharedSourcesManifest(
   sources: SourceEntry[],
-): Promise<SharedSourcesManifest> {
+): Promise<SharedSourcesManifestWriteResult> {
   const manifest = createEmptySharedSourcesManifest(SELF_EXTENSION_ID);
   manifest.sources = sources.map(normalizeSourceEntry);
   manifest.lastUpdated = new Date().toISOString();
-  await writeSharedSourcesManifest(manifest);
-  return manifest;
+  return await writeSharedSourcesManifest(manifest);
 }

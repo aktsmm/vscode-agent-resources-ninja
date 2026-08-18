@@ -4,6 +4,7 @@
 
 const assert = require("assert");
 const fs = require("fs");
+const fsPromises = require("fs/promises");
 const Module = require("module");
 const os = require("os");
 const path = require("path");
@@ -282,6 +283,50 @@ test("an unreadable lock is only reclaimed once it is older than the window", as
     entered,
     "leftovers from a half-written lock must not be permanent",
   );
+});
+
+test("fallback EEXIST is retried as lock contention", async () => {
+  reset({ isProcessAlive: () => true });
+  writeForeignLock({
+    pid: 424242,
+    acquiredAt: new Date(clock).toISOString(),
+    extensionId: "someone.else",
+    generation: "foreign",
+  });
+
+  const fallbackLock = requireTypeScriptModule(
+    path.join(repoRoot, "src", "sharedStoreLock.ts"),
+    {
+      "fs/promises": {
+        ...fsPromises,
+        link: async () => {
+          const error = new Error("hard links are unavailable");
+          error.code = "EPERM";
+          throw error;
+        },
+      },
+      "./sharedManifest": sharedManifestStub,
+      "./logger": { logger: { warn: () => {} } },
+    },
+  );
+  fallbackLock.configureSharedStoreLockRuntime({
+    now: () => clock,
+    isProcessAlive: () => true,
+    createGeneration: () => `fallback-${(generationCounter += 1)}`,
+  });
+
+  await assert.rejects(
+    () => fallbackLock.withSharedStoreLock(OWNER, async () => undefined),
+    (error) => {
+      assert.strictEqual(
+        error.message,
+        lock.SHARED_STORE_LOCK_UNAVAILABLE_MESSAGE,
+      );
+      assert.strictEqual(error.code, undefined, "raw EEXIST must not escape");
+      return true;
+    },
+  );
+  fallbackLock.resetSharedStoreLockRuntime();
 });
 
 test("a heartbeat cannot bring a released lock back", async () => {

@@ -1785,6 +1785,14 @@ export async function updateSingleSource(
 
   progress?.report({ message: `Updating ${source.name}...` });
 
+  if (hasForeignScanner(source)) {
+    logger.info(
+      `[Resource Ninja] Skipping ${source.id}: scanner "${source.foreignScanner}" is implemented by another shared-store writer.`,
+    );
+    progress?.report({ increment: 100 });
+    return { index: currentIndex, addedSkills: 0, removedSkills: 0 };
+  }
+
   try {
     const result = await scanRepositoryForSkills(
       source.url,
@@ -1877,6 +1885,15 @@ export interface SourceIndexUpdateAllResult {
   skipped: Source[];
 }
 
+export function hasForeignScanner(
+  source: Pick<Source, "foreignScanner">,
+): boolean {
+  return (
+    typeof source.foreignScanner === "string" &&
+    source.foreignScanner.length > 0
+  );
+}
+
 export async function updateIndexFromSources(
   context: vscode.ExtensionContext,
   currentIndex: SkillIndex,
@@ -1960,6 +1977,14 @@ export async function updateIndexFromSourcesWithResult(
       progress?.report({
         message: messages.updatingSource(source.name),
       });
+
+      if (hasForeignScanner(source)) {
+        logger.info(
+          `[Resource Ninja] Skipping ${source.id}: scanner "${source.foreignScanner}" is implemented by another shared-store writer.`,
+        );
+        preserveExistingSource(source);
+        continue;
+      }
 
       if (
         !options?.forceScan &&
@@ -2117,6 +2142,14 @@ export async function updateIndexFromSingleSource(
     message: messages.updatingSource(source.name),
   });
 
+  if (hasForeignScanner(source)) {
+    logger.info(
+      `[Resource Ninja] Skipping ${source.id}: scanner "${source.foreignScanner}" is implemented by another shared-store writer.`,
+    );
+    progress?.report({ increment: 100 });
+    return currentIndex;
+  }
+
   if (!options?.forceScan && !(await shouldRunSharedScan(context, sourceId))) {
     logger.info(
       `[Resource Ninja] Skipping shared scan for ${sourceId} because a recent shared scan is available.`,
@@ -2242,13 +2275,16 @@ export async function addSource(
     throw new Error("repoUrl must be a valid string");
   }
 
-  const token = await getGitHubToken();
-
   // 既に登録済みの URL なら、その source の repo identity を引き継いで検証する
   const normalizedRepoUrl = normalizeGitHubRepoUrl(repoUrl);
   const knownSource = currentIndex.sources.find(
     (s) => normalizeGitHubRepoUrl(s.url) === normalizedRepoUrl,
   );
+  if (knownSource && hasForeignScanner(knownSource)) {
+    return { index: currentIndex, addedSkills: 0 };
+  }
+
+  const token = await getGitHubToken();
 
   const result = await scanRepositoryForSkills(
     repoUrl,
@@ -2265,6 +2301,12 @@ export async function addSource(
   const existingSourceIndex = currentIndex.sources.findIndex(
     (s) => s.id === result.source.id,
   );
+  if (
+    existingSourceIndex >= 0 &&
+    hasForeignScanner(currentIndex.sources[existingSourceIndex])
+  ) {
+    return { index: currentIndex, addedSkills: 0 };
+  }
 
   let updatedSources: Source[];
   const indexedAt = new Date().toISOString();

@@ -20,6 +20,7 @@ import {
   SHARED_RESOURCE_INDEX_MAX_BYTES,
   SHARED_RESOURCE_INDEX_SCHEMA_VERSION,
   SHARED_RESOURCE_INDEX_TEMP_FILE,
+  ScanMeta,
   SharedResourceIndex,
   SourceEntry,
 } from "./sharedManifest";
@@ -145,6 +146,9 @@ async function applySharedStoreRejectionNotice(
 
 /** Long enough for any curated entry; anything longer is not data we wrote. */
 const SHARED_RESOURCE_MAX_FIELD_LENGTH = 2048;
+export const SHARED_RESOURCE_INDEX_MAX_ENTRIES = 10_000;
+export const SHARED_RESOURCE_MAX_FIELDS = 64;
+export const SHARED_RESOURCE_INDEX_MAX_METADATA_ENTRIES = 10_000;
 const SHARED_RESOURCE_SOURCE_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
 
 function isBoundedString(value: unknown): value is string {
@@ -199,6 +203,7 @@ export function isUsableSharedResourceEntry(
   }
   const candidate = entry as Record<string, unknown>;
   return (
+    Object.keys(candidate).length <= SHARED_RESOURCE_MAX_FIELDS &&
     isBoundedString(candidate.name) &&
     typeof candidate.source === "string" &&
     SHARED_RESOURCE_SOURCE_PATTERN.test(candidate.source) &&
@@ -212,6 +217,105 @@ export function isUsableSharedResourceEntry(
   );
 }
 
+function countSharedResourceEntries(raw: unknown): number | undefined {
+  if (!raw || typeof raw !== "object") {
+    return undefined;
+  }
+  const candidate = raw as Partial<SharedResourceIndex>;
+  let entryCount = 0;
+  for (const kind of RESOURCE_NINJA_KINDS) {
+    const entries = candidate.byKind?.[kind];
+    if (Array.isArray(entries)) {
+      entryCount += entries.length;
+    }
+  }
+  return entryCount;
+}
+
+function getSharedResourceIndexLimitReason(raw: unknown): string | undefined {
+  if (!raw || typeof raw !== "object") {
+    return undefined;
+  }
+  const candidate = raw as Partial<SharedResourceIndex>;
+  const entryCount = countSharedResourceEntries(candidate);
+  if (
+    entryCount !== undefined &&
+    entryCount > SHARED_RESOURCE_INDEX_MAX_ENTRIES
+  ) {
+    return `${entryCount} resources exceeds the ${SHARED_RESOURCE_INDEX_MAX_ENTRIES} entry limit`;
+  }
+
+  const translationCount =
+    candidate.translations?.ja && typeof candidate.translations.ja === "object"
+      ? Object.keys(candidate.translations.ja).length
+      : 0;
+  if (translationCount > SHARED_RESOURCE_INDEX_MAX_METADATA_ENTRIES) {
+    return `${translationCount} translations exceeds the ${SHARED_RESOURCE_INDEX_MAX_METADATA_ENTRIES} entry limit`;
+  }
+
+  const scanMetaCount =
+    candidate.scanMeta && typeof candidate.scanMeta === "object"
+      ? Object.keys(candidate.scanMeta).length
+      : 0;
+  if (scanMetaCount > SHARED_RESOURCE_INDEX_MAX_METADATA_ENTRIES) {
+    return `${scanMetaCount} scan records exceeds the ${SHARED_RESOURCE_INDEX_MAX_METADATA_ENTRIES} entry limit`;
+  }
+  return undefined;
+}
+
+function normalizeTranslations(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const translations: Record<string, string> = {};
+  for (const [key, translation] of Object.entries(value)) {
+    if (isBoundedString(key) && isBoundedString(translation)) {
+      translations[key] = translation;
+    }
+  }
+  return translations;
+}
+
+function normalizeScanMeta(value: unknown): Record<string, ScanMeta> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const scanMeta: Record<string, ScanMeta> = {};
+  for (const [sourceId, rawMeta] of Object.entries(value)) {
+    if (
+      !SHARED_RESOURCE_SOURCE_PATTERN.test(sourceId) ||
+      !rawMeta ||
+      typeof rawMeta !== "object" ||
+      Array.isArray(rawMeta)
+    ) {
+      continue;
+    }
+    const meta = rawMeta as Record<string, unknown>;
+    if (
+      !isBoundedString(meta.lastScannedBy) ||
+      (meta.etag !== undefined && !isBoundedString(meta.etag))
+    ) {
+      continue;
+    }
+    const lastScannedAt =
+      isBoundedString(meta.lastScannedAt) &&
+      Number.isFinite(Date.parse(meta.lastScannedAt))
+        ? meta.lastScannedAt
+        : new Date(0).toISOString();
+    const skillCount =
+      Number.isSafeInteger(meta.skillCount) && (meta.skillCount as number) >= 0
+        ? (meta.skillCount as number)
+        : 0;
+    scanMeta[sourceId] = {
+      lastScannedAt,
+      lastScannedBy: meta.lastScannedBy,
+      skillCount,
+      ...(meta.etag === undefined ? {} : { etag: meta.etag }),
+    };
+  }
+  return scanMeta;
+}
+
 function normalizeSharedResourceIndex(
   raw: unknown,
 ): SharedResourceIndex | undefined {
@@ -220,6 +324,13 @@ function normalizeSharedResourceIndex(
   }
   const candidate = raw as Partial<SharedResourceIndex>;
   if (candidate.schemaVersion !== SHARED_RESOURCE_INDEX_SCHEMA_VERSION) {
+    return undefined;
+  }
+
+  if (
+    countSharedResourceEntries(candidate) === undefined ||
+    getSharedResourceIndexLimitReason(candidate)
+  ) {
     return undefined;
   }
 
@@ -243,15 +354,9 @@ function normalizeSharedResourceIndex(
         : SELF_EXTENSION_ID,
     byKind: normalizedByKind,
     translations: {
-      ja:
-        candidate.translations && typeof candidate.translations === "object"
-          ? { ...(candidate.translations.ja || {}) }
-          : {},
+      ja: normalizeTranslations(candidate.translations?.ja),
     },
-    scanMeta:
-      candidate.scanMeta && typeof candidate.scanMeta === "object"
-        ? { ...candidate.scanMeta }
-        : {},
+    scanMeta: normalizeScanMeta(candidate.scanMeta),
   };
 }
 
@@ -396,9 +501,15 @@ export async function readSharedResourceIndexResult(): Promise<SharedResourceInd
       return { status: "rejected", reason };
     }
 
-    const parsed = normalizeSharedResourceIndex(
-      JSON.parse(await handle.readFile("utf8")),
-    );
+    const raw = JSON.parse(await handle.readFile("utf8"));
+    const limitReason = getSharedResourceIndexLimitReason(raw);
+    if (limitReason) {
+      logger.warn(
+        `[Resource Ninja] Shared resource index rejected (${limitReason}).`,
+      );
+      return { status: "rejected", reason: limitReason };
+    }
+    const parsed = normalizeSharedResourceIndex(raw);
     if (!parsed) {
       logger.warn("[Resource Ninja] Shared resource index schema mismatch.");
       return { status: "rejected", reason: "schema mismatch" };
@@ -429,6 +540,13 @@ export type SharedResourceIndexWriteResult =
 export async function writeSharedResourceIndex(
   sharedIndex: SharedResourceIndex,
 ): Promise<SharedResourceIndexWriteResult> {
+  const limitReason = getSharedResourceIndexLimitReason(sharedIndex);
+  if (limitReason) {
+    logger.warn(
+      `[Resource Ninja] Did not write the shared resource index (${limitReason}).`,
+    );
+    return { status: "rejected", reason: limitReason };
+  }
   const normalizedIndex = normalizeSharedResourceIndex(sharedIndex);
   if (!normalizedIndex) {
     throw new Error("Invalid shared resource index payload");
@@ -466,11 +584,10 @@ export async function writeSharedResourceIndex(
 
 export async function bootstrapSharedResourceIndex(
   currentIndex: SkillIndex,
-): Promise<SharedResourceIndex> {
+): Promise<SharedResourceIndexWriteResult> {
   const sharedIndex = buildSharedResourceIndexFromSkillIndex(currentIndex);
   sharedIndex.lastFullScan = new Date().toISOString();
-  await writeSharedResourceIndex(sharedIndex);
-  return sharedIndex;
+  return await writeSharedResourceIndex(sharedIndex);
 }
 
 export async function syncSharedStoresFromSkillIndex(
@@ -606,6 +723,13 @@ export function mergeSharedManifestSources(
     }
 
     const mergedSource: Source = { ...local };
+    // An absent marker means the shared scanner is now known or undeclared.
+    mergedSource.foreignScanner = incoming.foreignScanner;
+    if (incoming.foreignScanner) {
+      // A stale scanner learned from an older manifest must not overwrite the
+      // sibling's newer foreign declaration on the next shared rewrite.
+      mergedSource.scanner = undefined;
+    }
     for (const [key, value] of Object.entries(incoming)) {
       if (value !== undefined) {
         (mergedSource as unknown as Record<string, unknown>)[key] = value;
@@ -659,12 +783,20 @@ export async function loadSharedStoresIntoSkillIndex(
       };
     } else if (result.status === "missing") {
       try {
-        await bootstrapSharedSourcesManifest(
+        const writeResult = await bootstrapSharedSourcesManifest(
           currentIndex.sources.map((source) => ({ ...source })),
         );
-        await context.globalState.update(
-          SHARED_SOURCES_MANIFEST_RECONCILED_KEY,
-          true,
+        if (writeResult.status === "written") {
+          await context.globalState.update(
+            SHARED_SOURCES_MANIFEST_RECONCILED_KEY,
+            true,
+          );
+        }
+        await applySharedStoreRejectionNotice(
+          context,
+          "sources",
+          writeResult.status,
+          writeResult.status === "rejected" ? writeResult.reason : undefined,
         );
       } catch (error) {
         logger.warn(
@@ -687,7 +819,13 @@ export async function loadSharedStoresIntoSkillIndex(
       nextIndex = applySharedResourceIndexToSkillIndex(nextIndex, result.index);
     } else if (result.status === "missing") {
       try {
-        await bootstrapSharedResourceIndex(nextIndex);
+        const writeResult = await bootstrapSharedResourceIndex(nextIndex);
+        await applySharedStoreRejectionNotice(
+          context,
+          "index",
+          writeResult.status,
+          writeResult.status === "rejected" ? writeResult.reason : undefined,
+        );
       } catch (error) {
         logger.warn(
           "[Resource Ninja] Failed to bootstrap shared resource index:",
@@ -1005,7 +1143,13 @@ export async function updateSharedScanMetadata(
     }
     nextIndex.lastFullScan = scannedAt;
     nextIndex.lastScannedBy = SELF_EXTENSION_ID;
-    await writeSharedResourceIndex(nextIndex);
+    const writeResult = await writeSharedResourceIndex(nextIndex);
+    await applySharedStoreRejectionNotice(
+      context,
+      "index",
+      writeResult.status,
+      writeResult.status === "rejected" ? writeResult.reason : undefined,
+    );
   } catch (error) {
     logger.warn(
       "[Resource Ninja] Failed to update shared scan metadata:",

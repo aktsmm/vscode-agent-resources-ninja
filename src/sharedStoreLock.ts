@@ -48,6 +48,15 @@ export const SHARED_STORE_LOCK_UNAVAILABLE_MESSAGE =
   "Failed to acquire shared store lock";
 export const SHARED_STORE_LOCK_RECLAIM_SUFFIX = ".reclaim-";
 
+function isAlreadyExistsError(error: unknown): boolean {
+  return (
+    !!error &&
+    typeof error === "object" &&
+    "code" in error &&
+    (error as { code?: string }).code === "EEXIST"
+  );
+}
+
 /**
  * Losing the lock is an expected outcome of sharing the store with another tool,
  * so the callers that own a file report it instead of letting it escape as a crash.
@@ -280,22 +289,25 @@ async function publishLockFile(
       await fs.link(stagingPath, lockPath);
       return true;
     } catch (error) {
-      const code =
-        error && typeof error === "object" && "code" in error
-          ? (error as { code?: string }).code
-          : undefined;
-      if (code === "EEXIST") {
+      if (isAlreadyExistsError(error)) {
         return false;
       }
 
       // Fallback for filesystems without hard links; the empty window returns.
-      const handle = await fs.open(lockPath, "wx");
       try {
-        await handle.writeFile(body, "utf8");
-      } finally {
-        await handle.close();
+        const handle = await fs.open(lockPath, "wx");
+        try {
+          await handle.writeFile(body, "utf8");
+        } finally {
+          await handle.close();
+        }
+        return true;
+      } catch (fallbackError) {
+        if (isAlreadyExistsError(fallbackError)) {
+          return false;
+        }
+        throw fallbackError;
       }
-      return true;
     }
   } finally {
     await fs.rm(stagingPath, { force: true });

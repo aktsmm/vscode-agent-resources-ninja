@@ -64,9 +64,9 @@ async function main() {
       name: "listGitHubDirectory retries unauthenticated after auth failure for API requests",
       run: async () => {
         const fetchCalls = [];
-        global.fetch = async (_url, options = {}) => {
+        global.fetch = async (url, options = {}) => {
           const headers = options.headers || {};
-          fetchCalls.push(headers);
+          fetchCalls.push({ url, headers });
 
           if (fetchCalls.length === 1) {
             assert.strictEqual(
@@ -189,11 +189,15 @@ async function main() {
           "github",
           "awesome-copilot",
           "skills/create-github-action-workflow-specification",
-          "main",
+          "feature/x y",
           "test-token",
         );
 
         assert.strictEqual(fetchCalls.length, 2, "Should retry exactly once");
+        assert.strictEqual(
+          fetchCalls[0].url,
+          "https://api.github.com/repos/github/awesome-copilot/contents/skills/create-github-action-workflow-specification?ref=feature%2Fx%20y",
+        );
         assert.strictEqual(entries.length, 1);
         assert.strictEqual(entries[0].name, "SKILL.md");
       },

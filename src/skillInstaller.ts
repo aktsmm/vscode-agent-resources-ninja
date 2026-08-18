@@ -19,7 +19,10 @@ import {
 } from "./githubAuth";
 import { fetchGitHubWithOptionalAuthRetry } from "./githubFetch";
 import { resetGitHubCredentialBlocklist } from "./githubCredentialBlocklist";
-import { createGitHubResponseError } from "./githubResponse";
+import {
+  containsHttpStatus,
+  createGitHubResponseError,
+} from "./githubResponse";
 import {
   GitHubDirectoryEntry,
   partitionGitHubDirectoryEntries,
@@ -1018,7 +1021,7 @@ async function listGitHubDirectoryInternal(
     .split("/")
     .map((segment) => encodeURIComponent(segment))
     .join("/");
-  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}?ref=${branch}`;
+  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}?ref=${encodeURIComponent(branch)}`;
   const response = await fetchGitHubWithOptionalAuthRetry(url, {
     accept: "application/vnd.github.v3+json",
     token,
@@ -1516,7 +1519,7 @@ export async function installSkill(
         const errorMsg = error instanceof Error ? error.message : String(error);
 
         // 404エラーの場合はインストールをキャンセル（フォールバック作らない）
-        if (errorMsg.includes("404")) {
+        if (containsHttpStatus(errorMsg, 404)) {
           await handleSkillNotFound(
             skillPath,
             installRootUri,
@@ -1602,7 +1605,7 @@ export async function installSkill(
         const errorMsg = error instanceof Error ? error.message : String(error);
 
         // 404エラーの場合はインストールをキャンセル（フォールバック作らない）
-        if (errorMsg.includes("404")) {
+        if (containsHttpStatus(errorMsg, 404)) {
           const repoTreeUrl = `https://github.com/${owner}/${repo}/tree/${branch}/${remotePath}`;
           await handleSkillNotFound(
             skillPath,

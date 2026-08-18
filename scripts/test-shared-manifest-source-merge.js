@@ -92,6 +92,9 @@ assert.ok(
   `refusing to run: the shared directory ${sharedDir} is outside the temp root`,
 );
 const sharedIndexPath = path.join(sharedDir, "index.json");
+let useSharedResourceIndex = true;
+let useSharedSourcesManifest = true;
+let sourceBootstrapResult = { status: "written" };
 
 function makeContext() {
   const state = new Map();
@@ -135,8 +138,8 @@ const store = requireTypeScriptModule(
       ],
     },
     "./customizationPaths": {
-      getConfiguredUseSharedResourceIndex: () => true,
-      getConfiguredUseSharedSourcesManifest: () => true,
+      getConfiguredUseSharedResourceIndex: () => useSharedResourceIndex,
+      getConfiguredUseSharedSourcesManifest: () => useSharedSourcesManifest,
     },
     "./logger": {
       logger: {
@@ -159,7 +162,7 @@ const store = requireTypeScriptModule(
     "./sharedSourcesManifestStore": {
       readSharedSourcesManifest: async () => ({ status: "missing" }),
       writeSharedSourcesManifest: async () => ({ status: "written" }),
-      bootstrapSharedSourcesManifest: async () => undefined,
+      bootstrapSharedSourcesManifest: async () => sourceBootstrapResult,
     },
   },
 );
@@ -514,6 +517,73 @@ test("the shared index keeps what belongs to the other extension", () => {
   );
 });
 
+test("normalization preserves sibling ownership when skillCount is absent", async () => {
+  fs.mkdirSync(sharedDir, { recursive: true });
+  const siblingResource = {
+    name: "sibling-only",
+    source: "sibling-src",
+    path: "skills/sibling-only/SKILL.md",
+    kind: "skill",
+  };
+  const previous =
+    sharedManifest.createEmptySharedResourceIndex("sibling.extension");
+  previous.byKind.skill = [siblingResource];
+  previous.scanMeta["sibling-src"] = {
+    lastScannedAt: "invalid-date",
+    lastScannedBy: "sibling.extension",
+  };
+  fs.writeFileSync(sharedIndexPath, JSON.stringify(previous), "utf8");
+
+  const read = await store.readSharedResourceIndexResult();
+  assert.strictEqual(read.status, "valid");
+  assert.strictEqual(
+    read.index.scanMeta["sibling-src"].lastScannedBy,
+    "sibling.extension",
+  );
+  assert.strictEqual(read.index.scanMeta["sibling-src"].skillCount, 0);
+  assert.strictEqual(
+    read.index.scanMeta["sibling-src"].lastScannedAt,
+    new Date(0).toISOString(),
+  );
+
+  const rebuilt = store.buildSharedResourceIndexFromSkillIndex(
+    {
+      version: "1.0.0",
+      lastUpdated: "2026-08-18",
+      sources: [makeSource("local")],
+      skills: [],
+      categories: [],
+    },
+    read.index,
+  );
+  assert.ok(
+    rebuilt.byKind.skill.some((resource) => resource.name === "sibling-only"),
+    "a malformed auxiliary counter must not transfer sibling ownership",
+  );
+});
+
+test("a rejected sources bootstrap never marks reconciliation complete", async () => {
+  useSharedResourceIndex = false;
+  sourceBootstrapResult = { status: "rejected", reason: "write failed" };
+  const context = makeContext();
+  try {
+    await store.loadSharedStoresIntoSkillIndex(context, {
+      version: "1.0.0",
+      lastUpdated: "2026-08-18",
+      sources: [makeSource("local")],
+      skills: [],
+      categories: [],
+    });
+    assert.strictEqual(
+      context.globalState.get(store.SHARED_SOURCES_MANIFEST_RECONCILED_KEY),
+      undefined,
+    );
+  } finally {
+    sourceBootstrapResult = { status: "written" };
+    useSharedResourceIndex = true;
+  }
+});
+
 test("a foreign resource already loaded into our index is not written twice", () => {
   // A previous load copies the sibling's resources into our runtime index, so a
   // rebuild that emits everything and then carries the foreign ones over would
@@ -562,6 +632,23 @@ test("a shared resource entry that steers a download is rejected", () => {
     kind: "skill",
   };
   assert.strictEqual(store.isUsableSharedResourceEntry(usable), true);
+  const acceptedAtFieldLimit = Object.assign(
+    { ...usable },
+    Object.fromEntries(
+      Array.from(
+        { length: store.SHARED_RESOURCE_MAX_FIELDS - 4 },
+        (_, index) => [`extra${index}`, index],
+      ),
+    ),
+  );
+  assert.strictEqual(
+    Object.keys(acceptedAtFieldLimit).length,
+    store.SHARED_RESOURCE_MAX_FIELDS,
+  );
+  assert.strictEqual(
+    store.isUsableSharedResourceEntry(acceptedAtFieldLimit),
+    true,
+  );
 
   const rejected = [
     null,
@@ -577,7 +664,21 @@ test("a shared resource entry that steers a download is rejected", () => {
     { ...usable, url: "javascript:alert(1)" },
     { ...usable, rawUrl: "http://insecure.example.com/x" },
     { ...usable, name: "x".repeat(4096) },
+    Object.assign(
+      { ...usable },
+      Object.fromEntries(
+        Array.from(
+          { length: store.SHARED_RESOURCE_MAX_FIELDS - 3 },
+          (_, index) => [`extra${index}`, index],
+        ),
+      ),
+    ),
   ];
+  const rejectedAtFieldLimit = rejected[rejected.length - 1];
+  assert.strictEqual(
+    Object.keys(rejectedAtFieldLimit).length,
+    store.SHARED_RESOURCE_MAX_FIELDS + 1,
+  );
 
   for (const entry of rejected) {
     assert.strictEqual(
@@ -586,6 +687,141 @@ test("a shared resource entry that steers a download is rejected", () => {
       `expected rejection: ${JSON.stringify(entry)?.slice(0, 80)}`,
     );
   }
+});
+
+test("a shared resource index above the entry cap is rejected", async () => {
+  fs.mkdirSync(sharedDir, { recursive: true });
+  const entry = {
+    name: "bounded",
+    source: "src",
+    path: "skills/bounded/SKILL.md",
+    kind: "skill",
+  };
+  const byKind = sharedManifest.createEmptySharedResourceBuckets();
+  byKind.skill = Array.from(
+    { length: store.SHARED_RESOURCE_INDEX_MAX_ENTRIES + 1 },
+    (_, index) => ({ ...entry, name: `bounded-${index}` }),
+  );
+  const oversizedCountIndex = {
+    schemaVersion: sharedManifest.SHARED_RESOURCE_INDEX_SCHEMA_VERSION,
+    lastFullScan: new Date(0).toISOString(),
+    lastScannedBy: "test.extension",
+    byKind,
+    translations: { ja: {} },
+    scanMeta: {},
+  };
+  const acceptedAtCountLimit = {
+    ...oversizedCountIndex,
+    byKind: {
+      ...byKind,
+      skill: byKind.skill.slice(0, store.SHARED_RESOURCE_INDEX_MAX_ENTRIES),
+    },
+  };
+  fs.writeFileSync(
+    sharedIndexPath,
+    JSON.stringify(acceptedAtCountLimit),
+    "utf8",
+  );
+  assert.strictEqual(
+    (await store.readSharedResourceIndexResult()).status,
+    "valid",
+  );
+
+  fs.writeFileSync(
+    sharedIndexPath,
+    JSON.stringify(oversizedCountIndex),
+    "utf8",
+  );
+
+  const read = await store.readSharedResourceIndexResult();
+  assert.strictEqual(read.status, "rejected");
+  assert.match(read.reason, /10001 resources exceeds the 10000 entry limit/);
+  assert.deepStrictEqual(
+    await store.writeSharedResourceIndex(oversizedCountIndex),
+    {
+      status: "rejected",
+      reason: "10001 resources exceeds the 10000 entry limit",
+    },
+  );
+});
+
+test("shared resource metadata maps are bounded", async () => {
+  const base = sharedManifest.createEmptySharedResourceIndex("test.extension");
+  const tooManyEntries = Object.fromEntries(
+    Array.from(
+      { length: store.SHARED_RESOURCE_INDEX_MAX_METADATA_ENTRIES + 1 },
+      (_, index) => [`key-${index}`, {}],
+    ),
+  );
+
+  const acceptedTranslations = Object.fromEntries(
+    Array.from(
+      { length: store.SHARED_RESOURCE_INDEX_MAX_METADATA_ENTRIES },
+      (_, index) => [`key-${index}`, `translation-${index}`],
+    ),
+  );
+  fs.writeFileSync(
+    sharedIndexPath,
+    JSON.stringify({ ...base, translations: { ja: acceptedTranslations } }),
+    "utf8",
+  );
+  assert.strictEqual(
+    (await store.readSharedResourceIndexResult()).status,
+    "valid",
+  );
+
+  for (const [label, index] of [
+    ["translations", { ...base, translations: { ja: tooManyEntries } }],
+    ["scan records", { ...base, scanMeta: tooManyEntries }],
+  ]) {
+    fs.writeFileSync(sharedIndexPath, JSON.stringify(index), "utf8");
+    const read = await store.readSharedResourceIndexResult();
+    assert.strictEqual(read.status, "rejected", label);
+    assert.match(read.reason, new RegExp(label));
+    assert.strictEqual(
+      (await store.writeSharedResourceIndex(index)).status,
+      "rejected",
+      label,
+    );
+  }
+});
+
+test("invalid shared metadata values are filtered before runtime use", async () => {
+  const base = sharedManifest.createEmptySharedResourceIndex("test.extension");
+  const index = {
+    ...base,
+    translations: {
+      ja: {
+        valid: "説明",
+        empty: "",
+        oversized: "x".repeat(4096),
+        object: { unsafe: true },
+      },
+    },
+    scanMeta: {
+      valid: {
+        lastScannedAt: "2026-08-18T00:00:00.000Z",
+        lastScannedBy: "test.extension",
+        skillCount: 1,
+      },
+      "bad source id": {
+        lastScannedAt: "2026-08-18T00:00:00.000Z",
+        lastScannedBy: "test.extension",
+        skillCount: 1,
+      },
+      invalid: {
+        lastScannedAt: "not-a-date",
+        lastScannedBy: "",
+        skillCount: -1,
+      },
+    },
+  };
+  fs.writeFileSync(sharedIndexPath, JSON.stringify(index), "utf8");
+
+  const read = await store.readSharedResourceIndexResult();
+  assert.strictEqual(read.status, "valid");
+  assert.deepStrictEqual(read.index.translations.ja, { valid: "説明" });
+  assert.deepStrictEqual(Object.keys(read.index.scanMeta), ["valid"]);
 });
 
 async function main() {

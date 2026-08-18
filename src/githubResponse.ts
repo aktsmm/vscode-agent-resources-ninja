@@ -47,6 +47,29 @@ export function isGitHubResponseError(
   return error instanceof GitHubResponseError;
 }
 
+const GITHUB_AUTH_MESSAGE_MARKERS = [
+  "rate limit",
+  "authentication",
+  "github api の制限に達しました",
+  "github トークンで認証",
+];
+
+export function isGitHubAuthFailureMessage(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return GITHUB_AUTH_MESSAGE_MARKERS.some((marker) =>
+    normalized.includes(marker),
+  );
+}
+
+export function containsHttpStatus(
+  message: string,
+  ...statuses: readonly number[]
+): boolean {
+  return statuses.some((status) =>
+    new RegExp(`(?:^|[\\s(:])${status}(?=$|[\\s):.,])`).test(message),
+  );
+}
+
 /**
  * Presentation and recovery-policy code should explain the root cause; control
  * flow must keep reading `kind`, which still carries the surfaced failure.

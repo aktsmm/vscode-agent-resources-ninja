@@ -129,9 +129,14 @@ function getShouldPersistMergedIndexSourceFields() {
   ).map((node) => node.name.text);
 }
 
-function assertCoversSourceFields(siteName, coveredFields) {
+function assertCoversSourceFields(
+  siteName,
+  coveredFields,
+  excludedFields = [],
+) {
   const missing = getSourceInterfaceFields().filter(
-    (field) => !coveredFields.includes(field),
+    (field) =>
+      !excludedFields.includes(field) && !coveredFields.includes(field),
   );
   assert.deepStrictEqual(
     missing,
@@ -178,6 +183,7 @@ test("shouldPersistMergedIndex compares every Source field", () => {
   assertCoversSourceFields(
     "src/skillIndex.ts shouldPersistMergedIndex",
     getShouldPersistMergedIndexSourceFields(),
+    ["foreignScanner"],
   );
 });
 

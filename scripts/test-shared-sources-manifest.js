@@ -294,6 +294,7 @@ test("a scanner we cannot run never reaches the runtime", async () => {
   const read = await store.readSharedSourcesManifest();
   assert.strictEqual(read.status, "valid");
   assert.strictEqual(read.manifest.sources[0].scanner, undefined);
+  assert.strictEqual(read.manifest.sources[0].foreignScanner, "registry-json");
 });
 
 test("a scanner only the sibling implements survives our rewrite", async () => {
@@ -331,6 +332,62 @@ test("a scanner only the sibling implements survives our rewrite", async () => {
     "registry-json",
     "dropping it would delete the sibling's configuration on every save",
   );
+});
+
+test("a stale known scanner cannot overwrite a newer sibling scanner", async () => {
+  resetStore();
+  writeRawManifest({
+    schemaVersion: 1,
+    sources: [{ ...source, scanner: "registry-json" }],
+    lastUpdated: "2026-06-24T12:03:52.000Z",
+    updatedBy: SIBLING_ID,
+  });
+
+  const read = await store.readSharedSourcesManifest();
+  assert.strictEqual(read.status, "valid");
+  const runtimeSource = {
+    ...read.manifest.sources[0],
+    scanner: "auto",
+  };
+  await store.writeSharedSourcesManifest({
+    schemaVersion: 1,
+    sources: [runtimeSource],
+    lastUpdated: "2026-06-24T12:03:53.000Z",
+    updatedBy: SELF_ID,
+  });
+
+  const rewritten = readRawManifest().sources[0];
+  assert.strictEqual(rewritten.scanner, "registry-json");
+  assert.strictEqual(rewritten.lastIndexedAt, source.lastIndexedAt);
+  assert.strictEqual(rewritten.lastIndexedBy, source.lastIndexedBy);
+});
+
+test("a stale foreign runtime source cannot recreate a sibling deletion", async () => {
+  resetStore();
+  writeRawManifest({
+    schemaVersion: 1,
+    sources: [{ ...source, scanner: "registry-json" }],
+    lastUpdated: "2026-06-24T12:03:54.000Z",
+    updatedBy: SIBLING_ID,
+  });
+  const read = await store.readSharedSourcesManifest();
+  assert.strictEqual(read.status, "valid");
+  assert.strictEqual(read.manifest.sources[0].foreignScanner, "registry-json");
+
+  writeRawManifest({
+    schemaVersion: 1,
+    sources: [],
+    lastUpdated: "2026-06-24T12:03:55.000Z",
+    updatedBy: SIBLING_ID,
+  });
+  await store.writeSharedSourcesManifest({
+    schemaVersion: 1,
+    sources: read.manifest.sources,
+    lastUpdated: "2026-06-24T12:03:56.000Z",
+    updatedBy: SELF_ID,
+  });
+
+  assert.deepStrictEqual(readRawManifest().sources, []);
 });
 
 test("a scanner value that is not a plain name is not carried over", async () => {

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.52] - 2026-08-18
+
+### Fixed
+
+- 🛡️ **Shared Index Structure Was Not Fully Bounded** - The shared resource index had a 32 MB file limit and per-field validation, but no cap on resource count, metadata-map entries, or fields in one resource. A locally writable file could therefore force large activation-time filtering and object traversal without reaching the byte limit. Readers and writers now share limits of 10,000 resources, 10,000 translation or scan records, and 64 fields per resource; metadata values are validated before runtime use, malformed auxiliary scan fields cannot transfer sibling ownership, and rejected bootstrap writes raise the existing one-time sync warning / 共有リソースインデックスには 32 MB のファイル上限とフィールド単位の検証がありましたが、リソース総数、metadata map の件数、1 リソース内のフィールド数には上限がありませんでした。そのため、端末上で書き換え可能なファイルから、byte 上限に達しないまま起動時の大量 filter と object 走査を発生させられました。reader と writer の両方へ 10,000 resources、10,000 translation / scan records、1 resource あたり 64 fields の共通上限を設けます。metadata 値は runtime 利用前に検証し、補助的な scan field の破損で sibling ownership を移さず、bootstrap write の拒否は既存の一度だけの同期警告へ流します。
+
+- 📦 **A Newly Bundled Source Could Arrive Empty** - During activation, the shared index can omit a source introduced by the newer bundled catalog. The recovery path restored the source after reading shared state but not the resources belonging to it, then published an empty source back to the shared stores. Newly bundled sources and their resources are now restored together by identity and published only after shared state has been read / 起動時、より新しい bundled catalog で追加された source が shared index にまだ存在しない場合があります。復旧処理は shared state の読み取り後に source だけを戻し、その配下のリソースを戻さないまま空の source を共有ストアへ書き戻していました。新規 bundled source とそのリソースを identity 単位でまとめて復元し、shared state の読み取り後にだけ公開します。
+
+- 🤝 **Foreign Scanners Could Replace Another Extension's Index** - A scanner name implemented only by the sibling extension was preserved on disk but erased from the runtime source, so an update treated it as undeclared, ran this extension's fallback scanner, replaced the resources, and advanced freshness. Foreign scanner declarations now remain visible as a runtime guard without changing the shared scanner value; bulk, single-source, and duplicate add paths preserve the existing resources and timestamps without scanning / 姉妹拡張だけが実装する scanner 名は disk 上では保持していましたが、runtime source から消していたため、更新時には未宣言として扱われ、この拡張の fallback scanner でリソースを置き換え、鮮度も進めていました。共有 scanner 値を変更せず、foreign scanner 宣言を runtime のガードとして保持します。一括更新、単一 source 更新、既登録 source の追加では走査せず、既存リソースと timestamp を維持します。
+
+- 🔒 **Fallback Lock Contention Escaped the Retry Loop** - On a filesystem without hard-link support, another process winning the fallback `wx` create raised raw `EEXIST` and aborted the entire shared-store operation. The fallback now classifies that result as ordinary contention and returns to the bounded retry loop / hard link 非対応のファイルシステムで、別プロセスが fallback の `wx` 作成を先に取ると、生の `EEXIST` が共有ストア操作全体を中断していました。fallback でも通常の競合として分類し、上限付き retry loop へ戻るようにしました。
+
+- 🔑 **Japanese Rate-Limit Errors Missed Authentication Help** - Command handlers searched only English fragments such as `rate limit` and `authentication`, so the shipped Japanese rate-limit message fell through to a plain error. Authentication-message classification is now centralized and tested against the actual English and Japanese localized strings / command handler は `rate limit` や `authentication` など英語の断片だけを検索していたため、出荷中の日本語 rate-limit 文言は通常エラー表示へ落ちていました。認証メッセージ判定を一元化し、英語・日本語の実ローカライズ文字列でテストします。
+
+- 🔍 **HTTP Status and Ref Matching Were Too Loose** - Skill install recovery treated any message containing `404` as Not Found, including names and byte counts, while GitHub Contents API refs were inserted into the query without URL encoding. Status matching now requires token boundaries and API refs are query-encoded / skill の復旧処理は名前や byte 数を含め、`404` を含むだけのメッセージを Not Found として扱っていました。また GitHub Contents API の ref は URL encode せず query へ入れていました。status は token 境界付きで判定し、API ref は query 用に encode します。
+
 ## [0.2.51] - 2026-08-18
 
 ### Fixed

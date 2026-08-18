@@ -11,6 +11,7 @@ export type SourceEntry = Pick<
   | "type"
   | "repoId"
   | "scanner"
+  | "foreignScanner"
   | "branch"
   | "lastIndexedAt"
   | "lastIndexedBy"

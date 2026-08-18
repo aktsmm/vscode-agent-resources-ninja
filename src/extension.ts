@@ -205,7 +205,7 @@ import {
 } from "./sourceFreshness";
 import {
   getGitHubEffectiveFailureKind,
-  GitHubResponseError,
+  isGitHubAuthFailureMessage,
   isGitHubResponseError,
 } from "./githubResponse";
 import {
@@ -457,8 +457,8 @@ function formatSourceUpdateFailureReason(error: unknown): string {
   }
 }
 
-function shouldOfferGitHubAuth(error: unknown): error is GitHubResponseError {
-  return (
+function shouldOfferGitHubAuth(error: unknown): boolean {
+  if (
     isGitHubResponseError(error) &&
     [
       "rate-limit",
@@ -466,6 +466,11 @@ function shouldOfferGitHubAuth(error: unknown): error is GitHubResponseError {
       "classic-pat-forbidden",
       "auth-required",
     ].includes(getGitHubEffectiveFailureKind(error))
+  ) {
+    return true;
+  }
+  return isGitHubAuthFailureMessage(
+    error instanceof Error ? error.message : String(error),
   );
 }
 
@@ -5484,12 +5489,7 @@ export async function activate(
       }
       const errorMessage =
         error instanceof Error ? error.message : String(error);
-      if (
-        shouldOfferGitHubAuth(error) ||
-        errorMessage.includes("rate limit") ||
-        errorMessage.includes("403") ||
-        errorMessage.includes("authentication")
-      ) {
+      if (shouldOfferGitHubAuth(error)) {
         await showAuthHelp(error);
       } else {
         vscode.window.showErrorMessage(messages.installFailed(errorMessage));
@@ -7166,11 +7166,7 @@ export async function activate(
       } catch (error: unknown) {
         const errorMessage =
           error instanceof Error ? error.message : String(error);
-        if (
-          shouldOfferGitHubAuth(error) ||
-          errorMessage.includes("rate limit") ||
-          errorMessage.includes("authentication")
-        ) {
+        if (shouldOfferGitHubAuth(error)) {
           await showAuthHelp(error);
         } else {
           vscode.window.showErrorMessage(messages.updateFailed(errorMessage));
@@ -7272,11 +7268,7 @@ export async function activate(
 
         const errorMessage =
           error instanceof Error ? error.message : String(error);
-        if (
-          shouldOfferGitHubAuth(error) ||
-          errorMessage.includes("rate limit") ||
-          errorMessage.includes("authentication")
-        ) {
+        if (shouldOfferGitHubAuth(error)) {
           await showAuthHelp(error);
         } else {
           vscode.window.showErrorMessage(messages.updateFailed(errorMessage));
@@ -7394,11 +7386,7 @@ export async function activate(
 
         const errorMessage =
           error instanceof Error ? error.message : String(error);
-        if (
-          shouldOfferGitHubAuth(error) ||
-          errorMessage.includes("rate limit") ||
-          errorMessage.includes("authentication")
-        ) {
+        if (shouldOfferGitHubAuth(error)) {
           await showAuthHelp(error);
         } else if (errorMessage.includes("No resources found")) {
           vscode.window.showWarningMessage(messages.noSkillsInRepo());
@@ -7689,11 +7677,7 @@ export async function activate(
         } catch (error: unknown) {
           const errorMessage =
             error instanceof Error ? error.message : String(error);
-          if (
-            shouldOfferGitHubAuth(error) ||
-            errorMessage.includes("rate limit") ||
-            errorMessage.includes("authentication")
-          ) {
+          if (shouldOfferGitHubAuth(error)) {
             await showAuthHelp(error);
           } else {
             vscode.window.showErrorMessage(messages.searchFailed(errorMessage));

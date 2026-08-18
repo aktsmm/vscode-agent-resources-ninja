@@ -143,6 +143,7 @@ export interface Source {
   type: string;
   repoId?: number; // GitHub の数値 repository id（初回スキャンで TOFU 記録）
   scanner?: SourceScanner; // リポジトリ名に依存しないスキャン方式の宣言
+  foreignScanner?: string; // 共有 writer が宣言した未実装 scanner（走査抑止用）
   branch?: string; // 明示的なデフォルトブランチ（省略時は runtime で解決）
   lastIndexedAt?: string; // ソース単位の最終 index 更新日時
   lastIndexedBy?: string; // lastIndexedAt を書いた拡張の id（同居時の鮮度の帰属）
@@ -260,21 +261,43 @@ export function createBundleKey(bundle: Pick<Bundle, "source" | "id">): string {
   return `${bundle.source}:${bundle.id}`;
 }
 
-function normalizeSkillIndex(index: Partial<SkillIndex>): SkillIndex {
+function normalizeSkillIndex(
+  index: Partial<SkillIndex>,
+  preserveRuntimeMarkers = false,
+): SkillIndex {
   return {
     version: index.version || "1.0.0",
     lastUpdated: index.lastUpdated || new Date().toISOString().split("T")[0],
     lastScannedAt: index.lastScannedAt,
-    sources: getNormalizedArrayField<Source>(index, "sources").map(
-      (source) => ({
+    sources: getNormalizedArrayField<Source>(index, "sources").map((source) => {
+      const normalized = {
         ...source,
         url: normalizeGitHubRepoUrl(source.url),
-      }),
-    ),
+      };
+      if (!preserveRuntimeMarkers) {
+        delete normalized.foreignScanner;
+      }
+      return normalized;
+    }),
     skills: getNormalizedArrayField<Skill>(index, "skills"),
     categories: getNormalizedArrayField<Category>(index, "categories"),
     bundles: getNormalizedArrayField<Bundle>(index, "bundles"),
   };
+}
+
+async function persistLocalSkillIndex(
+  context: vscode.ExtensionContext,
+  index: SkillIndex,
+): Promise<void> {
+  const localIndexPath = vscode.Uri.joinPath(
+    context.globalStorageUri,
+    "skill-index.json",
+  );
+  await vscode.workspace.fs.createDirectory(context.globalStorageUri);
+  await vscode.workspace.fs.writeFile(
+    localIndexPath,
+    Buffer.from(JSON.stringify(normalizeSkillIndex(index), null, 2), "utf-8"),
+  );
 }
 
 /**
@@ -315,6 +338,7 @@ export async function loadSkillIndex(
   }
 
   let effectiveIndex: SkillIndex;
+  let newlyBundledSources: Source[] = [];
 
   try {
     // ローカルインデックスを読み込む
@@ -326,10 +350,12 @@ export async function loadSkillIndex(
     // バンドル版がある場合は常にマージ（description_ja の補完のため）
     if (bundledIndex) {
       const mergedIndex = mergeSkillIndexes(localIndex, bundledIndex);
-      // バンドル版で補完できるメタデータがあれば保存する
-      if (shouldPersistMergedIndex(localIndex, mergedIndex)) {
-        await saveSkillIndex(context, mergedIndex);
-      }
+      const localSourceIds = new Set(
+        localIndex.sources.map((source) => source.id),
+      );
+      newlyBundledSources = mergedIndex.sources.filter(
+        (source) => !localSourceIds.has(source.id),
+      );
       effectiveIndex = mergedIndex;
     } else {
       effectiveIndex = localIndex;
@@ -366,16 +392,41 @@ export async function loadSkillIndex(
     context,
     effectiveIndex,
   );
+  const sharedSourceIds = new Set(
+    sharedMergedIndex.sources.map((source) => source.id),
+  );
+  const sourcesToPublish = newlyBundledSources.filter(
+    (source) => !sharedSourceIds.has(source.id),
+  );
+  const sourceIdsToPublish = new Set(
+    sourcesToPublish.map((source) => source.id),
+  );
+  const sharedResourceKeys = new Set(
+    sharedMergedIndex.skills.map(createSkillKey),
+  );
+  const resourcesToPublish = effectiveIndex.skills.filter(
+    (skill) =>
+      sourceIdsToPublish.has(skill.source) &&
+      !sharedResourceKeys.has(createSkillKey(skill)),
+  );
+  const finalIndex =
+    sourcesToPublish.length > 0
+      ? {
+          ...sharedMergedIndex,
+          sources: [...sharedMergedIndex.sources, ...sourcesToPublish],
+          skills: [...sharedMergedIndex.skills, ...resourcesToPublish],
+        }
+      : sharedMergedIndex;
 
-  if (shouldPersistMergedIndex(effectiveIndex, sharedMergedIndex)) {
-    await vscode.workspace.fs.createDirectory(context.globalStorageUri);
-    await vscode.workspace.fs.writeFile(
-      localIndexPath,
-      Buffer.from(JSON.stringify(sharedMergedIndex, null, 2), "utf-8"),
-    );
+  if (sourcesToPublish.length > 0) {
+    // Shared state has now been read and merged, so publishing cannot overwrite
+    // a sibling's newer fields with stale local cache data.
+    await saveSkillIndex(context, finalIndex);
+  } else if (shouldPersistMergedIndex(effectiveIndex, finalIndex)) {
+    await persistLocalSkillIndex(context, finalIndex);
   }
 
-  return sharedMergedIndex;
+  return finalIndex;
 }
 
 /**
@@ -751,17 +802,9 @@ export async function saveSkillIndex(
   context: vscode.ExtensionContext,
   index: SkillIndex,
 ): Promise<void> {
-  const normalizedIndex = normalizeSkillIndex(index);
-  const localIndexPath = vscode.Uri.joinPath(
-    context.globalStorageUri,
-    "skill-index.json",
-  );
-  await vscode.workspace.fs.createDirectory(context.globalStorageUri);
-  await vscode.workspace.fs.writeFile(
-    localIndexPath,
-    Buffer.from(JSON.stringify(normalizedIndex, null, 2), "utf-8"),
-  );
-  await syncSharedStoresFromSkillIndex(context, normalizedIndex);
+  const runtimeIndex = normalizeSkillIndex(index, true);
+  await persistLocalSkillIndex(context, index);
+  await syncSharedStoresFromSkillIndex(context, runtimeIndex);
 }
 
 export const DEFAULT_BRANCH_NEGATIVE_CACHE_TTL_MS = 30_000;

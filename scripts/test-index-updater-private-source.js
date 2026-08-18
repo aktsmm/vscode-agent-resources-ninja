@@ -582,6 +582,84 @@ async function testSingleSourceProgressAdvancesAfterScan() {
   ]);
 }
 
+async function testForeignScannerIsNotExecutedOrStamped() {
+  const { moduleExports } = createModule();
+  let fetchCount = 0;
+  global.fetch = async () => {
+    fetchCount += 1;
+    throw new Error("foreign scanners must not reach GitHub");
+  };
+
+  const currentIndex = {
+    version: "1.0.0",
+    lastUpdated: "2026-06-20",
+    lastScannedAt: "2026-06-20T00:00:00.000Z",
+    sources: [
+      {
+        id: "foreign-source",
+        name: "Foreign Source",
+        url: "https://github.com/octo/foreign-source",
+        type: "community",
+        foreignScanner: "registry-json",
+        lastIndexedAt: "2026-06-19T00:00:00.000Z",
+        lastIndexedBy: "sibling.extension",
+        description: "Owned by another scanner",
+      },
+    ],
+    skills: [
+      {
+        name: "existing",
+        source: "foreign-source",
+        path: "registry/existing",
+        categories: [],
+        description: "Existing resource",
+      },
+    ],
+    categories: [],
+    bundles: [],
+  };
+
+  const bulk = await moduleExports.updateIndexFromSourcesWithResult(
+    { globalStorageUri: { fsPath: path.join("D:", "tmp", "storage") } },
+    currentIndex,
+    undefined,
+    { forceScan: true },
+  );
+  assert.strictEqual(fetchCount, 0);
+  assert.strictEqual(bulk.index.lastScannedAt, currentIndex.lastScannedAt);
+  assert.deepStrictEqual(bulk.index.sources, currentIndex.sources);
+  assert.deepStrictEqual(bulk.index.skills, currentIndex.skills);
+
+  const single = await moduleExports.updateIndexFromSingleSource(
+    { globalStorageUri: { fsPath: path.join("D:", "tmp", "storage") } },
+    currentIndex,
+    "foreign-source",
+    undefined,
+    { forceScan: true },
+  );
+  assert.strictEqual(single, currentIndex);
+  assert.strictEqual(fetchCount, 0);
+
+  const legacySingle = await moduleExports.updateSingleSource(
+    { globalStorageUri: { fsPath: path.join("D:", "tmp", "storage") } },
+    currentIndex,
+    "foreign-source",
+  );
+  assert.strictEqual(legacySingle.index, currentIndex);
+  assert.strictEqual(legacySingle.addedSkills, 0);
+  assert.strictEqual(legacySingle.removedSkills, 0);
+  assert.strictEqual(fetchCount, 0);
+
+  const duplicateAdd = await moduleExports.addSource(
+    { globalStorageUri: { fsPath: path.join("D:", "tmp", "storage") } },
+    currentIndex,
+    "https://github.com/octo/foreign-source",
+  );
+  assert.strictEqual(duplicateAdd.index, currentIndex);
+  assert.strictEqual(duplicateAdd.addedSkills, 0);
+  assert.strictEqual(fetchCount, 0);
+}
+
 async function testRemoveSourceRemovesOnlyIndexedEntries() {
   const { moduleExports, writes } = createModule();
   const currentIndex = {
@@ -965,6 +1043,7 @@ async function main() {
   await testFullUpdateStopsAfterRateLimit();
   await testFullUpdateScansOldestSourceFirst();
   await testSingleSourceProgressAdvancesAfterScan();
+  await testForeignScannerIsNotExecutedOrStamped();
   await testRemoveSourceRemovesOnlyIndexedEntries();
   await testMutationBoundariesRejectMalformedIndexShape();
   await testSaveSkillIndexSyncsSharedStores();

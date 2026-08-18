@@ -384,6 +384,302 @@ async function main() {
     }
   });
 
+  await test("saveSkillIndex keeps foreign scanner markers runtime-only", async () => {
+    const tempRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "resource-index-runtime-marker-"),
+    );
+    const globalStorageRoot = path.join(tempRoot, "global-storage");
+    let sharedSyncIndex;
+    const moduleWithFs = requireTypeScriptModule(
+      path.join(repoRoot, "src", "skillIndex.ts"),
+      {
+        vscode: makeVscodeStub(),
+        "./gitHubRefSafety": requireTypeScriptModule(
+          path.join(repoRoot, "src", "gitHubRefSafety.ts"),
+        ),
+        "./githubFetch": {
+          createGitHubHeaders: () => ({}),
+          fetchGitHubWithOptionalAuthRetry: async () => ({ ok: false }),
+        },
+        "./logger": {
+          logger: {
+            info: () => undefined,
+            warn: () => undefined,
+            error: () => undefined,
+          },
+        },
+        "./sharedResourceIndexStore": {
+          loadSharedStoresIntoSkillIndex: async (_context, index) => index,
+          syncSharedStoresFromSkillIndex: async (_context, index) => {
+            sharedSyncIndex = index;
+          },
+        },
+      },
+    );
+
+    try {
+      await moduleWithFs.saveSkillIndex(
+        { globalStorageUri: makeUri(globalStorageRoot) },
+        {
+          version: "1.0.0",
+          lastUpdated: "2026-08-18",
+          sources: [
+            {
+              id: "foreign-source",
+              name: "Foreign Source",
+              url: "https://github.com/octo/foreign-source",
+              type: "community",
+              foreignScanner: "registry-json",
+              description: "Foreign source",
+            },
+          ],
+          skills: [],
+          categories: [],
+          bundles: [],
+        },
+      );
+
+      const persisted = JSON.parse(
+        fs.readFileSync(
+          path.join(globalStorageRoot, "skill-index.json"),
+          "utf8",
+        ),
+      );
+      assert.strictEqual(persisted.sources[0].foreignScanner, undefined);
+      assert.strictEqual(
+        sharedSyncIndex.sources[0].foreignScanner,
+        "registry-json",
+      );
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  await test("loadSkillIndex reads shared state before any shared write", async () => {
+    const tempRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "resource-index-load-order-"),
+    );
+    const extensionRoot = path.join(tempRoot, "extension");
+    const globalStorageRoot = path.join(tempRoot, "global-storage");
+    fs.mkdirSync(path.join(extensionRoot, "resources"), { recursive: true });
+    fs.mkdirSync(globalStorageRoot, { recursive: true });
+    const source = {
+      id: "shared-source",
+      name: "Shared Source",
+      url: "https://github.com/octo/shared-source",
+      type: "community",
+      scanner: "auto",
+      description: "Shared source",
+    };
+    fs.writeFileSync(
+      path.join(extensionRoot, "resources", "skill-index.json"),
+      JSON.stringify({
+        version: "2.0.0",
+        lastUpdated: "2026-08-18",
+        sources: [source],
+        skills: [],
+        categories: [],
+        bundles: [],
+      }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(globalStorageRoot, "skill-index.json"),
+      JSON.stringify({
+        version: "1.0.0",
+        lastUpdated: "2026-08-17",
+        sources: [source],
+        skills: [],
+        categories: [],
+        bundles: [],
+      }),
+      "utf8",
+    );
+    const events = [];
+    const moduleWithFs = requireTypeScriptModule(
+      path.join(repoRoot, "src", "skillIndex.ts"),
+      {
+        vscode: makeVscodeStub(),
+        "./gitHubRefSafety": requireTypeScriptModule(
+          path.join(repoRoot, "src", "gitHubRefSafety.ts"),
+        ),
+        "./githubFetch": {
+          createGitHubHeaders: () => ({}),
+          fetchGitHubWithOptionalAuthRetry: async () => ({ ok: false }),
+        },
+        "./logger": {
+          logger: {
+            info: () => undefined,
+            warn: () => undefined,
+            error: () => undefined,
+          },
+        },
+        "./sharedResourceIndexStore": {
+          loadSharedStoresIntoSkillIndex: async (_context, index) => {
+            events.push("read-shared");
+            return {
+              ...index,
+              sources: index.sources.map((entry) => ({
+                ...entry,
+                scanner: undefined,
+                foreignScanner: "registry-json",
+              })),
+            };
+          },
+          syncSharedStoresFromSkillIndex: async () => {
+            events.push("write-shared");
+          },
+        },
+      },
+    );
+
+    try {
+      const loaded = await moduleWithFs.loadSkillIndex({
+        extensionUri: makeUri(extensionRoot),
+        globalStorageUri: makeUri(globalStorageRoot),
+      });
+      assert.deepStrictEqual(events, ["read-shared"]);
+      assert.strictEqual(loaded.sources[0].foreignScanner, "registry-json");
+      const persisted = JSON.parse(
+        fs.readFileSync(
+          path.join(globalStorageRoot, "skill-index.json"),
+          "utf8",
+        ),
+      );
+      assert.strictEqual(persisted.sources[0].foreignScanner, undefined);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  await test("loadSkillIndex publishes a newly bundled source after shared read", async () => {
+    const tempRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "resource-index-new-bundled-"),
+    );
+    const extensionRoot = path.join(tempRoot, "extension");
+    const globalStorageRoot = path.join(tempRoot, "global-storage");
+    fs.mkdirSync(path.join(extensionRoot, "resources"), { recursive: true });
+    fs.mkdirSync(globalStorageRoot, { recursive: true });
+    const existingSource = {
+      id: "existing-source",
+      name: "Existing Source",
+      url: "https://github.com/octo/existing-source",
+      type: "official",
+      description: "Existing source",
+    };
+    const newSource = {
+      id: "new-source",
+      name: "New Source",
+      url: "https://github.com/octo/new-source",
+      type: "official",
+      description: "New source",
+    };
+    const existingSkill = {
+      name: "existing-skill",
+      source: "existing-source",
+      path: "skills/existing-skill",
+      categories: [],
+      description: "Existing skill",
+    };
+    const newSkill = {
+      name: "new-skill",
+      source: "new-source",
+      path: "skills/new-skill",
+      categories: [],
+      description: "New skill",
+    };
+    fs.writeFileSync(
+      path.join(extensionRoot, "resources", "skill-index.json"),
+      JSON.stringify({
+        version: "2.0.0",
+        lastUpdated: "2026-08-18",
+        sources: [existingSource, newSource],
+        skills: [existingSkill, newSkill],
+        categories: [],
+        bundles: [],
+      }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(globalStorageRoot, "skill-index.json"),
+      JSON.stringify({
+        version: "1.0.0",
+        lastUpdated: "2026-08-17",
+        sources: [existingSource],
+        skills: [existingSkill],
+        categories: [],
+        bundles: [],
+      }),
+      "utf8",
+    );
+    const events = [];
+    let syncedIndex;
+    const moduleWithFs = requireTypeScriptModule(
+      path.join(repoRoot, "src", "skillIndex.ts"),
+      {
+        vscode: makeVscodeStub(),
+        "./gitHubRefSafety": requireTypeScriptModule(
+          path.join(repoRoot, "src", "gitHubRefSafety.ts"),
+        ),
+        "./githubFetch": {
+          createGitHubHeaders: () => ({}),
+          fetchGitHubWithOptionalAuthRetry: async () => ({ ok: false }),
+        },
+        "./logger": {
+          logger: {
+            info: () => undefined,
+            warn: () => undefined,
+            error: () => undefined,
+          },
+        },
+        "./sharedResourceIndexStore": {
+          loadSharedStoresIntoSkillIndex: async (_context, index) => {
+            events.push("read-shared");
+            return {
+              ...index,
+              sources: index.sources.filter(
+                (source) => source.id === "existing-source",
+              ),
+              skills: index.skills.filter(
+                (skill) => skill.source === "existing-source",
+              ),
+            };
+          },
+          syncSharedStoresFromSkillIndex: async (_context, index) => {
+            events.push("write-shared");
+            syncedIndex = index;
+          },
+        },
+      },
+    );
+
+    try {
+      const loaded = await moduleWithFs.loadSkillIndex({
+        extensionUri: makeUri(extensionRoot),
+        globalStorageUri: makeUri(globalStorageRoot),
+      });
+      assert.deepStrictEqual(events, ["read-shared", "write-shared"]);
+      assert.deepStrictEqual(
+        loaded.sources.map((source) => source.id),
+        ["existing-source", "new-source"],
+      );
+      assert.deepStrictEqual(
+        syncedIndex.sources.map((source) => source.id),
+        ["existing-source", "new-source"],
+      );
+      assert.deepStrictEqual(
+        loaded.skills.map((skill) => skill.name),
+        ["existing-skill", "new-skill"],
+      );
+      assert.deepStrictEqual(
+        syncedIndex.skills.map((skill) => skill.name),
+        ["existing-skill", "new-skill"],
+      );
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   console.log("RESULT=PASS");
 }
 
