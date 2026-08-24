@@ -114,33 +114,57 @@ export function getConfiguredInstructionFilePath(
   return instructionFile;
 }
 
+// `config.get` answers with the manifest default, so it cannot tell an unset
+// setting from one the user set to the default. Alias resolution needs that
+// distinction. The folder branch only carries a value for a setting declared
+// with `scope: "resource"`; every other scope stops at workspace:
+// https://code.visualstudio.com/api/references/contribution-points#contributes.configuration
+function readUserSetConfigValue<T>(
+  config: vscode.WorkspaceConfiguration,
+  key: string,
+): T | undefined {
+  const inspected = config.inspect<T>(key);
+  if (!inspected) {
+    return undefined;
+  }
+  if (inspected.workspaceFolderValue !== undefined) {
+    return inspected.workspaceFolderValue;
+  }
+  if (inspected.workspaceValue !== undefined) {
+    return inspected.workspaceValue;
+  }
+  return inspected.globalValue;
+}
+
+function readUserSetConfigString(
+  config: vscode.WorkspaceConfiguration,
+  key: string,
+): string | undefined {
+  const value = readUserSetConfigValue<string>(config, key);
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 export function getConfiguredSkillsDirectory(
   config: vscode.WorkspaceConfiguration,
 ): string {
-  const resourcesDirectoryInspect =
-    config.inspect<string>("resourcesDirectory");
-  const configuredResourcesDirectory =
-    resourcesDirectoryInspect?.workspaceValue ||
-    resourcesDirectoryInspect?.workspaceFolderValue ||
-    resourcesDirectoryInspect?.globalValue;
-  if (typeof configuredResourcesDirectory === "string") {
-    const trimmed = configuredResourcesDirectory.trim();
-    if (trimmed) {
-      return trimmed;
-    }
+  const configuredResourcesDirectory = readUserSetConfigString(
+    config,
+    "resourcesDirectory",
+  );
+  if (configuredResourcesDirectory) {
+    return configuredResourcesDirectory;
   }
 
-  const legacySkillsDirectoryInspect =
-    config.inspect<string>("skillsDirectory");
-  const configuredLegacySkillsDirectory =
-    legacySkillsDirectoryInspect?.workspaceValue ||
-    legacySkillsDirectoryInspect?.workspaceFolderValue ||
-    legacySkillsDirectoryInspect?.globalValue;
-  if (typeof configuredLegacySkillsDirectory === "string") {
-    const trimmed = configuredLegacySkillsDirectory.trim();
-    if (trimmed) {
-      return trimmed;
-    }
+  const configuredLegacySkillsDirectory = readUserSetConfigString(
+    config,
+    "skillsDirectory",
+  );
+  if (configuredLegacySkillsDirectory) {
+    return configuredLegacySkillsDirectory;
   }
 
   const siblingSkillsDirectory = vscode.workspace
@@ -428,8 +452,9 @@ export function getConfiguredAutoUpdateResourcesOnUpgrade(
   config: vscode.WorkspaceConfiguration,
 ): string {
   return (
-    config.get<string>("autoUpdateResourcesOnUpgrade") ||
-    config.get<string>("autoUpdateSkillsOnUpgrade") ||
+    readUserSetConfigString(config, "autoUpdateResourcesOnUpgrade") ??
+    readUserSetConfigString(config, "autoUpdateSkillsOnUpgrade") ??
+    config.get<string>("autoUpdateResourcesOnUpgrade")?.trim() ??
     "prompt"
   );
 }
@@ -438,8 +463,9 @@ export function getConfiguredIncludeLocalResources(
   config: vscode.WorkspaceConfiguration,
 ): boolean {
   return (
+    readUserSetConfigValue<boolean>(config, "includeLocalResources") ??
+    readUserSetConfigValue<boolean>(config, "includeLocalSkills") ??
     config.get<boolean>("includeLocalResources") ??
-    config.get<boolean>("includeLocalSkills") ??
     false
   );
 }

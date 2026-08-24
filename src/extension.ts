@@ -153,6 +153,7 @@ import {
   formatBatchCancellationSuffix,
   formatBatchFailureMessage,
 } from "./batchProgress";
+import { decideIndexRefreshRecovery } from "./reinstallRecovery";
 import {
   getPluginLocationsToRegister,
   mergePluginLocations,
@@ -1811,6 +1812,7 @@ export async function activate(
   type ReinstallAllCommandOptions = {
     skipConfirmation?: boolean;
     suppressSuccessMessage?: boolean;
+    suppressRecoveryPrompt?: boolean;
   };
 
   function normalizeReinstallCommandOptions(
@@ -2397,15 +2399,24 @@ export async function activate(
       }
       if (!fullSkill) {
         const sourceSummary = getSourceRefreshSummary(index, [resource.source]);
-        const tryUpdate = await vscode.window.showWarningMessage(
-          isJapanese()
+        const decision = await decideIndexRefreshRecovery({
+          suppressRecoveryPrompt,
+          message: isJapanese()
             ? `${resource.name} がインデックスに見つかりません。${sourceSummary} を更新しますか？`
             : `${resource.name} not found in index. Update ${sourceSummary} now?`,
-          isJapanese() ? "更新する" : "Update",
-          isJapanese() ? "キャンセル" : "Cancel",
-        );
+          refreshLabel: isJapanese() ? "更新する" : "Update",
+          declineLabel: isJapanese() ? "キャンセル" : "Cancel",
+          showPrompt: (message, ...items) =>
+            vscode.window.showWarningMessage(message, ...items),
+        });
 
-        if (tryUpdate === (isJapanese() ? "更新する" : "Update")) {
+        if (decision === "skipped") {
+          logger.warn(
+            `[Resource Ninja] ${resource.name} not found in index; skipped the refresh prompt because a batch caller is waiting`,
+          );
+        }
+
+        if (decision === "refresh") {
           index = await refreshIndexForKnownSources(
             index,
             [resource.source],
@@ -3125,6 +3136,9 @@ export async function activate(
       return targetUri.fsPath;
     };
 
+    const userDataPreview = previewTargetPath(skill, "userData");
+    const globalHomePreview = previewTargetPath(skill, "globalHome");
+
     const selected = await vscode.window.showQuickPick(
       [
         {
@@ -3134,18 +3148,22 @@ export async function activate(
           ),
           targetScope: "workspace" as InstallTargetScope,
         },
-        {
-          label: `$(account) ${messages.installTargetUserProfileLabel()}`,
-          description: messages.installTargetUserProfileDescription(
-            previewTargetPath(skill, "userData"),
-          ),
-          targetScope: "userData" as InstallTargetScope,
-        },
+        // Kinds with no VS Code user-data location of their own resolve to the
+        // global home, so offering both scopes would list the same folder twice.
+        ...(userDataPreview === globalHomePreview
+          ? []
+          : [
+              {
+                label: `$(account) ${messages.installTargetUserProfileLabel()}`,
+                description:
+                  messages.installTargetUserProfileDescription(userDataPreview),
+                targetScope: "userData" as InstallTargetScope,
+              },
+            ]),
         {
           label: `$(home) ${messages.installTargetCopilotHomeLabel()}`,
-          description: messages.installTargetCopilotHomeDescription(
-            previewTargetPath(skill, "globalHome"),
-          ),
+          description:
+            messages.installTargetCopilotHomeDescription(globalHomePreview),
           targetScope: "globalHome" as InstallTargetScope,
         },
         {
@@ -5836,8 +5854,9 @@ export async function activate(
       // 見つからないスキルがある場合、インデックス更新を提案
       if (missingSkills.length > 0) {
         const sourceSummary = getSourceRefreshSummary(index, missingSources);
-        const tryUpdate = await vscode.window.showWarningMessage(
-          isJapanese()
+        const decision = await decideIndexRefreshRecovery({
+          suppressRecoveryPrompt: options.suppressRecoveryPrompt === true,
+          message: isJapanese()
             ? `${
                 missingSkills.length
               } 個のスキルがインデックスに見つかりません（${missingSkills
@@ -5852,11 +5871,19 @@ export async function activate(
                 .join(", ")}${
                 missingSkills.length > 3 ? "..." : ""
               }). Update ${sourceSummary} now?`,
-          isJapanese() ? "更新する" : "Update",
-          isJapanese() ? "スキップ" : "Skip",
-        );
+          refreshLabel: isJapanese() ? "更新する" : "Update",
+          declineLabel: isJapanese() ? "スキップ" : "Skip",
+          showPrompt: (message, ...items) =>
+            vscode.window.showWarningMessage(message, ...items),
+        });
 
-        if (tryUpdate === (isJapanese() ? "更新する" : "Update")) {
+        if (decision === "skipped") {
+          logger.warn(
+            `[Resource Ninja] ${missingSkills.length} skill(s) not found in index; skipped the refresh prompt because an automatic caller is waiting`,
+          );
+        }
+
+        if (decision === "refresh") {
           index = await refreshIndexForKnownSources(index, missingSources);
         }
       }
@@ -6091,15 +6118,24 @@ export async function activate(
       // インデックスに見つからない場合は自動で更新を試みる
       if (!fullSkill) {
         const sourceSummary = getSourceRefreshSummary(index, [source]);
-        const tryUpdate = await vscode.window.showWarningMessage(
-          isJapanese()
+        const decision = await decideIndexRefreshRecovery({
+          suppressRecoveryPrompt,
+          message: isJapanese()
             ? `${skill.name} がインデックスに見つかりません。${sourceSummary} を更新しますか？`
             : `${skill.name} not found in index. Update ${sourceSummary} now?`,
-          isJapanese() ? "更新する" : "Update",
-          isJapanese() ? "キャンセル" : "Cancel",
-        );
+          refreshLabel: isJapanese() ? "更新する" : "Update",
+          declineLabel: isJapanese() ? "キャンセル" : "Cancel",
+          showPrompt: (message, ...items) =>
+            vscode.window.showWarningMessage(message, ...items),
+        });
 
-        if (tryUpdate === (isJapanese() ? "更新する" : "Update")) {
+        if (decision === "skipped") {
+          logger.warn(
+            `[Resource Ninja] ${skill.name} not found in index; skipped the refresh prompt because a batch caller is waiting`,
+          );
+        }
+
+        if (decision === "refresh") {
           index = await refreshIndexForKnownSources(
             index,
             [source],
@@ -9370,6 +9406,7 @@ async function checkVersionAndRefreshMetadata(
           {
             skipConfirmation: true,
             suppressSuccessMessage: true,
+            suppressRecoveryPrompt: true,
           },
         );
         if (reinstalled) {

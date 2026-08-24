@@ -1,9 +1,35 @@
 const assert = require("assert");
 const fs = require("fs");
+const Module = require("module");
 const path = require("path");
+const ts = require("typescript");
 
 const repoRoot = path.resolve(__dirname, "..");
 const packageJson = require(path.join(repoRoot, "package.json"));
+
+function requireTypeScriptModule(filePath, stubs = {}) {
+  const transpiled = ts.transpileModule(fs.readFileSync(filePath, "utf8"), {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+    },
+    fileName: filePath,
+  });
+  const loaded = new Module(filePath, module);
+  loaded.filename = filePath;
+  loaded.paths = Module._nodeModulePaths(path.dirname(filePath));
+  const originalLoad = Module._load;
+  Module._load = (request, parent, isMain) =>
+    Object.prototype.hasOwnProperty.call(stubs, request)
+      ? stubs[request]
+      : originalLoad(request, parent, isMain);
+  try {
+    loaded._compile(transpiled.outputText, filePath);
+  } finally {
+    Module._load = originalLoad;
+  }
+  return loaded.exports;
+}
 
 function test(name, fn) {
   try {
@@ -44,23 +70,25 @@ test("coexistence ownership prefers the broader kind set", () => {
   assert.match(coexistenceSource, /function computeOwnership/);
   assert.match(coexistenceSource, /RESOURCE_NINJA_KINDS/);
 
-  const computeOwnership = (self, sibling) => {
-    if (!sibling) {
-      return "self";
-    }
-
-    const selfKinds = new Set(self.kinds);
-    const siblingKinds = new Set(sibling.kinds);
-
-    const selfIsSubset = [...selfKinds].every((kind) => siblingKinds.has(kind));
-    const siblingIsSubset = [...siblingKinds].every((kind) =>
-      selfKinds.has(kind),
-    );
-
-    if (selfIsSubset && !siblingIsSubset) return "sibling";
-    if (siblingIsSubset && !selfIsSubset) return "self";
-    return self.extensionId < sibling.extensionId ? "self" : "sibling";
-  };
+  const { computeOwnership } = requireTypeScriptModule(
+    path.join(repoRoot, "src", "coexistence.ts"),
+    {
+      vscode: {
+        extensions: { all: [], getExtension: () => undefined },
+        workspace: { getConfiguration: () => ({ get: () => undefined }) },
+      },
+      "./customizationPaths": { getConfiguredCoexistenceMode: () => "auto" },
+      "./skillIndex": {},
+      "./logger": {
+        logger: {
+          info: () => undefined,
+          warn: () => undefined,
+          error: () => undefined,
+        },
+      },
+    },
+  );
+  assert.strictEqual(typeof computeOwnership, "function");
 
   const self = {
     extensionId: "yamapan.agent-resources-ninja",

@@ -84,7 +84,7 @@
 - **「When to Use」自動抽出** - SKILL.md の `## When to Use` セクションから自動取得
 - **説明を編集** - インストール済み skill の instruction file 向け説明を右クリックでカスタマイズ
 - 対象ビューから workspace / user / global リソースをアンインストール
-- **ワークスペース skill の一括再インストール** - インストール済み skill をソースメタデータから一括再インストール。インデックス項目が見つからない場合は、可能なら該当 source だけを更新し、source を特定できない場合だけ全体更新へフォールバックします。
+- **ワークスペース skill の一括再インストール** - インストール済み skill をソースメタデータから一括再インストール。インデックス項目が見つからない場合は、可能なら該当 source だけを更新し、source を特定できない場合だけ全体更新へフォールバックします。自動実行される再インストールと、グループ再インストールの各項目では、この更新確認を出しません。未検出の resource は summary に報告され、応答されない通知でバッチが止まりません。
 - **リソースグループの再インストール** - Workspace Resources の Skills や Agents などの種別グループを右クリックし、そのグループ内のリモートソースからインストールされたリソースを一括再インストール
 - **User / Global 側の再インストール** - ユーザー / グローバル リソース view でも、リモート由来の個別行の再インストールと、種別グループ・プラグイングループ単位の再インストールを行えます
 - **インストール通知** - NEW バッジ、ステータスバー表示、ツリービューで自動選択
@@ -487,6 +487,8 @@ MCP ツールが不要な場合は、GitHub Copilot Chat のツール一覧か�
 | 表示とメンテナンス   | `outputFormat`, `refCatalogFormat`, `showBuiltInResources`, `remoteResourceViewMode`, `language`, `githubToken`                                                                                                                                                                                            | 表示、探索、GitHub API 利用の調整                                   |
 
 通常は `globalResourceHomePreset` を選ぶだけで十分です。`globalHomeDirectory` は override なので、空でない場合は preset より優先されます。`custom` を選ぶ場合は、あわせて override path を指定してください。
+
+preset は global instruction file の名前も決めます。`copilot` は `copilot-instructions.md`、`claude` は `CLAUDE.md`、`agents` と `custom` は `AGENTS.md` です。2026-08-24 に同梱の VS Code と Copilot CLI の bundle を調べたところ、`~/.agents/skills` の読み手は存在しますが、ホーム直下の `AGENTS.md` を読む経路は見つかりませんでした。`agents` / `custom` preset ではこのファイルを利用者側で参照する前提で書き出します。skill や agent など他の種別に影響はありません。
 
 workspace skill を主 Workspace Skill Directory 以外に置く場合は、`additionalSkillRoots` を使います。例: `copilot-skills/skills`、`copilot-skills/m-skills`。各値は glob pattern ではなく root directory です。対象は discovery と生成 instruction output のみで、インストール先は引き続き `resourcesDirectory` です。skill-only sibling extension との同居互換として、`skillNinja.additionalSkillRoots` も fallback として尊重します。
 

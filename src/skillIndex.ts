@@ -306,6 +306,82 @@ async function persistLocalSkillIndex(
  * 2. なければバンドルされたインデックスをコピーして使用
  * 3. バンドル版のバージョンが新しければソースをマージ
  */
+// The bundled index ships inside the extension directory. Every command path
+// calls loadSkillIndex, and parsing this file each time is the largest repeated
+// cost in that path. The entry holds the in-flight parse so a burst of callers
+// during activation shares one read.
+interface BundledIndexCacheEntry {
+  key: string;
+  loaded: Promise<{ index: SkillIndex | null; stamp: string }>;
+}
+
+let bundledIndexCache: BundledIndexCacheEntry | undefined;
+
+/** Test seam: clears the parse the extension keeps for its own bundled index. */
+export function resetBundledSkillIndexCache(): void {
+  bundledIndexCache = undefined;
+}
+
+async function readBundledIndexStamp(
+  bundledIndexPath: vscode.Uri,
+): Promise<string> {
+  try {
+    const stat = await vscode.workspace.fs.stat(bundledIndexPath);
+    return `${stat.mtime}:${stat.size}`;
+  } catch {
+    return "";
+  }
+}
+
+async function readBundledSkillIndex(
+  bundledIndexPath: vscode.Uri,
+): Promise<{ index: SkillIndex | null; stamp: string }> {
+  const stamp = await readBundledIndexStamp(bundledIndexPath);
+  try {
+    const bundledContent = await vscode.workspace.fs.readFile(bundledIndexPath);
+    return {
+      index: normalizeSkillIndex(
+        JSON.parse(
+          Buffer.from(bundledContent).toString("utf-8"),
+        ) as Partial<SkillIndex>,
+      ),
+      stamp,
+    };
+  } catch (error) {
+    logger.warn(
+      `[Resource Ninja] Failed to load bundled skill index from ${String(bundledIndexPath)}; continuing without bundled fallback.`,
+      error,
+    );
+    return { index: null, stamp };
+  }
+}
+
+async function loadBundledSkillIndex(
+  bundledIndexPath: vscode.Uri,
+): Promise<SkillIndex | null> {
+  const key = String(bundledIndexPath);
+  const entry = bundledIndexCache;
+  if (entry?.key === key) {
+    const cached = await entry.loaded;
+    if (
+      cached.index &&
+      cached.stamp === (await readBundledIndexStamp(bundledIndexPath))
+    ) {
+      return structuredClone(cached.index);
+    }
+  }
+
+  const loaded = readBundledSkillIndex(bundledIndexPath);
+  const pendingEntry: BundledIndexCacheEntry = { key, loaded };
+  bundledIndexCache = pendingEntry;
+  const result = await loaded;
+  // A read that failed must not become this session's answer.
+  if (!result.index && bundledIndexCache === pendingEntry) {
+    bundledIndexCache = undefined;
+  }
+  return result.index ? structuredClone(result.index) : null;
+}
+
 export async function loadSkillIndex(
   context: vscode.ExtensionContext,
 ): Promise<SkillIndex> {
@@ -322,20 +398,7 @@ export async function loadSkillIndex(
   );
 
   let bundledIndex: SkillIndex | null = null;
-  try {
-    const bundledContent = await vscode.workspace.fs.readFile(bundledIndexPath);
-    bundledIndex = normalizeSkillIndex(
-      JSON.parse(
-        Buffer.from(bundledContent).toString("utf-8"),
-      ) as Partial<SkillIndex>,
-    );
-  } catch (error) {
-    logger.warn(
-      `[Resource Ninja] Failed to load bundled skill index from ${bundledIndexPath.toString(true)}; continuing without bundled fallback.`,
-      error,
-    );
-    // バンドルがなければ null のまま
-  }
+  bundledIndex = await loadBundledSkillIndex(bundledIndexPath);
 
   let effectiveIndex: SkillIndex;
   let newlyBundledSources: Source[] = [];

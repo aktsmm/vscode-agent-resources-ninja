@@ -1,5 +1,6 @@
 import * as path from "path";
 import * as vscode from "vscode";
+import { applyLineEnding, detectDominantLineEnding } from "./lineEndings";
 import { createSerialQueue } from "./serialQueue";
 import {
   getFallbackRecommendedHookConfig,
@@ -46,6 +47,16 @@ async function fileExists(uri: vscode.Uri): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+async function readTextOrEmpty(uri: vscode.Uri): Promise<string> {
+  try {
+    return Buffer.from(await vscode.workspace.fs.readFile(uri)).toString(
+      "utf-8",
+    );
+  } catch {
+    return "";
   }
 }
 
@@ -327,7 +338,13 @@ async function performHookConfigUpdate(
     }
     await vscode.workspace.fs.writeFile(
       configUri,
-      Buffer.from(`${JSON.stringify(mutation.config, null, 2)}\n`, "utf-8"),
+      Buffer.from(
+        applyLineEnding(
+          `${JSON.stringify(mutation.config, null, 2)}\n`,
+          detectDominantLineEnding(await readTextOrEmpty(configUri)),
+        ),
+        "utf-8",
+      ),
     );
   }
 

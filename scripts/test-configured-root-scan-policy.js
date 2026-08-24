@@ -93,11 +93,47 @@ test("configured roots are scanned before workspace fallback", () => {
 });
 
 test("workspace fallback is automatic only when configured roots are empty", () => {
-  assert.match(
-    scannerSource,
-    /type WorkspaceFallbackMode = "auto" \| "always" \| "none"/,
+  const { shouldUseWorkspaceFallback } = requireTypeScriptModule(
+    path.join(repoRoot, "src", "localSkillScanner.ts"),
+    {
+      vscode: {
+        workspace: { getConfiguration: () => ({ get: () => undefined }) },
+        Uri: { file: (fsPath) => ({ fsPath }) },
+        RelativePattern: class {},
+      },
+      "./skillIndex": {},
+      "./resourceKinds": {},
+      "./instructionManager": { updateInstructionFile: async () => undefined },
+      "./skillInstaller": { stripSkillMetaLocalPaths: (value) => value },
+      "./customizationPaths": {},
+      "./logger": {
+        logger: {
+          info: () => undefined,
+          warn: () => undefined,
+          error: () => undefined,
+        },
+      },
+    },
   );
-  assert.match(scannerSource, /return configuredSkills\.length === 0/);
+  assert.strictEqual(typeof shouldUseWorkspaceFallback, "function");
+
+  const oneConfiguredSkill = [{ name: "configured" }];
+  assert.strictEqual(shouldUseWorkspaceFallback("auto", []), true);
+  assert.strictEqual(
+    shouldUseWorkspaceFallback("auto", oneConfiguredSkill),
+    false,
+  );
+  assert.strictEqual(shouldUseWorkspaceFallback("always", []), true);
+  assert.strictEqual(
+    shouldUseWorkspaceFallback("always", oneConfiguredSkill),
+    true,
+  );
+  assert.strictEqual(shouldUseWorkspaceFallback("none", []), false);
+  assert.strictEqual(
+    shouldUseWorkspaceFallback("none", oneConfiguredSkill),
+    false,
+  );
+
   assert.match(
     scannerSource,
     /shouldUseWorkspaceFallback\(workspaceFallback, configuredSkills\)/,

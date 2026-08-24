@@ -28,51 +28,66 @@ const userResourceScannerSource = fs.readFileSync(
   "utf8",
 );
 
-function normalizeConfiguredPath(value) {
-  return value.replace(/\\/g, "/");
-}
-
-function isHomeRelativePath(configuredPath) {
-  return normalizeConfiguredPath(configuredPath).startsWith("~/");
-}
-
-function isAbsoluteConfiguredPath(configuredPath) {
-  return path.isAbsolute(normalizeConfiguredPath(configuredPath));
-}
-
-function getDefaultGlobalHomeDirectoryForPreset(preset) {
-  switch (preset) {
-    case "claude":
-      return "~/.claude";
-    case "agents":
-      return "~/.agents";
-    case "custom":
-    case "copilot":
-    default:
-      return "~/.copilot";
+function loadCustomizationPaths() {
+  const ts = require("typescript");
+  const Module = require("module");
+  const filePath = path.join(repoRoot, "src", "customizationPaths.ts");
+  const transpiled = ts.transpileModule(fs.readFileSync(filePath, "utf8"), {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+    },
+    fileName: filePath,
+  });
+  const stubs = {
+    vscode: {
+      workspace: { getConfiguration: () => ({ get: () => undefined }) },
+      Uri: { file: (fsPath) => ({ fsPath }) },
+      env: { appName: "Visual Studio Code" },
+    },
+    "./skillIndex": {},
+  };
+  const loaded = new Module(filePath, module);
+  loaded.filename = filePath;
+  loaded.paths = Module._nodeModulePaths(path.dirname(filePath));
+  const originalLoad = Module._load;
+  Module._load = (request, parent, isMain) =>
+    Object.prototype.hasOwnProperty.call(stubs, request)
+      ? stubs[request]
+      : originalLoad(request, parent, isMain);
+  try {
+    loaded._compile(transpiled.outputText, filePath);
+  } finally {
+    Module._load = originalLoad;
   }
+  return loaded.exports;
 }
 
-function getConfiguredGlobalHomeDirectory(config = {}) {
-  const configuredPath = config.globalHomeDirectory?.trim();
-  if (configuredPath) return configuredPath;
-  return getDefaultGlobalHomeDirectoryForPreset(
-    config.globalResourceHomePreset || "copilot",
+const customizationPaths = loadCustomizationPaths();
+
+function toWorkspaceConfiguration(values = {}) {
+  return {
+    get: (key) => values[key],
+    inspect: (key) => ({ key, globalValue: values[key] }),
+  };
+}
+
+const normalizeConfiguredPath = (value) => value.replace(/\\/g, "/");
+const isHomeRelativePath = (configuredPath) =>
+  customizationPaths.isHomeRelativePath(configuredPath);
+const isAbsoluteConfiguredPath = (configuredPath) =>
+  customizationPaths.isAbsoluteConfiguredPath(configuredPath);
+
+const getDefaultGlobalHomeDirectoryForPreset = (preset) =>
+  customizationPaths.getDefaultGlobalHomeDirectoryForPreset(preset);
+
+const getConfiguredGlobalHomeDirectory = (config = {}) =>
+  customizationPaths.getConfiguredGlobalHomeDirectory(
+    toWorkspaceConfiguration(config),
   );
-}
 
-function getGlobalInstructionFileNameForPreset(preset) {
-  switch (preset) {
-    case "copilot":
-      return "copilot-instructions.md";
-    case "claude":
-      return "CLAUDE.md";
-    case "agents":
-    case "custom":
-    default:
-      return "AGENTS.md";
-  }
-}
+const getGlobalInstructionFileNameForPreset = (preset) =>
+  customizationPaths.getGlobalInstructionFileNameForPreset(preset);
 
 function normalizeFsPathForCompare(fsPath) {
   return path

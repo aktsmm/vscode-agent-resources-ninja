@@ -299,7 +299,7 @@ async function findConfiguredWorkspaceCandidates(
   ];
 }
 
-function shouldUseWorkspaceFallback(
+export function shouldUseWorkspaceFallback(
   mode: WorkspaceFallbackMode,
   configuredSkills: LocalSkill[],
 ): boolean {

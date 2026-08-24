@@ -88,7 +88,7 @@ Managed output follows a ref-first model by default: keep **Use Ref Output** on 
 - **Auto-extract "When to Use"** - Extracted from SKILL.md `## When to Use` section
 - **Edit Description** - Right-click installed skills to customize the instruction-file description
 - Uninstall workspace and user/global resources from the relevant resource view
-- **Reinstall All Workspace Skills** - Batch reinstall installed workspace skills from latest source metadata. When indexed entries are missing, Agent Resources Ninja refreshes only the affected source indexes when possible and falls back to a full index update only when the source cannot be determined.
+- **Reinstall All Workspace Skills** - Batch reinstall installed workspace skills from latest source metadata. When indexed entries are missing, Agent Resources Ninja refreshes only the affected source indexes when possible and falls back to a full index update only when the source cannot be determined. A reinstall that runs automatically, or as one item of a group reinstall, never asks about that refresh: it reports the missing resources in its summary so the batch cannot stall on an unanswered notification.
 - **Reinstall Resource Groups** - Right-click a Workspace Resources kind group, such as Skills or Agents, to reinstall all installed resources in that group that were downloaded from remote sources
 - **User / Global Reinstall** - User / Global Resource Home also exposes per-resource reinstall for remote-installed rows and group reinstall for kind and plugin groups, so plugin-managed resources can be refreshed from either installed view
 - **Install Feedback** - NEW badge, status bar notification, auto-select in tree view
@@ -492,6 +492,8 @@ Settings are ordered by the workflow users usually follow:
 | Display and maintenance | `outputFormat`, `refCatalogFormat`, `showBuiltInResources`, `remoteResourceViewMode`, `language`, `githubToken`                                                                                                                                                                                            | Presentation, discovery, and GitHub API behavior                          |
 
 `globalResourceHomePreset` is the common case. `globalHomeDirectory` is an override: when it is not empty, it wins over the preset. Choose `custom` only when you also provide an override path.
+
+The preset also decides the global instruction file: `copilot` writes `copilot-instructions.md`, `claude` writes `CLAUDE.md`, and `agents` and `custom` write `AGENTS.md`. As of 2026-08-24, a scan of the shipped VS Code and Copilot CLI bundles found readers for `~/.agents/skills` but none for a global `AGENTS.md`, so under the `agents` and `custom` presets that file is written for you to wire up yourself. Skills, agents, and the other kinds are unaffected.
 
 Use `additionalSkillRoots` when workspace skills are stored outside the primary Workspace Skill Directory, for example `copilot-skills/skills` or `copilot-skills/m-skills`. Entries are root directories, not glob patterns. They affect discovery and generated instruction output only; installs still go to `resourcesDirectory`. For coexistence with the skill-only sibling extension, `skillNinja.additionalSkillRoots` is honored as a compatibility fallback.
 

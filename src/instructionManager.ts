@@ -57,6 +57,7 @@ import {
 } from "./skillIndex";
 import { messages } from "./i18n";
 import { logger } from "./logger";
+import { matchLineEnding } from "./lineEndings";
 import { createSerialQueue } from "./serialQueue";
 
 interface MarkerPair {
@@ -1024,21 +1025,26 @@ async function syncRefCatalogFiles(
       catalogFormat,
     );
     let existingContent = "";
+    let onDiskContent: string | undefined;
     try {
       const existing = await vscode.workspace.fs.readFile(catalogFileUri);
-      existingContent = stripInstructionManagedSections(
-        Buffer.from(existing).toString("utf-8"),
-      );
+      onDiskContent = Buffer.from(existing).toString("utf-8");
+      existingContent = stripInstructionManagedSections(onDiskContent);
     } catch {
       existingContent = "";
     }
-    await vscode.workspace.fs.writeFile(
-      catalogFileUri,
-      Buffer.from(
-        upsertCatalogSection(existingContent, kind, content),
-        "utf-8",
-      ),
+    const nextContent = matchLineEnding(
+      upsertCatalogSection(existingContent, kind, content),
+      onDiskContent ?? "",
     );
+    // Rewriting identical bytes churns mtime, wakes file watchers and folder
+    // sync, and feeds the write race with the sibling extension.
+    if (nextContent !== onDiskContent) {
+      await vscode.workspace.fs.writeFile(
+        catalogFileUri,
+        Buffer.from(nextContent, "utf-8"),
+      );
+    }
   }
 }
 
@@ -1509,19 +1515,24 @@ async function performInstructionFileUpdate(
   }
 
   // マーカーで囲まれた部分を更新
-  const newContent = updateSection(
+  const newContent = matchLineEnding(
+    updateSection(
+      existingContent,
+      skillSection,
+      coexistenceMode === "auto" ? SHARED_MARKERS : RESOURCE_MARKERS,
+    ),
     existingContent,
-    skillSection,
-    coexistenceMode === "auto" ? SHARED_MARKERS : RESOURCE_MARKERS,
   );
 
   // ディレクトリを作成してファイルを書き込む
-  const dir = vscode.Uri.file(path.dirname(instructionUri.fsPath));
-  await vscode.workspace.fs.createDirectory(dir);
-  await vscode.workspace.fs.writeFile(
-    instructionUri,
-    Buffer.from(newContent, "utf-8"),
-  );
+  if (newContent !== existingContent) {
+    const dir = vscode.Uri.file(path.dirname(instructionUri.fsPath));
+    await vscode.workspace.fs.createDirectory(dir);
+    await vscode.workspace.fs.writeFile(
+      instructionUri,
+      Buffer.from(newContent, "utf-8"),
+    );
+  }
 }
 
 export function resolvePrimaryRefCatalogUri(

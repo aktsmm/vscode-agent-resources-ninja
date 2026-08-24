@@ -150,6 +150,10 @@ async function main() {
     path.join(repoRoot, "src", "instructionManager.ts"),
     {
       vscode: vscodeStub,
+      "./lineEndings": requireTypeScriptModule(
+        path.join(repoRoot, "src", "lineEndings.ts"),
+        {},
+      ),
       "./skillInstaller": {
         getInstalledSkillsWithMeta: async () => [],
         getInstalledSkillsWithMetaFromRoot: async () => [],
