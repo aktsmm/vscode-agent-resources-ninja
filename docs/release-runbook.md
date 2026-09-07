@@ -40,6 +40,8 @@ Update these files together:
 
 When the bundled catalog changes, also synchronize the resource-index version and resource/source counts from `resources/skill-index.json` into both NLS files.
 
+Any change to a packaged input after packaging invalidates the existing VSIX. Rebuild after changing `CHANGELOG.md`, package/NLS metadata, README, LICENSE, runtime bundle inputs, `.vscodeignore`, or `resources/`. Record the final size and SHA256 in the release notes only after that final build.
+
 ## 4. Build and Inspect the VSIX
 
 ```powershell
@@ -82,6 +84,8 @@ Do not use `npm run release:vsce -- publish -i <path>` or `--packagePath <path>`
 ## 8. Create and Verify the GitHub Release
 
 Create the GitHub Release from the exact annotated tag, use `release-notes-vX.Y.Z.md` as the body, and attach the same VSIX. Verify Marketplace, GitHub Release, Git tag, and asset bytes independently. Download the Marketplace package and GitHub asset, then compare both size and SHA256 with the local VSIX.
+
+Marketplace listing metadata is eventually consistent. If it still shows the previous version after a successful publish, download the exact version from `https://marketplace.visualstudio.com/_apis/public/gallery/publishers/<publisher>/vsextensions/<extension>/<version>/vspackage` and compare its size and SHA256. A matching version-specific package is authoritative; do not republish only because the listing is stale.
 
 A release is complete only when version, commit, tag, push, Marketplace publish, GitHub Release, and independent artifact verification are each done or explicitly recorded as blocked.
 

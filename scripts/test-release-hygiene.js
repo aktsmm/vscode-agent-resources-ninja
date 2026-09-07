@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const assert = require("assert");
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
@@ -44,9 +45,9 @@ function listRootFiles() {
     .sort();
 }
 
-function readZipEntries(filePath) {
+function readZipContents(filePath) {
   const buffer = fs.readFileSync(filePath);
-  const entries = [];
+  const entries = new Map();
   let offset = 0;
   const localHeader = 0x04034b50;
   while (
@@ -62,8 +63,8 @@ function readZipEntries(filePath) {
     const nameEnd = nameStart + fileNameLength;
     const name = buffer.toString("utf8", nameStart, nameEnd);
     const dataStart = nameEnd + extraLength;
-    let dataEnd = dataStart + compressedSize;
-    entries.push(name);
+    let compressedDataEnd = dataStart + compressedSize;
+    let dataEnd = compressedDataEnd;
 
     if (flags & 0x08) {
       const descriptorSignature = 0x08074b50;
@@ -75,6 +76,7 @@ function readZipEntries(filePath) {
         descriptorOffset !== -1,
         `Missing ZIP data descriptor for ${name}`,
       );
+      compressedDataEnd = descriptorOffset;
       dataEnd = descriptorOffset + 16;
       assert.strictEqual(
         buffer.readUInt32LE(descriptorOffset),
@@ -82,13 +84,21 @@ function readZipEntries(filePath) {
       );
     } else if (method !== 0 && method !== 8) {
       throw new Error(`Unsupported ZIP method ${method} for ${name}`);
-    } else if (method === 8) {
-      zlib.inflateRawSync(buffer.subarray(dataStart, dataEnd));
     }
+
+    const compressed = buffer.subarray(dataStart, compressedDataEnd);
+    entries.set(
+      name,
+      method === 8 ? zlib.inflateRawSync(compressed) : Buffer.from(compressed),
+    );
 
     offset = dataEnd;
   }
-  return entries.sort();
+  return entries;
+}
+
+function readZipEntries(filePath) {
+  return [...readZipContents(filePath).keys()].sort();
 }
 
 function assertVsixPayloadMinimal(vsixPath, label) {
@@ -281,6 +291,63 @@ test("existing VSIX payload stays release-minimal", () => {
     `agent-resources-ninja-${packageJson.version}.vsix`,
   );
   assertVsixPayloadMinimal(vsixPath, "release");
+});
+
+test("existing release VSIX matches deterministic packaged inputs", () => {
+  const vsixPath = path.join(
+    repoRoot,
+    "artifacts",
+    "vsix",
+    `agent-resources-ninja-${packageJson.version}.vsix`,
+  );
+  if (!fs.existsSync(vsixPath)) {
+    console.log("SKIP release VSIX content match (VSIX not generated yet)");
+    return;
+  }
+
+  const archive = readZipContents(vsixPath);
+  const exactInputs = [
+    "LICENSE",
+    "package.nls.ja.json",
+    "package.nls.json",
+    "resources/icon.png",
+    "resources/icon.svg",
+    "resources/skill-index.json",
+  ];
+  for (const relativePath of exactInputs) {
+    const archivePath =
+      relativePath === "LICENSE"
+        ? "extension/LICENSE.txt"
+        : `extension/${relativePath}`;
+    const archivedInput = archive.get(archivePath);
+    assert.ok(archivedInput, `Missing packaged input: ${archivePath}`);
+    const hash = (buffer) =>
+      crypto.createHash("sha256").update(buffer).digest("hex");
+    assert.strictEqual(
+      hash(archivedInput),
+      hash(fs.readFileSync(path.join(repoRoot, relativePath))),
+      `Release VSIX is stale for ${relativePath}`,
+    );
+  }
+
+  const releaseHeading = `## [${packageJson.version}]`;
+  const extractReleaseSection = (text) => {
+    const start = text.indexOf(releaseHeading);
+    assert.ok(start !== -1, `Missing ${releaseHeading}`);
+    const end = text.indexOf("\n## [", start + releaseHeading.length);
+    return text
+      .slice(start, end === -1 ? undefined : end)
+      .replace(/\r\n/g, "\n");
+  };
+  const archivedChangelog = archive.get("extension/changelog.md");
+  assert.ok(archivedChangelog, "Missing packaged changelog");
+  assert.strictEqual(
+    extractReleaseSection(archivedChangelog.toString("utf8")),
+    extractReleaseSection(
+      fs.readFileSync(path.join(repoRoot, "CHANGELOG.md"), "utf8"),
+    ),
+    "Release VSIX is stale for the current changelog section",
+  );
 });
 
 test("existing dev VSIX payload stays release-minimal", () => {
