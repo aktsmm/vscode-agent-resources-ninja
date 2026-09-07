@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.56] - 2026-09-07
+
+### Fixed
+
+- 🧭 **Group Actions Re-resolve the Current Root / グループ操作で現在のrootを再解決** - Workspace and User/Global group actions no longer trust a TreeItem retained across refresh or destination-setting changes. Group rows carry a normalized root identity, reload current provider state before acting, tolerate Windows path casing, and reject missing, read-only, stale, or different-root items instead of falling back by a reused display label / Workspace と User/Global のグループ操作が、refresh や保存先設定変更をまたいだ古い TreeItem を信用しないようにしました。グループ行が正規化した root identity を保持し、操作前に現在の provider state を再読込します。Windows の path case 差を許容しつつ、missing・read-only・stale・別rootの項目は、再利用された表示labelで fallbackせず拒否します。
+
+- 🔒 **Shared Reinstall Exclusions Are Respected / 共有された再インストール除外を尊重** - Installed metadata written by Agent Skills Ninja can mark a missing resource with `reinstallDisabled`, its reason, and timestamp. Agent Resources Ninja now preserves and displays those fields, excludes the resource from startup checks and batch pickers, removes reinstall actions from Workspace, Browse, and User/Global views, and rejects direct command invocation with the recorded reason / Agent Skills Ninja が missing resource に記録する `reinstallDisabled`、理由、時刻を保持・表示するようにしました。対象 resource を起動時確認と batch picker から除外し、Workspace、Browse、User/Global view の再インストール操作を外し、直接 command 実行も記録済み理由付きで拒否します。
+
+- 🛡️ **Unreadable Resource Metadata Is Preserved / 読み取れないリソースメタデータを保護** - Missing sidecars are now distinguished from permission, lock, I/O, malformed JSON, and non-object failures. Workspace and user resources remain visible with remote actions disabled, while skill and non-skill installs stop instead of overwriting metadata they could not safely read / sidecar の不在と、権限・lock・I/O・不正 JSON・object 以外の失敗を区別するようにしました。workspace / user resource は表示を維持しつつ remote 操作を無効化し、skill / non-skill install は安全に読めない metadata を上書きせず停止します。
+
+- ⚠️ **Resource Output Failures No Longer Look Successful / リソース出力失敗の誤成功表示を防止** - Instruction and reference-catalog files are preflight-read before any mutation, and output updates now return explicit updated, unchanged, disabled, deferred, unreadable, locked, or failed results. Manual commands, automatic sync, local registration, and language-model tools keep a successful resource change while reporting output failure separately / instruction と reference catalog を変更前にすべて事前読取し、出力更新が updated / unchanged / disabled / deferred / unreadable / locked / failed を明示的に返すようにしました。手動 command、自動同期、local registration、language-model tool は resource 変更の成功を維持しつつ、出力失敗を別に報告します。
+
+- 🔁 **Bounded Non-destructive Reinstall Retry / 上限付きで再削除しない再インストール retry** - Workspace, user, group, all, and multiple reinstall paths now preserve per-resource stage, attempt count, and failure kind. Only server and transport failures receive one automatic retry and at most one manual retry, retry never removes the resource again, non-retryable failures remain in the final summary, and unstarted cancellations are recorded with zero attempts / workspace、user、group、all、multiple の再インストールで resource ごとの stage、attempt 数、failure kind を保持します。server / transport failure だけを自動1回・手動最大1回 retry し、retry では resource を再度削除しません。retry 対象外の失敗も最終 summary に残し、未着手 cancellation は attempt 0 として記録します。
+
 ## [0.2.55] - 2026-08-24
 
 ### Changed

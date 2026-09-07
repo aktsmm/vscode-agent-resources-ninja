@@ -5,6 +5,7 @@ import * as vscode from "vscode";
 import {
   getInstalledSkillsWithMeta,
   getInstalledSkillsWithMetaFromRoot,
+  isFileNotFoundError,
   SkillMeta,
 } from "./skillInstaller";
 import { scanLocalSkills, LocalSkill } from "./localSkillScanner";
@@ -81,6 +82,75 @@ interface SyncResourceItem {
 interface RefCatalogDescriptor {
   sectionTitle: string;
   catalogTitle: string;
+}
+
+export type InstructionFileUpdateResult =
+  | { status: "updated" | "unchanged" | "deferred"; target: string }
+  | { status: "disabled" }
+  | {
+      status: "unreadable" | "locked" | "failed";
+      target: string;
+      message: string;
+    };
+
+interface PlannedFileMutation {
+  uri: vscode.Uri;
+  operation: "write" | "delete";
+  content?: string;
+}
+
+interface InstructionFileUpdateOptions {
+  notifyOnFailure?: boolean;
+}
+
+const warnedInstructionUpdateFailures = new Set<string>();
+
+export function isInstructionFileUpdateFailure(
+  result: InstructionFileUpdateResult,
+): result is Extract<
+  InstructionFileUpdateResult,
+  { status: "unreadable" | "locked" | "failed" }
+> {
+  return (
+    result.status === "unreadable" ||
+    result.status === "locked" ||
+    result.status === "failed"
+  );
+}
+
+function reconcileInstructionUpdateWarning(
+  result: InstructionFileUpdateResult,
+  notifyOnFailure: boolean,
+): void {
+  if (!isInstructionFileUpdateFailure(result)) {
+    if ("target" in result) {
+      for (const key of warnedInstructionUpdateFailures) {
+        if (key.startsWith(`${result.target}\0`)) {
+          warnedInstructionUpdateFailures.delete(key);
+        }
+      }
+    }
+    return;
+  }
+
+  const key = `${result.target}\0${result.status}`;
+  if (!notifyOnFailure || warnedInstructionUpdateFailures.has(key)) {
+    return;
+  }
+  warnedInstructionUpdateFailures.add(key);
+  void vscode.window.showWarningMessage(
+    messages.resourceOutputUpdateFailed(result.status),
+  );
+}
+
+class OutputFileUnreadableError extends Error {
+  constructor(
+    public readonly target: string,
+    cause: unknown,
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = "OutputFileUnreadableError";
+  }
 }
 
 type RefCatalogFormat = Exclude<OutputFormat, "ref">;
@@ -875,54 +945,62 @@ function createRefCatalogContent(
   return `${lines.join("\n")}\n`;
 }
 
-async function deleteGeneratedRefCatalogFileIfExists(
+async function readOutputTextFile(
+  fileUri: vscode.Uri,
+): Promise<string | undefined> {
+  try {
+    const content = await vscode.workspace.fs.readFile(fileUri);
+    return Buffer.from(content).toString("utf-8");
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      return undefined;
+    }
+    throw new OutputFileUnreadableError(fileUri.fsPath, error);
+  }
+}
+
+async function planGeneratedRefCatalogCleanup(
   kind: ResourceKind,
   catalogFileUri: vscode.Uri,
-): Promise<void> {
-  try {
-    const content = await vscode.workspace.fs.readFile(catalogFileUri);
-    const text = Buffer.from(content).toString("utf-8");
-    const cleanedText = stripInstructionManagedSections(text);
-    const markers = getRefCatalogSectionMarkers(kind);
-
-    if (
-      cleanedText.includes(markers.start) &&
-      cleanedText.includes(markers.end)
-    ) {
-      const stripped = stripCatalogSection(cleanedText, kind);
-      if (stripped.trim()) {
-        await vscode.workspace.fs.writeFile(
-          catalogFileUri,
-          Buffer.from(`${stripped}\n`, "utf-8"),
-        );
-      } else {
-        await vscode.workspace.fs.delete(catalogFileUri, { useTrash: false });
-      }
-      return;
-    }
-
-    if (cleanedText !== text) {
-      if (cleanedText.trim()) {
-        await vscode.workspace.fs.writeFile(
-          catalogFileUri,
-          Buffer.from(`${cleanedText.trimEnd()}\n`, "utf-8"),
-        );
-      } else {
-        await vscode.workspace.fs.delete(catalogFileUri, { useTrash: false });
-      }
-      return;
-    }
-
-    if (!cleanedText.includes(REF_CATALOG_MARKER_PREFIX)) {
-      logger.info(
-        `[Resource Ninja] Keeping non-generated catalog file: ${catalogFileUri.fsPath}`,
-      );
-      return;
-    }
-    await vscode.workspace.fs.delete(catalogFileUri, { useTrash: false });
-  } catch {
-    // ignore missing files or inaccessible stale catalogs
+): Promise<PlannedFileMutation | undefined> {
+  const text = await readOutputTextFile(catalogFileUri);
+  if (text === undefined) {
+    return undefined;
   }
+  const cleanedText = stripInstructionManagedSections(text);
+  const markers = getRefCatalogSectionMarkers(kind);
+
+  if (
+    cleanedText.includes(markers.start) &&
+    cleanedText.includes(markers.end)
+  ) {
+    const stripped = stripCatalogSection(cleanedText, kind);
+    return stripped.trim()
+      ? {
+          uri: catalogFileUri,
+          operation: "write",
+          content: `${stripped}\n`,
+        }
+      : { uri: catalogFileUri, operation: "delete" };
+  }
+
+  if (cleanedText !== text) {
+    return cleanedText.trim()
+      ? {
+          uri: catalogFileUri,
+          operation: "write",
+          content: `${cleanedText.trimEnd()}\n`,
+        }
+      : { uri: catalogFileUri, operation: "delete" };
+  }
+
+  if (!cleanedText.includes(REF_CATALOG_MARKER_PREFIX)) {
+    logger.info(
+      `[Resource Ninja] Keeping non-generated catalog file: ${catalogFileUri.fsPath}`,
+    );
+    return undefined;
+  }
+  return { uri: catalogFileUri, operation: "delete" };
 }
 
 function stripCatalogSection(content: string, kind: ResourceKind): string {
@@ -991,9 +1069,10 @@ async function syncRefCatalogFiles(
   workspaceUri: vscode.Uri,
   scope: "workspace" | "globalHome",
   config: vscode.WorkspaceConfiguration,
-): Promise<void> {
+): Promise<PlannedFileMutation[]> {
   const groupedResources = new Map<ResourceKind, SyncResourceItem[]>();
   const catalogFormat = getConfiguredRefCatalogFormat(config);
+  const mutations: PlannedFileMutation[] = [];
   for (const resource of resources) {
     const existing = groupedResources.get(resource.kind) || [];
     existing.push(resource);
@@ -1010,13 +1089,15 @@ async function syncRefCatalogFiles(
     const kindResources = groupedResources.get(kind) || [];
 
     if (kindResources.length === 0) {
-      await deleteGeneratedRefCatalogFileIfExists(kind, catalogFileUri);
+      const mutation = await planGeneratedRefCatalogCleanup(
+        kind,
+        catalogFileUri,
+      );
+      if (mutation) {
+        mutations.push(mutation);
+      }
       continue;
     }
-
-    await vscode.workspace.fs.createDirectory(
-      vscode.Uri.file(path.dirname(catalogFileUri.fsPath)),
-    );
 
     const content = createRefCatalogContent(
       kind,
@@ -1024,15 +1105,10 @@ async function syncRefCatalogFiles(
       catalogFileUri.fsPath,
       catalogFormat,
     );
-    let existingContent = "";
-    let onDiskContent: string | undefined;
-    try {
-      const existing = await vscode.workspace.fs.readFile(catalogFileUri);
-      onDiskContent = Buffer.from(existing).toString("utf-8");
-      existingContent = stripInstructionManagedSections(onDiskContent);
-    } catch {
-      existingContent = "";
-    }
+    const onDiskContent = await readOutputTextFile(catalogFileUri);
+    const existingContent = stripInstructionManagedSections(
+      onDiskContent ?? "",
+    );
     const nextContent = matchLineEnding(
       upsertCatalogSection(existingContent, kind, content),
       onDiskContent ?? "",
@@ -1040,9 +1116,32 @@ async function syncRefCatalogFiles(
     // Rewriting identical bytes churns mtime, wakes file watchers and folder
     // sync, and feeds the write race with the sibling extension.
     if (nextContent !== onDiskContent) {
+      mutations.push({
+        uri: catalogFileUri,
+        operation: "write",
+        content: nextContent,
+      });
+    }
+  }
+
+  return mutations;
+}
+
+async function applyFileMutations(
+  mutations: readonly PlannedFileMutation[],
+): Promise<void> {
+  for (const mutation of mutations) {
+    if (mutation.operation === "delete") {
+      await vscode.workspace.fs.delete(mutation.uri, { useTrash: false });
+      continue;
+    }
+    if (mutation.operation === "write") {
+      await vscode.workspace.fs.createDirectory(
+        vscode.Uri.file(path.dirname(mutation.uri.fsPath)),
+      );
       await vscode.workspace.fs.writeFile(
-        catalogFileUri,
-        Buffer.from(nextContent, "utf-8"),
+        mutation.uri,
+        Buffer.from(mutation.content ?? "", "utf-8"),
       );
     }
   }
@@ -1053,12 +1152,16 @@ async function cleanupRefCatalogFiles(
   instructionUri: vscode.Uri,
   scope: "workspace" | "globalHome",
   config: vscode.WorkspaceConfiguration,
-): Promise<void> {
+): Promise<PlannedFileMutation[]> {
+  const mutations: PlannedFileMutation[] = [];
   for (const kind of RESOURCE_KIND_ORDER) {
-    await deleteGeneratedRefCatalogFileIfExists(
+    const mutation = await planGeneratedRefCatalogCleanup(
       kind,
       resolveRefCatalogFileUri(workspaceUri, scope, config, kind),
     );
+    if (mutation) {
+      mutations.push(mutation);
+    }
   }
 
   const legacyCatalogRootUri = getLegacyRefCatalogRootUri(
@@ -1067,29 +1170,38 @@ async function cleanupRefCatalogFiles(
     scope,
   );
   for (const kind of RESOURCE_KIND_ORDER) {
-    await deleteGeneratedRefCatalogFileIfExists(
+    const mutation = await planGeneratedRefCatalogCleanup(
       kind,
       getLegacyRefCatalogFileUri(legacyCatalogRootUri, kind),
     );
+    if (mutation) {
+      mutations.push(mutation);
+    }
   }
+  return mutations;
 }
 
 async function cleanupLegacyRefCatalogFiles(
   workspaceUri: vscode.Uri,
   instructionUri: vscode.Uri,
   scope: "workspace" | "globalHome",
-): Promise<void> {
+): Promise<PlannedFileMutation[]> {
   const legacyCatalogRootUri = getLegacyRefCatalogRootUri(
     workspaceUri,
     instructionUri,
     scope,
   );
+  const mutations: PlannedFileMutation[] = [];
   for (const kind of RESOURCE_KIND_ORDER) {
-    await deleteGeneratedRefCatalogFileIfExists(
+    const mutation = await planGeneratedRefCatalogCleanup(
       kind,
       getLegacyRefCatalogFileUri(legacyCatalogRootUri, kind),
     );
+    if (mutation) {
+      mutations.push(mutation);
+    }
   }
+  return mutations;
 }
 
 function generateSharedRefSection(
@@ -1258,26 +1370,28 @@ async function resolveInstructionSkillSource(
 export async function updateInstructionFile(
   workspaceUri: vscode.Uri,
   context: vscode.ExtensionContext,
-): Promise<void> {
+  options: InstructionFileUpdateOptions = {},
+): Promise<InstructionFileUpdateResult> {
   const config = vscode.workspace.getConfiguration(
     "resourceNinja",
     workspaceUri,
   );
   const { instructionFile } = await resolveOutputFormat(workspaceUri);
   if (instructionFile === DISABLED_INSTRUCTION_FILE) {
-    return;
+    return { status: "disabled" };
   }
 
   const instructionUri = resolveInstructionFileUri(workspaceUri, config);
   if (!instructionUri) {
-    return;
+    return { status: "disabled" };
   }
 
-  await updateInstructionFileAtUri(
+  return updateInstructionFileAtUri(
     workspaceUri,
     context,
     instructionUri,
     getConfiguredInstructionFilePath(config),
+    options,
   );
 }
 
@@ -1293,15 +1407,38 @@ export async function updateInstructionFileAtUri(
   context: vscode.ExtensionContext,
   instructionUri: vscode.Uri,
   instructionPath: string,
-): Promise<void> {
-  return runInstructionFileUpdate(() =>
-    performInstructionFileUpdate(
-      workspaceUri,
-      context,
-      instructionUri,
-      instructionPath,
-    ),
-  );
+  options: InstructionFileUpdateOptions = {},
+): Promise<InstructionFileUpdateResult> {
+  let result: InstructionFileUpdateResult;
+  try {
+    result = await runInstructionFileUpdate(() =>
+      performInstructionFileUpdate(
+        workspaceUri,
+        context,
+        instructionUri,
+        instructionPath,
+      ),
+    );
+  } catch (error) {
+    const target =
+      error instanceof OutputFileUnreadableError
+        ? error.target
+        : instructionUri.fsPath;
+    const message = error instanceof Error ? error.message : String(error);
+    const code = (error as { code?: unknown } | undefined)?.code;
+    const status =
+      error instanceof OutputFileUnreadableError
+        ? "unreadable"
+        : code === "EBUSY" || code === "ETXTBSY"
+          ? "locked"
+          : "failed";
+    logger.error(
+      `[Resource Ninja] Resource output update ${status}: ${target}: ${message}`,
+    );
+    result = { status, target, message };
+  }
+  reconcileInstructionUpdateWarning(result, options.notifyOnFailure !== false);
+  return result;
 }
 
 async function performInstructionFileUpdate(
@@ -1309,7 +1446,7 @@ async function performInstructionFileUpdate(
   context: vscode.ExtensionContext,
   instructionUri: vscode.Uri,
   instructionPath: string,
-): Promise<void> {
+): Promise<InstructionFileUpdateResult> {
   const config = vscode.workspace.getConfiguration(
     "resourceNinja",
     workspaceUri,
@@ -1321,7 +1458,7 @@ async function performInstructionFileUpdate(
 
   if (coexistenceMode === "auto" && owner === "sibling") {
     logger.info("Skill NINJA is owner. Resource NINJA defers.");
-    return;
+    return { status: "deferred", target: instructionUri.fsPath };
   }
 
   const resourcesDirectory = getConfiguredSkillsDirectory(config);
@@ -1386,7 +1523,18 @@ async function performInstructionFileUpdate(
   const skillIndex =
     format === "ref" ? await loadSkillIndex(context) : undefined;
 
+  let existingContent = await readOutputTextFile(instructionUri);
+  if (
+    coexistenceMode === "auto" &&
+    siblingDetected &&
+    existingContent?.includes("<!-- skill-ninja-START -->")
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    existingContent = await readOutputTextFile(instructionUri);
+  }
+
   let skillSection: string;
+  const relatedOutputMutations: PlannedFileMutation[] = [];
 
   if (coexistenceMode === "auto") {
     const sharedResources = (
@@ -1406,16 +1554,20 @@ async function performInstructionFileUpdate(
       const enrichedResources = skillIndex
         ? enrichSyncResourcesWithRemoteMetadata(sharedResources, skillIndex)
         : sharedResources;
-      await syncRefCatalogFiles(
-        enrichedResources,
-        workspaceUri,
-        skillSource.scope,
-        config,
+      relatedOutputMutations.push(
+        ...(await syncRefCatalogFiles(
+          enrichedResources,
+          workspaceUri,
+          skillSource.scope,
+          config,
+        )),
       );
-      await cleanupLegacyRefCatalogFiles(
-        workspaceUri,
-        instructionUri,
-        skillSource.scope,
+      relatedOutputMutations.push(
+        ...(await cleanupLegacyRefCatalogFiles(
+          workspaceUri,
+          instructionUri,
+          skillSource.scope,
+        )),
       );
       skillSection = generateSharedRefSection(
         enrichedResources,
@@ -1426,11 +1578,13 @@ async function performInstructionFileUpdate(
         SHARED_MARKERS,
       );
     } else {
-      await cleanupRefCatalogFiles(
-        workspaceUri,
-        instructionUri,
-        skillSource.scope,
-        config,
+      relatedOutputMutations.push(
+        ...(await cleanupRefCatalogFiles(
+          workspaceUri,
+          instructionUri,
+          skillSource.scope,
+          config,
+        )),
       );
       skillSection = generateSharedResourceSectionForFormat(
         sharedResources,
@@ -1454,16 +1608,20 @@ async function performInstructionFileUpdate(
       const enrichedResources = skillIndex
         ? enrichSyncResourcesWithRemoteMetadata(skillResources, skillIndex)
         : skillResources;
-      await syncRefCatalogFiles(
-        enrichedResources,
-        workspaceUri,
-        skillSource.scope,
-        config,
+      relatedOutputMutations.push(
+        ...(await syncRefCatalogFiles(
+          enrichedResources,
+          workspaceUri,
+          skillSource.scope,
+          config,
+        )),
       );
-      await cleanupLegacyRefCatalogFiles(
-        workspaceUri,
-        instructionUri,
-        skillSource.scope,
+      relatedOutputMutations.push(
+        ...(await cleanupLegacyRefCatalogFiles(
+          workspaceUri,
+          instructionUri,
+          skillSource.scope,
+        )),
       );
       skillSection = generateSkillRefSection(
         enrichedResources,
@@ -1474,11 +1632,13 @@ async function performInstructionFileUpdate(
         RESOURCE_MARKERS,
       );
     } else {
-      await cleanupRefCatalogFiles(
-        workspaceUri,
-        instructionUri,
-        skillSource.scope,
-        config,
+      relatedOutputMutations.push(
+        ...(await cleanupRefCatalogFiles(
+          workspaceUri,
+          instructionUri,
+          skillSource.scope,
+          config,
+        )),
       );
       skillSection = generateSkillSectionForFormat(
         installedSkills,
@@ -1490,42 +1650,21 @@ async function performInstructionFileUpdate(
     }
   }
 
-  // 既存のファイルを読み込む
-  let existingContent = "";
-  try {
-    const content = await vscode.workspace.fs.readFile(instructionUri);
-    existingContent = Buffer.from(content).toString("utf-8");
-  } catch {
-    // ファイルが存在しない場合は新規作成
-    existingContent = "";
-  }
-
-  if (
-    coexistenceMode === "auto" &&
-    siblingDetected &&
-    existingContent.includes("<!-- skill-ninja-START -->")
-  ) {
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    try {
-      const content = await vscode.workspace.fs.readFile(instructionUri);
-      existingContent = Buffer.from(content).toString("utf-8");
-    } catch {
-      existingContent = "";
-    }
-  }
+  const instructionContent = existingContent ?? "";
 
   // マーカーで囲まれた部分を更新
   const newContent = matchLineEnding(
     updateSection(
-      existingContent,
+      instructionContent,
       skillSection,
       coexistenceMode === "auto" ? SHARED_MARKERS : RESOURCE_MARKERS,
     ),
-    existingContent,
+    instructionContent,
   );
 
-  // ディレクトリを作成してファイルを書き込む
-  if (newContent !== existingContent) {
+  await applyFileMutations(relatedOutputMutations);
+
+  if (newContent !== instructionContent) {
     const dir = vscode.Uri.file(path.dirname(instructionUri.fsPath));
     await vscode.workspace.fs.createDirectory(dir);
     await vscode.workspace.fs.writeFile(
@@ -1533,6 +1672,9 @@ async function performInstructionFileUpdate(
       Buffer.from(newContent, "utf-8"),
     );
   }
+  return newContent !== instructionContent || relatedOutputMutations.length > 0
+    ? { status: "updated", target: instructionUri.fsPath }
+    : { status: "unchanged", target: instructionUri.fsPath };
 }
 
 export function resolvePrimaryRefCatalogUri(

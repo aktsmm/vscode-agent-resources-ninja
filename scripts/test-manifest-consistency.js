@@ -1728,8 +1728,8 @@ test("every delete path that can remove a plugin folder unregisters it, and a re
     `The uninstall path in skillInstaller must be covered, found ${covered.join(", ")}`,
   );
   for (const required of [
-    "src/extension.ts:reinstallCmd",
-    "src/extension.ts:reinstallUserResourceCmd",
+    "src/extension.ts:reinstallResource",
+    "src/extension.ts:reinstallUserResource",
   ]) {
     assert.ok(
       reinstallCovered.includes(required),

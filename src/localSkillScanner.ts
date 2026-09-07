@@ -15,8 +15,15 @@ import {
   isBuiltInResourcePath,
   isIncompleteSkillContent,
 } from "./resourceKinds";
-import { updateInstructionFile } from "./instructionManager";
-import { stripSkillMetaLocalPaths } from "./skillInstaller";
+import {
+  isInstructionFileUpdateFailure,
+  updateInstructionFile,
+} from "./instructionManager";
+import {
+  JsonObjectReadResult,
+  readJsonObject,
+  stripSkillMetaLocalPaths,
+} from "./skillInstaller";
 import {
   DISABLED_INSTRUCTION_FILE,
   DEFAULT_WORKSPACE_AGENTS_DIRECTORY,
@@ -44,7 +51,7 @@ import { logger } from "./logger";
 
 const MAX_LOCAL_RESOURCE_FILES = 1000;
 
-interface ResourceInstallMeta {
+interface ResourceInstallMeta extends Record<string, unknown> {
   name?: string;
   source?: string;
   description?: string;
@@ -52,6 +59,9 @@ interface ResourceInstallMeta {
   categories?: string[];
   remotePath?: string;
   incomplete?: boolean;
+  reinstallDisabled?: boolean;
+  reinstallDisabledReason?: string;
+  reinstallDisabledAt?: string;
   pluginRoot?: string;
   pluginManifestPath?: string;
   pluginManifestKind?: string;
@@ -181,20 +191,21 @@ export function getConfiguredWorkspaceResourceRoots(
 async function readResourceInstallMetadata(
   fileUri: vscode.Uri,
   kind: NonNullable<LocalSkill["kind"]>,
-): Promise<ResourceInstallMeta | undefined> {
-  try {
-    const metadataUri = vscode.Uri.file(
-      getResourceMetadataPath(fileUri.fsPath, kind),
-    );
-    const content = await vscode.workspace.fs.readFile(metadataUri);
-    const parsed = JSON.parse(Buffer.from(content).toString("utf8"));
+): Promise<JsonObjectReadResult<ResourceInstallMeta>> {
+  const metadataUri = vscode.Uri.file(
+    getResourceMetadataPath(fileUri.fsPath, kind),
+  );
+  const result = await readJsonObject<ResourceInstallMeta>(metadataUri);
+  if (result.status === "loaded") {
     // The sidecar can arrive from a third-party repository, so a path found
     // inside it never becomes a location this extension acts on.
-    stripSkillMetaLocalPaths(parsed);
-    return parsed;
-  } catch {
-    return undefined;
+    stripSkillMetaLocalPaths(result.value);
+  } else if (result.status !== "missing") {
+    logger.warn(
+      `[Resource Ninja] Resource metadata is ${result.status}: ${metadataUri.fsPath}`,
+    );
   }
+  return result;
 }
 
 const WORKSPACE_SCAN_EXCLUDE_PATTERN =
@@ -322,6 +333,10 @@ export interface LocalSkill extends Skill {
   isRegistered: boolean; // AGENTS.md に登録済みか
   isBuiltIn?: boolean; // VS Code / Copilot Chat built-in resource
   incomplete?: boolean; // 実体を取得できず、生成テンプレートだけが残っている
+  reinstallDisabled?: boolean;
+  reinstallDisabledReason?: string;
+  reinstallDisabledAt?: string;
+  metadataStatus?: "unreadable" | "invalid";
   registrationFile?: string; // 登録されているファイル (AGENTS.md など)
 }
 
@@ -602,7 +617,9 @@ async function parseLocalSkillFile(
   if (!kind) {
     return null;
   }
-  const installMeta = await readResourceInstallMetadata(fileUri, kind);
+  const installMetaResult = await readResourceInstallMetadata(fileUri, kind);
+  const installMeta =
+    installMetaResult.status === "loaded" ? installMetaResult.value : undefined;
 
   let name = "";
   let description = "";
@@ -661,6 +678,14 @@ async function parseLocalSkillFile(
     pluginRoot: installMeta?.pluginRoot,
     pluginManifestPath: installMeta?.pluginManifestPath,
     pluginManifestKind: installMeta?.pluginManifestKind,
+    reinstallDisabled: installMeta?.reinstallDisabled,
+    reinstallDisabledReason: installMeta?.reinstallDisabledReason,
+    reinstallDisabledAt: installMeta?.reinstallDisabledAt,
+    metadataStatus:
+      installMetaResult.status === "unreadable" ||
+      installMetaResult.status === "invalid"
+        ? installMetaResult.status
+        : undefined,
     isLocal: true,
     fullPath: fileUri.fsPath,
     relativePath: skillDir,
@@ -851,8 +876,8 @@ export async function registerLocalSkill(
   try {
     // instructionManager の updateInstructionFile を使用
     // これにより、全てのスキル（インストール済み＋ローカル）がマーカー内で管理される
-    await updateInstructionFile(workspaceUri, context);
-    return true;
+    const result = await updateInstructionFile(workspaceUri, context);
+    return !isInstructionFileUpdateFailure(result);
   } catch (error) {
     logger.error("Failed to register local skill:", error);
     return false;
@@ -878,7 +903,8 @@ export async function unregisterLocalSkill(
     // 暫定: includeLocalResources が false の場合のみ解除が有効
     const config = vscode.workspace.getConfiguration("resourceNinja");
     if (!getConfiguredIncludeLocalResources(config)) {
-      await updateInstructionFile(workspaceUri, context);
+      const result = await updateInstructionFile(workspaceUri, context);
+      return !isInstructionFileUpdateFailure(result);
     }
     return true;
   } catch (error) {

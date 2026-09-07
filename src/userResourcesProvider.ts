@@ -77,6 +77,26 @@ function formatRootPathForDisplay(fsPath: string): string {
   return normalizedPath;
 }
 
+export function normalizeResourceRootIdentity(
+  fsPath: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const pathApi = platform === "win32" ? path.win32 : path.posix;
+  const normalized = pathApi.normalize(fsPath).replace(/[\\/]+$/, "");
+  return platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function isResourceInTreeRoot(
+  resource: UserResource,
+  item: UserResourceTreeItem,
+): boolean {
+  return (
+    !!item.rootFsPath &&
+    normalizeResourceRootIdentity(resource.rootFsPath) ===
+      normalizeResourceRootIdentity(item.rootFsPath)
+  );
+}
+
 function formatScopeDescription(
   resource: UserResource,
   count: number,
@@ -209,7 +229,7 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
       const scopes = Array.from(
         new Map(
           regularResources.map((resource) => [
-            `${resource.scope}:${resource.scopeLabel}`,
+            `${resource.scope}:${normalizeResourceRootIdentity(resource.rootFsPath)}`,
             resource,
           ]),
         ).values(),
@@ -218,7 +238,8 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
         const scopedResources = regularResources.filter(
           (candidate) =>
             candidate.scope === resource.scope &&
-            candidate.scopeLabel === resource.scopeLabel,
+            normalizeResourceRootIdentity(candidate.rootFsPath) ===
+              normalizeResourceRootIdentity(resource.rootFsPath),
         );
         const count = scopedResources.length;
         const item = new UserResourceTreeItem(
@@ -232,6 +253,9 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
           resource.scope,
           undefined,
           resource.scopeLabel,
+          undefined,
+          undefined,
+          resource.rootFsPath,
         );
         item.iconPath = new vscode.ThemeIcon(getScopeIcon(resource.scope));
         item.tooltip = `${resource.scopeLabel}\n${formatScopeDescription(resource, count, scopedResources)}\n${resource.rootFsPath}`;
@@ -259,7 +283,7 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
       const scopedResources = this.getRegularResources().filter(
         (resource) =>
           resource.scope === element.scope &&
-          resource.scopeLabel === element.scopeLabel,
+          isResourceInTreeRoot(resource, element),
       );
       if (element.scope === "extension") {
         const tools = Array.from(
@@ -278,6 +302,9 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
             element.scope,
             undefined,
             tool,
+            undefined,
+            undefined,
+            element.rootFsPath,
           );
           item.iconPath = new vscode.ThemeIcon("extensions");
           return item;
@@ -305,7 +332,7 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
       const scopedResources = this.getRegularResources().filter(
         (resource) =>
           resource.scope === element.scope &&
-          resource.scopeLabel === element.scopeLabel,
+          isResourceInTreeRoot(resource, element),
       );
       return this.getPluginGroups(scopedResources).map((plugin) => {
         const item = new UserResourceTreeItem(
@@ -318,6 +345,8 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
           undefined,
           element.scopeLabel,
           plugin.id,
+          undefined,
+          element.rootFsPath,
         );
         item.iconPath = new vscode.ThemeIcon(
           "extensions",
@@ -332,7 +361,7 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
         .filter(
           (resource) =>
             resource.scope === element.scope &&
-            resource.scopeLabel === element.scopeLabel &&
+            isResourceInTreeRoot(resource, element) &&
             this.getPluginId(resource) === element.pluginId,
         )
         .map((resource) => this.createResourceItem(resource));
@@ -376,7 +405,7 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
         .filter(
           (resource) =>
             resource.scope === element.scope &&
-            resource.scopeLabel === element.scopeLabel &&
+            isResourceInTreeRoot(resource, element) &&
             resource.kind === element.kind,
         )
         .map((resource) => this.createResourceItem(resource));
@@ -436,6 +465,8 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
     return (
       !resource.isReadOnly &&
       !resource.isBuiltIn &&
+      !resource.metadataStatus &&
+      !resource.reinstallDisabled &&
       !!resource.remotePath &&
       !!resource.source &&
       resource.source !== "local"
@@ -463,6 +494,9 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
         parent.scope,
         kind,
         parent.scopeLabel,
+        undefined,
+        undefined,
+        parent.rootFsPath,
       );
       item.iconPath = new vscode.ThemeIcon(getResourceKindIcon(kind));
       return item;
@@ -509,6 +543,9 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
       parent.scope,
       undefined,
       parent.scopeLabel,
+      undefined,
+      undefined,
+      parent.rootFsPath,
     );
     item.iconPath = new vscode.ThemeIcon(
       "extensions",
@@ -519,6 +556,45 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
 
   getResources(): UserResource[] {
     return this.resources;
+  }
+
+  async getCurrentResources(): Promise<UserResource[]> {
+    if (!this.hasLoaded) {
+      await this.getChildren();
+    }
+    return this.resources;
+  }
+
+  async resolveCurrentGroupResources(
+    item: UserResourceTreeItem,
+  ): Promise<UserResource[] | undefined> {
+    if (
+      !item.scope ||
+      !item.rootFsPath ||
+      (item.nodeType !== "kind" && item.nodeType !== "plugin")
+    ) {
+      return undefined;
+    }
+
+    const currentResources = (await this.getCurrentResources()).filter(
+      (resource) =>
+        !resource.isBuiltIn &&
+        !resource.isReadOnly &&
+        resource.scope === item.scope &&
+        isResourceInTreeRoot(resource, item),
+    );
+    if (currentResources.length === 0) {
+      return undefined;
+    }
+    if (item.nodeType === "kind" && item.kind) {
+      return currentResources.filter((resource) => resource.kind === item.kind);
+    }
+    if (item.nodeType === "plugin" && item.pluginId) {
+      return currentResources.filter(
+        (resource) => this.getPluginId(resource) === item.pluginId,
+      );
+    }
+    return undefined;
   }
 
   private async enrichResourceStatuses(): Promise<void> {
@@ -584,6 +660,16 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
         ? "不完全"
         : "Incomplete"
       : undefined;
+    const metadataLabel = resource.metadataStatus
+      ? isJapanese()
+        ? `メタデータ${resource.metadataStatus === "invalid" ? "不正" : "読取不能"}`
+        : `Metadata ${resource.metadataStatus}`
+      : undefined;
+    const reinstallDisabledLabel = resource.reinstallDisabled
+      ? isJapanese()
+        ? `再インストール無効${resource.reinstallDisabledReason ? ` (${resource.reinstallDisabledReason})` : ""}`
+        : `Reinstall disabled${resource.reinstallDisabledReason ? ` (${resource.reinstallDisabledReason})` : ""}`
+      : undefined;
     // An extension-packaged resource can be incomplete too, so the label cannot live in one branch.
     const descriptionParts = resource.isBuiltIn
       ? [`${isJapanese() ? "組み込み" : "Built-in"} · ${resource.tool}`]
@@ -596,6 +682,8 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
         : [
             recentLabel,
             incompleteLabel,
+            metadataLabel,
+            reinstallDisabledLabel,
             pluginLabel,
             resource.lifecycleLabel,
             resource.description || resource.relativePath,
@@ -614,6 +702,7 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
       resource.scopeLabel,
       undefined,
       isRecent,
+      resource.rootFsPath,
     );
   }
 }
@@ -630,6 +719,7 @@ export class UserResourceTreeItem extends vscode.TreeItem {
     public readonly scopeLabel?: string,
     public readonly pluginId?: string,
     public readonly isRecent?: boolean,
+    public readonly rootFsPath?: string,
   ) {
     super(label, collapsibleState);
     this.description = description;
@@ -646,12 +736,13 @@ export class UserResourceTreeItem extends vscode.TreeItem {
 
     if (resource) {
       this.resourceUri = vscode.Uri.file(resource.fullPath);
-      this.iconPath = resource.incomplete
-        ? new vscode.ThemeIcon(
-            "warning",
-            new vscode.ThemeColor("errorForeground"),
-          )
-        : new vscode.ThemeIcon(getResourceKindIcon(resource.kind));
+      this.iconPath =
+        resource.incomplete || resource.metadataStatus
+          ? new vscode.ThemeIcon(
+              "warning",
+              new vscode.ThemeColor("errorForeground"),
+            )
+          : new vscode.ThemeIcon(getResourceKindIcon(resource.kind));
       const status = resource.isBuiltIn
         ? `${isJapanese() ? "組み込み" : "Built-in"} · ${resource.tool}`
         : resource.isReadOnly
@@ -675,7 +766,17 @@ export class UserResourceTreeItem extends vscode.TreeItem {
           ? `\n⚠ 不完全: SKILL.md の実体を取得できていません。再インストールしてください。`
           : `\n⚠ Incomplete: SKILL.md content was not downloaded. Reinstall this resource.`
         : "";
-      this.tooltip = `${resource.name}\n${resource.description || "No description"}${pluginLine}${lifecycleLines}${incompleteLine}${recentLine}\n${status}\n${resource.relativePath}\n${resource.fullPath}`;
+      const metadataLine = resource.metadataStatus
+        ? isJapanese()
+          ? `\n⚠ インストールメタデータを${resource.metadataStatus === "invalid" ? "解析" : "読み取り"}できないため、リモート操作を無効にしました。`
+          : `\n⚠ Install metadata is ${resource.metadataStatus}; remote actions are disabled.`
+        : "";
+      const reinstallDisabledLine = resource.reinstallDisabled
+        ? isJapanese()
+          ? `\n再インストール確認: 無効${resource.reinstallDisabledReason ? ` (${resource.reinstallDisabledReason})` : ""}`
+          : `\nReinstall Check: disabled${resource.reinstallDisabledReason ? ` (${resource.reinstallDisabledReason})` : ""}`
+        : "";
+      this.tooltip = `${resource.name}\n${resource.description || "No description"}${pluginLine}${lifecycleLines}${incompleteLine}${metadataLine}${reinstallDisabledLine}${recentLine}\n${status}\n${resource.relativePath}\n${resource.fullPath}`;
       this.command = {
         command: "resourceNinja.openUserResource",
         title: isJapanese() ? "リソースを開く" : "Open Resource",

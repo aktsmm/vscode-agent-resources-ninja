@@ -153,6 +153,47 @@ export interface UninstallSkillResult {
   hookConfigUpdate?: HookConfigUpdateResult;
 }
 
+export type JsonObjectReadResult<T extends Record<string, unknown>> =
+  | { status: "loaded"; value: T }
+  | { status: "missing" }
+  | { status: "unreadable"; error: unknown }
+  | { status: "invalid"; error: unknown };
+
+export function isFileNotFoundError(error: unknown): boolean {
+  const code = (error as { code?: unknown } | undefined)?.code;
+  if (code === "ENOENT" || code === "FileNotFound") {
+    return true;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /(?:ENOENT|FileNotFound)/i.test(message);
+}
+
+export async function readJsonObject<T extends Record<string, unknown>>(
+  uri: vscode.Uri,
+): Promise<JsonObjectReadResult<T>> {
+  let content: Uint8Array;
+  try {
+    content = await vscode.workspace.fs.readFile(uri);
+  } catch (error) {
+    return isFileNotFoundError(error)
+      ? { status: "missing" }
+      : { status: "unreadable", error };
+  }
+
+  try {
+    const value: unknown = JSON.parse(Buffer.from(content).toString("utf-8"));
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return {
+        status: "invalid",
+        error: new TypeError("Expected a JSON object"),
+      };
+    }
+    return { status: "loaded", value: value as T };
+  } catch (error) {
+    return { status: "invalid", error };
+  }
+}
+
 function getParentDirectoryUri(resourceUri: vscode.Uri): vscode.Uri {
   return vscode.Uri.file(path.dirname(resourceUri.fsPath));
 }
@@ -161,8 +202,11 @@ async function uriExists(uri: vscode.Uri): Promise<boolean> {
   try {
     await vscode.workspace.fs.stat(uri);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      return false;
+    }
+    throw error;
   }
 }
 
@@ -469,16 +513,15 @@ function createSyntheticSource(
 async function readSkillMetaIfExists(
   metaPath: vscode.Uri,
 ): Promise<Partial<SkillMeta> | undefined> {
-  try {
-    const existingContent = await vscode.workspace.fs.readFile(metaPath);
-    const parsed = JSON.parse(
-      Buffer.from(existingContent).toString("utf-8"),
-    ) as Partial<SkillMeta>;
-    stripSkillMetaLocalPaths(parsed);
-    return parsed;
-  } catch {
+  const result = await readJsonObject<Partial<SkillMeta>>(metaPath);
+  if (result.status === "missing") {
     return undefined;
   }
+  if (result.status !== "loaded") {
+    throw result.error;
+  }
+  stripSkillMetaLocalPaths(result.value);
+  return result.value;
 }
 
 /**
@@ -527,7 +570,7 @@ function mergeSkillMeta(
   };
 }
 
-interface ResourceInstallMeta {
+interface ResourceInstallMeta extends Record<string, unknown> {
   kind: string;
   name: string;
   source: string;
@@ -537,6 +580,9 @@ interface ResourceInstallMeta {
   remotePath: string;
   installedAt: string;
   incomplete?: boolean;
+  reinstallDisabled?: boolean;
+  reinstallDisabledReason?: string;
+  reinstallDisabledAt?: string;
   pluginRoot?: string;
   pluginManifestPath?: string;
   pluginManifestKind?: string;
@@ -560,7 +606,20 @@ async function writeResourceInstallMetadata(
     return;
   }
 
+  const metadataUri = getResourceMetadataUri(resourceUri, kind);
+  const existingResult =
+    await readJsonObject<Partial<ResourceInstallMeta>>(metadataUri);
+  if (
+    existingResult.status === "unreadable" ||
+    existingResult.status === "invalid"
+  ) {
+    throw existingResult.error;
+  }
+  const existingMeta =
+    existingResult.status === "loaded" ? existingResult.value : {};
+  stripSkillMetaLocalPaths(existingMeta);
   const meta: ResourceInstallMeta = {
+    ...existingMeta,
     kind,
     name: skill.name,
     source: normalizeSkillMetaSource({
@@ -577,7 +636,7 @@ async function writeResourceInstallMetadata(
     pluginManifestKind: skill.pluginManifestKind,
   };
   await vscode.workspace.fs.writeFile(
-    getResourceMetadataUri(resourceUri, kind),
+    metadataUri,
     Buffer.from(JSON.stringify(meta, null, 2), "utf-8"),
   );
 }
@@ -2144,6 +2203,9 @@ export interface SkillMeta {
   customWhenToUse?: string; // ユーザーがカスタマイズした説明（最優先）
   registrationDisabled?: boolean; // skill-only sibling extension と共有する登録状態フラグ
   incomplete?: boolean; // SKILL.md がテンプレートのみ、または実体を欠いた状態
+  reinstallDisabled?: boolean; // skill-only sibling extension と共有する再インストール抑止フラグ
+  reinstallDisabledReason?: string;
+  reinstallDisabledAt?: string;
   categories: string[];
   installedAt: string;
   relativePath?: string; // ネストされたスキルのパス（例: "document-skills/docx"）

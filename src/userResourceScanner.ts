@@ -24,8 +24,13 @@ import {
   shouldReplaceBuiltInResourcePath,
 } from "./resourceKinds";
 import { isJapanese } from "./i18n";
+import { logger } from "./logger";
 import { getVsCodeUserDataPath } from "./userDataPaths";
-import { stripSkillMetaLocalPaths } from "./skillInstaller";
+import {
+  JsonObjectReadResult,
+  readJsonObject,
+  stripSkillMetaLocalPaths,
+} from "./skillInstaller";
 
 export type UserResourceScope = "userData" | "globalHome" | "extension";
 
@@ -60,11 +65,15 @@ export interface UserResource {
   isBuiltIn?: boolean;
   isReadOnly?: boolean;
   incomplete?: boolean;
+  reinstallDisabled?: boolean;
+  reinstallDisabledReason?: string;
+  reinstallDisabledAt?: string;
+  metadataStatus?: "unreadable" | "invalid";
   lifecycleLabel?: string;
   lifecycleTooltipLines?: string[];
 }
 
-interface ResourceInstallMeta {
+interface ResourceInstallMeta extends Record<string, unknown> {
   name?: string;
   source?: string;
   description?: string;
@@ -72,6 +81,9 @@ interface ResourceInstallMeta {
   categories?: string[];
   remotePath?: string;
   incomplete?: boolean;
+  reinstallDisabled?: boolean;
+  reinstallDisabledReason?: string;
+  reinstallDisabledAt?: string;
   pluginRoot?: string;
   pluginManifestPath?: string;
   pluginManifestKind?: string;
@@ -673,20 +685,21 @@ function parseFrontmatterValue(frontmatter: string, key: string): string {
 async function readResourceInstallMetadata(
   fileUri: vscode.Uri,
   kind: ResourceKind,
-): Promise<ResourceInstallMeta | undefined> {
-  try {
-    const metadataUri = vscode.Uri.file(
-      getResourceMetadataPath(fileUri.fsPath, kind),
-    );
-    const document = await vscode.workspace.openTextDocument(metadataUri);
-    const parsed = JSON.parse(document.getText());
+): Promise<JsonObjectReadResult<ResourceInstallMeta>> {
+  const metadataUri = vscode.Uri.file(
+    getResourceMetadataPath(fileUri.fsPath, kind),
+  );
+  const result = await readJsonObject<ResourceInstallMeta>(metadataUri);
+  if (result.status === "loaded") {
     // The sidecar can arrive from a third-party repository, so a path found
     // inside it never becomes a location this extension acts on.
-    stripSkillMetaLocalPaths(parsed);
-    return parsed;
-  } catch {
-    return undefined;
+    stripSkillMetaLocalPaths(result.value);
+  } else if (result.status !== "missing") {
+    logger.warn(
+      `[Resource Ninja] Resource metadata is ${result.status}: ${metadataUri.fsPath}`,
+    );
   }
+  return result;
 }
 
 async function parseResourceFile(
@@ -703,7 +716,9 @@ async function parseResourceFile(
   if (!kind) {
     return undefined;
   }
-  const installMeta = await readResourceInstallMetadata(fileUri, kind);
+  const installMetaResult = await readResourceInstallMetadata(fileUri, kind);
+  const installMeta =
+    installMetaResult.status === "loaded" ? installMetaResult.value : undefined;
 
   let name = "";
   let description = "";
@@ -751,6 +766,9 @@ async function parseResourceFile(
     pluginRoot: installMeta?.pluginRoot,
     pluginManifestPath: installMeta?.pluginManifestPath,
     pluginManifestKind: installMeta?.pluginManifestKind,
+    reinstallDisabled: installMeta?.reinstallDisabled,
+    reinstallDisabledReason: installMeta?.reinstallDisabledReason,
+    reinstallDisabledAt: installMeta?.reinstallDisabledAt,
     fullPath: fileUri.fsPath,
     scope: root.scope,
     scopeLabel: root.label,
@@ -759,6 +777,11 @@ async function parseResourceFile(
     rootFsPath: root.uri.fsPath,
     isBuiltIn,
     isReadOnly,
+    metadataStatus:
+      installMetaResult.status === "unreadable" ||
+      installMetaResult.status === "invalid"
+        ? installMetaResult.status
+        : undefined,
     incomplete:
       kind === "skill" &&
       !isBuiltIn &&

@@ -588,6 +588,13 @@ const { collectMarkdownFiles } = requireTypeScriptModule(
       { vscode: walkVscodeStub },
     ),
     "./i18n": { isJapanese: () => false },
+    "./logger": {
+      logger: {
+        info: () => undefined,
+        warn: () => undefined,
+        error: () => undefined,
+      },
+    },
     "./userDataPaths": { getVsCodeUserDataPath: () => FIXTURE_ROOT },
     "./skillInstaller": { stripSkillMetaLocalPaths: () => undefined },
   },

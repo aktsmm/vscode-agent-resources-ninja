@@ -206,6 +206,8 @@ const jaMessages = {
   installResourcesHint: "「{0}」でインストールしてください",
   instructionFileUpdatedOnSettingChange:
     "✅ 設定変更によりリソース出力を更新しました",
+  resourceOutputUpdateFailed:
+    "リソースの変更は完了しましたが、出力の更新に失敗しました ({0})。Agent Resources Ninja の出力を確認してください。",
   pluginLocationRegisterPrompt:
     'plugin "{0}" のフォルダーのパスを、ユーザー設定 (settings.json) の chat.pluginLocations に追加してよいですか？登録しないと VS Code はこの plugin を読み込みません。',
   pluginLocationRegisterPromptMultiple:
@@ -428,6 +430,8 @@ const enMessages: MessageDictionary = {
   installResourcesHint: "Use '{0}' to install resources",
   instructionFileUpdatedOnSettingChange:
     "✅ Resource output updated due to setting change",
+  resourceOutputUpdateFailed:
+    "The resource change completed, but resource output update failed ({0}). Check the Agent Resources Ninja output channel.",
   pluginLocationRegisterPrompt:
     'Add the folder path of plugin "{0}" to chat.pluginLocations in your user settings (settings.json)? VS Code does not load the plugin until it is registered.',
   pluginLocationRegisterPromptMultiple:
@@ -753,6 +757,8 @@ export const messages = {
   // 設定変更時の自動更新
   instructionFileUpdatedOnSettingChange: () =>
     localize("instructionFileUpdatedOnSettingChange"),
+  resourceOutputUpdateFailed: (status: string) =>
+    localize("resourceOutputUpdateFailed", status),
 
   // plugin の chat.pluginLocations 登録
   pluginLocationRegisterPrompt: (name: string) =>

@@ -22,10 +22,10 @@ function test(name, fn) {
   }
 }
 
-test("local skills without remotePath are excluded from index-missing checks", () => {
+test("local and reinstall-disabled skills are excluded from index-missing checks", () => {
   assert.match(
     extensionSource,
-    /function isIndexTrackedInstalledSkill\(\s*meta: Pick<SkillMeta, "remotePath">,\s*\): boolean \{\s*return !!normalizeInstalledRemotePath\(meta\.remotePath\);\s*\}/,
+    /function isIndexTrackedInstalledSkill\([\s\S]*?"remotePath" \| "reinstallDisabled"[\s\S]*?meta\.reinstallDisabled !== true[\s\S]*?normalizeInstalledRemotePath\(meta\.remotePath\)/,
   );
   assert.match(
     extensionSource,
@@ -54,7 +54,7 @@ test("startup and bulk reinstall paths share the same missing-skill collector", 
 test("upgrade remote-skill count excludes local skills and requires remotePath", () => {
   assert.match(
     extensionSource,
-    /function isRemoteInstalledSkillMeta\([\s\S]*!!normalizeInstalledRemotePath\(meta\.remotePath\)[\s\S]*meta\.source !== "unknown"[\s\S]*meta\.source !== "local"/,
+    /function isRemoteInstalledSkillMeta\([\s\S]*meta\.reinstallDisabled !== true[\s\S]*!!normalizeInstalledRemotePath\(meta\.remotePath\)[\s\S]*meta\.source !== "unknown"[\s\S]*meta\.source !== "local"/,
   );
   assert.match(
     extensionSource,

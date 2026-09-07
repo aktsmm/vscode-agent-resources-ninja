@@ -139,6 +139,10 @@ export interface WorkspaceSkill {
   isRegistered: boolean; // instruction file に登録済みか
   isBuiltIn?: boolean; // VS Code / Copilot Chat built-in resource
   incomplete?: boolean; // 実体を取得できず、生成テンプレートだけが残っている
+  reinstallDisabled?: boolean;
+  reinstallDisabledReason?: string;
+  reinstallDisabledAt?: string;
+  metadataStatus?: "unreadable" | "invalid";
   source?: string; // インストール元ソース
   remotePath?: string;
   categories?: string[];
@@ -220,6 +224,7 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
   >();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
   private workspaceSkills: WorkspaceSkill[] = [];
+  private hasLoaded = false;
 
   constructor(
     private workspaceUri: vscode.Uri | undefined,
@@ -228,6 +233,7 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
 
   refresh(): void {
     this.workspaceSkills = [];
+    this.hasLoaded = false;
     void vscode.commands.executeCommand(
       "setContext",
       "resourceNinja.hasInstalledSkills",
@@ -249,13 +255,14 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
     if (!this.workspaceUri) {
       return [];
     }
+    const workspaceRootFsPath = this.workspaceUri.fsPath;
+
+    if (!this.hasLoaded) {
+      await this.loadWorkspaceSkills();
+      this.hasLoaded = true;
+    }
 
     if (!element) {
-      // ワークスペーススキルを取得
-      if (this.workspaceSkills.length === 0) {
-        await this.loadWorkspaceSkills();
-      }
-
       if (this.workspaceSkills.length === 0) {
         return [
           new SkillTreeItem(
@@ -282,6 +289,9 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
             undefined,
             undefined,
             kind,
+            undefined,
+            undefined,
+            workspaceRootFsPath,
           );
           item.iconPath = new vscode.ThemeIcon(getResourceKindIcon(kind));
           return item;
@@ -438,7 +448,11 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
     const workspacePluginLabel = workspacePluginId
       ? `${isJapanese() ? "プラグイン" : "Plugin"}: ${workspacePluginId}`
       : undefined;
-    const isRemoteInstalled = !!sourceLabel && !!skill.remotePath;
+    const isRemoteInstalled =
+      !skill.metadataStatus &&
+      !skill.reinstallDisabled &&
+      !!sourceLabel &&
+      !!skill.remotePath;
     const contextValue = skill.isBuiltIn
       ? "builtInResource"
       : skill.isInstalled
@@ -454,12 +468,24 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
           : "localResource";
     const labelPrefix = statusIcon ? `${newBadge}${statusIcon} ` : newBadge;
     const incompleteLabel = isJapanese() ? "不完全" : "Incomplete";
+    const metadataLabel = skill.metadataStatus
+      ? isJapanese()
+        ? `メタデータ${skill.metadataStatus === "invalid" ? "不正" : "読取不能"}`
+        : `Metadata ${skill.metadataStatus}`
+      : undefined;
+    const reinstallDisabledLabel = skill.reinstallDisabled
+      ? isJapanese()
+        ? `再インストール無効${skill.reinstallDisabledReason ? ` (${skill.reinstallDisabledReason})` : ""}`
+        : `Reinstall disabled${skill.reinstallDisabledReason ? ` (${skill.reinstallDisabledReason})` : ""}`
+      : undefined;
     const baseDescription = skill.isBuiltIn
       ? `built-in · ${sourceLabel || "Built-in"}`
       : skill.isInstalled
         ? [
             recentLabel,
             sourceLabel ? `installed from ${sourceLabel}` : "installed",
+            metadataLabel,
+            reinstallDisabledLabel,
             skill.lifecycleLabel,
             workspacePluginLabel,
           ]
@@ -491,6 +517,10 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
         relativePath: skill.relativePath,
         isRegistered: skill.isRegistered,
         isBuiltIn: skill.isBuiltIn,
+        metadataStatus: skill.metadataStatus,
+        reinstallDisabled: skill.reinstallDisabled,
+        reinstallDisabledReason: skill.reinstallDisabledReason,
+        reinstallDisabledAt: skill.reinstallDisabledAt,
       } as Skill & Partial<LocalSkill>,
       undefined,
       undefined,
@@ -499,12 +529,13 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
       parent,
     );
 
-    item.iconPath = skill.incomplete
-      ? new vscode.ThemeIcon(
-          "warning",
-          new vscode.ThemeColor("errorForeground"),
-        )
-      : new vscode.ThemeIcon(iconId, iconColor);
+    item.iconPath =
+      skill.incomplete || skill.metadataStatus
+        ? new vscode.ThemeIcon(
+            "warning",
+            new vscode.ThemeColor("errorForeground"),
+          )
+        : new vscode.ThemeIcon(iconId, iconColor);
     item.resourceUri = vscode.Uri.file(skill.fullPath);
 
     const statusText = skill.isBuiltIn
@@ -552,7 +583,17 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
         ? `\n⚠ 不完全: SKILL.md の実体を取得できていません。再インストールしてください。`
         : `\n⚠ Incomplete: SKILL.md content was not downloaded. Reinstall this resource.`
       : "";
-    item.tooltip = `${skill.name}\n${descText}${pluginInfo}${lifecycleInfo}${incompleteInfo}\n${pathLabel}: ${skill.relativePath}\n${statusLabel}: ${accessibleStatusText}${metaInfo}`;
+    const metadataInfo = skill.metadataStatus
+      ? isJapanese()
+        ? `\n⚠ インストールメタデータを${skill.metadataStatus === "invalid" ? "解析" : "読み取り"}できないため、リモート操作を無効にしました。`
+        : `\n⚠ Install metadata is ${skill.metadataStatus}; remote actions are disabled.`
+      : "";
+    const reinstallDisabledInfo = skill.reinstallDisabled
+      ? isJapanese()
+        ? `\n再インストール確認: 無効${skill.reinstallDisabledReason ? ` (${skill.reinstallDisabledReason})` : ""}`
+        : `\nReinstall Check: disabled${skill.reinstallDisabledReason ? ` (${skill.reinstallDisabledReason})` : ""}`
+      : "";
+    item.tooltip = `${skill.name}\n${descText}${pluginInfo}${lifecycleInfo}${incompleteInfo}${metadataInfo}${reinstallDisabledInfo}\n${pathLabel}: ${skill.relativePath}\n${statusLabel}: ${accessibleStatusText}${metaInfo}`;
     item.command = {
       command: "vscode.open",
       title: isJapanese() ? "リソースを開く" : "Open Resource",
@@ -617,6 +658,10 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
         remotePath: local.remotePath,
         categories: local.categories,
         incomplete: local.incomplete,
+        reinstallDisabled: local.reinstallDisabled,
+        reinstallDisabledReason: local.reinstallDisabledReason,
+        reinstallDisabledAt: local.reinstallDisabledAt,
+        metadataStatus: local.metadataStatus,
       });
     }
 
@@ -645,6 +690,9 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
         existing.author = meta.author;
         existing.version = meta.version;
         existing.incomplete = meta.incomplete || existing.incomplete;
+        existing.reinstallDisabled = meta.reinstallDisabled;
+        existing.reinstallDisabledReason = meta.reinstallDisabledReason;
+        existing.reinstallDisabledAt = meta.reinstallDisabledAt;
         existing.fullPath = meta.skillFilePath || existing.fullPath;
       } else if (meta.skillFilePath) {
         skillMap.set(metaKey, {
@@ -663,6 +711,9 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
           author: meta.author,
           version: meta.version,
           incomplete: meta.incomplete,
+          reinstallDisabled: meta.reinstallDisabled,
+          reinstallDisabledReason: meta.reinstallDisabledReason,
+          reinstallDisabledAt: meta.reinstallDisabledAt,
         });
       }
     }
@@ -749,6 +800,10 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
   private skillIndex: SkillIndex | undefined;
   private installedRemoteResourceKeys: Set<string> = new Set();
+  private reinstallDisabledResourceReasons = new Map<
+    string,
+    string | undefined
+  >();
 
   constructor(
     private context: vscode.ExtensionContext,
@@ -758,6 +813,7 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
   refresh(): void {
     this.skillIndex = undefined;
     this.installedRemoteResourceKeys.clear();
+    this.reinstallDisabledResourceReasons.clear();
     this._onDidChangeTreeData.fire();
   }
 
@@ -767,6 +823,7 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
   setIndex(index: SkillIndex): void {
     this.skillIndex = index;
     this.installedRemoteResourceKeys.clear();
+    this.reinstallDisabledResourceReasons.clear();
     this._onDidChangeTreeData.fire();
   }
 
@@ -781,6 +838,15 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
     return getResourceIdentityKeys(skill).some((key) =>
       this.installedRemoteResourceKeys.has(key),
     );
+  }
+
+  private getReinstallDisabledReason(skill: Skill): string | null | undefined {
+    for (const key of getResourceIdentityKeys(skill)) {
+      if (this.reinstallDisabledResourceReasons.has(key)) {
+        return this.reinstallDisabledResourceReasons.get(key) ?? null;
+      }
+    }
+    return undefined;
   }
 
   getTreeItem(element: SkillTreeItem): vscode.TreeItem {
@@ -809,6 +875,12 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
             remotePath: meta.remotePath,
           })) {
             this.installedRemoteResourceKeys.add(key);
+            if (meta.reinstallDisabled) {
+              this.reinstallDisabledResourceReasons.set(
+                key,
+                meta.reinstallDisabledReason,
+              );
+            }
           }
         });
 
@@ -825,6 +897,12 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
           ) {
             for (const key of getResourceIdentityKeys(resource)) {
               this.installedRemoteResourceKeys.add(key);
+              if (resource.reinstallDisabled) {
+                this.reinstallDisabledResourceReasons.set(
+                  key,
+                  resource.reinstallDisabledReason,
+                );
+              }
             }
           }
         });
@@ -1430,6 +1508,8 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
     );
     return resources.map((skill) => {
       const isInstalled = this.isSkillInstalled(skill);
+      const reinstallDisabledReason = this.getReinstallDisabledReason(skill);
+      const reinstallDisabled = reinstallDisabledReason !== undefined;
       const isRecent = getResourceIdentityKeys(skill).some((key) =>
         this.recentlyInstalled?.has(key),
       );
@@ -1443,9 +1523,13 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
           ? undefined
           : getPluginPackageLabel(pluginPackageId, pluginPackages);
       const browseContextValue = isInstalled
-        ? kind === "skill"
-          ? "installedRemoteSkill"
-          : "installedRemoteResource"
+        ? reinstallDisabled
+          ? kind === "skill"
+            ? "installedSkill"
+            : "installedResource"
+          : kind === "skill"
+            ? "installedRemoteSkill"
+            : "installedRemoteResource"
         : "skill";
       const descriptionParts = [
         isRecent
@@ -1454,6 +1538,11 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
             : "Recently installed"
           : undefined,
         isInstalled ? (isJa ? "インストール済み" : "Installed") : undefined,
+        reinstallDisabled
+          ? isJa
+            ? `再インストール無効${reinstallDisabledReason ? ` (${reinstallDisabledReason})` : ""}`
+            : `Reinstall disabled${reinstallDisabledReason ? ` (${reinstallDisabledReason})` : ""}`
+          : undefined,
         pluginLabel
           ? `${isJa ? "プラグイン" : "Plugin"}: ${pluginLabel}`
           : undefined,
@@ -1467,7 +1556,10 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
         descriptionParts.join(" · "),
         vscode.TreeItemCollapsibleState.None,
         browseContextValue,
-        skill,
+        reinstallDisabled
+          ? ({ ...skill, reinstallDisabled, reinstallDisabledReason } as Skill &
+              Partial<LocalSkill>)
+          : skill,
         undefined,
         undefined,
         this.skillIndex?.categories,
@@ -1475,12 +1567,22 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
 
       if (isInstalled) {
         item.iconPath = new vscode.ThemeIcon(
-          getResourceKindIcon(kind),
-          new vscode.ThemeColor("charts.green"),
+          reinstallDisabled ? "warning" : getResourceKindIcon(kind),
+          new vscode.ThemeColor(
+            reinstallDisabled ? "charts.yellow" : "charts.green",
+          ),
         );
         item.command = {
-          command: "resourceNinja.onSkillClick",
-          title: isJa ? "リソースを再インストール" : "Reinstall Resource",
+          command: reinstallDisabled
+            ? "resourceNinja.preview"
+            : "resourceNinja.onSkillClick",
+          title: reinstallDisabled
+            ? isJa
+              ? "リソースをプレビュー"
+              : "Preview Resource"
+            : isJa
+              ? "リソースを再インストール"
+              : "Reinstall Resource",
           arguments: [skill],
         };
         item.tooltip = `${item.tooltip}\n${isJa ? "状態" : "Status"}: ${
@@ -1491,6 +1593,10 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
             : isJa
               ? "インストール済み"
               : "Installed"
+        }${
+          reinstallDisabled
+            ? `\n${isJa ? "再インストール確認" : "Reinstall Check"}: ${isJa ? "無効" : "disabled"}${reinstallDisabledReason ? ` (${reinstallDisabledReason})` : ""}`
+            : ""
         }`;
       } else {
         item.iconPath = new vscode.ThemeIcon(getResourceKindIcon(kind));
@@ -1538,6 +1644,7 @@ export class SkillTreeItem extends vscode.TreeItem {
     public readonly resourceKind?: ResourceKind,
     public readonly parent?: SkillTreeItem,
     public readonly pluginId?: string,
+    public readonly rootFsPath?: string,
   ) {
     super(label, collapsibleState);
     this.description = description;

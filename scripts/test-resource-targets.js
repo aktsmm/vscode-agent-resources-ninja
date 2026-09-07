@@ -916,15 +916,15 @@ test("a plugin reinstall unregisters where it was and registers where it lands",
 
   const entryPoints = [
     [
-      "reinstallUserResourceCmd",
+      "reinstallUserResource",
+      "const reinstallUserResource = async (",
       "const reinstallUserResourceCmd = vscode.commands.registerCommand(",
-      "const reinstallUserResourceGroupCmd = vscode.commands.registerCommand(",
       "const installOptions = { targetScope, suppressRecoveryPrompt };",
     ],
     [
-      "reinstallCmd",
+      "reinstallResource",
+      "const reinstallResource = async (",
       "const reinstallCmd = vscode.commands.registerCommand(",
-      "const reinstallResourceGroupCmd = vscode.commands.registerCommand(",
       "const installOptions = { suppressRecoveryPrompt };",
     ],
   ];
@@ -951,31 +951,31 @@ test("a plugin reinstall unregisters where it was and registers where it lands",
     // that was never created.
     assert.match(
       body,
-      /installResult = await installSkill\(\s*fullSkill,\s*wsFolder\.uri,\s*context,\s*installOptions,?\s*\)/,
+      /const installResult = await installSkill\(\s*fullSkill,\s*wsFolder\.uri,\s*context,\s*installOptions,?\s*\)/,
       `${label} must capture what the install reported`,
     );
     assert.match(
       body,
-      /installResult &&\s*installWasClean\(installResult\)\s*\)\s*\{\s*await offerPluginLocationRegistration\(\[installResult\.destinationUri\]\)/,
+      /record\.result\.success &&\s*record\.result\.value\s*\)\s*\{\s*await offerPluginLocationRegistration\(\[\s*record\.result\.value\.destinationUri,?\s*\]\)/,
       `${label} must re-register the destination the install reported, through the normal install path`,
     );
     assert.ok(
       !/getResourceTargetUri\(/.test(body),
       `${label} must not register a destination it computed itself`,
     );
-    // A thrown install leaves the capture unset, so the registration must be
-    // reachable only once there is a result.
+    // A thrown install leaves the task result without a value, so registration
+    // remains reachable only after a successful result.
     assert.match(
       body,
-      /let installResult:[^;]*\|\s*undefined;/,
-      `${label} must leave the capture unset until the install succeeds`,
+      /record\.result\.success &&\s*record\.result\.value/,
+      `${label} must require a successful typed result before registration`,
     );
     // An install that could not download every file leaves a partial folder;
     // it must not be registered, and the caller must report it as a failure so
     // the group reinstall does not count it as a success.
     assert.match(
       body,
-      /if \(!installWasClean\(installResult\)\) \{[\s\S]{0,400}?return false;/,
+      /if \(!installWasClean\(installResult\)\) \{[\s\S]{0,400}?new ReinstallAttemptError\(\s*"incomplete"/,
       `${label} must report an install that was not clean as a failure`,
     );
   }
@@ -1162,9 +1162,12 @@ test("every plugin registration site is gated on a clean install", () => {
     "no single-destination registration sites found",
   );
   for (const site of registrationSites) {
-    assert.strictEqual(
-      site,
-      "offerPluginLocationRegistration([installResult.destinationUri])",
+    const normalizedSite = site.replace(/\s/g, "");
+    assert.ok(
+      [
+        "offerPluginLocationRegistration([installResult.destinationUri])",
+        "offerPluginLocationRegistration([record.result.value.destinationUri,])",
+      ].includes(normalizedSite),
       "a single-destination registration must come from the install result",
     );
   }

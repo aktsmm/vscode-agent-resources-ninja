@@ -304,7 +304,7 @@ test("every surface that lists an installed resource shows the incomplete state"
   // mention of "incomplete" elsewhere in the file cannot satisfy the guard.
   assert.match(
     treeProviderSource,
-    /skill\.incomplete\s*\n?\s*\?\s*new vscode\.ThemeIcon\(\s*\n?\s*"warning"/,
+    /skill\.incomplete \|\| skill\.metadataStatus\s*\n?\s*\?\s*new vscode\.ThemeIcon\(\s*\n?\s*"warning"/,
     "treeProvider must pick the warning icon from skill.incomplete",
   );
   assert.match(
@@ -320,7 +320,7 @@ test("every surface that lists an installed resource shows the incomplete state"
 
   assert.match(
     userResourcesProviderSource,
-    /resource\.incomplete\s*\n?\s*\?\s*new vscode\.ThemeIcon\(\s*\n?\s*"warning"/,
+    /resource\.incomplete \|\| resource\.metadataStatus\s*\n?\s*\?\s*new vscode\.ThemeIcon\(\s*\n?\s*"warning"/,
     "userResourcesProvider must pick the warning icon from resource.incomplete",
   );
   assert.match(

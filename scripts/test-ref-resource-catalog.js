@@ -230,10 +230,7 @@ test("instruction manager generates per-kind README indexes and preserves manual
   assert.match(instructionManagerSource, /Compressed Index/);
   assert.match(instructionManagerSource, /REF_CATALOG_MARKER_PREFIX/);
   assert.match(instructionManagerSource, /REF_CATALOG_END_MARKER_PREFIX/);
-  assert.match(
-    instructionManagerSource,
-    /deleteGeneratedRefCatalogFileIfExists/,
-  );
+  assert.match(instructionManagerSource, /planGeneratedRefCatalogCleanup/);
   assert.match(
     instructionManagerSource,
     /async function cleanupLegacyRefCatalogFiles/,

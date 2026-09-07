@@ -74,6 +74,15 @@ async function main() {
     workspace: {
       getConfiguration: () => ({ get: () => undefined }),
       fs: {
+        readFile: async (uri) => {
+          const written = writes.find((entry) => entry.path === uri.fsPath);
+          if (!written) {
+            throw Object.assign(new Error(`ENOENT ${uri.fsPath}`), {
+              code: "ENOENT",
+            });
+          }
+          return Buffer.from(written.content, "utf8");
+        },
         createDirectory: async (uri) => {
           directories.push(uri.fsPath);
         },
@@ -89,7 +98,9 @@ async function main() {
         stat: async (uri) => {
           const written = writes.find((entry) => entry.path === uri.fsPath);
           if (!written) {
-            throw new Error(`ENOENT ${uri.fsPath}`);
+            throw Object.assign(new Error(`ENOENT ${uri.fsPath}`), {
+              code: "ENOENT",
+            });
           }
           return { size: Buffer.byteLength(written.content, "utf8") };
         },

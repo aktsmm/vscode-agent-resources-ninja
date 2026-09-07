@@ -96,6 +96,13 @@ function createVscodeStub(writes, options = {}) {
         writeFile: async (uri, content) => {
           writes.set(uri.fsPath, Buffer.from(content).toString("utf-8"));
         },
+        readFile: async (uri) => {
+          const content = writes.get(uri.fsPath);
+          if (content === undefined) {
+            throw Object.assign(new Error("not found"), { code: "ENOENT" });
+          }
+          return Buffer.from(content, "utf-8");
+        },
         stat: async (uri) => {
           const content = writes.get(uri.fsPath);
           if (content !== undefined) {
@@ -104,7 +111,7 @@ function createVscodeStub(writes, options = {}) {
           if (existingDirectories.has(uri.fsPath)) {
             return { size: 0 };
           }
-          throw new Error("not found");
+          throw Object.assign(new Error("not found"), { code: "ENOENT" });
         },
         readDirectory: async (uri) => {
           const normalizedParent = uri.fsPath
@@ -400,7 +407,7 @@ function loadWindowsInstaller(recorded, options = {}) {
         readFile: async (uri) => {
           const content = recorded.writes.get(realDestination(uri));
           if (content === undefined) {
-            throw new Error("not found");
+            throw Object.assign(new Error("not found"), { code: "ENOENT" });
           }
           return Buffer.from(content, "utf-8");
         },
@@ -415,7 +422,7 @@ function loadWindowsInstaller(recorded, options = {}) {
           if (recorded.enumerateWrites && hasRecordedChild(recorded, target)) {
             return { size: 0, type: 2 };
           }
-          throw new Error("not found");
+          throw Object.assign(new Error("not found"), { code: "ENOENT" });
         },
         readDirectory: async (uri) => {
           if (!recorded.enumerateWrites) {
@@ -527,7 +534,11 @@ function loadWindowsInstaller(recorded, options = {}) {
 async function run() {
   const writes = new Map();
   const installer = loadInstaller(writes);
-  const { normalizeSkillMetaSource, recoverPrimarySkillMdFromRaw } = installer;
+  const {
+    normalizeSkillMetaSource,
+    readJsonObject,
+    recoverPrimarySkillMdFromRaw,
+  } = installer;
 
   assert.strictEqual(
     typeof recoverPrimarySkillMdFromRaw,
@@ -541,6 +552,48 @@ async function run() {
   let passed = 0;
 
   try {
+    // --- Safe JSON object reads distinguish absence, I/O failures, and invalid data. ---
+    {
+      const cases = [
+        {
+          expected: "loaded",
+          readFile: async () => Buffer.from('{"name":"demo"}', "utf-8"),
+        },
+        {
+          expected: "missing",
+          readFile: async () => {
+            throw Object.assign(new Error("missing"), { code: "ENOENT" });
+          },
+        },
+        {
+          expected: "unreadable",
+          readFile: async () => {
+            throw Object.assign(new Error("denied"), { code: "EACCES" });
+          },
+        },
+        {
+          expected: "invalid",
+          readFile: async () => Buffer.from("{", "utf-8"),
+        },
+        {
+          expected: "invalid",
+          readFile: async () => Buffer.from("null", "utf-8"),
+        },
+        {
+          expected: "invalid",
+          readFile: async () => Buffer.from("[]", "utf-8"),
+        },
+      ];
+      for (const testCase of cases) {
+        const vscodeStub = createVscodeStub(new Map());
+        vscodeStub.workspace.fs.readFile = testCase.readFile;
+        const safeReadInstaller = loadInstaller(new Map(), { vscodeStub });
+        const result = await safeReadInstaller.readJsonObject(makeUri("meta"));
+        assert.strictEqual(result.status, testCase.expected);
+        passed++;
+      }
+    }
+
     // --- Test 1: retired source metadata は canonical source へ移行 ---
     {
       assert.strictEqual(
@@ -1628,6 +1681,9 @@ async function run() {
           categories: [],
           installedAt: "2020-01-01T00:00:00.000Z",
           customWhenToUse: "user edited note",
+          reinstallDisabled: true,
+          reinstallDisabledReason: "missing-from-index",
+          reinstallDisabledAt: "2026-09-07T00:00:00.000Z",
           skillFilePath: `${attackerPath}\\SKILL.md`,
           relativePath: "..\\..\\..\\victim",
         }),
@@ -1705,6 +1761,15 @@ async function run() {
         storedMeta.customWhenToUse,
         "user edited note",
         "additive non-path fields must still survive the merge",
+      );
+      assert.strictEqual(storedMeta.reinstallDisabled, true);
+      assert.strictEqual(
+        storedMeta.reinstallDisabledReason,
+        "missing-from-index",
+      );
+      assert.strictEqual(
+        storedMeta.reinstallDisabledAt,
+        "2026-09-07T00:00:00.000Z",
       );
       assert.strictEqual(storedMeta.name, "meta-demo");
       assert.ok(
@@ -2059,7 +2124,7 @@ async function run() {
   }
 
   console.log(
-    `PASS: test-skill-installer-remote-fallback.js (${passed}/27 cases)`,
+    `PASS: test-skill-installer-remote-fallback.js (${passed}/33 cases)`,
   );
 }
 

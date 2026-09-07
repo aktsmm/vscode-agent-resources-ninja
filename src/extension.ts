@@ -61,6 +61,7 @@ import {
   updateMcpConfigForUninstall,
 } from "./mcpConfigManager";
 import {
+  isInstructionFileUpdateFailure,
   resolvePrimaryRefCatalogUri,
   updateInstructionFile,
   updateInstructionFileAtUri,
@@ -72,6 +73,7 @@ import {
   WorkspaceSkillsProvider,
 } from "./treeProvider";
 import {
+  normalizeResourceRootIdentity,
   UserResourceTreeItem,
   UserResourcesProvider,
 } from "./userResourcesProvider";
@@ -153,7 +155,15 @@ import {
   formatBatchCancellationSuffix,
   formatBatchFailureMessage,
 } from "./batchProgress";
-import { decideIndexRefreshRecovery } from "./reinstallRecovery";
+import {
+  decideIndexRefreshRecovery,
+  isReinstallRetryable,
+  ReinstallAttemptError,
+  ReinstallBatchRecord,
+  ReinstallTask,
+  retryReinstallBatch,
+  runReinstallTask,
+} from "./reinstallRecovery";
 import {
   getPluginLocationsToRegister,
   mergePluginLocations,
@@ -357,20 +367,31 @@ function normalizeInstalledRemotePath(
 }
 
 function isIndexTrackedInstalledSkill(
-  meta: Pick<SkillMeta, "remotePath">,
+  meta: Pick<SkillMeta, "remotePath" | "reinstallDisabled">,
 ): boolean {
-  return !!normalizeInstalledRemotePath(meta.remotePath);
+  return (
+    meta.reinstallDisabled !== true &&
+    !!normalizeInstalledRemotePath(meta.remotePath)
+  );
 }
 
 function isRemoteInstalledSkillMeta(
-  meta: Pick<SkillMeta, "source" | "remotePath">,
+  meta: Pick<SkillMeta, "source" | "remotePath" | "reinstallDisabled">,
 ): boolean {
   return (
+    meta.reinstallDisabled !== true &&
     !!normalizeInstalledRemotePath(meta.remotePath) &&
     !!meta.source &&
     meta.source !== "unknown" &&
     meta.source !== "local"
   );
+}
+
+function getReinstallDisabledMessage(name: string, reason?: string): string {
+  const reasonSuffix = reason ? ` (${reason})` : "";
+  return isJapanese()
+    ? `${name} は再インストール確認から除外されています${reasonSuffix}。再度有効にするには、インストールメタデータの reinstallDisabled を解除してください。`
+    : `${name} is disabled for reinstall checks${reasonSuffix}. Clear reinstallDisabled in its install metadata to enable it again.`;
 }
 
 function findIndexedSkillForInstalledMeta(
@@ -1824,6 +1845,76 @@ export async function activate(
     return value ?? {};
   }
 
+  async function maybeOfferManualReinstallRetry<T>(
+    record: ReinstallBatchRecord<T>,
+    suppressPrompt: boolean,
+  ): Promise<ReinstallBatchRecord<T>> {
+    if (
+      suppressPrompt ||
+      record.result.stage !== "install" ||
+      !isReinstallRetryable(record.result.failureKind)
+    ) {
+      return record;
+    }
+    const retryLabel = isJapanese() ? "再試行" : "Retry";
+    const choice = await vscode.window.showWarningMessage(
+      isJapanese()
+        ? `${record.task.name} の再インストールに一時的な問題が発生しました。既存ファイルを再度削除せずに、もう1回だけ試しますか？`
+        : `A transient problem interrupted reinstalling ${record.task.name}. Retry once without removing the existing files again?`,
+      retryLabel,
+    );
+    if (choice !== retryLabel) {
+      return record;
+    }
+    return (await retryReinstallBatch([record]))[0];
+  }
+
+  async function maybeOfferManualBatchReinstallRetry<T>(
+    records: readonly ReinstallBatchRecord<T>[],
+    scopeLabel: string,
+    suppressPrompt: boolean,
+  ): Promise<ReinstallBatchRecord<T>[]> {
+    const eligibleCount = records.filter(
+      (record) =>
+        record.result.stage === "install" &&
+        isReinstallRetryable(record.result.failureKind),
+    ).length;
+    if (suppressPrompt || eligibleCount === 0) {
+      return [...records];
+    }
+    const retryLabel = isJapanese() ? "再試行" : "Retry";
+    const choice = await vscode.window.showWarningMessage(
+      isJapanese()
+        ? `${scopeLabel}: 一時的な問題で失敗した ${eligibleCount} 件を、再度削除せずにもう1回だけ試しますか？`
+        : `${scopeLabel}: Retry ${eligibleCount} transient failure(s) once without removing the existing files again?`,
+      retryLabel,
+    );
+    return choice === retryLabel ? retryReinstallBatch(records) : [...records];
+  }
+
+  function createUnstartedReinstallRecord<T>(
+    name: string,
+    failureKind: "cancelled" | "not-found",
+  ): ReinstallBatchRecord<T> {
+    const task: ReinstallTask<T> = {
+      name,
+      remove: async () => undefined,
+      install: async () => {
+        throw new ReinstallAttemptError(failureKind, "Not started");
+      },
+    };
+    return {
+      task,
+      result: {
+        success: false,
+        attempts: 0,
+        removed: false,
+        stage: "not-started",
+        failureKind,
+      },
+    };
+  }
+
   function getBatchFailureMessage(
     scopeLabel: string,
     success: number,
@@ -1855,9 +1946,18 @@ export async function activate(
     return formatBatchCancellationSuffix(processed, requested, isJapanese());
   }
 
+  function showStaleResourceGroupMessage(): void {
+    void vscode.window.showWarningMessage(
+      isJapanese()
+        ? "このリソースグループは現在の設定と一致しません。ビューを更新して、現在のグループからもう一度実行してください。"
+        : "This resource group no longer matches the current configuration. Refresh the view and run the action from the current group.",
+    );
+  }
+
   function isRemoteInstalledUserResource(resource: UserResource): boolean {
     return (
       !resource.isBuiltIn &&
+      resource.reinstallDisabled !== true &&
       !!resource.remotePath &&
       !!resource.source &&
       resource.source !== "local"
@@ -2350,203 +2450,244 @@ export async function activate(
     },
   );
 
-  const reinstallUserResourceCmd = vscode.commands.registerCommand(
-    "resourceNinja.reinstallUserResource",
-    async (
-      item: UserResourceTreeItem,
-      optionsOrSuppressSuccessMessage?: boolean | ReinstallCommandOptions,
-    ) => {
-      const { suppressSuccessMessage = false, suppressRecoveryPrompt = false } =
-        normalizeReinstallCommandOptions(optionsOrSuppressSuccessMessage);
-      const resource = item?.resource;
-      if (!resource || resource.isBuiltIn || resource.isReadOnly) {
-        return false;
+  const reinstallUserResource = async (
+    item: UserResourceTreeItem,
+    optionsOrSuppressSuccessMessage?: boolean | ReinstallCommandOptions,
+  ): Promise<ReinstallBatchRecord<InstallSkillResult> | undefined> => {
+    const { suppressSuccessMessage = false, suppressRecoveryPrompt = false } =
+      normalizeReinstallCommandOptions(optionsOrSuppressSuccessMessage);
+    const resource = item?.resource;
+    if (!resource || resource.isBuiltIn || resource.isReadOnly) {
+      return undefined;
+    }
+    if (resource.reinstallDisabled) {
+      if (!suppressSuccessMessage) {
+        vscode.window.showInformationMessage(
+          getReinstallDisabledMessage(
+            resource.name,
+            resource.reinstallDisabledReason,
+          ),
+        );
       }
-      if (!isRemoteInstalledUserResource(resource)) {
-        if (!suppressSuccessMessage) {
-          vscode.window.showWarningMessage(
-            isJapanese()
-              ? `${resource.name} はリモートインストール元のメタデータがないため再インストールできません`
-              : `${resource.name} cannot be reinstalled because remote install metadata is missing`,
-          );
-        }
-        return false;
+      return undefined;
+    }
+    if (!isRemoteInstalledUserResource(resource)) {
+      if (!suppressSuccessMessage) {
+        vscode.window.showWarningMessage(
+          isJapanese()
+            ? `${resource.name} はリモートインストール元のメタデータがないため再インストールできません`
+            : `${resource.name} cannot be reinstalled because remote install metadata is missing`,
+        );
       }
+      return undefined;
+    }
 
-      const wsFolder = vscode.workspace.workspaceFolders?.[0];
-      if (!wsFolder) {
-        vscode.window.showErrorMessage(messages.noWorkspace());
-        return false;
-      }
+    const wsFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!wsFolder) {
+      vscode.window.showErrorMessage(messages.noWorkspace());
+      return undefined;
+    }
 
-      const targetScope: InstallTargetScope =
-        resource.scope === "userData" ? "userData" : "globalHome";
+    const targetScope: InstallTargetScope =
+      resource.scope === "userData" ? "userData" : "globalHome";
 
-      let index = await loadSkillIndex(context);
-      let resources = getIndexResources(index);
-      let fullSkill = resources.find(
+    let index = await loadSkillIndex(context);
+    let resources = getIndexResources(index);
+    let fullSkill = resources.find(
+      (s: Skill) =>
+        getResourceKind(s) === resource.kind &&
+        s.source === resource.source &&
+        s.path === resource.remotePath,
+    );
+    if (!fullSkill) {
+      fullSkill = resources.find(
         (s: Skill) =>
           getResourceKind(s) === resource.kind &&
-          s.source === resource.source &&
           s.path === resource.remotePath,
       );
-      if (!fullSkill) {
+    }
+    if (!fullSkill) {
+      const sourceSummary = getSourceRefreshSummary(index, [resource.source]);
+      const decision = await decideIndexRefreshRecovery({
+        suppressRecoveryPrompt,
+        message: isJapanese()
+          ? `${resource.name} がインデックスに見つかりません。${sourceSummary} を更新しますか？`
+          : `${resource.name} not found in index. Update ${sourceSummary} now?`,
+        refreshLabel: isJapanese() ? "更新する" : "Update",
+        declineLabel: isJapanese() ? "キャンセル" : "Cancel",
+        showPrompt: (message, ...items) =>
+          vscode.window.showWarningMessage(message, ...items),
+      });
+
+      if (decision === "skipped") {
+        logger.warn(
+          `[Resource Ninja] ${resource.name} not found in index; skipped the refresh prompt because a batch caller is waiting`,
+        );
+      }
+
+      if (decision === "refresh") {
+        index = await refreshIndexForKnownSources(
+          index,
+          [resource.source],
+          resource.name,
+        );
+        resources = getIndexResources(index);
+
         fullSkill = resources.find(
           (s: Skill) =>
             getResourceKind(s) === resource.kind &&
+            s.source === resource.source &&
             s.path === resource.remotePath,
         );
-      }
-      if (!fullSkill) {
-        const sourceSummary = getSourceRefreshSummary(index, [resource.source]);
-        const decision = await decideIndexRefreshRecovery({
-          suppressRecoveryPrompt,
-          message: isJapanese()
-            ? `${resource.name} がインデックスに見つかりません。${sourceSummary} を更新しますか？`
-            : `${resource.name} not found in index. Update ${sourceSummary} now?`,
-          refreshLabel: isJapanese() ? "更新する" : "Update",
-          declineLabel: isJapanese() ? "キャンセル" : "Cancel",
-          showPrompt: (message, ...items) =>
-            vscode.window.showWarningMessage(message, ...items),
-        });
-
-        if (decision === "skipped") {
-          logger.warn(
-            `[Resource Ninja] ${resource.name} not found in index; skipped the refresh prompt because a batch caller is waiting`,
-          );
-        }
-
-        if (decision === "refresh") {
-          index = await refreshIndexForKnownSources(
-            index,
-            [resource.source],
-            resource.name,
-          );
-          resources = getIndexResources(index);
-
+        if (!fullSkill) {
           fullSkill = resources.find(
             (s: Skill) =>
               getResourceKind(s) === resource.kind &&
-              s.source === resource.source &&
               s.path === resource.remotePath,
           );
-          if (!fullSkill) {
-            fullSkill = resources.find(
-              (s: Skill) =>
-                getResourceKind(s) === resource.kind &&
-                s.path === resource.remotePath,
-            );
-          }
-        }
-
-        if (!fullSkill) {
-          if (!suppressSuccessMessage) {
-            vscode.window.showErrorMessage(
-              isJapanese()
-                ? `${resource.name} がインデックスに見つかりません。ソースリポジトリを確認してください。`
-                : `${resource.name} not found in index. Please check source repositories.`,
-            );
-          }
-          return false;
         }
       }
 
-      const installOptions = { targetScope, suppressRecoveryPrompt };
-
-      try {
-        // A plugin always installs into the fixed Global Home `plugins`
-        // directory, so a plugin scanned from a configured user-data path is
-        // recreated somewhere other than it was removed from. The destination is
-        // taken from the install itself, because a setting that changes while the
-        // progress notification is up would make a precomputed one name a folder
-        // that was never created.
-        let installResult: Awaited<ReturnType<typeof installSkill>> | undefined;
-        await vscode.window.withProgress(
-          {
-            location: vscode.ProgressLocation.Notification,
-            title: isJapanese()
-              ? `${resource.name} を再インストール中...`
-              : `Reinstalling ${resource.name}...`,
-            cancellable: false,
-          },
-          async () => {
-            await deleteInstalledResourceByPath(
-              resource.kind,
-              resource.fullPath,
-              resource.rootFsPath,
-            );
-            installResult = await installSkill(
-              fullSkill,
-              wsFolder.uri,
-              context,
-              installOptions,
-            );
-
-            const config = vscode.workspace.getConfiguration("resourceNinja");
-            if (
-              resource.kind === "skill" &&
-              config.get<boolean>("autoUpdateInstruction")
-            ) {
-              const targetUri = resolveGlobalInstructionFileUri(
-                wsFolder.uri,
-                config,
-              );
-              if (targetUri) {
-                await updateInstructionFileAtUri(
-                  wsFolder.uri,
-                  context,
-                  targetUri,
-                  getGlobalInstructionTargetLabel(wsFolder.uri, config),
-                );
-              }
-            }
-          },
-        );
-
-        // The delete above dropped the registration for the folder it removed, so
-        // the destination the install reported goes back through the same path a
-        // normal install uses and keeps honouring `registerPluginLocation` and the
-        // version guard. A failed install leaves `installResult` unset, and an
-        // install that could not download every file must not be registered
-        // either, so nothing is put back for a folder with missing content.
-        if (
-          resource.kind === "plugin" &&
-          installResult &&
-          installWasClean(installResult)
-        ) {
-          await offerPluginLocationRegistration([installResult.destinationUri]);
-        }
-
-        markRecentlyInstalled(fullSkill);
-        userResourcesProvider.refresh();
-        browseProvider.refresh();
-        workspaceProvider.refresh();
-
-        if (!installWasClean(installResult)) {
-          // The install already warned about the files it could not download;
-          // reporting failure here is what the group reinstall aggregates.
-          return false;
-        }
-
-        if (!suppressSuccessMessage) {
-          vscode.window.showInformationMessage(
-            isJapanese()
-              ? `${resource.name} を再インストールしました`
-              : `Reinstalled ${resource.name}`,
-          );
-        }
-        return true;
-      } catch (error) {
+      if (!fullSkill) {
         if (!suppressSuccessMessage) {
           vscode.window.showErrorMessage(
             isJapanese()
-              ? `再インストール失敗: ${String(error)}。元のファイルはごみ箱から復元できます。`
-              : `Reinstall failed: ${String(error)}. You can restore the original files from the trash.`,
+              ? `${resource.name} がインデックスに見つかりません。ソースリポジトリを確認してください。`
+              : `${resource.name} not found in index. Please check source repositories.`,
           );
         }
-        return false;
+        return undefined;
       }
-    },
+    }
+
+    const installOptions = { targetScope, suppressRecoveryPrompt };
+
+    try {
+      // A plugin always installs into the fixed Global Home `plugins`
+      // directory, so a plugin scanned from a configured user-data path is
+      // recreated somewhere other than it was removed from. The destination is
+      // taken from the install itself, because a setting that changes while the
+      // progress notification is up would make a precomputed one name a folder
+      // that was never created.
+      const task: ReinstallTask<InstallSkillResult> = {
+        name: resource.name,
+        remove: () =>
+          deleteInstalledResourceByPath(
+            resource.kind,
+            resource.fullPath,
+            resource.rootFsPath,
+          ),
+        install: async () => {
+          const installResult = await installSkill(
+            fullSkill,
+            wsFolder.uri,
+            context,
+            installOptions,
+          );
+          if (!installWasClean(installResult)) {
+            throw new ReinstallAttemptError(
+              "incomplete",
+              `Incomplete install: ${resource.name}`,
+            );
+          }
+          return installResult;
+        },
+      };
+      let result;
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: isJapanese()
+            ? `${resource.name} を再インストール中...`
+            : `Reinstalling ${resource.name}...`,
+          cancellable: false,
+        },
+        async () => {
+          result = await runReinstallTask(task);
+        },
+      );
+      let record: ReinstallBatchRecord<InstallSkillResult> = {
+        task,
+        result: result!,
+      };
+      record = await maybeOfferManualReinstallRetry(
+        record,
+        suppressSuccessMessage || suppressRecoveryPrompt,
+      );
+
+      const config = vscode.workspace.getConfiguration("resourceNinja");
+      if (
+        record.result.removed &&
+        resource.kind === "skill" &&
+        config.get<boolean>("autoUpdateInstruction")
+      ) {
+        const targetUri = resolveGlobalInstructionFileUri(wsFolder.uri, config);
+        if (targetUri) {
+          await updateInstructionFileAtUri(
+            wsFolder.uri,
+            context,
+            targetUri,
+            getGlobalInstructionTargetLabel(wsFolder.uri, config),
+          );
+        }
+      }
+
+      // The delete above dropped the registration for the folder it removed, so
+      // the destination the install reported goes back through the same path a
+      // normal install uses and keeps honouring `registerPluginLocation` and the
+      // version guard. A failed install leaves `installResult` unset, and an
+      // install that could not download every file must not be registered
+      // either, so nothing is put back for a folder with missing content.
+      if (
+        resource.kind === "plugin" &&
+        record.result.success &&
+        record.result.value
+      ) {
+        await offerPluginLocationRegistration([
+          record.result.value.destinationUri,
+        ]);
+      }
+
+      if (record.result.success) {
+        markRecentlyInstalled(fullSkill);
+      }
+      userResourcesProvider.refresh();
+      browseProvider.refresh();
+      workspaceProvider.refresh();
+
+      if (!record.result.success) {
+        if (!suppressSuccessMessage) {
+          vscode.window.showErrorMessage(
+            isJapanese()
+              ? `再インストール失敗 (${record.result.failureKind || "other"})。元のファイルはごみ箱から復元できます。`
+              : `Reinstall failed (${record.result.failureKind || "other"}). You can restore the original files from the trash.`,
+          );
+        }
+        return record;
+      }
+
+      if (!suppressSuccessMessage) {
+        vscode.window.showInformationMessage(
+          isJapanese()
+            ? `${resource.name} を再インストールしました`
+            : `Reinstalled ${resource.name}`,
+        );
+      }
+      return record;
+    } catch (error) {
+      if (!suppressSuccessMessage) {
+        vscode.window.showErrorMessage(
+          isJapanese()
+            ? `再インストール失敗: ${String(error)}。元のファイルはごみ箱から復元できます。`
+            : `Reinstall failed: ${String(error)}. You can restore the original files from the trash.`,
+        );
+      }
+      return undefined;
+    }
+  };
+  const reinstallUserResourceCmd = vscode.commands.registerCommand(
+    "resourceNinja.reinstallUserResource",
+    reinstallUserResource,
   );
 
   const reinstallUserResourceGroupCmd = vscode.commands.registerCommand(
@@ -2556,26 +2697,10 @@ export async function activate(
         return;
       }
 
-      const allResources = userResourcesProvider
-        .getResources()
-        .filter((resource) => !resource.isBuiltIn && !resource.isReadOnly);
-
-      let targets: UserResource[] = [];
-      if (item.nodeType === "kind" && item.scope && item.kind) {
-        targets = allResources.filter(
-          (resource) =>
-            resource.scope === item.scope &&
-            resource.scopeLabel === item.scopeLabel &&
-            resource.kind === item.kind,
-        );
-      } else if (item.nodeType === "plugin" && item.scope && item.pluginId) {
-        targets = allResources.filter(
-          (resource) =>
-            resource.scope === item.scope &&
-            resource.scopeLabel === item.scopeLabel &&
-            getInstalledPluginId(resource) === item.pluginId,
-        );
-      } else {
+      const targets =
+        await userResourcesProvider.resolveCurrentGroupResources(item);
+      if (!targets) {
+        showStaleResourceGroupMessage();
         return;
       }
 
@@ -2607,7 +2732,7 @@ export async function activate(
       let success = 0;
       let completed = 0;
       let cancelled = false;
-      const failedResources: string[] = [];
+      const records: ReinstallBatchRecord<InstallSkillResult>[] = [];
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
@@ -2626,8 +2751,7 @@ export async function activate(
               message: `${resource.name} (${completed + 1}/${remoteTargets.length})`,
               increment: 100 / remoteTargets.length,
             });
-            const ok = await vscode.commands.executeCommand<boolean>(
-              "resourceNinja.reinstallUserResource",
+            const record = await reinstallUserResource(
               new UserResourceTreeItem(
                 resource.name,
                 resource.description || "",
@@ -2643,15 +2767,48 @@ export async function activate(
                 suppressRecoveryPrompt: true,
               },
             );
-            if (ok) {
-              success++;
+            if (record) {
+              records.push(record);
+              if (record.result.success) {
+                success++;
+              }
             } else {
-              failedResources.push(resource.name);
+              records.push(
+                createUnstartedReinstallRecord<InstallSkillResult>(
+                  resource.name,
+                  "not-found",
+                ),
+              );
             }
             completed++;
           }
         },
       );
+
+      if (cancelled) {
+        records.push(
+          ...remoteTargets
+            .slice(completed)
+            .map((resource) =>
+              createUnstartedReinstallRecord<InstallSkillResult>(
+                resource.name,
+                "cancelled",
+              ),
+            ),
+        );
+      }
+      const finalRecords = await maybeOfferManualBatchReinstallRetry(
+        records,
+        groupLabel,
+        false,
+      );
+      success = finalRecords.filter((record) => record.result.success).length;
+      const failedResources = finalRecords
+        .filter(
+          (record) =>
+            !record.result.success && record.result.failureKind !== "cancelled",
+        )
+        .map((record) => record.task.name);
 
       userResourcesProvider.refresh();
       browseProvider.refresh();
@@ -5819,9 +5976,18 @@ export async function activate(
         return;
       }
 
-      const installedMeta = await getInstalledSkillsWithMeta(wsFolder.uri);
+      const allInstalledMeta = await getInstalledSkillsWithMeta(wsFolder.uri);
+      const installedMeta = allInstalledMeta.filter(
+        (meta) => !meta.reinstallDisabled,
+      );
       if (installedMeta.length === 0) {
-        vscode.window.showInformationMessage(messages.noInstalledSkills());
+        vscode.window.showInformationMessage(
+          allInstalledMeta.length > 0
+            ? isJapanese()
+              ? "再インストール可能なスキルはありません。無効化された項目はインストールメタデータで確認できます。"
+              : "No skills are eligible for reinstall. Check install metadata for disabled entries."
+            : messages.noInstalledSkills(),
+        );
         return false;
       }
 
@@ -5891,7 +6057,7 @@ export async function activate(
       let success = 0;
       let completed = 0;
       let cancelled = false;
-      const failedSkills: string[] = [];
+      const records: ReinstallBatchRecord<InstallSkillResult>[] = [];
 
       await vscode.window.withProgress(
         {
@@ -5918,35 +6084,78 @@ export async function activate(
             const skill = findIndexedSkillForInstalledMeta(index, meta);
 
             if (skill) {
-              try {
-                // 既存を削除して再インストール
-                await uninstallSkill(meta.name, wsFolder.uri);
-                const installResult = await installSkill(
-                  skill,
-                  wsFolder.uri,
-                  context,
-                  {
-                    suppressRecoveryPrompt: true,
-                  },
-                );
-                if (!installWasClean(installResult)) {
-                  failedSkills.push(meta.name);
-                  completed++;
-                  continue;
-                }
+              const task: ReinstallTask<InstallSkillResult> = {
+                name: meta.name,
+                remove: async () => {
+                  await uninstallSkill(meta.name, wsFolder.uri);
+                },
+                install: async () => {
+                  const installResult = await installSkill(
+                    skill,
+                    wsFolder.uri,
+                    context,
+                    {
+                      suppressRecoveryPrompt: true,
+                    },
+                  );
+                  if (!installWasClean(installResult)) {
+                    throw new ReinstallAttemptError(
+                      "incomplete",
+                      `Incomplete install: ${meta.name}`,
+                    );
+                  }
+                  return installResult;
+                },
+              };
+              const result = await runReinstallTask(task);
+              records.push({ task, result });
+              if (result.success) {
                 markRecentlyInstalled(skill);
                 success++;
-              } catch (error) {
-                logger.error(`Failed to reinstall ${meta.name}:`, error);
-                failedSkills.push(meta.name);
+              } else {
+                logger.error(
+                  `Failed to reinstall ${meta.name} (${result.failureKind || "other"})`,
+                  result.error,
+                );
               }
             } else {
-              failedSkills.push(meta.name);
+              records.push(
+                createUnstartedReinstallRecord<InstallSkillResult>(
+                  meta.name,
+                  "not-found",
+                ),
+              );
             }
             completed++;
           }
         },
       );
+
+      if (cancelled) {
+        records.push(
+          ...installedMeta
+            .slice(completed)
+            .map((meta) =>
+              createUnstartedReinstallRecord<InstallSkillResult>(
+                meta.name,
+                "cancelled",
+              ),
+            ),
+        );
+      }
+      const finalRecords = await maybeOfferManualBatchReinstallRetry(
+        records,
+        isJapanese() ? "スキル再インストール" : "Skill reinstall",
+        options.suppressRecoveryPrompt === true ||
+          options.suppressSuccessMessage === true,
+      );
+      success = finalRecords.filter((record) => record.result.success).length;
+      const failedSkills = finalRecords
+        .filter(
+          (record) =>
+            !record.result.success && record.result.failureKind !== "cancelled",
+        )
+        .map((record) => record.task.name);
 
       // Instruction ファイルを更新
       const config = vscode.workspace.getConfiguration("resourceNinja");
@@ -5979,98 +6188,117 @@ export async function activate(
   );
 
   // Command: Reinstall single remote-installed resource
-  const reinstallCmd = vscode.commands.registerCommand(
-    "resourceNinja.reinstall",
-    async (
-      item?: SkillTreeItem,
-      optionsOrSuppressSuccessMessage?: boolean | ReinstallCommandOptions,
-    ) => {
-      const { suppressSuccessMessage = false, suppressRecoveryPrompt = false } =
-        normalizeReinstallCommandOptions(optionsOrSuppressSuccessMessage);
-      const wsFolder = vscode.workspace.workspaceFolders?.[0];
-      if (!wsFolder) {
-        vscode.window.showErrorMessage(messages.noWorkspace());
-        return false;
+  const reinstallResource = async (
+    item?: SkillTreeItem,
+    optionsOrSuppressSuccessMessage?: boolean | ReinstallCommandOptions,
+  ): Promise<ReinstallBatchRecord<InstallSkillResult> | undefined> => {
+    const { suppressSuccessMessage = false, suppressRecoveryPrompt = false } =
+      normalizeReinstallCommandOptions(optionsOrSuppressSuccessMessage);
+    const wsFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!wsFolder) {
+      vscode.window.showErrorMessage(messages.noWorkspace());
+      return undefined;
+    }
+
+    const skill = item?.skill as (Skill & Partial<LocalSkill>) | undefined;
+    if (!skill?.name) {
+      if (!suppressSuccessMessage) {
+        vscode.window.showErrorMessage(messages.invalidSkillInfo());
       }
-
-      const skill = item?.skill as (Skill & Partial<LocalSkill>) | undefined;
-      if (!skill?.name) {
-        if (!suppressSuccessMessage) {
-          vscode.window.showErrorMessage(messages.invalidSkillInfo());
-        }
-        return false;
+      return undefined;
+    }
+    if (skill.reinstallDisabled) {
+      if (!suppressSuccessMessage) {
+        vscode.window.showInformationMessage(
+          getReinstallDisabledMessage(
+            skill.name,
+            skill.reinstallDisabledReason,
+          ),
+        );
       }
+      return undefined;
+    }
 
-      const resourceKind = getResourceKind(skill);
-      let source = skill.source;
-      let remotePath = skill.remotePath || skill.path;
-      let resourceName = skill.name;
-      let relativePath = skill.relativePath || skill.path;
-      const normalizedRemotePath = normalizeInstalledRemotePath(remotePath);
-      const installedWorkspaceResource = workspaceProvider
-        .getWorkspaceSkills()
-        .find((resource) => {
-          if (resource.kind !== resourceKind || !resource.isInstalled) {
-            return false;
-          }
-          const candidateRemotePath = normalizeInstalledRemotePath(
-            resource.remotePath,
-          );
-          if (
-            normalizedRemotePath &&
-            candidateRemotePath &&
-            normalizedRemotePath === candidateRemotePath
-          ) {
-            return (
-              !source || source === "unknown" || resource.source === source
-            );
-          }
-          return (
-            resource.name === skill.name &&
-            (!source || source === "unknown" || resource.source === source)
-          );
-        });
-
-      if (resourceKind === "skill") {
-        const installedMeta = await getInstalledSkillsWithMeta(wsFolder.uri);
-        const meta =
-          installedMeta.find(
-            (m) =>
-              !!normalizedRemotePath &&
-              normalizeInstalledRemotePath(m.remotePath) ===
-                normalizedRemotePath &&
-              (!source || source === "unknown" || m.source === source),
-          ) ||
-          installedMeta.find(
-            (m) =>
-              m.name === skill.name ||
-              (!!skill.relativePath && m.relativePath === skill.relativePath),
-          );
-        if (!meta && !installedWorkspaceResource) {
-          if (!suppressSuccessMessage) {
-            vscode.window.showErrorMessage(
-              isJapanese()
-                ? `${skill.name} のメタデータが見つかりません`
-                : `Metadata not found for ${skill.name}`,
-            );
-          }
+    const resourceKind = getResourceKind(skill);
+    let source = skill.source;
+    let remotePath = skill.remotePath || skill.path;
+    let resourceName = skill.name;
+    let relativePath = skill.relativePath || skill.path;
+    const normalizedRemotePath = normalizeInstalledRemotePath(remotePath);
+    const installedWorkspaceResource = workspaceProvider
+      .getWorkspaceSkills()
+      .find((resource) => {
+        if (resource.kind !== resourceKind || !resource.isInstalled) {
           return false;
         }
-        if (meta) {
-          source = meta.source;
-          remotePath = meta.remotePath || remotePath;
-          resourceName = meta.name;
-          relativePath =
-            meta.skillFilePath || meta.relativePath || relativePath;
-        } else if (installedWorkspaceResource) {
-          source = installedWorkspaceResource.source || source;
-          remotePath = installedWorkspaceResource.remotePath || remotePath;
-          resourceName = installedWorkspaceResource.name || resourceName;
-          relativePath =
-            installedWorkspaceResource.fullPath ||
-            installedWorkspaceResource.relativePath ||
-            relativePath;
+        const candidateRemotePath = normalizeInstalledRemotePath(
+          resource.remotePath,
+        );
+        if (
+          normalizedRemotePath &&
+          candidateRemotePath &&
+          normalizedRemotePath === candidateRemotePath
+        ) {
+          return !source || source === "unknown" || resource.source === source;
         }
+        return (
+          resource.name === skill.name &&
+          (!source || source === "unknown" || resource.source === source)
+        );
+      });
+    if (installedWorkspaceResource?.reinstallDisabled) {
+      if (!suppressSuccessMessage) {
+        vscode.window.showInformationMessage(
+          getReinstallDisabledMessage(
+            installedWorkspaceResource.name,
+            installedWorkspaceResource.reinstallDisabledReason,
+          ),
+        );
+      }
+      return undefined;
+    }
+
+    if (resourceKind === "skill") {
+      const installedMeta = await getInstalledSkillsWithMeta(wsFolder.uri);
+      const meta =
+        installedMeta.find(
+          (m) =>
+            !!normalizedRemotePath &&
+            normalizeInstalledRemotePath(m.remotePath) ===
+              normalizedRemotePath &&
+            (!source || source === "unknown" || m.source === source),
+        ) ||
+        installedMeta.find(
+          (m) =>
+            m.name === skill.name ||
+            (!!skill.relativePath && m.relativePath === skill.relativePath),
+        );
+      if (!meta && !installedWorkspaceResource) {
+        if (!suppressSuccessMessage) {
+          vscode.window.showErrorMessage(
+            isJapanese()
+              ? `${skill.name} のメタデータが見つかりません`
+              : `Metadata not found for ${skill.name}`,
+          );
+        }
+        return undefined;
+      }
+      if (meta?.reinstallDisabled) {
+        if (!suppressSuccessMessage) {
+          vscode.window.showInformationMessage(
+            getReinstallDisabledMessage(
+              meta.name,
+              meta.reinstallDisabledReason,
+            ),
+          );
+        }
+        return undefined;
+      }
+      if (meta) {
+        source = meta.source;
+        remotePath = meta.remotePath || remotePath;
+        resourceName = meta.name;
+        relativePath = meta.skillFilePath || meta.relativePath || relativePath;
       } else if (installedWorkspaceResource) {
         source = installedWorkspaceResource.source || source;
         remotePath = installedWorkspaceResource.remotePath || remotePath;
@@ -6080,209 +6308,273 @@ export async function activate(
           installedWorkspaceResource.relativePath ||
           relativePath;
       }
+    } else if (installedWorkspaceResource) {
+      source = installedWorkspaceResource.source || source;
+      remotePath = installedWorkspaceResource.remotePath || remotePath;
+      resourceName = installedWorkspaceResource.name || resourceName;
+      relativePath =
+        installedWorkspaceResource.fullPath ||
+        installedWorkspaceResource.relativePath ||
+        relativePath;
+    }
 
-      if (!source || source === "local" || !remotePath) {
-        if (!suppressSuccessMessage) {
-          vscode.window.showWarningMessage(
-            isJapanese()
-              ? `${skill.name} はリモートインストール元のメタデータがないため再インストールできません`
-              : `${skill.name} cannot be reinstalled because remote install metadata is missing`,
-          );
-        }
-        return false;
-      }
-
-      let index = await loadSkillIndex(context);
-      let resources = getIndexResources(index);
-      let fullSkill = resources.find(
-        (s: Skill) =>
-          getResourceKind(s) === resourceKind &&
-          s.source === source &&
-          s.path === remotePath,
-      );
-      if (!fullSkill && source === "unknown") {
-        fullSkill = resources.find(
-          (s: Skill) =>
-            getResourceKind(s) === resourceKind && s.name === resourceName,
+    if (!source || source === "local" || !remotePath) {
+      if (!suppressSuccessMessage) {
+        vscode.window.showWarningMessage(
+          isJapanese()
+            ? `${skill.name} はリモートインストール元のメタデータがないため再インストールできません`
+            : `${skill.name} cannot be reinstalled because remote install metadata is missing`,
         );
       }
-      if (!fullSkill) {
+      return undefined;
+    }
+
+    let index = await loadSkillIndex(context);
+    let resources = getIndexResources(index);
+    let fullSkill = resources.find(
+      (s: Skill) =>
+        getResourceKind(s) === resourceKind &&
+        s.source === source &&
+        s.path === remotePath,
+    );
+    if (!fullSkill && source === "unknown") {
+      fullSkill = resources.find(
+        (s: Skill) =>
+          getResourceKind(s) === resourceKind && s.name === resourceName,
+      );
+    }
+    if (!fullSkill) {
+      fullSkill = resources.find(
+        (s: Skill) =>
+          getResourceKind(s) === resourceKind &&
+          s.name === resourceName &&
+          s.source === source,
+      );
+    }
+
+    // インデックスに見つからない場合は自動で更新を試みる
+    if (!fullSkill) {
+      const sourceSummary = getSourceRefreshSummary(index, [source]);
+      const decision = await decideIndexRefreshRecovery({
+        suppressRecoveryPrompt,
+        message: isJapanese()
+          ? `${skill.name} がインデックスに見つかりません。${sourceSummary} を更新しますか？`
+          : `${skill.name} not found in index. Update ${sourceSummary} now?`,
+        refreshLabel: isJapanese() ? "更新する" : "Update",
+        declineLabel: isJapanese() ? "キャンセル" : "Cancel",
+        showPrompt: (message, ...items) =>
+          vscode.window.showWarningMessage(message, ...items),
+      });
+
+      if (decision === "skipped") {
+        logger.warn(
+          `[Resource Ninja] ${skill.name} not found in index; skipped the refresh prompt because a batch caller is waiting`,
+        );
+      }
+
+      if (decision === "refresh") {
+        index = await refreshIndexForKnownSources(index, [source], skill.name);
+        resources = getIndexResources(index);
+
         fullSkill = resources.find(
           (s: Skill) =>
             getResourceKind(s) === resourceKind &&
-            s.name === resourceName &&
-            s.source === source,
+            s.source === source &&
+            s.path === remotePath,
         );
-      }
-
-      // インデックスに見つからない場合は自動で更新を試みる
-      if (!fullSkill) {
-        const sourceSummary = getSourceRefreshSummary(index, [source]);
-        const decision = await decideIndexRefreshRecovery({
-          suppressRecoveryPrompt,
-          message: isJapanese()
-            ? `${skill.name} がインデックスに見つかりません。${sourceSummary} を更新しますか？`
-            : `${skill.name} not found in index. Update ${sourceSummary} now?`,
-          refreshLabel: isJapanese() ? "更新する" : "Update",
-          declineLabel: isJapanese() ? "キャンセル" : "Cancel",
-          showPrompt: (message, ...items) =>
-            vscode.window.showWarningMessage(message, ...items),
-        });
-
-        if (decision === "skipped") {
-          logger.warn(
-            `[Resource Ninja] ${skill.name} not found in index; skipped the refresh prompt because a batch caller is waiting`,
-          );
-        }
-
-        if (decision === "refresh") {
-          index = await refreshIndexForKnownSources(
-            index,
-            [source],
-            skill.name,
-          );
-          resources = getIndexResources(index);
-
+        if (!fullSkill && source === "unknown") {
           fullSkill = resources.find(
             (s: Skill) =>
-              getResourceKind(s) === resourceKind &&
-              s.source === source &&
-              s.path === remotePath,
+              getResourceKind(s) === resourceKind && s.name === resourceName,
           );
-          if (!fullSkill && source === "unknown") {
-            fullSkill = resources.find(
-              (s: Skill) =>
-                getResourceKind(s) === resourceKind && s.name === resourceName,
-            );
-          }
-        }
-
-        if (!fullSkill) {
-          if (!suppressSuccessMessage) {
-            vscode.window.showErrorMessage(
-              isJapanese()
-                ? `${skill.name} がインデックスに見つかりません。ソースリポジトリを確認してください。`
-                : `${skill.name} not found in index. Please check source repositories.`,
-            );
-          }
-          return false;
         }
       }
 
-      const installOptions = { suppressRecoveryPrompt };
-
-      try {
-        // The uninstall below removes the plugin folder and its registration. The
-        // destination is taken from the install itself, because a setting that
-        // changes while the progress notification is up would make a precomputed
-        // one name a folder that was never created.
-        let installResult: Awaited<ReturnType<typeof installSkill>> | undefined;
-        await vscode.window.withProgress(
-          {
-            location: vscode.ProgressLocation.Notification,
-            title: isJapanese()
-              ? `${skill.name} を再インストール中...`
-              : `Reinstalling ${skill.name}...`,
-          },
-          async () => {
-            let uninstallResult:
-              | Awaited<ReturnType<typeof uninstallSkillByPath>>
-              | Awaited<ReturnType<typeof uninstallSkill>>
-              | undefined;
-            if (relativePath) {
-              uninstallResult = await uninstallSkillByPath(
-                relativePath,
-                wsFolder.uri,
-              );
-            } else {
-              uninstallResult = await uninstallSkill(skill.name, wsFolder.uri);
-            }
-            installResult = await installSkill(
-              fullSkill,
-              wsFolder.uri,
-              context,
-              installOptions,
-            );
-
-            const config = vscode.workspace.getConfiguration("resourceNinja");
-            if (
-              resourceKind === "skill" &&
-              config.get<boolean>("autoUpdateInstruction")
-            ) {
-              await updateInstructionFile(wsFolder.uri, context);
-            }
-            const hookConfigSummary = formatHookConfigUpdateSummary(
-              uninstallResult?.hookConfigUpdate,
-            );
-            if (hookConfigSummary && !suppressSuccessMessage) {
-              vscode.window.showInformationMessage(hookConfigSummary);
-            }
-          },
-        );
-
-        // The uninstall above dropped the registration for the folder it removed,
-        // so the destination the install reported goes back through the same path
-        // a normal install uses and keeps honouring `registerPluginLocation` and
-        // the version guard. A failed install leaves `installResult` unset, and an
-        // install that could not download every file must not be registered
-        // either, so nothing is put back for a folder with missing content.
-        if (
-          resourceKind === "plugin" &&
-          installResult &&
-          installWasClean(installResult)
-        ) {
-          await offerPluginLocationRegistration([installResult.destinationUri]);
-        }
-
-        markRecentlyInstalled(fullSkill);
-
-        if (!installWasClean(installResult)) {
-          // The install already warned about the files it could not download;
-          // reporting failure here is what the group reinstall aggregates.
-          workspaceProvider.refresh();
-          browseProvider.refresh();
-          return false;
-        }
-
-        // ステータスバーに表示
-        statusBarItem.text = `$(sync) ${skill.name} ${
-          isJapanese() ? "再インストール完了" : "reinstalled"
-        }`;
-        statusBarItem.show();
-        setTimeout(() => statusBarItem.hide(), 4000);
-
-        if (!suppressSuccessMessage) {
-          vscode.window.showInformationMessage(
-            isJapanese()
-              ? `${skill.name} を再インストールしました`
-              : `Reinstalled ${skill.name}`,
-          );
-        }
-        workspaceProvider.refresh();
-        browseProvider.refresh();
-        return true;
-      } catch (error) {
+      if (!fullSkill) {
         if (!suppressSuccessMessage) {
           vscode.window.showErrorMessage(
             isJapanese()
-              ? `再インストール失敗: ${String(error)}。元のファイルはごみ箱から復元できます。`
-              : `Reinstall failed: ${String(error)}. You can restore the original files from the trash.`,
+              ? `${skill.name} がインデックスに見つかりません。ソースリポジトリを確認してください。`
+              : `${skill.name} not found in index. Please check source repositories.`,
           );
         }
-        return false;
+        return undefined;
       }
-    },
+    }
+
+    const installOptions = { suppressRecoveryPrompt };
+
+    try {
+      // The uninstall below removes the plugin folder and its registration. The
+      // destination is taken from the install itself, because a setting that
+      // changes while the progress notification is up would make a precomputed
+      // one name a folder that was never created.
+      let uninstallResult:
+        | Awaited<ReturnType<typeof uninstallSkillByPath>>
+        | Awaited<ReturnType<typeof uninstallSkill>>
+        | undefined;
+      const task: ReinstallTask<InstallSkillResult> = {
+        name: skill.name,
+        remove: async () => {
+          uninstallResult = relativePath
+            ? await uninstallSkillByPath(relativePath, wsFolder.uri)
+            : await uninstallSkill(skill.name, wsFolder.uri);
+        },
+        install: async () => {
+          const installResult = await installSkill(
+            fullSkill,
+            wsFolder.uri,
+            context,
+            installOptions,
+          );
+          if (!installWasClean(installResult)) {
+            throw new ReinstallAttemptError(
+              "incomplete",
+              `Incomplete install: ${skill.name}`,
+            );
+          }
+          return installResult;
+        },
+      };
+      let result;
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: isJapanese()
+            ? `${skill.name} を再インストール中...`
+            : `Reinstalling ${skill.name}...`,
+        },
+        async () => {
+          result = await runReinstallTask(task);
+        },
+      );
+      let record: ReinstallBatchRecord<InstallSkillResult> = {
+        task,
+        result: result!,
+      };
+      record = await maybeOfferManualReinstallRetry(
+        record,
+        suppressSuccessMessage || suppressRecoveryPrompt,
+      );
+
+      const config = vscode.workspace.getConfiguration("resourceNinja");
+      if (
+        record.result.removed &&
+        resourceKind === "skill" &&
+        config.get<boolean>("autoUpdateInstruction")
+      ) {
+        await updateInstructionFile(wsFolder.uri, context);
+      }
+      const hookConfigSummary = formatHookConfigUpdateSummary(
+        uninstallResult?.hookConfigUpdate,
+      );
+      if (hookConfigSummary && !suppressSuccessMessage) {
+        vscode.window.showInformationMessage(hookConfigSummary);
+      }
+
+      // The uninstall above dropped the registration for the folder it removed,
+      // so the destination the install reported goes back through the same path
+      // a normal install uses and keeps honouring `registerPluginLocation` and
+      // the version guard. A failed install leaves `installResult` unset, and an
+      // install that could not download every file must not be registered
+      // either, so nothing is put back for a folder with missing content.
+      if (
+        resourceKind === "plugin" &&
+        record.result.success &&
+        record.result.value
+      ) {
+        await offerPluginLocationRegistration([
+          record.result.value.destinationUri,
+        ]);
+      }
+
+      if (record.result.success) {
+        markRecentlyInstalled(fullSkill);
+      }
+
+      if (!record.result.success) {
+        workspaceProvider.refresh();
+        browseProvider.refresh();
+        if (!suppressSuccessMessage) {
+          vscode.window.showErrorMessage(
+            isJapanese()
+              ? `再インストール失敗 (${record.result.failureKind || "other"})。元のファイルはごみ箱から復元できます。`
+              : `Reinstall failed (${record.result.failureKind || "other"}). You can restore the original files from the trash.`,
+          );
+        }
+        return record;
+      }
+
+      // ステータスバーに表示
+      statusBarItem.text = `$(sync) ${skill.name} ${
+        isJapanese() ? "再インストール完了" : "reinstalled"
+      }`;
+      statusBarItem.show();
+      setTimeout(() => statusBarItem.hide(), 4000);
+
+      if (!suppressSuccessMessage) {
+        vscode.window.showInformationMessage(
+          isJapanese()
+            ? `${skill.name} を再インストールしました`
+            : `Reinstalled ${skill.name}`,
+        );
+      }
+      workspaceProvider.refresh();
+      browseProvider.refresh();
+      return record;
+    } catch (error) {
+      if (!suppressSuccessMessage) {
+        vscode.window.showErrorMessage(
+          isJapanese()
+            ? `再インストール失敗: ${String(error)}。元のファイルはごみ箱から復元できます。`
+            : `Reinstall failed: ${String(error)}. You can restore the original files from the trash.`,
+        );
+      }
+      return undefined;
+    }
+  };
+  const reinstallCmd = vscode.commands.registerCommand(
+    "resourceNinja.reinstall",
+    reinstallResource,
   );
 
   // Command: Reinstall remote-installed resources in a workspace resource-kind group
   const reinstallResourceGroupCmd = vscode.commands.registerCommand(
     "resourceNinja.reinstallResourceGroup",
     async (item?: SkillTreeItem) => {
-      if (!item || item.contextValue !== "workspaceResourceType") {
+      if (
+        !item ||
+        item.contextValue !== "workspaceResourceType" ||
+        !item.resourceKind ||
+        !item.rootFsPath
+      ) {
+        showStaleResourceGroupMessage();
         return;
       }
 
-      const children = await workspaceProvider.getChildren(item);
+      const wsFolder = vscode.workspace.workspaceFolders?.find(
+        (folder) =>
+          normalizeResourceRootIdentity(folder.uri.fsPath) ===
+          normalizeResourceRootIdentity(item.rootFsPath!),
+      );
+      if (!wsFolder) {
+        showStaleResourceGroupMessage();
+        return;
+      }
+      const currentGroup = (await workspaceProvider.getChildren()).find(
+        (candidate) =>
+          candidate.contextValue === "workspaceResourceType" &&
+          candidate.resourceKind === item.resourceKind &&
+          !!candidate.rootFsPath &&
+          normalizeResourceRootIdentity(candidate.rootFsPath) ===
+            normalizeResourceRootIdentity(item.rootFsPath!),
+      );
+      if (!currentGroup) {
+        showStaleResourceGroupMessage();
+        return;
+      }
+
+      const children = await workspaceProvider.getChildren(currentGroup);
       const remoteInstalledItems = children.filter(
         (child) =>
           child.contextValue === "installedRemoteSkill" ||
@@ -6318,7 +6610,7 @@ export async function activate(
       let success = 0;
       let completed = 0;
       let cancelled = false;
-      const failedResources: string[] = [];
+      const records: ReinstallBatchRecord<InstallSkillResult>[] = [];
 
       await vscode.window.withProgress(
         {
@@ -6338,23 +6630,52 @@ export async function activate(
               message: `${child.skill?.name || child.label} (${completed + 1}/${remoteInstalledItems.length})`,
               increment: 100 / remoteInstalledItems.length,
             });
-            const ok = await vscode.commands.executeCommand<boolean>(
-              "resourceNinja.reinstall",
-              child,
-              {
-                suppressSuccessMessage: true,
-                suppressRecoveryPrompt: true,
-              },
-            );
-            if (ok) {
-              success++;
+            const record = await reinstallResource(child, {
+              suppressSuccessMessage: true,
+              suppressRecoveryPrompt: true,
+            });
+            if (record) {
+              records.push(record);
+              if (record.result.success) {
+                success++;
+              }
             } else {
-              failedResources.push(String(child.skill?.name || child.label));
+              records.push(
+                createUnstartedReinstallRecord<InstallSkillResult>(
+                  String(child.skill?.name || child.label),
+                  "not-found",
+                ),
+              );
             }
             completed++;
           }
         },
       );
+
+      if (cancelled) {
+        records.push(
+          ...remoteInstalledItems
+            .slice(completed)
+            .map((child) =>
+              createUnstartedReinstallRecord<InstallSkillResult>(
+                String(child.skill?.name || child.label),
+                "cancelled",
+              ),
+            ),
+        );
+      }
+      const finalRecords = await maybeOfferManualBatchReinstallRetry(
+        records,
+        kindLabel,
+        false,
+      );
+      success = finalRecords.filter((record) => record.result.success).length;
+      const failedResources = finalRecords
+        .filter(
+          (record) =>
+            !record.result.success && record.result.failureKind !== "cancelled",
+        )
+        .map((record) => record.task.name);
 
       workspaceProvider.refresh();
       browseProvider.refresh();
@@ -6932,9 +7253,18 @@ export async function activate(
         return;
       }
 
-      const installedMeta = await getInstalledSkillsWithMeta(wsFolder.uri);
+      const allInstalledMeta = await getInstalledSkillsWithMeta(wsFolder.uri);
+      const installedMeta = allInstalledMeta.filter(
+        (meta) => !meta.reinstallDisabled,
+      );
       if (installedMeta.length === 0) {
-        vscode.window.showInformationMessage(messages.noInstalledSkills());
+        vscode.window.showInformationMessage(
+          allInstalledMeta.length > 0
+            ? isJapanese()
+              ? "再インストール可能なスキルはありません。無効化された項目はインストールメタデータで確認できます。"
+              : "No skills are eligible for reinstall. Check install metadata for disabled entries."
+            : messages.noInstalledSkills(),
+        );
         return;
       }
 
@@ -6963,7 +7293,7 @@ export async function activate(
       let success = 0;
       let completed = 0;
       let cancelled = false;
-      const failedSkills: string[] = [];
+      const records: ReinstallBatchRecord<InstallSkillResult>[] = [];
 
       await vscode.window.withProgress(
         {
@@ -6995,34 +7325,77 @@ export async function activate(
             }
 
             if (skill) {
-              try {
-                await uninstallSkill(item.meta.name, wsFolder.uri);
-                const installResult = await installSkill(
-                  skill,
-                  wsFolder.uri,
-                  context,
-                  {
-                    suppressRecoveryPrompt: true,
-                  },
-                );
-                if (!installWasClean(installResult)) {
-                  failedSkills.push(item.meta.name);
-                  completed++;
-                  continue;
-                }
+              const task: ReinstallTask<InstallSkillResult> = {
+                name: item.meta.name,
+                remove: async () => {
+                  await uninstallSkill(item.meta.name, wsFolder.uri);
+                },
+                install: async () => {
+                  const installResult = await installSkill(
+                    skill,
+                    wsFolder.uri,
+                    context,
+                    {
+                      suppressRecoveryPrompt: true,
+                    },
+                  );
+                  if (!installWasClean(installResult)) {
+                    throw new ReinstallAttemptError(
+                      "incomplete",
+                      `Incomplete install: ${item.meta.name}`,
+                    );
+                  }
+                  return installResult;
+                },
+              };
+              const result = await runReinstallTask(task);
+              records.push({ task, result });
+              if (result.success) {
                 markRecentlyInstalled(skill);
                 success++;
-              } catch (error) {
-                logger.error(`Failed to reinstall ${item.meta.name}:`, error);
-                failedSkills.push(item.meta.name);
+              } else {
+                logger.error(
+                  `Failed to reinstall ${item.meta.name} (${result.failureKind || "other"})`,
+                  result.error,
+                );
               }
             } else {
-              failedSkills.push(item.meta.name);
+              records.push(
+                createUnstartedReinstallRecord<InstallSkillResult>(
+                  item.meta.name,
+                  "not-found",
+                ),
+              );
             }
             completed++;
           }
         },
       );
+
+      if (cancelled) {
+        records.push(
+          ...selected
+            .slice(completed)
+            .map((item) =>
+              createUnstartedReinstallRecord<InstallSkillResult>(
+                item.meta.name,
+                "cancelled",
+              ),
+            ),
+        );
+      }
+      const finalRecords = await maybeOfferManualBatchReinstallRetry(
+        records,
+        isJapanese() ? "スキル再インストール" : "Skill reinstall",
+        false,
+      );
+      success = finalRecords.filter((record) => record.result.success).length;
+      const failedSkills = finalRecords
+        .filter(
+          (record) =>
+            !record.result.success && record.result.failureKind !== "cancelled",
+        )
+        .map((record) => record.task.name);
 
       const config = vscode.workspace.getConfiguration("resourceNinja");
       if (config.get<boolean>("autoUpdateInstruction")) {
@@ -7044,8 +7417,8 @@ export async function activate(
       } else {
         vscode.window.showInformationMessage(
           isJapanese()
-            ? `${selected.length} 個のスキルを再インストールしました`
-            : `Reinstalled ${selected.length} skills`,
+            ? `${success} 個のスキルを再インストールしました`
+            : `Reinstalled ${success} skills`,
         );
       }
     },
@@ -8563,11 +8936,31 @@ export async function activate(
           config,
           isJapanese(),
         );
-        await updateInstructionFile(workspaceFolder.uri, context);
+        const result = await updateInstructionFile(
+          workspaceFolder.uri,
+          context,
+          { notifyOnFailure: false },
+        );
+        if (isInstructionFileUpdateFailure(result)) {
+          vscode.window.showErrorMessage(
+            isJapanese()
+              ? `リソース出力の更新に失敗しました (${result.status})。Agent Resources Ninja の出力を確認してください。`
+              : `Failed to update resource output (${result.status}). Check the Agent Resources Ninja output channel.`,
+          );
+          return;
+        }
         vscode.window.showInformationMessage(
-          isJapanese()
-            ? `リソース出力を更新しました: ${instructionTarget}`
-            : `Resource output updated: ${instructionTarget}`,
+          result.status === "unchanged"
+            ? isJapanese()
+              ? `リソース出力は最新です: ${instructionTarget}`
+              : `Resource output is already up to date: ${instructionTarget}`
+            : result.status === "deferred"
+              ? isJapanese()
+                ? `リソース出力の更新は Agent Skills Ninja に委譲されています: ${instructionTarget}`
+                : `Resource output updates are delegated to Agent Skills Ninja: ${instructionTarget}`
+              : isJapanese()
+                ? `リソース出力を更新しました: ${instructionTarget}`
+                : `Resource output updated: ${instructionTarget}`,
         );
       } catch (error) {
         vscode.window.showErrorMessage(
@@ -8615,16 +9008,33 @@ export async function activate(
           workspaceFolder.uri,
           config,
         );
-        await updateInstructionFileAtUri(
+        const result = await updateInstructionFileAtUri(
           workspaceFolder.uri,
           context,
           fileUri,
           instructionTarget,
+          { notifyOnFailure: false },
         );
+        if (isInstructionFileUpdateFailure(result)) {
+          vscode.window.showErrorMessage(
+            isJapanese()
+              ? `グローバル リソース出力の更新に失敗しました (${result.status})。Agent Resources Ninja の出力を確認してください。`
+              : `Failed to update global resource output (${result.status}). Check the Agent Resources Ninja output channel.`,
+          );
+          return;
+        }
         vscode.window.showInformationMessage(
-          isJapanese()
-            ? `グローバル リソース出力を更新しました: ${instructionTarget}`
-            : `Global resource output updated: ${instructionTarget}`,
+          result.status === "unchanged"
+            ? isJapanese()
+              ? `グローバル リソース出力は最新です: ${instructionTarget}`
+              : `Global resource output is already up to date: ${instructionTarget}`
+            : result.status === "deferred"
+              ? isJapanese()
+                ? `グローバル リソース出力の更新は Agent Skills Ninja に委譲されています: ${instructionTarget}`
+                : `Global resource output updates are delegated to Agent Skills Ninja: ${instructionTarget}`
+              : isJapanese()
+                ? `グローバル リソース出力を更新しました: ${instructionTarget}`
+                : `Global resource output updated: ${instructionTarget}`,
         );
       } catch (error) {
         vscode.window.showErrorMessage(

@@ -24,9 +24,13 @@ function requireTypeScriptModule(filePath) {
   return loadedModule.exports;
 }
 
-const { decideIndexRefreshRecovery } = requireTypeScriptModule(
-  path.join(repoRoot, "src", "reinstallRecovery.ts"),
-);
+const {
+  decideIndexRefreshRecovery,
+  ReinstallAttemptError,
+  retryReinstallBatch,
+  runReinstallBatch,
+  runReinstallTask,
+} = requireTypeScriptModule(path.join(repoRoot, "src", "reinstallRecovery.ts"));
 
 const failures = [];
 
@@ -187,25 +191,28 @@ function inspectReinstallCallers(sourceText, fileName) {
       childInsideProgress = true;
     }
 
-    if (
-      ts.isCallExpression(node) &&
-      node.expression.getText(sourceFile).endsWith("executeCommand")
-    ) {
+    if (ts.isCallExpression(node)) {
+      const expression = node.expression.getText(sourceFile);
       const [nameArgument] = node.arguments;
-      if (
-        nameArgument &&
-        ts.isStringLiteral(nameArgument) &&
-        nameArgument.text.startsWith("resourceNinja.reinstall")
-      ) {
+      const commandName = expression.endsWith("executeCommand")
+        ? nameArgument && ts.isStringLiteral(nameArgument)
+          ? nameArgument.text
+          : undefined
+        : expression === "reinstallUserResource"
+          ? "resourceNinja.reinstallUserResource"
+          : expression === "reinstallResource"
+            ? "resourceNinja.reinstall"
+            : undefined;
+      if (commandName?.startsWith("resourceNinja.reinstall")) {
         const options = readOptions(node);
         const suppressed = options.includes("suppressRecoveryPrompt=true");
-        const caller = { command: nameArgument.text, options };
+        const caller = { command: commandName, options };
 
         if (insideProgress) {
           awaitedInProgress.push(caller);
           if (!suppressed) {
             violations.push(
-              `${nameArgument.text} inside withProgress without suppressRecoveryPrompt`,
+              `${commandName} inside withProgress without suppressRecoveryPrompt`,
             );
           }
         }
@@ -213,7 +220,7 @@ function inspectReinstallCallers(sourceText, fileName) {
           automatic.push(caller);
           if (!suppressed) {
             violations.push(
-              `${nameArgument.text} skips confirmation without suppressRecoveryPrompt`,
+              `${commandName} skips confirmation without suppressRecoveryPrompt`,
             );
           }
         }
@@ -230,6 +237,115 @@ function inspectReinstallCallers(sourceText, fileName) {
 const extensionSource = fs.readFileSync(extensionPath, "utf8");
 
 async function main() {
+  await test("transient reinstall retries once without removing twice", async () => {
+    let removeCount = 0;
+    let installCount = 0;
+    const result = await runReinstallTask({
+      name: "demo",
+      remove: async () => {
+        removeCount++;
+      },
+      install: async () => {
+        installCount++;
+        if (installCount === 1) {
+          throw new ReinstallAttemptError("transport", "offline");
+        }
+        return "installed";
+      },
+    });
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.attempts, 2);
+    assert.strictEqual(removeCount, 1);
+    assert.strictEqual(installCount, 2);
+  });
+
+  await test("non-retryable reinstall failure stops after one attempt", async () => {
+    let removeCount = 0;
+    let installCount = 0;
+    const result = await runReinstallTask({
+      name: "private",
+      remove: async () => {
+        removeCount++;
+      },
+      install: async () => {
+        installCount++;
+        throw new ReinstallAttemptError("auth-required", "login required");
+      },
+    });
+    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.failureKind, "auth-required");
+    assert.strictEqual(result.attempts, 1);
+    assert.strictEqual(removeCount, 1);
+    assert.strictEqual(installCount, 1);
+  });
+
+  await test("manual retry adds one install attempt and never removes again", async () => {
+    let removeCount = 0;
+    let installCount = 0;
+    const task = {
+      name: "unstable",
+      remove: async () => {
+        removeCount++;
+      },
+      install: async () => {
+        installCount++;
+        throw new ReinstallAttemptError("server-error", "upstream failed");
+      },
+    };
+    const initial = await runReinstallBatch([task]);
+    const retried = await retryReinstallBatch(initial);
+    assert.strictEqual(retried[0].result.success, false);
+    assert.strictEqual(retried[0].result.attempts, 3);
+    assert.strictEqual(removeCount, 1);
+    assert.strictEqual(installCount, 3);
+  });
+
+  await test("manual retry preserves failures outside the retry subset", async () => {
+    const authTask = {
+      name: "private",
+      remove: async () => undefined,
+      install: async () => {
+        throw new ReinstallAttemptError("auth-required", "login required");
+      },
+    };
+    const transientTask = {
+      name: "server",
+      remove: async () => undefined,
+      install: async () => {
+        throw new ReinstallAttemptError("server-error", "upstream failed");
+      },
+    };
+    const initial = await runReinstallBatch([authTask, transientTask]);
+    const retried = await retryReinstallBatch(initial);
+    assert.strictEqual(retried.length, 2);
+    assert.strictEqual(retried[0].result.failureKind, "auth-required");
+    assert.strictEqual(retried[0].result.attempts, 1);
+    assert.strictEqual(retried[1].result.failureKind, "server-error");
+    assert.strictEqual(retried[1].result.attempts, 3);
+  });
+
+  await test("batch cancellation records every unstarted item with zero attempts", async () => {
+    let started = 0;
+    const tasks = ["one", "two", "three"].map((name) => ({
+      name,
+      remove: async () => undefined,
+      install: async () => name,
+    }));
+    const records = await runReinstallBatch(tasks, {
+      isCancellationRequested: () => started >= 1,
+      onProgress: () => {
+        started++;
+      },
+    });
+    assert.strictEqual(records.length, 3);
+    assert.strictEqual(records[0].result.success, true);
+    for (const record of records.slice(1)) {
+      assert.strictEqual(record.result.stage, "not-started");
+      assert.strictEqual(record.result.failureKind, "cancelled");
+      assert.strictEqual(record.result.attempts, 0);
+    }
+  });
+
   await test("a suppressed caller never reaches the prompt", async () => {
     const recorder = createPromptRecorder("Update");
     const decision = await decideIndexRefreshRecovery({
@@ -280,7 +396,7 @@ async function main() {
     assert.strictEqual(dismissed, "declined");
   });
 
-  await test("no programmatically awaited reinstall command blocks on a notification", () => {
+  await test("reinstall groups use direct typed handlers without boolean command calls", () => {
     const { blocking, modal, checked } = inspectReinstallCommands(
       extensionSource,
       extensionPath,
@@ -289,8 +405,8 @@ async function main() {
       name.startsWith("resourceNinja.reinstall"),
     );
     assert.ok(
-      reinstallCommands.length >= 3,
-      `Expected the reinstall commands invoked by other commands: ${reinstallCommands.join(", ")}`,
+      reinstallCommands.length >= 1,
+      `Expected the automatic reinstall command caller: ${reinstallCommands.join(", ")}`,
     );
     assert.deepStrictEqual(
       blocking,
@@ -301,23 +417,26 @@ async function main() {
       modal.length >= 1,
       "Expected the reinstall confirmations to still be awaited modal dialogs",
     );
+    assert.doesNotMatch(
+      extensionSource,
+      /executeCommand<boolean>\(\s*"resourceNinja\.reinstall(?:UserResource)?"/,
+      "group reinstall must call the typed handlers directly",
+    );
+    assert.match(
+      extensionSource,
+      /const record = await reinstallUserResource\(/,
+    );
+    assert.match(extensionSource, /const record = await reinstallResource\(/);
   });
 
-  await test("the blocking-notification check is not vacuous", () => {
-    const anchor = "await decideIndexRefreshRecovery(";
-    assert.ok(
-      extensionSource.includes(anchor),
-      "The mutation anchor is gone; this proof no longer tests the real file",
-    );
-    const mutated = extensionSource.replace(
-      anchor,
-      "await vscode.window.showWarningMessage(",
-    );
-    const { blocking } = inspectReinstallCommands(mutated, extensionPath);
-    assert.strictEqual(blocking.length, 1);
+  await test("manual retry is gated before showing a notification", () => {
     assert.match(
-      blocking[0],
-      /^resourceNinja\.reinstall\w*:showWarningMessage$/,
+      extensionSource,
+      /if \(\s*suppressPrompt \|\|[\s\S]*?!isReinstallRetryable\(record\.result\.failureKind\)[\s\S]*?\) \{\s*return record;/,
+    );
+    assert.match(
+      extensionSource,
+      /Retry once without removing the existing files again/,
     );
   });
 

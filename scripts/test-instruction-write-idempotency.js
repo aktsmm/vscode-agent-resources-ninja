@@ -106,13 +106,13 @@ test("both idempotency guards are the ones this check relies on", () => {
   );
   assert.match(
     instructionManagerSource,
-    /if \(newContent !== existingContent\) \{/,
+    /if \(newContent !== instructionContent\) \{/,
     "The instruction file writer must compare against the content it read",
   );
 });
 
 test("the unconditional-write check is not vacuous against the real file", () => {
-  const anchor = "if (newContent !== existingContent) {";
+  const anchor = "if (newContent !== instructionContent) {";
   assert.ok(
     instructionManagerSource.includes(anchor),
     "The mutation anchor is gone; this proof no longer tests the real file",

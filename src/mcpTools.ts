@@ -27,6 +27,7 @@ import { formatHookConfigUpdateSummary } from "./hookConfigManager";
 import {
   escapeMarkdownTableText as escapeMarkdownCell,
   INCOMPLETE_ROW_MARKER,
+  isInstructionFileUpdateFailure,
   updateInstructionFile,
 } from "./instructionManager";
 import { getConfiguredInstructionFilePath } from "./customizationPaths";
@@ -632,8 +633,18 @@ class SkillInstallTool implements vscode.LanguageModelTool<{
         config,
         skill,
       );
+      let outputWarning = "";
       if (config.get<boolean>("autoUpdateInstruction")) {
-        await updateInstructionFile(workspaceFolder.uri, context);
+        const outputResult = await updateInstructionFile(
+          workspaceFolder.uri,
+          context,
+        );
+        if (isInstructionFileUpdateFailure(outputResult)) {
+          outputWarning = localizeMcpText(
+            `\n⚠️ The resource was installed, but resource output update failed (${outputResult.status}). Check the Agent Resources Ninja output channel.`,
+            `\n⚠️ リソースはインストールされましたが、リソース出力の更新に失敗しました (${outputResult.status})。Agent Resources Ninja の出力を確認してください。`,
+          );
+        }
       }
 
       // ツリービューをリフレッシュ
@@ -657,6 +668,7 @@ class SkillInstallTool implements vscode.LanguageModelTool<{
 | Trust | ${trust} |
 | Installed to | ${escapeMarkdownCell(toDisplayPath(workspaceFolder, targetUri))} |
 ${hookConfigSummary ? `| hooks.json | ${hookConfigSummary} |` : ""}
+${outputWarning}
 
 You can now view the installed file or list workspace resources.`,
             `✅ **${skill.name}** をインストールしました！
@@ -669,6 +681,7 @@ You can now view the installed file or list workspace resources.`,
 | 信頼度 | ${trust} |
 | インストール先 | ${escapeMarkdownCell(toDisplayPath(workspaceFolder, targetUri))} |
 ${hookConfigSummary ? `| hooks.json | ${hookConfigSummary} |` : ""}
+${outputWarning}
 
 ---
 **Agent Instructions:**
@@ -1163,11 +1176,36 @@ List workspace resources or search the index to find the exact resource name.`,
       // インストラクションファイルを更新（設定で有効な場合のみ）
       const config = vscode.workspace.getConfiguration("resourceNinja");
       const instructionTarget = getConfiguredInstructionFilePath(config);
+      let instructionOutputEn =
+        removedKind === "skill"
+          ? instructionTarget === "none"
+            ? "Disabled"
+            : "Updated"
+          : "Unchanged";
+      let instructionOutputJa =
+        removedKind === "skill"
+          ? instructionTarget === "none"
+            ? "無効"
+            : "更新済み"
+          : "変更なし";
       if (
         removedKind === "skill" &&
         config.get<boolean>("autoUpdateInstruction")
       ) {
-        await updateInstructionFile(workspaceFolder.uri, requireExtContext());
+        const outputResult = await updateInstructionFile(
+          workspaceFolder.uri,
+          requireExtContext(),
+        );
+        if (isInstructionFileUpdateFailure(outputResult)) {
+          instructionOutputEn = `Failed (${outputResult.status}); resource removal succeeded`;
+          instructionOutputJa = `失敗 (${outputResult.status})。リソース削除は成功`;
+        } else if (outputResult.status === "unchanged") {
+          instructionOutputEn = "Unchanged";
+          instructionOutputJa = "変更なし";
+        } else if (outputResult.status === "deferred") {
+          instructionOutputEn = "Delegated to Agent Skills Ninja";
+          instructionOutputJa = "Agent Skills Ninja に委譲";
+        }
       }
 
       // ツリービューをリフレッシュ
@@ -1182,7 +1220,7 @@ List workspace resources or search the index to find the exact resource name.`,
 |---|---|
 | Resource | ${escapeMarkdownCell(removedName)} |
 | Kind | ${getResourceKindLabel(removedKind, false)} |
-| Instruction file | ${removedKind === "skill" ? (instructionTarget === "none" ? "Disabled" : "Updated") : "Unchanged"} |
+| Instruction file | ${instructionOutputEn} |
 ${hookConfigSummary ? `| hooks.json | ${hookConfigSummary} |` : ""}
 
 You can list remaining resources or search for an alternative.`,
@@ -1193,7 +1231,7 @@ You can list remaining resources or search for an alternative.`,
 | Resource | ${escapeMarkdownCell(removedName)} |
 | Kind | ${getResourceKindLabel(removedKind, isJapanese())} |
 | ステータス | 削除完了 |
-| Instruction File | ${removedKind === "skill" ? (instructionTarget === "none" ? "無効" : "更新済み") : "変更なし"} |
+| Instruction File | ${instructionOutputJa} |
 ${hookConfigSummary ? `| hooks.json | ${hookConfigSummary} |` : ""}
 
 ---
