@@ -5,6 +5,7 @@ const fs = require("fs");
 const Module = require("module");
 const path = require("path");
 const ts = require("typescript");
+const vm = require("vm");
 
 const repoRoot = path.resolve(__dirname, "..");
 const extensionPath = path.join(repoRoot, "src", "extension.ts");
@@ -427,6 +428,69 @@ async function main() {
       /const record = await reinstallUserResource\(/,
     );
     assert.match(extensionSource, /const record = await reinstallResource\(/);
+  });
+
+  await test("batch failure reports require a click without holding the batch", async () => {
+    const parsed = ts.createSourceFile(
+      extensionPath,
+      extensionSource,
+      ts.ScriptTarget.ES2020,
+      true,
+    );
+    let handler;
+    const visit = (node) => {
+      if (
+        ts.isFunctionDeclaration(node) &&
+        node.name?.text === "showReinstallBatchFailure"
+      ) {
+        handler = node;
+      } else {
+        node.forEachChild(visit);
+      }
+    };
+    visit(parsed);
+    assert.ok(handler, "batch failure handler not found");
+    const code = ts.transpileModule(
+      `${handler.getText(parsed)}\nshowReinstallBatchFailure;`,
+      { compilerOptions: { target: ts.ScriptTarget.ES2020 } },
+    ).outputText;
+    const notifications = [];
+    const reports = [];
+    let choose;
+    const showFailure = vm.runInNewContext(code, {
+      vscode: {
+        window: {
+          showWarningMessage: (...args) => {
+            notifications.push(args);
+            return new Promise((resolve) => {
+              choose = resolve;
+            });
+          },
+        },
+      },
+      messages: { actionReportBug: () => "Report Bug" },
+      isJapanese: () => false,
+      buildReinstallBatchReport: () => ({ title: "safe", body: "safe" }),
+      openBugReport: async (...args) => reports.push(args),
+      logger: { warn: () => undefined },
+    });
+    const failed = [{ result: { success: false, failureKind: "not-found" } }];
+    assert.strictEqual(showFailure("failed", failed), undefined);
+    assert.deepStrictEqual(notifications[0], ["failed", "Report Bug"]);
+    assert.deepStrictEqual(reports, []);
+    choose("Report Bug");
+    await new Promise(setImmediate);
+    assert.deepStrictEqual(reports, [["safe", "safe"]]);
+
+    showFailure("cancelled", [
+      { result: { success: false, failureKind: "cancelled" } },
+    ]);
+    assert.deepStrictEqual(notifications[1], ["cancelled"]);
+    assert.strictEqual(
+      (extensionSource.match(/showReinstallBatchFailure\(/g) || []).length,
+      5,
+      "all four batch reinstall entry points must share the report action",
+    );
   });
 
   await test("manual retry is gated before showing a notification", () => {

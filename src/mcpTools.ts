@@ -43,7 +43,10 @@ import { isGitHubResponseError } from "./githubResponse";
 import { getGitHubToken } from "./githubAuth";
 import { logger } from "./logger";
 import { scanLocalSkills } from "./localSkillScanner";
-import { formatSourceIndexUpdateToolResult } from "./sourceIndexUpdatePresentation";
+import {
+  formatSourceIndexUpdateToolResult,
+  getIndexedResourceChanges,
+} from "./sourceIndexUpdatePresentation";
 
 /** スキルインデックスをキャッシュ */
 let cachedIndex: SkillIndex | undefined;
@@ -1323,6 +1326,10 @@ class UpdateIndexTool implements vscode.LanguageModelTool<
               skippedCount: updateResult.skipped.length,
               failedSources: updateResult.failures.map(
                 (failure) => failure.entry.name || failure.entry.id,
+              ),
+              changes: getIndexedResourceChanges(
+                getIndexResources(oldIndex),
+                getIndexResources(newIndex),
               ),
             },
             isJapanese() ? "ja" : "en",

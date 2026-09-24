@@ -487,7 +487,10 @@ function loadWindowsInstaller(recorded, options = {}) {
     },
     "./hookConfigManager": {
       restoreHookConfigFromBackup: async () => undefined,
-      updateHookConfigForInstall: async () => undefined,
+      updateHookConfigForInstall: async () => {
+        options.onHookConfigUpdate?.();
+        return undefined;
+      },
       updateHookConfigForUninstall: async () => undefined,
     },
     "./mcpConfigManager": { updateMcpConfigForInstall: async () => undefined },
@@ -1657,6 +1660,84 @@ async function run() {
       passed++;
     }
 
+    // --- A downloaded SKILL.md does not make missing companion files complete ---
+    {
+      const recorded = {
+        writes: new Map(),
+        directories: [],
+        deleted: [],
+        warnings: [],
+      };
+      const { installSkill, isSkillInstallIncompleteError } =
+        loadWindowsInstaller(recorded);
+      global.fetch = async (url) => {
+        if (url.startsWith("https://api.github.com/")) {
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            json: async () => [
+              {
+                name: "SKILL.md",
+                type: "file",
+                download_url: "https://raw/skill",
+              },
+              {
+                name: "README.md",
+                type: "file",
+                download_url: "https://raw/missing",
+              },
+            ],
+            text: async () => "",
+          };
+        }
+        return url === "https://raw/missing"
+          ? {
+              ok: false,
+              status: 404,
+              statusText: "Not Found",
+              text: async () => "",
+            }
+          : {
+              ok: true,
+              status: 200,
+              statusText: "OK",
+              text: async () => realSkillMd,
+            };
+      };
+
+      let thrown;
+      try {
+        await installSkill(
+          {
+            name: "partial-skill",
+            source: "traversal-source",
+            path: "skills/partial-skill",
+            categories: [],
+            description: "Partial skill",
+          },
+          makeWindowsUri("/C:/ws"),
+          {},
+          { suppressRecoveryPrompt: true },
+        );
+      } catch (error) {
+        thrown = error;
+      }
+
+      const installRoot = "C:\\ws\\.github\\skills\\partial-skill";
+      assert.strictEqual(isSkillInstallIncompleteError(thrown), true);
+      assert.strictEqual(
+        recorded.writes.get(`${installRoot}\\SKILL.md`),
+        realSkillMd,
+      );
+      assert.strictEqual(
+        JSON.parse(recorded.writes.get(`${installRoot}\\.skill-meta.json`))
+          .incomplete,
+        true,
+      );
+      passed++;
+    }
+
     // --- Test 15: リモート由来の .skill-meta.json は保存メタデータに入らない ---
     {
       const recorded = {
@@ -2050,6 +2131,96 @@ async function run() {
       passed++;
     }
 
+    // --- A partial hook folder cannot be activated as a complete hook ---
+    {
+      const recorded = {
+        writes: new Map(),
+        directories: [],
+        deleted: [],
+        warnings: [],
+      };
+      let missing = true;
+      let hookConfigCalls = 0;
+      global.fetch = async (url) => {
+        if (url.startsWith("https://api.github.com/")) {
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            json: async () => [
+              {
+                name: "README.md",
+                type: "file",
+                download_url: "https://raw/readme",
+              },
+              {
+                name: "script.js",
+                type: "file",
+                download_url: "https://raw/missing",
+              },
+            ],
+            text: async () => "",
+          };
+        }
+        return missing && url === "https://raw/missing"
+          ? {
+              ok: false,
+              status: 404,
+              statusText: "Not Found",
+              text: async () => "",
+            }
+          : {
+              ok: true,
+              status: 200,
+              statusText: "OK",
+              text: async () => "Hook readme",
+            };
+      };
+
+      const result = await loadWindowsInstaller(recorded, {
+        resourceKind: "hook",
+        onHookConfigUpdate: () => hookConfigCalls++,
+      }).installSkill(
+        {
+          kind: "hook",
+          name: "partial-hook",
+          source: "traversal-source",
+          path: "hooks/partial-hook/README.md",
+          categories: [],
+          description: "Partial hook",
+        },
+        makeWindowsUri("/C:/ws"),
+        {},
+        { suppressRecoveryPrompt: true },
+      );
+      assert.strictEqual(result.errors.length, 1);
+      assert.strictEqual(hookConfigCalls, 0);
+
+      missing = false;
+      const cleanResult = await loadWindowsInstaller(
+        { writes: new Map(), directories: [], deleted: [], warnings: [] },
+        {
+          resourceKind: "hook",
+          onHookConfigUpdate: () => hookConfigCalls++,
+        },
+      ).installSkill(
+        {
+          kind: "hook",
+          name: "partial-hook",
+          source: "traversal-source",
+          path: "hooks/partial-hook/README.md",
+          categories: [],
+          description: "Complete hook",
+        },
+        makeWindowsUri("/C:/ws"),
+        {},
+        { suppressRecoveryPrompt: true },
+      );
+      assert.strictEqual(cleanResult.errors, undefined);
+      assert.strictEqual(hookConfigCalls, 1);
+      passed++;
+    }
+
     // --- Test 26: legacy plugin hook は ownership metadata が一致するときだけ削除する ---
     {
       const fixtureRoot = fs.mkdtempSync(
@@ -2124,7 +2295,7 @@ async function run() {
   }
 
   console.log(
-    `PASS: test-skill-installer-remote-fallback.js (${passed}/33 cases)`,
+    `PASS: test-skill-installer-remote-fallback.js (${passed}/35 cases)`,
   );
 }
 

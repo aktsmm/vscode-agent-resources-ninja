@@ -3,6 +3,8 @@
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
+const ts = require("typescript");
+const vm = require("vm");
 
 const repoRoot = path.resolve(__dirname, "..");
 const extensionSource = fs
@@ -33,14 +35,86 @@ test("local and reinstall-disabled skills are excluded from index-missing checks
   );
 });
 
-test("indexed install lookup prefers remotePath before name/source fallback", () => {
+test("indexed install lookup does not replace a recorded path by name", () => {
+  const lookup = extensionSource.match(
+    /function findIndexedSkillForInstalledMeta\([\s\S]*?\n\}/,
+  )?.[0];
+  assert.ok(lookup, "installed skill lookup not found");
   assert.match(
-    extensionSource,
-    /const matchedByRemotePath = resources\.find\([\s\S]*normalizeInstalledRemotePath\(skill\.path\) === normalizedRemotePath/,
+    lookup,
+    /if \(normalizedRemotePath\) \{\s*return resources\.find\([\s\S]*skill\.source === meta\.source[\s\S]*normalizeInstalledRemotePath\(skill\.path\) === normalizedRemotePath/,
+  );
+  assert.match(
+    lookup,
+    /candidate\.name === meta\.name &&\s*candidate\.source === meta\.source/,
   );
   assert.match(
     extensionSource,
-    /candidate\.name === meta\.name &&\s*candidate\.source === meta\.source/,
+    /const skill = findIndexedSkillForInstalledMeta\(index, item\.meta\);/,
+    "multiple reinstall must use the same path identity check",
+  );
+  const singleReinstall = extensionSource.slice(
+    extensionSource.indexOf("const reinstallResource = async ("),
+    extensionSource.indexOf(
+      "const reinstallCmd = vscode.commands.registerCommand(",
+    ),
+  );
+  assert.doesNotMatch(
+    singleReinstall,
+    /getResourceKind\(s\) === resourceKind &&\s*s\.name === resourceName/,
+    "single reinstall must not replace a recorded path by name",
+  );
+});
+
+test("indexed install lookup distinguishes old and renamed paths", () => {
+  const normalize = extensionSource.match(
+    /function normalizeInstalledRemotePath\([\s\S]*?\n\}/,
+  )?.[0];
+  const lookup = extensionSource.match(
+    /function findIndexedSkillForInstalledMeta\([\s\S]*?\n\}/,
+  )?.[0];
+  assert.ok(normalize && lookup, "production matching functions not found");
+  const code = ts.transpileModule(
+    `${normalize}\n${lookup}\nfindIndexedSkillForInstalledMeta;`,
+    { compilerOptions: { target: ts.ScriptTarget.ES2020 } },
+  ).outputText;
+  const findIndexedSkill = vm.runInNewContext(code, {
+    getIndexResources: (index) => index.skills,
+    getResourceKind: (resource) => resource.kind || "skill",
+  });
+
+  const renamed = { name: "demo", source: "repo", path: "skills/new" };
+  const otherSource = { name: "demo", source: "other", path: "skills/old" };
+  const index = { skills: [renamed, otherSource] };
+  assert.strictEqual(
+    findIndexedSkill(index, {
+      name: "demo",
+      source: "repo",
+      remotePath: "skills/old",
+    }),
+    undefined,
+    "a renamed index entry must not authorize removing the old installation",
+  );
+  assert.strictEqual(
+    findIndexedSkill(index, {
+      name: "demo",
+      source: "repo",
+      remotePath: "skills/new",
+    }),
+    renamed,
+    "the actual new path must resolve after installation under that path",
+  );
+  assert.strictEqual(
+    findIndexedSkill(
+      { skills: [otherSource] },
+      {
+        name: "demo",
+        source: "repo",
+        remotePath: "skills/old",
+      },
+    ),
+    undefined,
+    "a matching path from a different source must not authorize removal",
   );
 });
 

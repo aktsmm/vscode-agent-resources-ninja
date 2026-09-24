@@ -100,7 +100,7 @@ import {
 import { createChatParticipant } from "./chatParticipant";
 import { registerMcpTools } from "./mcpTools";
 import { logger, registerLogger } from "./logger";
-import { openBugReport } from "./bugReport";
+import { buildReinstallBatchReport, openBugReport } from "./bugReport";
 import {
   AgentNinjaExtensionApi,
   clearBeacon,
@@ -230,7 +230,9 @@ import {
   isSourceRepositoryChangedError,
 } from "./sourceUpdateReconcile";
 import {
+  formatIndexedResourceChanges,
   formatSourceIndexResetAt,
+  getIndexedResourceChanges,
   getSourceIndexUpdateNotificationKind,
   scaleSourceIndexProgressIncrement,
 } from "./sourceIndexUpdatePresentation";
@@ -401,16 +403,13 @@ function findIndexedSkillForInstalledMeta(
   const normalizedRemotePath = normalizeInstalledRemotePath(meta.remotePath);
   const resources = getIndexResources(index);
 
-  if (normalizedRemotePath && meta.source && meta.source !== "local") {
-    const matchedByRemotePath = resources.find(
+  if (normalizedRemotePath) {
+    return resources.find(
       (skill: Skill) =>
         getResourceKind(skill) === "skill" &&
         skill.source === meta.source &&
         normalizeInstalledRemotePath(skill.path) === normalizedRemotePath,
     );
-    if (matchedByRemotePath) {
-      return matchedByRemotePath;
-    }
   }
 
   let skill = resources.find(
@@ -1930,6 +1929,35 @@ export async function activate(
     );
   }
 
+  function showReinstallBatchFailure(
+    message: string,
+    records: readonly ReinstallBatchRecord<InstallSkillResult>[],
+  ): void {
+    if (
+      !records.some(
+        (record) =>
+          !record.result.success && record.result.failureKind !== "cancelled",
+      )
+    ) {
+      void vscode.window.showWarningMessage(message);
+      return;
+    }
+
+    const reportAction = messages.actionReportBug();
+    const report = buildReinstallBatchReport(records, isJapanese());
+    void Promise.resolve(
+      vscode.window.showWarningMessage(message, reportAction),
+    )
+      .then((choice) => {
+        if (choice === reportAction) {
+          return openBugReport(report.title, report.body);
+        }
+      })
+      .catch((error: unknown) => {
+        logger.warn("[Resource Ninja] Failed to open batch bug report:", error);
+      });
+  }
+
   function getReinstallTrashRecoverySuffix(failedCount: number): string {
     if (failedCount === 0) {
       return "";
@@ -2500,13 +2528,6 @@ export async function activate(
         s.path === resource.remotePath,
     );
     if (!fullSkill) {
-      fullSkill = resources.find(
-        (s: Skill) =>
-          getResourceKind(s) === resource.kind &&
-          s.path === resource.remotePath,
-      );
-    }
-    if (!fullSkill) {
       const sourceSummary = getSourceRefreshSummary(index, [resource.source]);
       const decision = await decideIndexRefreshRecovery({
         suppressRecoveryPrompt,
@@ -2539,13 +2560,6 @@ export async function activate(
             s.source === resource.source &&
             s.path === resource.remotePath,
         );
-        if (!fullSkill) {
-          fullSkill = resources.find(
-            (s: Skill) =>
-              getResourceKind(s) === resource.kind &&
-              s.path === resource.remotePath,
-          );
-        }
       }
 
       if (!fullSkill) {
@@ -2561,7 +2575,7 @@ export async function activate(
     }
 
     const installOptions = { targetScope, suppressRecoveryPrompt };
-
+    let record: ReinstallBatchRecord<InstallSkillResult> | undefined;
     try {
       // A plugin always installs into the fixed Global Home `plugins`
       // directory, so a plugin scanned from a configured user-data path is
@@ -2606,7 +2620,7 @@ export async function activate(
           result = await runReinstallTask(task);
         },
       );
-      let record: ReinstallBatchRecord<InstallSkillResult> = {
+      record = {
         task,
         result: result!,
       };
@@ -2675,6 +2689,18 @@ export async function activate(
       }
       return record;
     } catch (error) {
+      if (record?.result.success && installWasClean(record.result.value)) {
+        logger.warn(
+          `[Resource Ninja] Post-reinstall operation failed for ${resource.name}:`,
+          error,
+        );
+        vscode.window.showWarningMessage(
+          isJapanese()
+            ? `${resource.name} は再インストールされましたが、後続の設定または表示処理は完了しませんでした。出力ログを確認し、必要な処理を再実行してください。`
+            : `${resource.name} was reinstalled, but a follow-up configuration or display operation did not complete. Check the output log and retry the affected operation.`,
+        );
+        return record;
+      }
       if (!suppressSuccessMessage) {
         vscode.window.showErrorMessage(
           isJapanese()
@@ -2815,13 +2841,14 @@ export async function activate(
       workspaceProvider.refresh();
       if (failedResources.length > 0 || cancelled) {
         const total = cancelled ? completed : remoteTargets.length;
-        vscode.window.showWarningMessage(
+        showReinstallBatchFailure(
           `${getBatchFailureMessage(
             groupLabel,
             success,
             total,
             failedResources,
           )}${cancelled ? getBatchCancellationSuffix(completed, remoteTargets.length) : ""}`,
+          finalRecords,
         );
       } else {
         vscode.window.showInformationMessage(
@@ -3372,6 +3399,21 @@ export async function activate(
     return "workspace";
   }
 
+  function hasUserDataGlobalHomeAlias(skill: Skill): boolean {
+    if (!workspaceFolder) {
+      return false;
+    }
+    const config = vscode.workspace.getConfiguration("resourceNinja");
+    return (
+      getResourceTargetUri(workspaceFolder.uri, config, skill, {
+        targetScope: "userData",
+      }).fsPath ===
+      getResourceTargetUri(workspaceFolder.uri, config, skill, {
+        targetScope: "globalHome",
+      }).fsPath
+    );
+  }
+
   async function resolveDefaultInstallTarget(skill: Skill): Promise<
     | {
         targetScope: InstallTargetScope;
@@ -3382,6 +3424,14 @@ export async function activate(
     const defaultTarget = getDefaultInstallTarget();
     if (defaultTarget === "ask") {
       return pickInstallTarget(skill);
+    }
+    if (defaultTarget === "userData" && hasUserDataGlobalHomeAlias(skill)) {
+      void vscode.window.showInformationMessage(
+        isJapanese()
+          ? "このリソース種別には VS Code ユーザープロファイルの保存先がないため、グローバルリソースホームへインストールします。"
+          : "This resource type has no VS Code User Profile destination. Installing in Global Resource Home instead.",
+      );
+      return { targetScope: "globalHome" };
     }
     return { targetScope: defaultTarget };
   }
@@ -5554,9 +5604,8 @@ export async function activate(
       return false;
     }
 
+    let installResult: Awaited<ReturnType<typeof installSkill>> | undefined;
     try {
-      let installResult: Awaited<ReturnType<typeof installSkill>> | undefined;
-
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
@@ -5662,6 +5711,18 @@ export async function activate(
     } catch (error) {
       if (isSkillNotFoundHandledError(error)) {
         return false;
+      }
+      if (installWasClean(installResult)) {
+        logger.warn(
+          `[Resource Ninja] Post-install operation failed for ${skill.name}:`,
+          error,
+        );
+        vscode.window.showWarningMessage(
+          isJapanese()
+            ? `${skill.name} はインストールされましたが、後続の更新または表示処理は完了しませんでした。出力ログを確認し、必要な処理を再実行してください。`
+            : `${skill.name} was installed, but a follow-up update or display operation did not complete. Check the output log and retry the affected operation.`,
+        );
+        return true;
       }
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -6167,13 +6228,14 @@ export async function activate(
       browseProvider.refresh();
       if (failedSkills.length > 0 || cancelled) {
         const total = cancelled ? completed : installedMeta.length;
-        vscode.window.showWarningMessage(
+        showReinstallBatchFailure(
           `${getBatchFailureMessage(
             isJapanese() ? "スキル再インストール" : "Skill reinstall",
             success,
             total,
             failedSkills,
           )}${cancelled ? getBatchCancellationSuffix(completed, installedMeta.length) : ""}${getReinstallTrashRecoverySuffix(failedSkills.length)}`,
+          finalRecords,
         );
         return false;
       } else if (!options.suppressSuccessMessage) {
@@ -6222,7 +6284,6 @@ export async function activate(
     const resourceKind = getResourceKind(skill);
     let source = skill.source;
     let remotePath = skill.remotePath || skill.path;
-    let resourceName = skill.name;
     let relativePath = skill.relativePath || skill.path;
     const normalizedRemotePath = normalizeInstalledRemotePath(remotePath);
     const installedWorkspaceResource = workspaceProvider
@@ -6297,12 +6358,10 @@ export async function activate(
       if (meta) {
         source = meta.source;
         remotePath = meta.remotePath || remotePath;
-        resourceName = meta.name;
         relativePath = meta.skillFilePath || meta.relativePath || relativePath;
       } else if (installedWorkspaceResource) {
         source = installedWorkspaceResource.source || source;
         remotePath = installedWorkspaceResource.remotePath || remotePath;
-        resourceName = installedWorkspaceResource.name || resourceName;
         relativePath =
           installedWorkspaceResource.fullPath ||
           installedWorkspaceResource.relativePath ||
@@ -6311,7 +6370,6 @@ export async function activate(
     } else if (installedWorkspaceResource) {
       source = installedWorkspaceResource.source || source;
       remotePath = installedWorkspaceResource.remotePath || remotePath;
-      resourceName = installedWorkspaceResource.name || resourceName;
       relativePath =
         installedWorkspaceResource.fullPath ||
         installedWorkspaceResource.relativePath ||
@@ -6337,21 +6395,6 @@ export async function activate(
         s.source === source &&
         s.path === remotePath,
     );
-    if (!fullSkill && source === "unknown") {
-      fullSkill = resources.find(
-        (s: Skill) =>
-          getResourceKind(s) === resourceKind && s.name === resourceName,
-      );
-    }
-    if (!fullSkill) {
-      fullSkill = resources.find(
-        (s: Skill) =>
-          getResourceKind(s) === resourceKind &&
-          s.name === resourceName &&
-          s.source === source,
-      );
-    }
-
     // インデックスに見つからない場合は自動で更新を試みる
     if (!fullSkill) {
       const sourceSummary = getSourceRefreshSummary(index, [source]);
@@ -6382,12 +6425,6 @@ export async function activate(
             s.source === source &&
             s.path === remotePath,
         );
-        if (!fullSkill && source === "unknown") {
-          fullSkill = resources.find(
-            (s: Skill) =>
-              getResourceKind(s) === resourceKind && s.name === resourceName,
-          );
-        }
       }
 
       if (!fullSkill) {
@@ -6403,7 +6440,7 @@ export async function activate(
     }
 
     const installOptions = { suppressRecoveryPrompt };
-
+    let record: ReinstallBatchRecord<InstallSkillResult> | undefined;
     try {
       // The uninstall below removes the plugin folder and its registration. The
       // destination is taken from the install itself, because a setting that
@@ -6448,7 +6485,7 @@ export async function activate(
           result = await runReinstallTask(task);
         },
       );
-      let record: ReinstallBatchRecord<InstallSkillResult> = {
+      record = {
         task,
         result: result!,
       };
@@ -6523,6 +6560,18 @@ export async function activate(
       browseProvider.refresh();
       return record;
     } catch (error) {
+      if (record?.result.success && installWasClean(record.result.value)) {
+        logger.warn(
+          `[Resource Ninja] Post-reinstall operation failed for ${skill.name}:`,
+          error,
+        );
+        vscode.window.showWarningMessage(
+          isJapanese()
+            ? `${skill.name} は再インストールされましたが、後続の設定または表示処理は完了しませんでした。出力ログを確認し、必要な処理を再実行してください。`
+            : `${skill.name} was reinstalled, but a follow-up configuration or display operation did not complete. Check the output log and retry the affected operation.`,
+        );
+        return record;
+      }
       if (!suppressSuccessMessage) {
         vscode.window.showErrorMessage(
           isJapanese()
@@ -6681,13 +6730,14 @@ export async function activate(
       browseProvider.refresh();
       if (failedResources.length > 0 || cancelled) {
         const total = cancelled ? completed : remoteInstalledItems.length;
-        vscode.window.showWarningMessage(
+        showReinstallBatchFailure(
           `${getBatchFailureMessage(
             kindLabel,
             success,
             total,
             failedResources,
           )}${cancelled ? getBatchCancellationSuffix(completed, remoteInstalledItems.length) : ""}${getReinstallTrashRecoverySuffix(failedResources.length)}`,
+          finalRecords,
         );
       } else {
         vscode.window.showInformationMessage(
@@ -6911,6 +6961,13 @@ export async function activate(
       if (!installTarget) {
         return;
       }
+      const destinationNotice =
+        installTarget.targetScope === "userData" &&
+        selectedItems.some(({ skill }) => hasUserDataGlobalHomeAlias(skill))
+          ? isJapanese()
+            ? "\n一部のリソースはユーザープロファイルではなくグローバルリソースホームに保存されます。"
+            : "\nSome resources will be saved in Global Resource Home, not the VS Code User Profile."
+          : "";
 
       if (missingResources.length > 0) {
         vscode.window.showWarningMessage(
@@ -6946,11 +7003,11 @@ export async function activate(
       const confirm = await vscode.window.showInformationMessage(
         isJapanese()
           ? isPluginPick
-            ? `「${bundle.name}」から選択した ${selectedItems.length} 個の中身をインストールしますか？\n${selectedKindSummary}\nこれはプラグイン本体ではなく、インデックス済み中身の選択 install です。${hasMcpConfig ? "\nMCP config は選択した方法で処理します。" : ""}`
-            : `おすすめセット「${bundle.name}」から選択した ${selectedItems.length} 個のリソースをインストールしますか？\n${selectedKindSummary}\nこれは curated なおすすめまとめ install ショートカットです。${hasMcpConfig ? "\nMCP config は選択した方法で処理します。" : ""}`
+            ? `「${bundle.name}」から選択した ${selectedItems.length} 個の中身をインストールしますか？\n${selectedKindSummary}\nこれはプラグイン本体ではなく、インデックス済み中身の選択 install です。${hasMcpConfig ? "\nMCP config は選択した方法で処理します。" : ""}${destinationNotice}`
+            : `おすすめセット「${bundle.name}」から選択した ${selectedItems.length} 個のリソースをインストールしますか？\n${selectedKindSummary}\nこれは curated なおすすめまとめ install ショートカットです。${hasMcpConfig ? "\nMCP config は選択した方法で処理します。" : ""}${destinationNotice}`
           : isPluginPick
-            ? `Install ${selectedItems.length} selected contents from "${bundle.name}"?\n${selectedKindSummary}\nThis installs indexed contents only, not the plugin package itself.${hasMcpConfig ? "\nMCP config files will use the selected activation mode." : ""}`
-            : `Install ${selectedItems.length} selected resources from curated set "${bundle.name}"?\n${selectedKindSummary}\nThis is a curated install shortcut.${hasMcpConfig ? "\nMCP config files will use the selected activation mode." : ""}`,
+            ? `Install ${selectedItems.length} selected contents from "${bundle.name}"?\n${selectedKindSummary}\nThis installs indexed contents only, not the plugin package itself.${hasMcpConfig ? "\nMCP config files will use the selected activation mode." : ""}${destinationNotice}`
+            : `Install ${selectedItems.length} selected resources from curated set "${bundle.name}"?\n${selectedKindSummary}\nThis is a curated install shortcut.${hasMcpConfig ? "\nMCP config files will use the selected activation mode." : ""}${destinationNotice}`,
         { modal: true },
         isJapanese() ? "インストール" : "Install",
       );
@@ -7002,6 +7059,9 @@ export async function activate(
                   suppressRecoveryPrompt: true,
                 },
               );
+              if (!installWasClean(installResult)) {
+                throw new Error(`Incomplete install: ${skill.name}`);
+              }
               const mcpConfigSummary = formatMcpConfigUpdateSummary(
                 installResult.mcpConfigUpdate,
               );
@@ -7013,19 +7073,7 @@ export async function activate(
                 installedSkills++;
               }
               if (getResourceKind(skill) === "plugin") {
-                // The destination comes from the install itself: the
-                // configuration is read again on every iteration, so a setting
-                // changed during the batch would otherwise register a folder that
-                // was never created. An install that could not download every
-                // file is counted with the failures instead, which is what the
-                // batch summary below reports, because the per-install warning is
-                // suppressed here.
-                if (installWasClean(installResult)) {
-                  installedPluginUris.push(installResult.destinationUri);
-                } else {
-                  failed++;
-                  failedResources.push(skill.name);
-                }
+                installedPluginUris.push(installResult.destinationUri);
               }
             } catch (error) {
               logger.error(`Failed to install ${skill.name}:`, error);
@@ -7049,12 +7097,12 @@ export async function activate(
                 completed
               } 個インストール完了（${failed} 個失敗: ${failedSummary}${
                 failedResources.length > 3 ? "..." : ""
-              }）${cancelled ? getBatchCancellationSuffix(completed, selectedItems.length) : ""}。上流の plugin/resource path が変わっている可能性があります。`
+              }）${cancelled ? getBatchCancellationSuffix(completed, selectedItems.length) : ""}。原因は出力ログで確認してください。`
             : `${bundle.name}: ${completed - failed}/${
                 completed
               } installed (${failed} failed: ${failedSummary}${
                 failedResources.length > 3 ? "..." : ""
-              })${cancelled ? getBatchCancellationSuffix(completed, selectedItems.length) : ""}. Upstream plugin/resource paths may have changed.`,
+              })${cancelled ? getBatchCancellationSuffix(completed, selectedItems.length) : ""}. Check the output log for the cause.`,
           updateSource,
         );
         if (choice === updateSource) {
@@ -7107,7 +7155,19 @@ export async function activate(
       }
 
       // One prompt for the whole batch instead of one per installed plugin.
-      await offerPluginLocationRegistration(installedPluginUris);
+      try {
+        await offerPluginLocationRegistration(installedPluginUris);
+      } catch (error) {
+        logger.warn(
+          `[Resource Ninja] Batch plugin registration failed:`,
+          error,
+        );
+        vscode.window.showWarningMessage(
+          isJapanese()
+            ? "リソースのインストールは完了しましたが、プラグインの登録は完了しませんでした。出力ログを確認し、登録を再実行してください。"
+            : "Resources were installed, but plugin registration did not complete. Check the output log and retry registration.",
+        );
+      }
 
       // Instruction ファイルを更新
       const config = vscode.workspace.getConfiguration("resourceNinja");
@@ -7314,15 +7374,7 @@ export async function activate(
               increment: 100 / selected.length,
             });
 
-            const resources = getIndexResources(index);
-            let skill = resources.find(
-              (s: Skill) =>
-                s.name === item.meta.name && s.source === item.meta.source,
-            );
-            // source が "unknown" の場合は name だけで検索
-            if (!skill && item.meta.source === "unknown") {
-              skill = resources.find((s: Skill) => s.name === item.meta.name);
-            }
+            const skill = findIndexedSkillForInstalledMeta(index, item.meta);
 
             if (skill) {
               const task: ReinstallTask<InstallSkillResult> = {
@@ -7406,13 +7458,14 @@ export async function activate(
       browseProvider.refresh();
       if (failedSkills.length > 0 || cancelled) {
         const total = cancelled ? completed : selected.length;
-        vscode.window.showWarningMessage(
+        showReinstallBatchFailure(
           `${getBatchFailureMessage(
             isJapanese() ? "スキル再インストール" : "Skill reinstall",
             success,
             total,
             failedSkills,
           )}${cancelled ? getBatchCancellationSuffix(completed, selected.length) : ""}`,
+          finalRecords,
         );
       } else {
         vscode.window.showInformationMessage(
@@ -7483,7 +7536,20 @@ export async function activate(
         skillIndex = await loadSkillIndex(context);
       }
 
-      const oldCount = getIndexResources(skillIndex).length;
+      const oldResources = getIndexResources(skillIndex).map(
+        ({ source, kind, path, name }) => ({ source, kind, path, name }),
+      );
+      const oldCount = oldResources.length;
+      const withChanges = (message: string): string => {
+        const changes = formatIndexedResourceChanges(
+          getIndexedResourceChanges(
+            oldResources,
+            getIndexResources(skillIndex),
+          ),
+          isJapanese() ? "ja" : "en",
+        );
+        return changes ? `${message} ${changes}` : message;
+      };
       const totalSources = skillIndex.sources.length;
       const initialSourceIds = skillIndex.sources.map((source) => source.id);
       const retryAfterAuthRecovery = createOneShotGitHubAuthRetry();
@@ -7538,7 +7604,7 @@ export async function activate(
 
         if (updateResult.failures.length === 0) {
           await vscode.window.showInformationMessage(
-            messages.indexUpdated(oldCount, newCount, diffText),
+            withChanges(messages.indexUpdated(oldCount, newCount, diffText)),
           );
         } else {
           const firstFailure = updateResult.failures[0];
@@ -7558,20 +7624,22 @@ export async function activate(
               ].filter(Boolean)
             : [];
           const action = await vscode.window.showWarningMessage(
-            [
-              messages.staleSourceIndexPartialFailed(
-                updateResult.succeeded.length,
-                updateResult.failures.length,
-                totalSources,
-                updateResult.failures
-                  .slice(0, 3)
-                  .map((failure) => getSourceUpdateDisplayName(failure.entry))
-                  .join(", "),
-                formatSourceUpdateFailureReason(firstFailure.error),
-                updateResult.skipped.length,
-              ),
-              ...extraLines,
-            ].join(" "),
+            withChanges(
+              [
+                messages.staleSourceIndexPartialFailed(
+                  updateResult.succeeded.length,
+                  updateResult.failures.length,
+                  totalSources,
+                  updateResult.failures
+                    .slice(0, 3)
+                    .map((failure) => getSourceUpdateDisplayName(failure.entry))
+                    .join(", "),
+                  formatSourceUpdateFailureReason(firstFailure.error),
+                  updateResult.skipped.length,
+                ),
+                ...extraLines,
+              ].join(" "),
+            ),
             ...actions,
           );
           if (action === detailAction) {
@@ -7595,21 +7663,25 @@ export async function activate(
                 const retryCount = getIndexResources(skillIndex).length;
                 const retryDiff = retryCount - oldCount;
                 await vscode.window.showInformationMessage(
-                  messages.indexUpdated(
-                    oldCount,
-                    retryCount,
-                    retryDiff > 0
-                      ? `+${retryDiff}`
-                      : retryDiff === 0
-                        ? "±0"
-                        : `${retryDiff}`,
+                  withChanges(
+                    messages.indexUpdated(
+                      oldCount,
+                      retryCount,
+                      retryDiff > 0
+                        ? `+${retryDiff}`
+                        : retryDiff === 0
+                          ? "±0"
+                          : `${retryDiff}`,
+                    ),
                   ),
                 );
               } else {
                 await vscode.window.showWarningMessage(
-                  messages.updateFailed(
-                    formatSourceUpdateFailureReason(
-                      retryResult.failures[0].error,
+                  withChanges(
+                    messages.updateFailed(
+                      formatSourceUpdateFailureReason(
+                        retryResult.failures[0].error,
+                      ),
                     ),
                   ),
                 );
@@ -7638,21 +7710,25 @@ export async function activate(
               const retryCount = getIndexResources(skillIndex).length;
               const retryDiff = retryCount - oldCount;
               await vscode.window.showInformationMessage(
-                messages.indexUpdated(
-                  oldCount,
-                  retryCount,
-                  retryDiff > 0
-                    ? `+${retryDiff}`
-                    : retryDiff === 0
-                      ? "±0"
-                      : `${retryDiff}`,
+                withChanges(
+                  messages.indexUpdated(
+                    oldCount,
+                    retryCount,
+                    retryDiff > 0
+                      ? `+${retryDiff}`
+                      : retryDiff === 0
+                        ? "±0"
+                        : `${retryDiff}`,
+                  ),
                 ),
               );
             } else {
               await vscode.window.showWarningMessage(
-                messages.updateFailed(
-                  formatSourceUpdateFailureReason(
-                    retryResult.failures[0].error,
+                withChanges(
+                  messages.updateFailed(
+                    formatSourceUpdateFailureReason(
+                      retryResult.failures[0].error,
+                    ),
                   ),
                 ),
               );
@@ -7688,9 +7764,10 @@ export async function activate(
         skillIndex = await loadSkillIndex(context);
       }
 
-      const oldCount = getIndexResources(skillIndex).filter(
-        (s) => s.source === sourceId,
-      ).length;
+      const oldResources = getIndexResources(skillIndex)
+        .filter((resource) => resource.source === sourceId)
+        .map(({ source, kind, path, name }) => ({ source, kind, path, name }));
+      const oldCount = oldResources.length;
       const retryAfterAuthRecovery = createOneShotGitHubAuthRetry();
 
       const runSourceIndexUpdate = async (
@@ -7712,18 +7789,23 @@ export async function activate(
             );
           },
         );
-        const newCount = getIndexResources(skillIndex).filter(
-          (s) => s.source === sourceId,
-        ).length;
+        const newResources = getIndexResources(skillIndex).filter(
+          (resource) => resource.source === sourceId,
+        );
+        const newCount = newResources.length;
         const diff = newCount - oldCount;
         const diffText = diff > 0 ? `+${diff}` : diff === 0 ? "±0" : `${diff}`;
+        const changes = formatIndexedResourceChanges(
+          getIndexedResourceChanges(oldResources, newResources),
+          isJapanese() ? "ja" : "en",
+        );
         vscode.window.showInformationMessage(
-          messages.sourceIndexUpdated(
+          `${messages.sourceIndexUpdated(
             item.source?.name || sourceId,
             oldCount,
             newCount,
             diffText,
-          ),
+          )}${changes ? ` ${changes}` : ""}`,
         );
         browseProvider.refresh();
       };

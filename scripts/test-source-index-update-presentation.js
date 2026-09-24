@@ -56,6 +56,50 @@ function test(name, fn) {
   }
 }
 
+function inspectUpdateCalls(sourceText) {
+  const sourceFile = ts.createSourceFile(
+    "extension.ts",
+    sourceText,
+    ts.ScriptTarget.ES2020,
+    true,
+  );
+  const resourceChanges = [];
+  const wrappedMessages = new Set();
+  const collectMessages = (node) => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      ts.isIdentifier(node.expression.expression) &&
+      node.expression.expression.text === "messages"
+    ) {
+      wrappedMessages.add(node.expression.name.text);
+    }
+    node.forEachChild(collectMessages);
+  };
+  const visit = (node) => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "withChanges" &&
+      node.arguments[0]
+    ) {
+      collectMessages(node.arguments[0]);
+    }
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "getIndexedResourceChanges"
+    ) {
+      resourceChanges.push(
+        node.arguments.map((argument) => argument.getText(sourceFile)),
+      );
+    }
+    node.forEachChild(visit);
+  };
+  visit(sourceFile);
+  return { resourceChanges, wrappedMessages };
+}
+
 const root = path.join(__dirname, "..");
 const presentation = requireTypeScriptModule(
   path.join(root, "src", "sourceIndexUpdatePresentation.ts"),
@@ -70,6 +114,48 @@ test("scales nested progress across all sources", () => {
     presentation.scaleSourceIndexProgressIncrement(4, undefined),
     undefined,
   );
+});
+
+test("equal index counts still identify added and removed resource names", () => {
+  const previous = [
+    { source: "google", kind: "skill", path: "skills/old", name: "Genkit old" },
+    {
+      source: "other",
+      kind: "skill",
+      path: "skills/stable",
+      name: "Unchanged",
+    },
+  ];
+  const current = [
+    { source: "google", kind: "skill", path: "skills/new", name: "Genkit new" },
+    previous[1],
+  ];
+  const changes = presentation.getIndexedResourceChanges(previous, current);
+  assert.deepStrictEqual(changes, {
+    added: ["Genkit new"],
+    removed: ["Genkit old"],
+  });
+  assert.strictEqual(
+    presentation.formatIndexedResourceChanges(changes, "en-US"),
+    "Added 1: Genkit new; Removed 1: Genkit old",
+  );
+  assert.strictEqual(
+    presentation.formatIndexedResourceChanges(changes, "ja-JP"),
+    "追加 1 件: Genkit new; 削除 1 件: Genkit old",
+  );
+  assert.strictEqual(
+    presentation.formatIndexedResourceChanges(
+      presentation.getIndexedResourceChanges(previous, previous),
+      "en-US",
+    ),
+    "",
+  );
+  const bounded = presentation.formatIndexedResourceChanges(
+    { added: ["First\nname", "Second", "Third", "Fourth"], removed: [] },
+    "en-US",
+  );
+  assert.match(bounded, /^Added 4: First name, Second, Third \(\+1\)$/);
+  assert.doesNotMatch(bounded, /Fourth|\n/);
 });
 
 test("selects one final notification severity", () => {
@@ -110,6 +196,14 @@ test("formats localized LM tool results for success and partial failure", () => 
   const en = presentation.formatSourceIndexUpdateToolResult(base, "en-US");
   assert.match(en, /^✅ Resource index updated\./);
   assert.match(en, /\| Resources \| 10 \| 12 \(\+2\) \|/);
+  const changed = presentation.formatSourceIndexUpdateToolResult(
+    {
+      ...base,
+      changes: { added: ["Genkit new"], removed: ["Genkit old"] },
+    },
+    "en-US",
+  );
+  assert.match(changed, /Added 1: Genkit new; Removed 1: Genkit old/);
 
   const ja = presentation.formatSourceIndexUpdateToolResult(
     {
@@ -176,12 +270,42 @@ test("keeps batch diagnostics and anonymous raw guards wired", () => {
   assert.match(extensionSource, /\[Source Index\] \[OK\]/);
   assert.match(extensionSource, /\[Source Index\] \[FAILED\]/);
   assert.match(extensionSource, /\[Source Index\] \[SKIPPED\]/);
+  const wraps = (text, messageName) =>
+    inspectUpdateCalls(text).wrappedMessages.has(messageName);
+  assert.ok(wraps(extensionSource, "indexUpdated"));
+  assert.ok(wraps(extensionSource, "staleSourceIndexPartialFailed"));
+  const reformatted = extensionSource.replace(
+    /withChanges\(\s*messages\.indexUpdated\(/,
+    "withChanges(\n messages.indexUpdated(",
+  );
+  assert.notStrictEqual(reformatted, extensionSource);
+  assert.ok(wraps(reformatted, "indexUpdated"));
+  assert.strictEqual(
+    wraps(
+      'withChanges(/* messages.indexUpdated() */ "plain text")',
+      "indexUpdated",
+    ),
+    false,
+  );
+  const disconnected = extensionSource.replaceAll(
+    /\bwithChanges(?=\s*\(\s*messages\s*\.\s*indexUpdated\s*\()/g,
+    "withoutChanges",
+  );
+  assert.notStrictEqual(disconnected, extensionSource);
+  assert.strictEqual(wraps(disconnected, "indexUpdated"), false);
+  assert.ok(
+    inspectUpdateCalls(extensionSource).resourceChanges.some(
+      ([before, after]) =>
+        before === "oldResources" && after === "newResources",
+    ),
+  );
   assert.doesNotMatch(indexUpdaterSource, /githubFetch\(rawUrl,\s*token\)/);
   assert.ok(attachTokenFunction);
   assert.match(attachTokenFunction, /return isGitHubApiUrl\(url\)/);
   assert.doesNotMatch(attachTokenFunction, /return isRawGitHubUrl\(url\)/);
   assert.match(mcpToolsSource, /SourceIndexUpdateAllResult \| undefined/);
   assert.match(mcpToolsSource, /formatSourceIndexUpdateToolResult\(/);
+  assert.match(mcpToolsSource, /changes:\s*getIndexedResourceChanges\s*\(/);
   assert.doesNotMatch(mcpToolsSource, /✅ スキルインデックスを更新しました/);
 });
 

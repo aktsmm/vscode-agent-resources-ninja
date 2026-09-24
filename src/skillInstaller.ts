@@ -1393,6 +1393,7 @@ export async function installSkill(
   let usedFallbackTemplate = false;
   // 経路ガードが弾いた entry。SKILL.md が取れていても実体は欠けている。
   const rejectedRemoteEntries: string[] = [];
+  let missingRemoteEntries = false;
 
   if (!repositoryRef) {
     if (resourceKind === "skill") {
@@ -1491,13 +1492,14 @@ export async function installSkill(
       const resourceParentUri = getParentDirectoryUri(skillPath);
       const resourceParentExisted = await uriExists(resourceParentUri);
       const resourcePathExisted = await uriExists(skillPath);
+      let downloadErrors: string[] = [];
       await vscode.workspace.fs.createDirectory(resourceParentUri);
       try {
         const isHookConfigFile =
           resourceKind === "hook" && isHookConfigFilePath(remotePath);
         if (resourceKind === "hook" && !isHookConfigFile) {
           const remoteDir = remotePath.split("/").slice(0, -1).join("/");
-          await downloadDirectory(
+          const result = await downloadDirectory(
             owner,
             repo,
             remoteDir,
@@ -1505,6 +1507,7 @@ export async function installSkill(
             branch,
             token,
           );
+          downloadErrors = result.errors;
         } else {
           const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}/${encodeGitHubPathForUrl(remotePath)}`;
           const content = await fetchFileContent(
@@ -1539,6 +1542,17 @@ export async function installSkill(
           resourceParentExisted,
         );
         throw error;
+      }
+      if (downloadErrors.length > 0) {
+        logger.warn(`[Resource Ninja] Partial hook download:`, downloadErrors);
+        if (!options.suppressRecoveryPrompt) {
+          vscode.window.showWarningMessage(
+            isJapanese()
+              ? `フック "${skill.name}" の一部のファイルがダウンロードできませんでした。内容を確認してください。`
+              : `Some files for hook "${skill.name}" could not be downloaded. Review the copied contents.`,
+          );
+        }
+        return { destinationUri: skillPath, errors: downloadErrors };
       }
       if (resourceKind === "hook" && !isHookConfigFilePath(remotePath)) {
         const hookConfigRootUri = getHookConfigRootUri(
@@ -1628,6 +1642,7 @@ export async function installSkill(
           token,
         );
         rejectedRemoteEntries.push(...result.rejectedEntries);
+        missingRemoteEntries = result.errors.length > 0;
 
         // SKILL.md がなければ作成
         try {
@@ -1754,6 +1769,7 @@ export async function installSkill(
   const incomplete =
     usedFallbackTemplate ||
     rejectedRemoteEntries.length > 0 ||
+    missingRemoteEntries ||
     (await isSkillContentIncomplete(skillMdPath));
 
   const metaPath = vscode.Uri.joinPath(skillPath, ".skill-meta.json");

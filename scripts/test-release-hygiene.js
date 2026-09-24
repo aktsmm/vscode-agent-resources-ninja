@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const assert = require("assert");
+const { spawnSync } = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
@@ -36,6 +37,26 @@ function test(name, fn) {
 function hasLine(text, line) {
   return text.split(/\r?\n/).includes(line);
 }
+
+function normalizeReleaseInput(buffer, relativePath, releasedCommit) {
+  return releasedCommit && relativePath !== "resources/icon.png"
+    ? Buffer.from(buffer.toString("utf8").replace(/\r\n/g, "\n"), "utf8")
+    : buffer;
+}
+
+test("published text ignores line endings but new builds and images remain byte exact", () => {
+  const lf = Buffer.from("example\n", "utf8");
+  const crlf = Buffer.from("example\r\n", "utf8");
+  assert.deepStrictEqual(normalizeReleaseInput(crlf, "LICENSE", "tagged"), lf);
+  assert.deepStrictEqual(
+    normalizeReleaseInput(crlf, "LICENSE", undefined),
+    crlf,
+  );
+  assert.deepStrictEqual(
+    normalizeReleaseInput(crlf, "resources/icon.png", "tagged"),
+    crlf,
+  );
+});
 
 function listRootFiles() {
   return fs
@@ -305,6 +326,37 @@ test("existing release VSIX matches deterministic packaged inputs", () => {
     return;
   }
 
+  const tag = spawnSync(
+    "git",
+    [
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      `refs/tags/v${packageJson.version}^{commit}`,
+    ],
+    { cwd: repoRoot, encoding: "utf8" },
+  );
+  const releasedCommit = tag.status === 0 ? tag.stdout.trim() : undefined;
+  const packagedInput = (relativePath) => {
+    if (!releasedCommit) {
+      return fs.readFileSync(path.join(repoRoot, relativePath));
+    }
+    const blob = spawnSync(
+      "git",
+      ["show", `${releasedCommit}:${relativePath}`],
+      {
+        cwd: repoRoot,
+        maxBuffer: 32 * 1024 * 1024,
+      },
+    );
+    assert.strictEqual(
+      blob.status,
+      0,
+      `Missing released input: ${relativePath}`,
+    );
+    return blob.stdout;
+  };
+
   const archive = readZipContents(vsixPath);
   const exactInputs = [
     "LICENSE",
@@ -324,8 +376,14 @@ test("existing release VSIX matches deterministic packaged inputs", () => {
     const hash = (buffer) =>
       crypto.createHash("sha256").update(buffer).digest("hex");
     assert.strictEqual(
-      hash(archivedInput),
-      hash(fs.readFileSync(path.join(repoRoot, relativePath))),
+      hash(normalizeReleaseInput(archivedInput, relativePath, releasedCommit)),
+      hash(
+        normalizeReleaseInput(
+          packagedInput(relativePath),
+          relativePath,
+          releasedCommit,
+        ),
+      ),
       `Release VSIX is stale for ${relativePath}`,
     );
   }

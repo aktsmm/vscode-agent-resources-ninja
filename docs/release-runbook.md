@@ -53,6 +53,7 @@ Get-FileHash -Algorithm SHA256 -LiteralPath .\artifacts\vsix\agent-resources-nin
 ```
 
 Treat the file's existence, size, timestamp, and hash as the build result. Confirm the package excludes source maps, tests, `.github`, `.vscode`, and local artifacts while retaining `dist/extension.js`.
+The release hygiene test checks a published-version VSIX against its immutable Git tag (ignoring text line-ending differences), so later Unreleased edits do not invalidate the preserved artifact. Before the next version is tagged, it still compares the newly built VSIX against current worktree bytes, including binary assets.
 
 ## 5. Validate Marketplace Credentials
 

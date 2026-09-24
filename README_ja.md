@@ -72,6 +72,7 @@
 ### 📦 インストール・管理
 
 - ワンクリックの default install は skill だけでなく agents、instructions、prompts、hooks、MCP config、plugin manifest、Cursor rules を含むすべての resource kind に適用されます。クリック / ダブルクリックインストールは **Default Install Target** を使い、コンテキストメニューの **Install Resource** は毎回インストール先を選択でき、Custom も選べます。
+- **User Profile** と **Global Resource Home** が同じ保存先になるリソース種別では、既定のインストール時に実際の Global Resource Home への導入を通知します。異なる種別を含むセットではコピー前の確認文に保存先の違いを示します。
 - **Remote Resources** では、ダブルクリックの動作は行の inline action に合わせています。未インストール行は install、インストール済みの remote 行は記録済み source metadata を使って reinstall、local-only 行には remote install/reinstall action を出しません。
 - 再インストールでは、記録済み source metadata（`remotePath`、plugin sidecar の項目、`.skill-meta.json` に保持済みの coexistence フラグ）を維持し、name だけの曖昧一致に落とさず同じ upstream resource へ再接続します。
 - MCP config リソースのクリック / ダブルクリックインストールは Workspace MCP Directory へレビュー用にコピーするのみで、`.vscode/mcp.json` は変更しません。互換 server を `.vscode/mcp.json` にマージしたい場合は、コンテキストメニューの **Install Resource** を使って merge オプションを選択してください。既存 server key の上書きは必ず確認します。
@@ -84,7 +85,7 @@
 - **「When to Use」自動抽出** - SKILL.md の `## When to Use` セクションから自動取得
 - **説明を編集** - インストール済み skill の instruction file 向け説明を右クリックでカスタマイズ
 - 対象ビューから workspace / user / global リソースをアンインストール
-- **ワークスペース skill の一括再インストール** - インストール済み skill をソースメタデータから一括再インストール。インデックス項目が見つからない場合は、可能なら該当 source だけを更新し、source を特定できない場合だけ全体更新へフォールバックします。自動実行される再インストールと、グループ再インストールの各項目では、この更新確認を出しません。未検出の resource は summary に報告され、応答されない通知でバッチが止まりません。
+- **ワークスペース skill の一括再インストール** - インストール済み skill をソースメタデータから一括再インストール。インデックス項目が見つからない場合は、可能なら該当 source だけを更新し、source を特定できない場合だけ全体更新へフォールバックします。自動実行される再インストールと、グループ再インストールの各項目では、この更新確認を出しません。未検出の resource は summary に報告され、応答されない通知でバッチが止まりません。一括失敗時の「バグ報告」は件数と既知の失敗種別だけを含む下書きを開きます。投稿前に内容を確認してください。
 - **リソースグループの再インストール** - Workspace Resources の Skills や Agents などの種別グループを右クリックし、そのグループ内のリモートソースからインストールされたリソースを一括再インストール
 - **User / Global 側の再インストール** - ユーザー / グローバル リソース view でも、リモート由来の個別行の再インストールと、種別グループ・プラグイングループ単位の再インストールを行えます
 - **インストール通知** - NEW バッジ、ステータスバー表示、ツリービューで自動選択
@@ -276,7 +277,7 @@ v1 で可搬なのは skills と MCP サーバーだけです。agents、hooks�
 
 ### 不完全なリソース
 
-実体を取得できず生成テンプレートだけが残ったインストールは、成功ではなく失敗として扱います。一覧に出る場所では `不完全` と表示されます。対象はワークスペースツリー、ユーザー/グローバルリソースツリー、再インストールピッカー、`/list` のチャット応答、言語モデル用ツールが返すワークスペースリソース表で、モデルには内容を信用しないよう伝えます。生成される instruction file と ref カタログでは、同じ理由で説明欄の先頭に `[incomplete]` を付けます。
+スキルの実体または一部のファイルを取得できなかったインストールは、成功ではなく不完全として扱います。`SKILL.md` を取得できなかった場合は生成テンプレートだけが残ることがあります。一覧に出る場所では `不完全` と表示されます。対象はワークスペースツリー、ユーザー/グローバルリソースツリー、再インストールピッカー、`/list` のチャット応答、言語モデル用ツールが返すワークスペースリソース表で、モデルには内容を信用しないよう伝えます。生成される instruction file と ref カタログでは、同じ理由で説明欄の先頭に `[incomplete]` を付けます。
 
 インストールに失敗したときは **再インストール**、**インデックス更新**（index の path が移動した可能性）、**バグ報告**、**削除** を選べます。この状態が導入される前にインストールした skill も、次回のスキャン時に本文から判定します。
 
@@ -534,7 +535,7 @@ workspace skill を主 Workspace Skill Directory 以外に置く場合は、`add
 
 `staleSourceIndexUpdateMode` は remote source index だけを更新します。インストール済みファイルは再インストールせず、更新に失敗した source は前回 timestamp のまま残るため、後から再試行できます。
 
-明示的な **Update Index** は、設定済み source を古い順にすべて force scan します。rate limit で中断した実行が、いちばん遅れている source に予算を使えるようにするためです。進捗は各 source の処理完了後に進み、結果は **Agent Resources Ninja** Output Channel に `OK` / `FAILED` / `SKIPPED` として記録されます。失敗した source の既存 entry は保持し、GitHub rate limit を検出した場合は残りの request を停止して未試行として報告したうえで、制限解除後の自動再開を予約します。通知と `#updateResourceIndex` tool は、部分成功を全成功と表示せず、日英の1件の結果 summary に統合します。summary の **GitHub 認証を設定** は、2つ目のエラーダイアログを表示せず該当設定を直接開きます。
+明示的な **Update Index** は、設定済み source を古い順にすべて force scan します。rate limit で中断した実行が、いちばん遅れている source に予算を使えるようにするためです。進捗は各 source の処理完了後に進み、結果は **Agent Resources Ninja** Output Channel に `OK` / `FAILED` / `SKIPPED` として記録されます。失敗した source の既存 entry は保持し、GitHub rate limit を検出した場合は残りの request を停止して未試行として報告したうえで、制限解除後の自動再開を予約します。通知と `#updateResourceIndex` tool は、部分成功を全成功と表示せず、日英の1件の結果 summary に統合します。総数が同じでも index の追加・削除 entry 名を示しますが、これだけで上流の rename と断定しません。summary の **GitHub 認証を設定** は、2つ目のエラーダイアログを表示せず該当設定を直接開きます。
 
 更新が index を黙って壊さないよう、6 つの保護が入っています。
 

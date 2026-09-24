@@ -5,6 +5,7 @@ const fs = require("fs");
 const Module = require("module");
 const path = require("path");
 const ts = require("typescript");
+const vm = require("vm");
 
 // Load the shipped rule instead of copying it; the local copy had already lost
 // the metadata-sidecar exclusion that src applies.
@@ -981,6 +982,68 @@ test("a plugin reinstall unregisters where it was and registers where it lands",
   }
 });
 
+test("default userData installs disclose a Global Home alias", () => {
+  const aliasStart = extensionSource.indexOf(
+    "function hasUserDataGlobalHomeAlias(",
+  );
+  const start = extensionSource.indexOf(
+    "async function resolveDefaultInstallTarget(",
+  );
+  const aliasBody = extensionSource.slice(aliasStart, start);
+  const body = extensionSource.slice(
+    start,
+    extensionSource.indexOf("type McpInstallMode =", start),
+  );
+  assert.ok(
+    aliasStart !== -1 && start !== -1,
+    "default install target resolver not found",
+  );
+  assert.match(
+    aliasBody,
+    /getResourceTargetUri\([\s\S]*targetScope: "userData"/,
+  );
+  assert.match(
+    aliasBody,
+    /getResourceTargetUri\([\s\S]*targetScope: "globalHome"/,
+  );
+  assert.match(aliasBody, /\.fsPath ===[\s\S]*\.fsPath/);
+  const code = ts.transpileModule(`${aliasBody}\nhasUserDataGlobalHomeAlias;`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2020 },
+  }).outputText;
+  const evaluateAlias = (userDataPath) =>
+    vm.runInNewContext(code, {
+      workspaceFolder: { uri: { fsPath: "C:/workspace" } },
+      vscode: { workspace: { getConfiguration: () => ({}) } },
+      getResourceTargetUri: (_workspaceUri, _config, _skill, options) => ({
+        fsPath:
+          options.targetScope === "userData"
+            ? userDataPath
+            : "C:/global/skills/example",
+      }),
+    })({ name: "example", kind: "skill", path: "skills/example" });
+  assert.strictEqual(evaluateAlias("C:/global/skills/example"), true);
+  assert.strictEqual(evaluateAlias("C:/user/skills/example"), false);
+  assert.match(body, /defaultTarget === "userData"/);
+  assert.match(body, /hasUserDataGlobalHomeAlias\(skill\)/);
+  assert.match(body, /showInformationMessage\(/);
+  assert.match(body, /return \{ targetScope: "globalHome" \};/);
+
+  const bundleStart = extensionSource.indexOf("const installBundleCmd =");
+  const bundleBody = extensionSource.slice(
+    bundleStart,
+    extensionSource.indexOf("const installPluginResourcesCmd =", bundleStart),
+  );
+  assert.match(
+    bundleBody,
+    /selectedItems\.some\(\(\{ skill \}\) => hasUserDataGlobalHomeAlias\(skill\)\)/,
+  );
+  assert.strictEqual(
+    (bundleBody.match(/\$\{destinationNotice\}/g) || []).length,
+    4,
+    "each localized bundle confirmation must disclose mixed destinations",
+  );
+});
+
 // The batch install runs many installs under one progress notification, so the
 // configuration it reads can change between iterations.
 test("the batch install registers what each install reported, and only when clean", () => {
@@ -1003,19 +1066,27 @@ test("the batch install registers what each install reported, and only when clea
   );
   assert.match(
     body,
-    /if \(installWasClean\(installResult\)\) \{\s*installedPluginUris\.push\(installResult\.destinationUri\);/,
-    "the batch must register the destination the install reported",
+    /if \(!installWasClean\(installResult\)\) \{\s*throw new Error\(`Incomplete install: \$\{skill\.name\}`\);\s*\}/,
+    "all partially installed resources must stop before being counted",
+  );
+  assert.match(
+    body,
+    /if \(getResourceKind\(skill\) === "plugin"\) \{\s*installedPluginUris\.push\(installResult\.destinationUri\);/,
+    "clean plugins must register the destination the install reported",
   );
   assert.ok(
     !/getResourceTargetUri\(/.test(body),
     "the batch must not recompute a destination after the install await",
   );
-  // The per-install warning is suppressed in a batch, so an unclean install has
-  // to reach the user through the batch failure summary instead.
+  assert.ok(
+    body.indexOf("if (!installWasClean(installResult))") <
+      body.indexOf("markRecentlyInstalled(skill)"),
+    "an incomplete install must not be recorded as recent",
+  );
   assert.match(
     body,
-    /\} else \{\s*failed\+\+;\s*failedResources\.push\(skill\.name\);\s*\}/,
-    "an install that was not clean must be counted with the batch failures",
+    /catch \(error\) \{\s*logger\.error\(`Failed to install \$\{skill\.name\}:`, error\);\s*failed\+\+;\s*failedResources\.push\(skill\.name\);/,
+    "an incomplete install must reach the batch failure summary",
   );
   assert.match(body, /cancellable:\s*true/);
   assert.match(body, /async \(progress, token\)/);
@@ -1143,6 +1214,39 @@ test("the single install registers only what a clean install reported", () => {
     /installResult &&\s*installWasClean\(installResult\)\s*\)\s*\{\s*await offerPluginLocationRegistration\(\[installResult\.destinationUri\]\)/,
     "the single install must register the reported destination only when clean",
   );
+});
+
+test("completed installs report follow-up failures without claiming download failure", () => {
+  const singleInstall = extensionSource.slice(
+    extensionSource.indexOf("async function installResource("),
+    extensionSource.indexOf(
+      "const searchCmd = vscode.commands.registerCommand(",
+    ),
+  );
+  assert.match(
+    singleInstall,
+    /catch \(error\) \{[\s\S]*?if \(installWasClean\(installResult\)\) \{[\s\S]*?showWarningMessage\([\s\S]*?return true;/,
+  );
+
+  for (const [startMarker, endMarker] of [
+    [
+      "const reinstallUserResource = async (",
+      "const reinstallUserResourceCmd =",
+    ],
+    ["const reinstallResource = async (", "const reinstallCmd ="],
+  ]) {
+    const start = extensionSource.indexOf(startMarker);
+    assert.ok(start !== -1, `${startMarker} not found`);
+    const body = extensionSource.slice(
+      start,
+      extensionSource.indexOf(endMarker, start),
+    );
+    assert.match(
+      body,
+      /catch \(error\) \{\s*if \(record\?\.result\.success && installWasClean\(record\.result\.value\)\) \{[\s\S]*?showWarningMessage\([\s\S]*?return record;/,
+      `${startMarker} must retain a successful download after follow-up failure`,
+    );
+  }
 });
 
 // Whatever a caller checks, the fact an install was not clean has to come from

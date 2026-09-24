@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.57] - 2026-09-24
+
+### Fixed
+
+- **Accurate Install Outcomes / 導入結果を正確に通知** - Incomplete skill and hook downloads no longer count as successful installs, and a follow-up instruction, registration, or view failure no longer misreports an already completed download as an install failure / スキルやフックの部分取得を成功として数えず、後続の instruction 更新・登録・表示の失敗で取得済みのリソースをインストール失敗と誤報しないようにしました。
+- **Reinstall Identity Guard / 再インストール元の照合を厳格化** - A recorded source and remote path must match the index before reinstalling; a same-name resource at a new path or in another source cannot silently replace the old copy / 保存済みのソースと配布元パスが索引と一致する場合だけ再インストールし、新パスや別ソースの同名リソースで旧コピーを黙って置き換えないようにしました。
+- **Private Batch Failure Reports / 一括失敗を安全に報告** - Failed batch reinstalls offer an optional Report Bug draft containing only counts and known failure categories, never resource names, paths, or raw errors; cancelling alone does not offer a report / 一括再インストールの失敗時は件数と既知の失敗種別だけを含む任意のバグ報告下書きを開けます。リソース名・パス・生のエラーは転記せず、キャンセルのみでは報告を提案しません。
+- **Index Update Names Beyond Counts / 件数以外の索引更新結果** - Update Index notifications and the language-model tool now list added and removed resource names even when the total is unchanged, without treating an index path change as proof of an upstream rename / Update Index の通知と言語モデル用ツールに、総数が同じでも追加・削除されたリソース名を示します。索引パスの変更だけで上流の rename と断定しません。
+- **Actual User Profile Install Destination / User Profile の実保存先を通知** - Default installs disclose when User Profile resolves to Global Resource Home, and mixed-kind set confirmations warn when some selected resources will land there / 既定の User Profile が Global Resource Home と同じ保存先になる場合は実際の保存先を通知し、異なる種別を含むセットでは確認時に保存先の違いを知らせます。
+- **Azure Skills Catalog Refresh / Azure Skills カタログの更新** - Removed the upstream-deleted `azure-cost` entry from the Azure source and its install set, refreshed that source's metadata, and kept other sources and the catalog-wide scan date unchanged / 上流から削除された `azure-cost` を Azure ソースと導入セットから除き、このソースのメタデータだけを更新しました。他ソースとカタログ全体の走査日は維持します。
+- **Dev Dependency Audit / 開発時依存の監査** - Updated the transitive `js-yaml` override to 5.4.2, verified a clean install and full audit, and retained public npm URLs in the lockfile / 間接依存の `js-yaml` を5.4.2へ更新し、クリーン導入と full audit を確認しました。lockfile の公開 npm URL は維持しています。
+
 ## [0.2.56] - 2026-09-07
 
 ### Fixed

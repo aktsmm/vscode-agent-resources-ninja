@@ -32,6 +32,66 @@ export function formatSourceIndexResetAt(
   }).format(date);
 }
 
+export interface IndexedResourceEntry {
+  source: string;
+  kind?: string;
+  path: string;
+  name: string;
+}
+
+export interface IndexedResourceChanges {
+  added: string[];
+  removed: string[];
+}
+
+export function getIndexedResourceChanges(
+  previous: readonly IndexedResourceEntry[],
+  current: readonly IndexedResourceEntry[],
+): IndexedResourceChanges {
+  const identity = (resource: IndexedResourceEntry) =>
+    JSON.stringify([resource.source, resource.kind || "skill", resource.path]);
+  const oldEntries = new Map(
+    previous.map((resource) => [identity(resource), resource.name]),
+  );
+  const newEntries = new Map(
+    current.map((resource) => [identity(resource), resource.name]),
+  );
+  return {
+    added: [...newEntries]
+      .filter(([resourceId]) => !oldEntries.has(resourceId))
+      .map(([, name]) => name)
+      .sort(),
+    removed: [...oldEntries]
+      .filter(([resourceId]) => !newEntries.has(resourceId))
+      .map(([, name]) => name)
+      .sort(),
+  };
+}
+
+export function formatIndexedResourceChanges(
+  changes: IndexedResourceChanges,
+  locale: string,
+): string {
+  const isJapanese = locale.toLowerCase().startsWith("ja");
+  const formatNames = (names: string[], label: string) => {
+    const displayNames = names
+      .slice(0, 3)
+      .map((name) =>
+        Array.from(name.replace(/\s+/g, " ").trim()).slice(0, 80).join(""),
+      );
+    const remaining = names.length - displayNames.length;
+    return `${label} ${names.length}${isJapanese ? " 件" : ""}: ${displayNames.join(", ")}${remaining > 0 ? ` (+${remaining})` : ""}`;
+  };
+  return [
+    changes.added.length > 0 &&
+      formatNames(changes.added, isJapanese ? "追加" : "Added"),
+    changes.removed.length > 0 &&
+      formatNames(changes.removed, isJapanese ? "削除" : "Removed"),
+  ]
+    .filter(Boolean)
+    .join("; ");
+}
+
 export interface SourceIndexUpdateToolSummary {
   oldCount: number;
   newCount: number;
@@ -43,6 +103,7 @@ export interface SourceIndexUpdateToolSummary {
   failureCount: number;
   skippedCount: number;
   failedSources: string[];
+  changes?: IndexedResourceChanges;
 }
 
 export function formatSourceIndexUpdateToolResult(
@@ -60,6 +121,9 @@ export function formatSourceIndexUpdateToolResult(
       : isJapanese
         ? "✅ リソースインデックスを更新しました。"
         : "✅ Resource index updated.";
+  const changeSummary = summary.changes
+    ? formatIndexedResourceChanges(summary.changes, locale)
+    : "";
   const labels = isJapanese
     ? {
         item: "項目",
@@ -78,7 +142,7 @@ export function formatSourceIndexUpdateToolResult(
         sources: "Sources",
       };
 
-  return `${statusLine}
+  return `${statusLine}${changeSummary ? `\n\n${changeSummary}` : ""}
 
 | ${labels.item} | ${labels.before} | ${labels.after} |
 |---|---:|---:|

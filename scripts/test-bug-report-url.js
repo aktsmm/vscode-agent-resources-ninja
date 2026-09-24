@@ -33,10 +33,13 @@ function requireTypeScriptModule(filePath, stubs = {}) {
   return loadedModule.exports;
 }
 
-const { BUG_REPORT_URL_MAX_LENGTH, buildBugReportUrl } =
-  requireTypeScriptModule(path.join(__dirname, "..", "src", "bugReport.ts"), {
-    vscode: { env: {}, Uri: { parse: (value) => value } },
-  });
+const {
+  BUG_REPORT_URL_MAX_LENGTH,
+  buildBugReportUrl,
+  buildReinstallBatchReport,
+} = requireTypeScriptModule(path.join(__dirname, "..", "src", "bugReport.ts"), {
+  vscode: { env: {}, Uri: { parse: (value) => value } },
+});
 
 const shortUrl = new URL(buildBugReportUrl("Short title", "Short body"));
 assert.strictEqual(shortUrl.searchParams.get("title"), "Short title");
@@ -61,5 +64,54 @@ const truncatedEmojiBody = emojiUrl.searchParams.get("body");
 assert.ok(emojiUrl.toString().length <= BUG_REPORT_URL_MAX_LENGTH);
 assert.ok(!/[\uD800-\uDBFF]$/.test(truncatedEmojiBody));
 assert.ok(!truncatedEmojiBody.includes("\uFFFD"));
+
+const records = [
+  {
+    task: { name: "customer/secret-skill" },
+    result: {
+      success: false,
+      removed: true,
+      attempts: 1,
+      stage: "install",
+      failureKind: "auth-required",
+      error: new Error("token ghp_secret in C:/private/path"),
+    },
+  },
+  {
+    task: { name: "another-private-resource" },
+    result: {
+      success: false,
+      removed: false,
+      attempts: 0,
+      stage: "not-started",
+      failureKind: "token ghp_secret",
+    },
+  },
+  {
+    task: { name: "installed-private-resource" },
+    result: { success: true, removed: true, attempts: 1, stage: "complete" },
+  },
+  {
+    task: { name: "cancelled-private-resource" },
+    result: {
+      success: false,
+      removed: false,
+      attempts: 0,
+      stage: "not-started",
+      failureKind: "cancelled",
+    },
+  },
+];
+const report = buildReinstallBatchReport(records, false);
+assert.strictEqual(report.title, "[Bug] Batch reinstall failure");
+assert.match(report.body, /Succeeded: 1/);
+assert.match(report.body, /Failed: 2/);
+assert.match(report.body, /Cancelled: 1/);
+assert.match(report.body, /Not started: 2/);
+assert.match(report.body, /auth-required: 1/);
+assert.match(report.body, /other: 1/);
+const reportUrl = buildBugReportUrl(report.title, report.body);
+assert.doesNotMatch(reportUrl, /ghp_secret|private|customer|C%3A|path/i);
+assert.match(buildReinstallBatchReport(records, true).body, /成功: 1/);
 
 console.log("RESULT=PASS");
