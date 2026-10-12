@@ -9,6 +9,7 @@ const fs = require("fs");
 const Module = require("module");
 const path = require("path");
 const ts = require("typescript");
+const vm = require("vm");
 
 function requireTypeScriptModule(filePath, stubs = {}) {
   const source = fs.readFileSync(filePath, "utf8");
@@ -45,7 +46,7 @@ const indexDataNormalization = requireTypeScriptModule(
   path.join(__dirname, "..", "src", "indexDataNormalization.ts"),
 );
 
-const { markdownToHtml } = requireTypeScriptModule(
+const { markdownToHtml, getWebviewContent } = requireTypeScriptModule(
   path.join(__dirname, "..", "src", "skillPreview.ts"),
   {
     vscode: {
@@ -63,7 +64,10 @@ const { markdownToHtml } = requireTypeScriptModule(
       getIndexSources: () => [],
       getResourceKind: (resource) => resource.kind || "skill",
     },
-    "./i18n": { default: {}, isJapanese: () => false },
+    "./i18n": {
+      default: new Proxy({}, { get: (_, key) => () => String(key) }),
+      isJapanese: () => false,
+    },
     "./githubAuth": { getGitHubToken: async () => undefined },
     "./githubCredentialBlocklist": requireTypeScriptModule(
       path.join(__dirname, "..", "src", "githubCredentialBlocklist.ts"),
@@ -98,6 +102,89 @@ function runTest(name, fn) {
 }
 
 console.log("=== skillPreview markdownToHtml テスト ===");
+
+const previewSkill = {
+  name: "Preview Fixture",
+  source: "fixture",
+  path: "skills/fixture",
+  categories: [],
+  description: "fixture",
+};
+runTest(
+  "preview actions use nonce-authorized listeners and reject unknown commands",
+  () => {
+    const html = getWebviewContent(
+      previewSkill,
+      "# Fixture\n\nPreview content.",
+      false,
+      "fixture-nonce",
+    );
+    if (/onclick=/.test(html)) {
+      throw new Error("Inline handlers violate CSP");
+    }
+    assertIncludes(
+      html,
+      "script-src 'nonce-fixture-nonce'",
+      "Nonce CSP must stay enforced",
+    );
+    const script = html.match(
+      /<script nonce="fixture-nonce">([\s\S]*?)<\/script>/,
+    )[1];
+    const sent = [];
+    const listeners = [];
+    const commands = [
+      "install",
+      "openGitHub",
+      "toggleFavorite",
+      "addSource",
+      "unknown",
+    ];
+    vm.runInNewContext(script, {
+      acquireVsCodeApi: () => ({
+        postMessage: (message) => sent.push(message.command),
+      }),
+      document: {
+        querySelectorAll: () =>
+          commands.map((command) => ({
+            dataset: { command },
+            addEventListener: (event, listener) => {
+              if (event !== "click") {
+                throw new Error("Expected click listener");
+              }
+              listeners.push(listener);
+            },
+          })),
+      },
+    });
+    listeners.forEach((listener) => listener());
+    if (sent.join(",") !== commands.slice(0, 4).join(",")) {
+      throw new Error("Preview command routing mismatch");
+    }
+  },
+);
+
+if (process.argv.includes("--html-fixture")) {
+  const directory = path.resolve(
+    process.argv[process.argv.indexOf("--html-fixture") + 1],
+  );
+  fs.mkdirSync(directory, { recursive: true });
+  for (const indexed of [true, false]) {
+    const html = getWebviewContent(
+      previewSkill,
+      "# Fixture\n\nPreview content.",
+      false,
+      "fixture-nonce",
+      indexed,
+    ).replace(
+      '<script nonce="fixture-nonce">',
+      '<script nonce="fixture-nonce">window.previewMessages = []; window.acquireVsCodeApi = () => ({ postMessage: (message) => window.previewMessages.push(message.command) });</script><script nonce="fixture-nonce">',
+    );
+    fs.writeFileSync(
+      path.join(directory, indexed ? "indexed.html" : "search.html"),
+      html,
+    );
+  }
+}
 
 runTest("見出しが h1/h2 に変換される", () => {
   const html = markdownToHtml("# Title\n\n## Section");

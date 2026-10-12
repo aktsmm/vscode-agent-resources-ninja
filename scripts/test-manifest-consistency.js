@@ -4,6 +4,7 @@ const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 const ts = require("typescript");
+const { spawnSync } = require("child_process");
 
 const repoRoot = path.resolve(__dirname, "..");
 const packageJson = JSON.parse(
@@ -654,6 +655,31 @@ test("new product metadata is internally consistent", () => {
   );
 });
 
+test("smoke configuration rejects unknown and path-like locale inputs before writing fixtures", () => {
+  for (const locale of ["unsupported", "../invalid-locale"]) {
+    const result = spawnSync(
+      process.execPath,
+      ["--input-type=module", "-e", 'await import("./.vscode-test.mjs")'],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          RESOURCE_NINJA_TEST_LOCALE: locale,
+          RESOURCE_NINJA_SIBLING_ROOT: "",
+        },
+      },
+    );
+    assert.ifError(result.error);
+    assert.strictEqual(
+      result.status,
+      1,
+      "Unsupported locales must fail before launching a host",
+    );
+    assert.match(result.stderr, /Unsupported smoke test locale; use en or ja/);
+  }
+});
+
 test("extension-host smoke runner guards windows update mutex and uses isolated test paths", () => {
   assert.match(
     vscodeSmokeRunnerSource,
@@ -1291,6 +1317,7 @@ test("settings order keeps install and destination paths first", () => {
     "resourceNinja.instructionBlock.globalHome.includeAgents",
     "resourceNinja.instructionBlock.globalHome.includeInstructions",
     "resourceNinja.registerPluginLocation",
+    "resourceNinja.autoManageGitignore",
   ];
 
   for (let index = 1; index < orderedSettings.length; index += 1) {

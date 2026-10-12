@@ -70,6 +70,7 @@ import {
 } from "./pluginLocations";
 import { encodeGitHubPathForUrl, encodeGitRefForPath } from "./gitHubRefSafety";
 import { logger } from "./logger";
+import { synchronizeSkillGitignore } from "./gitignoreManager";
 import { openBugReport as openBugReportIssue } from "./bugReport";
 import {
   HookConfigUpdateResult,
@@ -1795,6 +1796,8 @@ export async function installSkill(
     Buffer.from(JSON.stringify(meta, null, 2), "utf-8"),
   );
 
+  await synchronizeSkillGitignore(installRootUri, vscode.workspace);
+
   if (!incomplete) {
     return { destinationUri: skillPath };
   }
@@ -2037,6 +2040,7 @@ export async function uninstallSkill(
     [skillPath.fsPath],
     path.basename(skillPath.fsPath),
   );
+  await synchronizeSkillGitignore(skillsRootUri, vscode.workspace);
   return {};
 }
 
@@ -2166,6 +2170,12 @@ export async function uninstallSkillByPath(
             ...normalizedPath.split("/").filter(Boolean),
           );
       await deleteResourceInstallMetadata(resourceUri, kind);
+    }
+    if (kind === "skill") {
+      await synchronizeSkillGitignore(
+        getParentDirectoryUri(skillPath),
+        vscode.workspace,
+      );
     }
     return { hookConfigUpdate };
   } catch (error) {

@@ -2,7 +2,7 @@
   "name": "agent-resources-ninja",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.57",
+  "version": "0.2.58",
   "publisher": "yamapan",
   "license": "CC-BY-NC-SA-4.0",
   "icon": "resources/icon.png",
@@ -1349,6 +1349,13 @@
           "order": 2,
           "markdownDescription": "%config.resourcesDirectory.markdownDescription%"
         },
+        "resourceNinja.autoManageGitignore": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "order": 37,
+          "markdownDescription": "%config.autoManageGitignore.markdownDescription%"
+        },
         "resourceNinja.additionalSkillRoots": {
           "type": "array",
           "default": [],
@@ -1705,12 +1712,12 @@
     "release:vsce": "pwsh -NoProfile -File ./scripts/Invoke-VsceWithPat.ps1"
   },
   "overrides": {
-    "brace-expansion": "^5.0.7",
+    "brace-expansion": "^5.0.12",
     "diff": "^9.0.0",
     "flatted": "^3.4.2",
     "js-yaml": "5.4.2",
     "minimatch": "^10.2.5",
-    "shell-quote": "^1.10.0",
+    "shell-quote": "^1.11.0",
     "serialize-javascript": "^7.0.5",
     "picomatch": "^4.0.4"
   },
@@ -1720,7 +1727,7 @@
     "@types/vscode": "^1.85.0",
     "@typescript-eslint/eslint-plugin": "^8.18.0",
     "@typescript-eslint/parser": "^8.18.0",
-    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^2.4.1",
     "esbuild": "^0.28.1",
     "eslint": "^9.17.0",

@@ -491,7 +491,7 @@ MCP ツールが不要な場合は、GitHub Copilot Chat のツール一覧か�
 
 preset は global instruction file の名前も決めます。`copilot` は `copilot-instructions.md`、`claude` は `CLAUDE.md`、`agents` と `custom` は `AGENTS.md` です。2026-08-24 に同梱の VS Code と Copilot CLI の bundle を調べたところ、`~/.agents/skills` の読み手は存在しますが、ホーム直下の `AGENTS.md` を読む経路は見つかりませんでした。`agents` / `custom` preset ではこのファイルを利用者側で参照する前提で書き出します。skill や agent など他の種別に影響はありません。
 
-workspace skill を主 Workspace Skill Directory 以外に置く場合は、`additionalSkillRoots` を使います。例: `copilot-skills/skills`、`copilot-skills/m-skills`。各値は glob pattern ではなく root directory です。対象は discovery と生成 instruction output のみで、インストール先は引き続き `resourcesDirectory` です。skill-only sibling extension との同居互換として、`skillNinja.additionalSkillRoots` も fallback として尊重します。
+workspace skill を主 Workspace Skill Directory 以外に置く場合は、`additionalSkillRoots` を使います。例: `copilot-skills/skills`、`copilot-skills/m-skills`。各値は glob pattern ではなく root directory です。対象は discovery、生成 instruction output、任意の gitignore 管理で、インストール先は引き続き `resourcesDirectory` です。skill-only sibling extension との同居互換として、`skillNinja.additionalSkillRoots` も fallback として尊重します。
 
 | 順序 | Setting                                                         | Default                | Description                                                                                                                   |
 | :--: | --------------------------------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
@@ -532,6 +532,9 @@ workspace skill を主 Workspace Skill Directory 以外に置く場合は、`add
 |  34  | `resourceNinja.instructionBlock.globalHome.includeInstructions` | `inherit`              | Global Resource Home 向け instruction 掲載ポリシーの上書き（`inherit` / `on` / `off`）                                        |
 |  35  | `resourceNinja.registerPluginLocation`                          | `prompt`               | インストール済み plugin のフォルダーを VS Code の `chat.pluginLocations` に登録するか（`always` / `prompt` / `never`）        |
 |  36  | `resourceNinja.defaultPluginHost`                               | `auto`                 | 互換 plugin host のおすすめと表示順（`auto` / `ask` / `vscode-copilot` / `copilot-cli` / `claude-code` / `codex` / `cursor`） |
+|  37  | `resourceNinja.autoManageGitignore`                             | `true`                 | workspace skill 保存先の Resources Ninja gitignore ブロックを管理                                                             |
+
+`autoManageGitignore` は外部 skill のフォルダーと自作 skill の metadata だけを除外し、既存ルールと Skills Ninja のブロックを保持します。OFF は Resources のブロックだけを除去します。導入後、保存先・設定変更、**ビュー更新**で現在と過去の管理先を同期し、起動だけでは作成しません。User/Global の保存先と skill 以外は対象外です。未保存の ignore file や不正な Ninja マーカーを検出した場合は原本を上書きせず停止します。Output Channel の理由を確認し、解消後にビューを更新してください。拡張が停止中の設定変更も次のビュー更新で同期します。
 
 `staleSourceIndexUpdateMode` は remote source index だけを更新します。インストール済みファイルは再インストールせず、更新に失敗した source は前回 timestamp のまま残るため、後から再試行できます。
 

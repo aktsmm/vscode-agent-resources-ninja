@@ -259,6 +259,9 @@ function loadInstaller(writes, options = {}) {
     "./mcpConfigManager": {
       updateMcpConfigForInstall: async () => undefined,
     },
+    "./gitignoreManager": {
+      synchronizeSkillGitignore: async () => ({ status: "skipped" }),
+    },
     "./customizationPaths": {
       DEFAULT_GLOBAL_HOME_DIRECTORY: "~/.copilot",
       getConfiguredGlobalHomeDirectory: () => "~/.copilot",
@@ -494,6 +497,9 @@ function loadWindowsInstaller(recorded, options = {}) {
       updateHookConfigForUninstall: async () => undefined,
     },
     "./mcpConfigManager": { updateMcpConfigForInstall: async () => undefined },
+    "./gitignoreManager": {
+      synchronizeSkillGitignore: async () => ({ status: "skipped" }),
+    },
     "./customizationPaths": {
       DEFAULT_GLOBAL_HOME_DIRECTORY: "~/.copilot",
       getConfiguredGlobalHomeDirectory: () => "~/.copilot",

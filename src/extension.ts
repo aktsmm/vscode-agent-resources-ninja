@@ -100,6 +100,11 @@ import {
 import { createChatParticipant } from "./chatParticipant";
 import { registerMcpTools } from "./mcpTools";
 import { logger, registerLogger } from "./logger";
+import {
+  createGitignoreInventory,
+  observeGitignoreSynchronization,
+  reconcileSkillGitignores,
+} from "./gitignoreManager";
 import { buildReinstallBatchReport, openBugReport } from "./bugReport";
 import {
   AgentNinjaExtensionApi,
@@ -136,6 +141,7 @@ import {
   getInstructionBlockKinds,
   getConfiguredStaleSourceIndexUpdateMode,
   getConfiguredSkillsDirectory,
+  getConfiguredAdditionalSkillRoots,
   getConfiguredUserAgentsDirectory,
   getConfiguredUserInstructionsDirectory,
   getConfiguredUserPromptsDirectory,
@@ -788,6 +794,7 @@ const RESETTABLE_RESOURCE_NINJA_SETTINGS = [
   "defaultPluginHost",
   "resourcesDirectory",
   "additionalSkillRoots",
+  "autoManageGitignore",
   "workspaceAgentsDirectory",
   "workspaceInstructionsDirectory",
   "workspacePromptsDirectory",
@@ -1090,6 +1097,87 @@ export async function activate(
   registerLogger(context);
   logger.info("Agent Resources Ninja is now active!");
   await publishBeacon(context);
+
+  const currentGitignoreRoots = (): vscode.Uri[] =>
+    (vscode.workspace.workspaceFolders || []).flatMap((folder) => {
+      const config = vscode.workspace.getConfiguration(
+        "resourceNinja",
+        folder.uri,
+      );
+      return [
+        resolveSkillsDirectoryUri(folder.uri, config),
+        ...getConfiguredAdditionalSkillRoots(config).map((root) =>
+          resolveConfiguredUri(folder.uri, root, root),
+        ),
+      ];
+    });
+  const storedGitignoreRoots = context.workspaceState.get<unknown>(
+    "gitignoreManagedRoots",
+    [],
+  );
+  const gitignoreInventory = createGitignoreInventory({
+    initialRoots: [
+      ...(Array.isArray(storedGitignoreRoots) ? storedGitignoreRoots : [])
+        .filter(
+          (value): value is string =>
+            typeof value === "string" && path.isAbsolute(value),
+        )
+        .map((value) => vscode.Uri.file(value)),
+      ...currentGitignoreRoots(),
+    ],
+    currentRoots: currentGitignoreRoots,
+    reconcile: (current, previous) =>
+      reconcileSkillGitignores(current, previous, vscode.workspace),
+    save: (roots) =>
+      context.workspaceState.update(
+        "gitignoreManagedRoots",
+        roots.map((root) => root.fsPath),
+      ),
+    onFailure: () => logger.warn("[Gitignore] inventory-update-failed"),
+  });
+  const gitignoreFailures = new Map<string, string>();
+  context.subscriptions.push(
+    new vscode.Disposable(
+      observeGitignoreSynchronization((root, result) => {
+        if (activeExtensionContext !== context) {
+          return;
+        }
+        if (
+          (result.status === "updated" || result.status === "unchanged") &&
+          result.managedBlock
+        ) {
+          void gitignoreInventory.remember(root);
+        }
+        const key =
+          process.platform === "win32"
+            ? root.fsPath.toLowerCase()
+            : root.fsPath;
+        if (result.status !== "failed" && !result.warning) {
+          gitignoreFailures.delete(key);
+          return;
+        }
+        const reason = result.warning || result.reason || "io-failure";
+        logger.warn(`[Gitignore] ${reason}`);
+        if (gitignoreFailures.get(key) === reason) {
+          return;
+        }
+        gitignoreFailures.set(key, reason);
+        const details = messages.actionShowDetails();
+        void vscode.window
+          .showWarningMessage(
+            isJapanese()
+              ? "Gitignore の同期を完了できませんでした。導入結果とは別の問題です。詳細を確認し、解消後にビューを更新してください。"
+              : "Gitignore synchronization could not finish. This is separate from the installation result. Check Details, then refresh the view after resolving the cause.",
+            details,
+          )
+          .then((action) => {
+            if (action === details) {
+              logger.show();
+            }
+          });
+      }),
+    ),
+  );
 
   // GitHub 認証を初期化し、旧設定のトークンを SecretStorage へ移行
   initializeGitHubAuth(context);
@@ -2064,6 +2152,18 @@ export async function activate(
 
   // 設定変更を監視してビューをリフレッシュ
   const configWatcher = vscode.workspace.onDidChangeConfiguration(async (e) => {
+    if (
+      [
+        "resourceNinja.autoManageGitignore",
+        "resourceNinja.resourcesDirectory",
+        "resourceNinja.skillsDirectory",
+        "resourceNinja.additionalSkillRoots",
+        "skillNinja.skillsDirectory",
+        "skillNinja.additionalSkillRoots",
+      ].some((setting) => e.affectsConfiguration(setting))
+    ) {
+      await gitignoreInventory.synchronize();
+    }
     if (e.affectsConfiguration("resourceNinja.githubToken")) {
       // 旧設定のトークンが変更されたら SecretStorage を同期（セッション中の編集を反映）
       try {
@@ -2217,7 +2317,8 @@ export async function activate(
   // Command: Refresh
   const refreshCmd = vscode.commands.registerCommand(
     "resourceNinja.refresh",
-    () => {
+    async () => {
+      await gitignoreInventory.synchronize();
       installedProvider.refresh();
       browseProvider.refresh();
       userResourcesProvider.refresh();
@@ -2863,7 +2964,8 @@ export async function activate(
   // Command: Refresh Local
   const refreshLocalCmd = vscode.commands.registerCommand(
     "resourceNinja.refreshLocal",
-    () => {
+    async () => {
+      await gitignoreInventory.synchronize();
       workspaceProvider.refresh();
     },
   );

@@ -136,6 +136,9 @@ async function main() {
             "./mcpConfigManager": {
               updateMcpConfigForInstall: async () => undefined,
             },
+            "./gitignoreManager": {
+              synchronizeSkillGitignore: async () => ({ status: "skipped" }),
+            },
             "./customizationPaths": {
               DEFAULT_GLOBAL_HOME_DIRECTORY: "~/.copilot",
               getConfiguredGlobalHomeDirectory: () => "~/.copilot",

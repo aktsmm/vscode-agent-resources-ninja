@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.58] - 2026-10-13
+
+### Added
+
+- **Safe Workspace Skill Gitignore / Workspace skill の安全な gitignore 管理** - Added resource-scoped `autoManageGitignore`, enabled by default, to ignore external skill folders and local skill metadata while preserving user rules and the Skills Ninja block; disabling removes only our block, previous destinations are reconciled, and dirty or malformed files are preserved / 既定 ON の `autoManageGitignore` を追加し、外部 skill のフォルダーと自作 skill の metadata だけを除外します。既存ルールと Skills Ninja のブロックを保持し、OFF は自ブロックだけを除去します。旧保存先も同期し、未保存・不正構造のファイルは上書きしません。
+
+### Changed
+
+- **Scoped Catalog Refresh / 対象ソース限定のカタログ更新** - Refreshed PRP, Google Skills, and Azure Skills to Resource Index v1.31.0 with 2,788 resources, including current PRP companion paths and discover-azure-skills, without changing unrelated sources or the catalog-wide scan date / PRP・Google Skills・Azure Skills を再走査し、現行 PRP companion パスと discover-azure-skills を含む 2,788 件の Resource Index v1.31.0 に更新しました。他ソースとカタログ全体の走査日は維持します。
+
+### Fixed
+
+- **CSP-Compatible Preview Actions / CSP に対応したプレビュー操作** - Preview buttons now register click listeners inside the nonce-authorized script instead of blocked inline handlers, without relaxing the content security policy / プレビューのボタン操作を nonce 付き script 内の click listener に変更し、CSP を緩めずにインラインハンドラーの拒否を解消しました。
+- **Development Dependency Security / 開発依存の脆弱性修正** - Updated the Extension Host test CLI and brace-expansion and shell-quote overrides to resolve reported High and Critical development dependency vulnerabilities / Extension Host test CLI と brace-expansion・shell-quote の override を更新し、報告された開発依存の High・Critical 脆弱性に対応しました。
+
 ## [0.2.57] - 2026-09-24
 
 ### Fixed

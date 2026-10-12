@@ -241,6 +241,9 @@ async function main() {
       "./mcpConfigManager": {
         updateMcpConfigForInstall: async () => undefined,
       },
+      "./gitignoreManager": {
+        synchronizeSkillGitignore: async () => ({ status: "skipped" }),
+      },
     },
   );
 

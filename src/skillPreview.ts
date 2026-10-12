@@ -341,7 +341,7 @@ export function markdownToHtml(markdown: string): string {
 /**
  * Webview の HTML を生成
  */
-function getWebviewContent(
+export function getWebviewContent(
   skill: Skill,
   content: string,
   isFavorite: boolean,
@@ -375,11 +375,11 @@ function getWebviewContent(
   // インデックスにないスキル（検索結果から）の場合は Add Source ボタンを表示
   const addSourceButton = isInIndex
     ? ""
-    : `<button class="btn-secondary" onclick="addSource()">${messages.addSourceButtonLabel()}</button>`;
+    : `<button class="btn-secondary" data-command="addSource">${messages.addSourceButtonLabel()}</button>`;
 
   // インデックスにないスキルはお気に入り機能が使えないので非表示
   const favoriteButton = isInIndex
-    ? `<button class="btn-star ${starClass}" onclick="toggleFavorite()">
+    ? `<button class="btn-star ${starClass}" data-command="toggleFavorite" aria-label="${isJapanese() ? (isFavorite ? "お気に入りから削除" : "お気に入りに追加") : isFavorite ? "Remove favorite" : "Add favorite"}">
         ${starIcon}
       </button>`
     : "";
@@ -419,6 +419,8 @@ function getWebviewContent(
     }
     .header {
       display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
       justify-content: space-between;
       align-items: center;
       margin-bottom: 20px;
@@ -427,14 +429,20 @@ function getWebviewContent(
     }
     .title {
       margin: 0;
+      max-width: 100%;
+      overflow-wrap: anywhere;
       color: var(--vscode-textLink-foreground);
     }
     .actions {
       display: flex;
+      flex-wrap: wrap;
+      max-width: 100%;
       gap: 10px;
     }
     button {
       padding: 8px 16px;
+      max-width: 100%;
+      overflow-wrap: anywhere;
       border: none;
       border-radius: 4px;
       cursor: pointer;
@@ -515,11 +523,11 @@ function getWebviewContent(
     <h1 class="title">${safeSkillName}</h1>
     <div class="actions">
       ${favoriteButton}
-      <button class="btn-primary" onclick="install()">
+      <button class="btn-primary" data-command="install">
         ${messages.actionInstall()}
       </button>
       ${addSourceButton}
-      <button class="btn-primary" onclick="openGitHub()">
+      <button class="btn-primary" data-command="openGitHub">
         ${messages.githubButtonLabel()}
       </button>
     </div>
@@ -542,22 +550,15 @@ function getWebviewContent(
   </div>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
-    
-    function install() {
-      vscode.postMessage({ command: 'install' });
-    }
-    
-    function addSource() {
-      vscode.postMessage({ command: 'addSource' });
-    }
-    
-    function openGitHub() {
-      vscode.postMessage({ command: 'openGitHub' });
-    }
-    
-    function toggleFavorite() {
-      vscode.postMessage({ command: 'toggleFavorite' });
-    }
+    const allowedCommands = new Set(['install', 'addSource', 'openGitHub', 'toggleFavorite']);
+    document.querySelectorAll('.header button[data-command]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const command = button.dataset.command;
+        if (allowedCommands.has(command)) {
+          vscode.postMessage({ command });
+        }
+      });
+    });
   </script>
 </body>
 </html>`;
