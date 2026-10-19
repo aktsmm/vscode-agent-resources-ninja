@@ -231,6 +231,12 @@ export function getConfiguredKindsExcluded(
   );
 }
 
+export function getConfiguredIncludeExplicitOnlySkills(
+  config: vscode.WorkspaceConfiguration,
+): boolean {
+  return config.get<boolean>("instructionBlock.includeExplicitOnlySkills") ?? false;
+}
+
 function getConfiguredInstructionBlockIncludeAgents(
   config: vscode.WorkspaceConfiguration,
 ): boolean {

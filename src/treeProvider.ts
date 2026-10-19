@@ -137,6 +137,7 @@ export interface WorkspaceSkill {
   fullPath: string;
   isInstalled: boolean; // configured skills directory 配下か
   isRegistered: boolean; // instruction file に登録済みか
+  disableModelInvocation?: boolean; // 手動専用スキル
   isBuiltIn?: boolean; // VS Code / Copilot Chat built-in resource
   incomplete?: boolean; // 実体を取得できず、生成テンプレートだけが残っている
   reinstallDisabled?: boolean;
@@ -547,9 +548,13 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
           ? "インストール済み"
           : "Installed"
         : skill.isRegistered
-          ? isJapanese()
-            ? "ローカル（登録済み）"
-            : "Local (Registered)"
+          ? skill.disableModelInvocation
+            ? isJapanese()
+              ? "ローカル（手動専用）"
+              : "Local (Manual-only)"
+            : isJapanese()
+              ? "ローカル（登録済み）"
+              : "Local (Registered)"
           : isJapanese()
             ? "ローカル（未登録）"
             : "Local (Not registered)";
@@ -653,6 +658,7 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
         fullPath: local.fullPath, // スキャン結果の実際のパスを使用
         isInstalled,
         isRegistered: local.isRegistered,
+        disableModelInvocation: local.disableModelInvocation,
         isBuiltIn: local.isBuiltIn,
         source: local.source || (isInstalled ? undefined : "local"),
         remotePath: local.remotePath,

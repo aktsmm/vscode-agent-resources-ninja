@@ -1318,6 +1318,7 @@ test("settings order keeps install and destination paths first", () => {
     "resourceNinja.instructionBlock.globalHome.includeInstructions",
     "resourceNinja.registerPluginLocation",
     "resourceNinja.autoManageGitignore",
+    "resourceNinja.instructionBlock.includeExplicitOnlySkills",
   ];
 
   for (let index = 1; index < orderedSettings.length; index += 1) {

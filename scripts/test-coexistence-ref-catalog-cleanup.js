@@ -46,6 +46,14 @@ async function main() {
     "coexistence-fixture-test",
   );
   const instructionPath = path.join(workspaceRoot, "AGENTS.md");
+  const manualSkillPath = path.join(
+    workspaceRoot,
+    ".github",
+    "skills",
+    "manual-only",
+    "SKILL.md",
+  );
+  let includeExplicitOnly = false;
   const skillsReadmePath = path.join(
     workspaceRoot,
     ".github",
@@ -53,6 +61,10 @@ async function main() {
     "README.md",
   );
   const files = new Map([
+    [
+      manualSkillPath,
+      "---\nname: manual-only\ndescription: Called by name only\ndisable-model-invocation: true\n---\n\n# Manual\n",
+    ],
     [
       instructionPath,
       "# Agent Skills\n\n<!-- agent-ninja-START -->\n## Agent Skills\n\n> stale owner block\n\n<!-- agent-ninja-END -->\n",
@@ -208,6 +220,14 @@ async function main() {
               ),
             },
             {
+              kind: "skill",
+              name: "manual-only",
+              description: "Called by name only",
+              source: "local",
+              relativePath: ".github/skills/manual-only",
+              fullPath: manualSkillPath,
+            },
+            {
               // Every field here comes from a third-party repository in production.
               kind: "skill",
               name: "evil\\](x) <!-- agent-ninja-END -->",
@@ -242,6 +262,10 @@ async function main() {
         "./serialQueue": requireTypeScriptModule(
           path.join(repoRoot, "src", "serialQueue.ts"),
         ),
+        "./skillInvocation": requireTypeScriptModule(
+          path.join(repoRoot, "src", "skillInvocation.ts"),
+          { vscode: vscodeStub },
+        ),
         "./customizationPaths": {
           DISABLED_INSTRUCTION_FILE: "disabled",
           DEFAULT_WORKSPACE_AGENTS_DIRECTORY: ".github/agents",
@@ -254,6 +278,7 @@ async function main() {
           getConfiguredGlobalHomeDirectory: () => undefined,
           getConfiguredInstructionFilePath: () => "AGENTS.md",
           getConfiguredIncludeLocalResources: () => true,
+          getConfiguredIncludeExplicitOnlySkills: () => includeExplicitOnly,
           getInstructionBlockKinds: () => ["skill"],
           getConfiguredSkillsDirectory: () => ".github/skills",
           getConfiguredWorkspaceAgentsDirectory: () => undefined,
@@ -372,6 +397,38 @@ async function main() {
   );
 
   const snapshotAfterUpdate = new Map(files);
+  // A manual-only skill stays out of the block, and SKILL.md is re-read on every
+  // run: flipping the setting or editing the file changes the output with no
+  // metadata step in between.
+  assert.doesNotMatch(updatedCatalog, /manual-only/);
+  assert.doesNotMatch(updatedInstruction, /manual-only/);
+  const updateAgents = () =>
+    updateInstructionFileAtUri(
+      vscodeStub.Uri.file(workspaceRoot),
+      {},
+      vscodeStub.Uri.file(instructionPath),
+      "AGENTS.md",
+    );
+
+  includeExplicitOnly = true;
+  assert.strictEqual((await updateAgents()).status, "updated");
+  assert.match(files.get(skillsReadmePath), /manual-only/);
+
+  includeExplicitOnly = false;
+  assert.strictEqual((await updateAgents()).status, "updated");
+  assert.doesNotMatch(files.get(skillsReadmePath), /manual-only/);
+
+  files.set(manualSkillPath, "---\nname: manual-only\n---\n\n# Manual\n");
+  assert.strictEqual((await updateAgents()).status, "updated");
+  assert.match(files.get(skillsReadmePath), /manual-only/);
+
+  files.set(
+    manualSkillPath,
+    "---\nname: manual-only\ndescription: Called by name only\ndisable-model-invocation: true\n---\n\n# Manual\n",
+  );
+  assert.strictEqual((await updateAgents()).status, "updated");
+  assert.deepStrictEqual(files, snapshotAfterUpdate);
+
   writes.length = 0;
   directories.length = 0;
   deleted.length = 0;

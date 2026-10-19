@@ -139,6 +139,97 @@ suite("Agent Resources Ninja smoke test", () => {
     }
   });
 
+  test("SKILL.md edits regenerate the block in additional roots and honor manual-only skills", async function () {
+    this.timeout(90000);
+    const folder = vscode.workspace.workspaceFolders[0];
+    const extra = file(folder.uri, "smoke-extra");
+    const skillMd = file(extra, "extra-skill", "SKILL.md");
+    const agents = file(folder.uri, "AGENTS.md");
+    const config = vscode.workspace.getConfiguration(
+      "resourceNinja",
+      folder.uri,
+    );
+    const update = (key, value) =>
+      config.update(key, value, vscode.ConfigurationTarget.Workspace);
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const readAgents = async () => {
+      try {
+        return await read(agents);
+      } catch {
+        return "";
+      }
+    };
+    const skillText = (flag) =>
+      `---\nname: extra-skill\ndescription: smoke fixture\n${flag}---\n\nFixture.\n`;
+    const waitFor = async (predicate, message) => {
+      const deadline = Date.now() + 20000;
+      while (Date.now() < deadline) {
+        if (await predicate()) {
+          return;
+        }
+        await sleep(250);
+      }
+      assert.fail(message);
+    };
+    let hadAgents = true;
+    try {
+      await vscode.workspace.fs.stat(agents);
+    } catch {
+      hadAgents = false;
+    }
+
+    try {
+      await update("useRefOutput", false);
+      await update("outputFormat", "compact");
+      await update("autoUpdateInstruction", true);
+      await vscode.workspace.fs.createDirectory(file(extra, "extra-skill"));
+      await update("additionalSkillRoots", ["smoke-extra"]);
+      // The settings listener rebuilds the SKILL.md watchers for the new root.
+      await sleep(1500);
+
+      await write(skillMd, skillText(""));
+      await waitFor(
+        async () => (await readAgents()).includes("extra-skill"),
+        "a new SKILL.md in an additional root must appear in the block",
+      );
+
+      await write(skillMd, skillText("disable-model-invocation: true\n"));
+      await waitFor(
+        async () => !(await readAgents()).includes("extra-skill"),
+        "a manual-only skill must leave the block without a metadata change",
+      );
+
+      await write(skillMd, skillText(""));
+      await waitFor(
+        async () => (await readAgents()).includes("extra-skill"),
+        "removing the flag must list the skill again",
+      );
+
+      await update("instructionBlock.includeExplicitOnlySkills", true);
+      await write(skillMd, skillText("disable-model-invocation: true\n"));
+      await waitFor(
+        async () => (await readAgents()).includes("extra-skill"),
+        "the opt-in setting must keep a manual-only skill in the block",
+      );
+    } finally {
+      await update("instructionBlock.includeExplicitOnlySkills", undefined);
+      await update("additionalSkillRoots", undefined);
+      await update("autoUpdateInstruction", false);
+      await update("outputFormat", undefined);
+      await update("useRefOutput", undefined);
+      await vscode.workspace.fs.delete(extra, { recursive: true });
+      if (!hadAgents) {
+        try {
+          await vscode.workspace.fs.delete(agents);
+        } catch (error) {
+          if (error.code !== "FileNotFound") {
+            throw error;
+          }
+        }
+      }
+    }
+  });
+
   test("both Ninja extensions preserve their blocks in the same destination", async function () {
     if (!process.env.RESOURCE_NINJA_SIBLING_ROOT) {
       this.skip();

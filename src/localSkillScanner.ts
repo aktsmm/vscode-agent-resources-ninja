@@ -36,6 +36,7 @@ import {
   getConfiguredAdditionalSkillRoots,
   getConfiguredInstructionFilePath,
   getConfiguredIncludeLocalResources,
+  getConfiguredIncludeExplicitOnlySkills,
   getConfiguredSkillsDirectory,
   getConfiguredWorkspaceAgentsDirectory,
   getConfiguredWorkspaceHooksDirectory,
@@ -48,6 +49,10 @@ import {
   resolveInstructionFileUri,
 } from "./customizationPaths";
 import { logger } from "./logger";
+import {
+  markExplicitOnlySkillsRegistered,
+  parseDisableModelInvocation,
+} from "./skillInvocation";
 
 const MAX_LOCAL_RESOURCE_FILES = 1000;
 
@@ -331,6 +336,7 @@ export interface LocalSkill extends Skill {
   fullPath: string; // フルパス
   relativePath: string; // ワークスペース相対パス
   isRegistered: boolean; // AGENTS.md に登録済みか
+  disableModelInvocation?: boolean; // 手動専用（SKILL.md の disable-model-invocation: true）
   isBuiltIn?: boolean; // VS Code / Copilot Chat built-in resource
   incomplete?: boolean; // 実体を取得できず、生成テンプレートだけが残っている
   reinstallDisabled?: boolean;
@@ -690,6 +696,10 @@ async function parseLocalSkillFile(
     fullPath: fileUri.fsPath,
     relativePath: skillDir,
     isRegistered: false,
+    disableModelInvocation:
+      kind === "skill" && parseDisableModelInvocation(normalizedText)
+        ? true
+        : undefined,
     isBuiltIn,
     // フラグ導入前のインストールも、既に読み込み済みの本文から判定する。
     incomplete:
@@ -710,6 +720,11 @@ async function checkRegistrationStatus(
   workspaceUri: vscode.Uri,
 ): Promise<void> {
   const config = vscode.workspace.getConfiguration("resourceNinja");
+  markExplicitOnlySkillsRegistered(
+    skills,
+    getConfiguredIncludeExplicitOnlySkills(config),
+  );
+
   const instructionPath = getConfiguredInstructionFilePath(config);
   if (instructionPath === DISABLED_INSTRUCTION_FILE) {
     return;

@@ -787,6 +787,7 @@ const RESETTABLE_RESOURCE_NINJA_SETTINGS = [
   "includeLocalResources",
   "instructionBlock.includeAgents",
   "instructionBlock.includeInstructions",
+  "instructionBlock.includeExplicitOnlySkills",
   "instructionBlock.globalHome.includeAgents",
   "instructionBlock.globalHome.includeInstructions",
   "kindsExcluded",
@@ -2240,6 +2241,9 @@ export async function activate(
       e.affectsConfiguration("resourceNinja.instructionBlock.includeAgents") ||
       e.affectsConfiguration(
         "resourceNinja.instructionBlock.includeInstructions",
+      ) ||
+      e.affectsConfiguration(
+        "resourceNinja.instructionBlock.includeExplicitOnlySkills",
       ) ||
       e.affectsConfiguration(
         "resourceNinja.instructionBlock.globalHome.includeAgents",
@@ -9872,18 +9876,10 @@ ${fileUri.fsPath}`,
     vscode.workspace.onDidDeleteFiles(() => refreshViews()),
   );
 
-  // SKILL.md の変更を監視してメタデータを自動更新
-  const config = vscode.workspace.getConfiguration("resourceNinja");
-  const skillsDir = getConfiguredSkillsDirectory(config);
-  const skillMdWatcher = vscode.workspace.createFileSystemWatcher(
-    new vscode.RelativePattern(
-      vscode.workspace.workspaceFolders?.[0] || "",
-      `${skillsDir}/**/SKILL.md`,
-    ),
-  );
-
-  // デバウンス用の Map（同じファイルへの連続保存を1回にまとめる）
+  // SKILL.md の変更を監視してメタデータと出力を自動更新
+  // （resourcesDirectory と additionalSkillRoots の両方。設定変更時は張り直す）
   const pendingUpdates = new Map<string, NodeJS.Timeout>();
+  const skillMdWatchers: vscode.Disposable[] = [];
 
   const handleSkillMdChange = async (uri: vscode.Uri) => {
     const key = uri.fsPath;
@@ -9893,7 +9889,7 @@ ${fileUri.fsPath}`,
       clearTimeout(pendingUpdates.get(key));
     }
 
-    // 500ms のデバウンス
+    // 500ms のデバウンス（同じファイルへの連続保存を1回にまとめる）
     pendingUpdates.set(
       key,
       setTimeout(async () => {
@@ -9904,21 +9900,72 @@ ${fileUri.fsPath}`,
           // ビューを更新
           workspaceProvider.refresh();
           browseProvider.refresh();
+        }
 
-          // 自動更新が有効な場合は instruction file も更新
-          const autoUpdate = vscode.workspace
-            .getConfiguration("resourceNinja")
-            .get<boolean>("autoUpdateInstruction", true);
-          if (autoUpdate && workspaceFolder) {
-            await updateInstructionFile(workspaceFolder.uri, context);
-          }
+        // メタデータを持たないスキルや、一覧の掲載可否だけが変わる frontmatter の
+        // 編集は updated にならないため、出力は常に生成し直す（変化がなければ書かない）。
+        const autoUpdate = vscode.workspace
+          .getConfiguration("resourceNinja")
+          .get<boolean>("autoUpdateInstruction", true);
+        if (autoUpdate && workspaceFolder) {
+          await updateInstructionFile(workspaceFolder.uri, context);
+          workspaceProvider.refresh();
         }
       }, 500),
     );
   };
 
-  skillMdWatcher.onDidChange(handleSkillMdChange);
-  context.subscriptions.push(skillMdWatcher);
+  const disposeSkillMdWatchers = () => {
+    for (const watcher of skillMdWatchers.splice(0)) {
+      watcher.dispose();
+    }
+  };
+
+  const registerSkillMdWatchers = () => {
+    disposeSkillMdWatchers();
+    if (!workspaceFolder) {
+      return;
+    }
+
+    const config = vscode.workspace.getConfiguration("resourceNinja");
+    const skillsDir = getConfiguredSkillsDirectory(config);
+    const roots = new Set([
+      skillsDir,
+      ...getConfiguredAdditionalSkillRoots(config),
+    ]);
+    for (const root of roots) {
+      const watcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(
+          resolveConfiguredUri(workspaceFolder.uri, root, skillsDir),
+          "**/SKILL.md",
+        ),
+      );
+      watcher.onDidChange(handleSkillMdChange);
+      watcher.onDidCreate(handleSkillMdChange);
+      watcher.onDidDelete(handleSkillMdChange);
+      skillMdWatchers.push(watcher);
+    }
+  };
+
+  registerSkillMdWatchers();
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (
+        event.affectsConfiguration("resourceNinja.resourcesDirectory") ||
+        event.affectsConfiguration("resourceNinja.additionalSkillRoots") ||
+        event.affectsConfiguration("skillNinja.additionalSkillRoots")
+      ) {
+        registerSkillMdWatchers();
+      }
+    }),
+    new vscode.Disposable(() => {
+      disposeSkillMdWatchers();
+      for (const timer of pendingUpdates.values()) {
+        clearTimeout(timer);
+      }
+      pendingUpdates.clear();
+    }),
+  );
   return {
     getAgentNinjaBeacon: () => getPublishedSelfBeacon(context),
   };

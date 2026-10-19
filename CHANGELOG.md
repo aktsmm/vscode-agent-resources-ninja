@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.59] - 2026-10-19
+
+### Added
+
+- **Manual-only Skills Stay Out of Instruction Blocks / 手動専用スキルを一覧から除外** - Skills whose SKILL.md sets `disable-model-invocation: true` are no longer listed in generated instruction blocks by default, because a listed skill invites the model to use it on its own; `instructionBlock.includeExplicitOnlySkills` opts back in. They stay in the tree as "Manual-only" and are never shown as unregistered / SKILL.md に `disable-model-invocation: true` を持つ手動専用スキルを、生成する instruction block へ既定で載せなくしました（一覧に載せるとモデルが自分で使おうとするため）。`instructionBlock.includeExplicitOnlySkills` で載せられます。ツリーには「手動専用」として残り、「未登録」とは表示されません。
+
+### Fixed
+
+- **SKILL.md Edits Always Refresh the Output / SKILL.md 編集で出力を必ず更新** - Saving, creating, or deleting a SKILL.md now regenerates the instruction block even when the skill has no `.skill-meta.json` change, in `resourcesDirectory` and every `additionalSkillRoots` entry (watchers are re-created when those settings change), so a frontmatter edit such as `disable-model-invocation` is reflected without a manual refresh / SKILL.md の保存・作成・削除で、`.skill-meta.json` に変化がなくても instruction block を再生成します。対象は `resourcesDirectory` と `additionalSkillRoots` の全ルートで、これらの設定を変えると監視も張り直します。`disable-model-invocation` などの frontmatter 編集が手動更新なしで反映されます。
+
 ## [0.2.58] - 2026-10-13
 
 ### Added

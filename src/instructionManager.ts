@@ -30,6 +30,7 @@ import {
   getConfiguredGlobalHomeDirectory,
   getConfiguredInstructionFilePath,
   getConfiguredIncludeLocalResources,
+  getConfiguredIncludeExplicitOnlySkills,
   getInstructionBlockKinds,
   InstructionBlockScope,
   getConfiguredSkillsDirectory,
@@ -60,6 +61,7 @@ import { messages } from "./i18n";
 import { logger } from "./logger";
 import { matchLineEnding } from "./lineEndings";
 import { createSerialQueue } from "./serialQueue";
+import { excludeExplicitOnlySkills } from "./skillInvocation";
 
 interface MarkerPair {
   start: string;
@@ -820,16 +822,25 @@ function toSyncResourceFromUser(
   };
 }
 
+function getInstalledSkillFilePath(
+  meta: SkillMeta,
+  skillsUri: vscode.Uri,
+): string {
+  const relativePath = meta.relativePath || meta.name;
+  return (
+    meta.skillFilePath ||
+    vscode.Uri.joinPath(skillsUri, ...relativePath.split("/"), "SKILL.md")
+      .fsPath
+  );
+}
+
 function toSyncResourceFromInstalledMeta(
   meta: SkillMeta,
   skillsUri: vscode.Uri,
   instructionUri: vscode.Uri,
 ): SyncResourceItem {
   const relativePath = meta.relativePath || meta.name;
-  const skillFilePath =
-    meta.skillFilePath ||
-    vscode.Uri.joinPath(skillsUri, ...relativePath.split("/"), "SKILL.md")
-      .fsPath;
+  const skillFilePath = getInstalledSkillFilePath(meta, skillsUri);
 
   return {
     kind: "skill",
@@ -1519,6 +1530,18 @@ async function performInstructionFileUpdate(
     siblingDetected,
     owner,
   );
+  const includeExplicitOnlySkills =
+    getConfiguredIncludeExplicitOnlySkills(config);
+  const listedInstalledSkills = await excludeExplicitOnlySkills(
+    installedSkills,
+    (skill) => getInstalledSkillFilePath(skill, skillsUri),
+    includeExplicitOnlySkills,
+  );
+  const listedLocalSkills = await excludeExplicitOnlySkills(
+    localSkills,
+    (skill) => (skill.kind === "skill" ? skill.fullPath : undefined),
+    includeExplicitOnlySkills,
+  );
 
   const skillIndex =
     format === "ref" ? await loadSkillIndex(context) : undefined;
@@ -1537,8 +1560,8 @@ async function performInstructionFileUpdate(
   const relatedOutputMutations: PlannedFileMutation[] = [];
 
   if (coexistenceMode === "auto") {
-    const sharedResources = (
-      skillSource.scope === "workspace"
+    const sharedResources = await excludeExplicitOnlySkills(
+      (skillSource.scope === "workspace"
         ? await collectWorkspaceResourcesForInstruction(
             workspaceUri,
             instructionUri,
@@ -1548,7 +1571,10 @@ async function performInstructionFileUpdate(
             workspaceUri,
             instructionUri,
           )
-    ).filter((resource) => instructionBlockKinds.includes(resource.kind));
+      ).filter((resource) => instructionBlockKinds.includes(resource.kind)),
+      (resource) => (resource.kind === "skill" ? resource.fullPath : undefined),
+      includeExplicitOnlySkills,
+    );
 
     if (format === "ref") {
       const enrichedResources = skillIndex
@@ -1595,12 +1621,12 @@ async function performInstructionFileUpdate(
   } else {
     if (format === "ref") {
       const skillResources = sortSyncResources(
-        installedSkills
+        listedInstalledSkills
           .map((skill) =>
             toSyncResourceFromInstalledMeta(skill, skillsUri, instructionUri),
           )
           .concat(
-            localSkills.map((skill) =>
+            listedLocalSkills.map((skill) =>
               toSyncResourceFromLocal(skill, instructionUri),
             ),
           ),
@@ -1641,8 +1667,8 @@ async function performInstructionFileUpdate(
         )),
       );
       skillSection = generateSkillSectionForFormat(
-        installedSkills,
-        localSkills,
+        listedInstalledSkills,
+        listedLocalSkills,
         relativeSkillsDir,
         format,
         RESOURCE_MARKERS,

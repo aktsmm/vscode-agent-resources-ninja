@@ -104,6 +104,7 @@ test("workspace fallback is automatic only when configured roots are empty", () 
       "./skillIndex": {},
       "./resourceKinds": {},
       "./instructionManager": { updateInstructionFile: async () => undefined },
+      "./skillInvocation": {},
       "./skillInstaller": { stripSkillMetaLocalPaths: (value) => value },
       "./customizationPaths": {},
       "./logger": {
@@ -264,6 +265,10 @@ const { getConfiguredWorkspaceResourceRoots } = requireTypeScriptModule(
       },
     ),
     "./instructionManager": { updateInstructionFile: () => undefined },
+    "./skillInvocation": requireTypeScriptModule(
+      path.join(repoRoot, "src", "skillInvocation.ts"),
+      { vscode: vscodeStub },
+    ),
     "./skillInstaller": { stripSkillMetaLocalPaths: () => undefined },
   },
 );

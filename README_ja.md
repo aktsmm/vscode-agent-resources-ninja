@@ -483,7 +483,7 @@ MCP ツールが不要な場合は、GitHub Copilot Chat のツール一覧か�
 | Workspace roots      | `resourcesDirectory`, `additionalSkillRoots`, `workspace*Directory`                                                                                                                                                                                                                                        | ワークスペースで管理する project-specific resources                 |
 | User roots           | `user*Directory`                                                                                                                                                                                                                                                                                           | VS Code User Profile の agents、prompts、instructions               |
 | Global Resource Home | `globalResourceHomePreset`, `globalHomeDirectory`                                                                                                                                                                                                                                                          | Copilot CLI、Claude 互換、Open Agent 系で共有するグローバルリソース |
-| Instruction sync     | `autoUpdateInstruction`, `instructionFile`, `customInstructionPath`, `includeLocalResources`, `coexistenceMode`, `kindsExcluded`, `instructionBlock.includeAgents`, `instructionBlock.includeInstructions`, `instructionBlock.globalHome.includeAgents`, `instructionBlock.globalHome.includeInstructions` | 共有 instruction block の生成と掲載 kind ポリシー                   |
+| Instruction sync     | `autoUpdateInstruction`, `instructionFile`, `customInstructionPath`, `includeLocalResources`, `coexistenceMode`, `kindsExcluded`, `instructionBlock.includeAgents`, `instructionBlock.includeInstructions`, `instructionBlock.includeExplicitOnlySkills`, `instructionBlock.globalHome.includeAgents`, `instructionBlock.globalHome.includeInstructions` | 共有 instruction block の生成と掲載 kind ポリシー                   |
 | Shared caches        | `useSharedSourcesManifest`, `useSharedResourceIndex`, `staleSourceIndexUpdateMode`                                                                                                                                                                                                                         | cross-extension SSOT と source index 鮮度管理                       |
 | 表示とメンテナンス   | `outputFormat`, `refCatalogFormat`, `showBuiltInResources`, `remoteResourceViewMode`, `language`, `githubToken`                                                                                                                                                                                            | 表示、探索、GitHub API 利用の調整                                   |
 
@@ -533,6 +533,7 @@ workspace skill を主 Workspace Skill Directory 以外に置く場合は、`add
 |  35  | `resourceNinja.registerPluginLocation`                          | `prompt`               | インストール済み plugin のフォルダーを VS Code の `chat.pluginLocations` に登録するか（`always` / `prompt` / `never`）        |
 |  36  | `resourceNinja.defaultPluginHost`                               | `auto`                 | 互換 plugin host のおすすめと表示順（`auto` / `ask` / `vscode-copilot` / `copilot-cli` / `claude-code` / `codex` / `cursor`） |
 |  37  | `resourceNinja.autoManageGitignore`                             | `true`                 | workspace skill 保存先の Resources Ninja gitignore ブロックを管理                                                             |
+|  38  | `resourceNinja.instructionBlock.includeExplicitOnlySkills`      | `false`                | 手動専用 skill（`disable-model-invocation: true`）を生成する instruction block に含める                                       |
 
 `autoManageGitignore` は外部 skill のフォルダーと自作 skill の metadata だけを除外し、既存ルールと Skills Ninja のブロックを保持します。OFF は Resources のブロックだけを除去します。導入後、保存先・設定変更、**ビュー更新**で現在と過去の管理先を同期し、起動だけでは作成しません。User/Global の保存先と skill 以外は対象外です。未保存の ignore file や不正な Ninja マーカーを検出した場合は原本を上書きせず停止します。Output Channel の理由を確認し、解消後にビューを更新してください。拡張が停止中の設定変更も次のビュー更新で同期します。
 
@@ -566,6 +567,8 @@ workspace skill を主 Workspace Skill Directory 以外に置く場合は、`add
 `useRefOutput`、`outputFormat`、`refCatalogFormat` など出力関連の設定変更は、`autoUpdateInstruction` が off でも生成リソース出力を即時再生成します。この設定はリソース変更時の自動同期だけを止めます。
 
 既定では shared instruction block を意図的に薄く保ちます。`skill` は常に掲載、`agent` と `instruction` は opt-in、`prompt` / `hook` / `mcp` / `plugin` / `cursor-rule` はネイティブ view に残します。Global Resource Home 向けの同期先は workspace の方針を継承するか、必要なときだけ個別に上書きできます。
+
+`SKILL.md` に `disable-model-invocation: true` を持つ skill は手動専用のため、`resourceNinja.instructionBlock.includeExplicitOnlySkills` を ON にしない限り生成ブロックに載せません（一覧に載せるとモデルが自分で使おうとするためです）。このフラグは更新のたびに `SKILL.md` から読み直すので、`resourcesDirectory` と `additionalSkillRoots` の全ルートで、保存するだけで反映されます（metadata の更新は不要です）。手動専用 skill はツリーに「手動専用」として残り、「未登録」とは表示されません。この方針は Resource NINJA が shared block の所有者のときだけ効きます。Agent Skills Ninja が所有者のときは、その拡張の方針に従います。`user-invocable: false` の skill はモデル専用で、一覧に載ります。
 
 ### Agent Skills Ninja との共存
 
