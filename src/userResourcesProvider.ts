@@ -26,6 +26,17 @@ import {
   getHookConfigDiagnostics,
   HookConfigDiagnostics,
 } from "./hookConfigManager";
+import {
+  getInvocationExplanationText,
+  getInvocationIconId,
+  getInvocationLabelText,
+  normalizeSkillInvocation,
+} from "./skillInvocationMode";
+import {
+  filterSkillsByInvocation,
+  getSkillViewOptions,
+  sortSkills,
+} from "./skillListOptions";
 
 type UserResourceNodeType =
   | "scope"
@@ -192,6 +203,17 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
     this._onDidChangeTreeData.fire();
   }
 
+  /** 再スキャンせず、絞り込み・並べ替えの変更だけをツリーへ反映する。 */
+  refreshView(): void {
+    this._onDidChangeTreeData.fire();
+  }
+
+  /** ビューの絞り込み・並べ替えを適用する。skill 以外の種別は絞り込みの対象外。 */
+  private applyViewOptions(resources: UserResource[]): UserResource[] {
+    const { filter, sort } = getSkillViewOptions("local");
+    return sortSkills(filterSkillsByInvocation(resources, filter), sort);
+  }
+
   getTreeItem(element: UserResourceTreeItem): vscode.TreeItem {
     return element;
   }
@@ -212,6 +234,23 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
       const regularResources = this.getRegularResources();
       const builtInResources = this.getBuiltInResources();
       if (regularResources.length === 0 && builtInResources.length === 0) {
+        if (
+          this.resources.length > 0 &&
+          getSkillViewOptions("local").filter !== "all"
+        ) {
+          return [
+            new UserResourceTreeItem(
+              isJapanese()
+                ? "絞り込みに一致するスキルがありません"
+                : "No skills match the filter",
+              isJapanese()
+                ? "ビュー上部のアイコンで「すべて表示」に戻せます"
+                : "Reset the filter with the icon in the view title",
+              vscode.TreeItemCollapsibleState.None,
+              "placeholder",
+            ),
+          ];
+        }
         return [
           new UserResourceTreeItem(
             isJapanese()
@@ -446,11 +485,15 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
   }
 
   private getRegularResources(): UserResource[] {
-    return this.resources.filter((resource) => !resource.isBuiltIn);
+    return this.applyViewOptions(
+      this.resources.filter((resource) => !resource.isBuiltIn),
+    );
   }
 
   private getBuiltInResources(): UserResource[] {
-    return this.resources.filter((resource) => resource.isBuiltIn);
+    return this.applyViewOptions(
+      this.resources.filter((resource) => resource.isBuiltIn),
+    );
   }
 
   private getPluginId(resource: UserResource): string | undefined {
@@ -576,7 +619,10 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
       return undefined;
     }
 
-    const currentResources = (await this.getCurrentResources()).filter(
+    // 画面に出ている一覧と同じ集合を対象にする。絞り込み中に、見えていないリソースへ操作が及ばないようにするため
+    const currentResources = this.applyViewOptions(
+      await this.getCurrentResources(),
+    ).filter(
       (resource) =>
         !resource.isBuiltIn &&
         !resource.isReadOnly &&
@@ -691,9 +737,17 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
     const description = descriptionParts
       .filter((part): part is string => !!part)
       .join(" · ");
+    const invocation =
+      resource.kind === "skill"
+        ? normalizeSkillInvocation(resource.invocation)
+        : "auto";
     return new UserResourceTreeItem(
       `${isRecent ? "🆕 " : ""}${resource.name}`,
-      description,
+      invocation === "auto"
+        ? description
+        : [getInvocationLabelText(invocation, isJapanese()), description]
+            .filter(Boolean)
+            .join(" · "),
       vscode.TreeItemCollapsibleState.None,
       this.isRemoteInstalled(resource) ? "remoteResource" : "resource",
       resource,
@@ -742,7 +796,12 @@ export class UserResourceTreeItem extends vscode.TreeItem {
               "warning",
               new vscode.ThemeColor("errorForeground"),
             )
-          : new vscode.ThemeIcon(getResourceKindIcon(resource.kind));
+          : new vscode.ThemeIcon(
+              getInvocationIconId(
+                resource.kind === "skill" ? resource.invocation : undefined,
+                getResourceKindIcon(resource.kind),
+              ),
+            );
       const status = resource.isBuiltIn
         ? `${isJapanese() ? "組み込み" : "Built-in"} · ${resource.tool}`
         : resource.isReadOnly
@@ -776,7 +835,15 @@ export class UserResourceTreeItem extends vscode.TreeItem {
           ? `\n再インストール確認: 無効${resource.reinstallDisabledReason ? ` (${resource.reinstallDisabledReason})` : ""}`
           : `\nReinstall Check: disabled${resource.reinstallDisabledReason ? ` (${resource.reinstallDisabledReason})` : ""}`
         : "";
-      this.tooltip = `${resource.name}\n${resource.description || "No description"}${pluginLine}${lifecycleLines}${incompleteLine}${metadataLine}${reinstallDisabledLine}${recentLine}\n${status}\n${resource.relativePath}\n${resource.fullPath}`;
+      const invocationMode =
+        resource.kind === "skill"
+          ? normalizeSkillInvocation(resource.invocation)
+          : "auto";
+      const invocationLine =
+        invocationMode === "auto"
+          ? ""
+          : `\n${isJapanese() ? "呼び出し" : "Invocation"}: ${getInvocationLabelText(invocationMode, isJapanese())} - ${getInvocationExplanationText(invocationMode, resource.name, isJapanese())}`;
+      this.tooltip = `${resource.name}\n${resource.description || "No description"}${invocationLine}${pluginLine}${lifecycleLines}${incompleteLine}${metadataLine}${reinstallDisabledLine}${recentLine}\n${status}\n${resource.relativePath}\n${resource.fullPath}`;
       this.command = {
         command: "resourceNinja.openUserResource",
         title: isJapanese() ? "リソースを開く" : "Open Resource",

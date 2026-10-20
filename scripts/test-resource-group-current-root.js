@@ -64,8 +64,19 @@ const vscodeStub = {
   workspace: { getConfiguration: () => ({ get: () => false }) },
 };
 
+const skillInvocationModeModule = requireTypeScriptModule(
+  path.join(repoRoot, "src", "skillInvocationMode.ts"),
+  {},
+);
+const skillListOptionsModule = requireTypeScriptModule(
+  path.join(repoRoot, "src", "skillListOptions.ts"),
+  { "./skillInvocationMode": skillInvocationModeModule },
+);
+
 const providerModule = requireTypeScriptModule(providerPath, {
   vscode: vscodeStub,
+  "./skillInvocationMode": skillInvocationModeModule,
+  "./skillListOptions": skillListOptionsModule,
   "./skillIndex": {
     getResourceKindIcon: () => "file",
     getResourceKindLabel: (kind) => kind,

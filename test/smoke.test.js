@@ -291,4 +291,69 @@ suite("Agent Resources Ninja smoke test", () => {
       await vscode.commands.executeCommand("skillNinja.refresh");
     }
   });
+
+  // 単体テストは「ピッカーが開いたまま状態を保つ」ことを確かめられない。実際の QuickPick をキー操作で動かす。
+  // コマンドは確定後の設定を返すので、ホスト側から結果を観測できる。
+  test("filter and sort pickers apply several choices from one open picker", async function () {
+    const extension = vscode.extensions.getExtension(
+      "yamapan.agent-resources-ninja",
+    );
+    await extension.activate();
+    const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const pickerKeys = {
+      next: "workbench.action.quickOpenSelectNext",
+      previous: "workbench.action.quickOpenSelectPrevious",
+      accept: "workbench.action.acceptSelectedQuickOpenItem",
+    };
+    const drive = async (commandId, keys) => {
+      const pending = vscode.commands.executeCommand(commandId);
+      await pause(800);
+      for (const key of keys) {
+        await vscode.commands.executeCommand(pickerKeys[key]);
+        await pause(250);
+      }
+      await vscode.commands.executeCommand("workbench.action.closeQuickOpen");
+      return pending;
+    };
+    const repeat = (key, count) => Array(count).fill(key);
+
+    for (const [commandId, sortSteps, expectedSort] of [
+      // 項目順: 絞り込み(all/auto/explicitOnly/modelOnly) → 並べ替え。
+      // ローカル（Installed / User-Global）は default/name/invocation、Browse は default/name/stars
+      ["resourceNinja.filterSkillsByInvocation", 4, "invocation"],
+      ["resourceNinja.filterBrowseSkills", 3, "name"],
+    ]) {
+      try {
+        const changed = await drive(commandId, [
+          ...repeat("next", 2),
+          "accept",
+          ...repeat("next", sortSteps),
+          "accept",
+        ]);
+        assert.deepStrictEqual(
+          { ...changed },
+          { filter: "explicitOnly", sort: expectedSort },
+          `${commandId} must apply a filter and a sort from one open picker`,
+        );
+        const unchanged = await drive(commandId, []);
+        assert.deepStrictEqual(
+          { ...unchanged },
+          { ...changed },
+          `${commandId} must keep the applied options`,
+        );
+      } finally {
+        const reset = await drive(commandId, [
+          ...repeat("previous", 2),
+          "accept",
+          ...repeat("next", 4),
+          "accept",
+        ]);
+        assert.deepStrictEqual(
+          { ...reset },
+          { filter: "all", sort: "default" },
+          `${commandId} must return to the default view`,
+        );
+      }
+    }
+  });
 });

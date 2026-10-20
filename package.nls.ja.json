@@ -42,6 +42,8 @@
   "command.showBuiltInResources": "組み込みリソースを表示",
   "command.hideBuiltInResources": "組み込みリソースを非表示",
   "command.toggleRemoteResourceViewMode": "リモート表示レイアウトを切り替え",
+  "command.filterSkillsByInvocation": "スキルの絞り込みと並べ替え",
+  "command.filterBrowseSkills": "リモートスキルの絞り込みと並べ替え",
   "command.openOnGitHub": "GitHub で開く",
   "command.browseByCategory": "カテゴリで検索",
   "command.showRecent": "最近インストールしたリソース",

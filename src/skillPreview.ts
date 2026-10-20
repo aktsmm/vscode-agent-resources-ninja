@@ -20,6 +20,11 @@ import { resetGitHubCredentialBlocklist } from "./githubCredentialBlocklist";
 import { fetchGitHubWithOptionalAuthRetry } from "./githubFetch";
 import { encodeGitHubPathForUrl, encodeGitRefForPath } from "./gitHubRefSafety";
 import { normalizeStarCount } from "./indexDataNormalization";
+import {
+  getInvocationExplanationText,
+  getInvocationLabelText,
+  normalizeSkillInvocation,
+} from "./skillInvocationMode";
 
 let previewPanel: vscode.WebviewPanel | undefined;
 let previewMessageListener: vscode.Disposable | undefined;
@@ -36,6 +41,40 @@ function escapeHtml(text: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+/** skill の呼び出しモード・引数ヒント・context を meta 行へ足す HTML。値はすべてエスケープする。 */
+function getInvocationMetaHtml(skill: Skill): string {
+  if (getResourceKind(skill) !== "skill") {
+    return "";
+  }
+  const isJa = isJapanese();
+  const parts: string[] = [];
+  const invocation = normalizeSkillInvocation(skill.invocation);
+  if (invocation !== "auto") {
+    const label = escapeHtml(getInvocationLabelText(invocation, isJa));
+    const explanation = escapeHtml(
+      getInvocationExplanationText(invocation, skill.name, isJa),
+    );
+    parts.push(
+      `<strong>${isJa ? "呼び出し" : "Invocation"}:</strong> <span title="${explanation}">${label}</span>`,
+    );
+  }
+  if (skill.argumentHint) {
+    parts.push(
+      `<strong>${isJa ? "引数ヒント" : "Argument hint"}:</strong> <code>${escapeHtml(skill.argumentHint)}</code>`,
+    );
+  }
+  if (skill.context === "fork") {
+    parts.push(
+      escapeHtml(
+        isJa
+          ? "サブエージェントで実行 (context: fork)"
+          : "Runs in a subagent (context: fork)",
+      ),
+    );
+  }
+  return parts.map((part) => ` | ${part}`).join("");
 }
 
 function sanitizeHref(href: string): string {
@@ -371,6 +410,7 @@ export function getWebviewContent(
       : escapeHtml(normalizedStars.toLocaleString());
   const starIcon = isFavorite ? "★" : "☆";
   const starClass = isFavorite ? "favorite" : "";
+  const invocationMeta = getInvocationMetaHtml(skill);
 
   // インデックスにないスキル（検索結果から）の場合は Add Source ボタンを表示
   const addSourceButton = isInIndex
@@ -542,7 +582,7 @@ export function getWebviewContent(
       safeBundle
         ? ` | <strong>${messages.bundleLabel()}:</strong> ${safeBundle}`
         : ""
-    }
+    }${invocationMeta}
   </div>
   ${standaloneWarning}
   <div class="content">

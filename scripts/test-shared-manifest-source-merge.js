@@ -969,6 +969,43 @@ test("invalid shared metadata values are filtered before runtime use", async () 
   assert.deepStrictEqual(Object.keys(read.index.scanMeta), ["valid"]);
 });
 
+// A sibling extension writes these fields, and the filter relies on them, so a read that
+// dropped one would silently turn a manual-only skill into a plain one.
+test("invocation fields survive the shared index round trip", async () => {
+  const base = sharedManifest.createEmptySharedResourceIndex("test.extension");
+  const index = {
+    ...base,
+    byKind: {
+      ...base.byKind,
+      skill: [
+        {
+          name: "manual",
+          source: "src",
+          path: "skills/manual",
+          kind: "skill",
+          description: "manual",
+          invocation: "explicitOnly",
+          argumentHint: "<topic>",
+          context: "fork",
+        },
+      ],
+    },
+  };
+  fs.mkdirSync(sharedDir, { recursive: true });
+  fs.writeFileSync(sharedIndexPath, JSON.stringify(index), "utf8");
+
+  const read = await store.readSharedResourceIndexResult();
+  assert.strictEqual(read.status, "valid");
+  const applied = store.applySharedResourceIndexToSkillIndex(
+    { version: "1", lastUpdated: "2026-01-01", sources: [], skills: [], categories: [] },
+    read.index,
+  );
+  assert.strictEqual(applied.skills[0].invocation, "explicitOnly");
+  assert.strictEqual(applied.skills[0].argumentHint, "<topic>");
+  assert.strictEqual(applied.skills[0].context, "fork");
+  fs.rmSync(sharedIndexPath, { force: true });
+});
+
 async function main() {
   let failed = 0;
   for (const [name, fn] of tests) {

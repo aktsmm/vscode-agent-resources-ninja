@@ -201,6 +201,10 @@ function createModule() {
     "./githubCredentialBlocklist": githubCredentialBlocklistModule,
     "./sourceUpdateReconcile": sourceUpdateReconcileModule,
     "./indexDataNormalization": indexDataNormalizationModule,
+    "./skillInvocationMode": requireTypeScriptModule(
+      path.join(__dirname, "..", "src", "skillInvocationMode.ts"),
+      {},
+    ),
   });
 
   return { moduleExports, writes, resourceKindsModule };
@@ -1043,6 +1047,82 @@ async function testExternalRegistryParsersBuildNormalizedSkills() {
   assert.strictEqual(registryResult.skills.length, 1);
 }
 
+async function testScannedSkillsCarryInvocationMetadata() {
+  const { moduleExports } = createModule();
+  const files = {
+    "skills/manual/SKILL.md":
+      "---\nname: manual\ndescription: Manual one\ndisable-model-invocation: true\nargument-hint: <topic>\ncontext: fork\n---\n# Manual\n",
+    "skills/model/SKILL.md":
+      "---\nname: model\ndescription: Model one\nuser-invocable: false\n---\n# Model\n",
+    "skills/plain/SKILL.md":
+      "---\nname: plain\ndescription: Plain one\n---\n# Plain\n",
+    "skills/bare/SKILL.md": "# Bare skill\n\nNo frontmatter here.\n",
+    ".github/agents/helper.agent.md":
+      "---\nname: helper\ndescription: Helper agent\ndisable-model-invocation: true\n---\n# Helper\n",
+  };
+  global.fetch = async (url) => {
+    if (url === "https://api.github.com/repos/octo/invocation-source") {
+      return response(200, { default_branch: "main" });
+    }
+    if (
+      url ===
+      "https://api.github.com/repos/octo/invocation-source/git/trees/main?recursive=1"
+    ) {
+      return response(200, {
+        tree: Object.keys(files).map((filePath) => ({
+          path: filePath,
+          type: "blob",
+        })),
+      });
+    }
+    const rawPrefix =
+      "https://raw.githubusercontent.com/octo/invocation-source/main/";
+    if (url.startsWith(rawPrefix)) {
+      const body = files[url.slice(rawPrefix.length)];
+      return body === undefined ? response(404, "") : response(200, body);
+    }
+    throw new Error(`Unexpected fetch ${url}`);
+  };
+
+  const result = await moduleExports.addSource(
+    { globalStorageUri: { fsPath: path.join("D:", "tmp", "storage") } },
+    {
+      version: "1.0.0",
+      lastUpdated: "2026-06-20",
+      sources: [],
+      skills: [],
+      categories: [],
+      bundles: [],
+    },
+    "https://github.com/octo/invocation-source",
+  );
+
+  const byName = new Map(result.index.skills.map((skill) => [skill.name, skill]));
+  assert.strictEqual(byName.get("manual").invocation, "explicitOnly");
+  assert.strictEqual(byName.get("manual").argumentHint, "<topic>");
+  assert.strictEqual(byName.get("manual").context, "fork");
+  assert.strictEqual(byName.get("model").invocation, "modelOnly");
+  assert.strictEqual(
+    byName.get("plain").invocation,
+    "auto",
+    "a plain skill stores auto so it is not mistaken for an unfetched entry",
+  );
+  assert.strictEqual(byName.get("plain").argumentHint, undefined);
+  assert.strictEqual(byName.get("plain").context, undefined);
+  assert.strictEqual(
+    byName.get("bare").invocation,
+    "auto",
+    "a skill without frontmatter is a plain skill",
+  );
+  const agent = byName.get("helper");
+  assert.ok(agent, "the agent file should be indexed");
+  assert.strictEqual(
+    agent.invocation,
+    undefined,
+    "only skills carry an invocation mode",
+  );
+}
+
 async function main() {
   await testPrivateSourceUsesContentsFallback();
   await testPublicRawDoesNotAttachToken();
@@ -1055,6 +1135,7 @@ async function main() {
   await testSaveSkillIndexSyncsSharedStores();
   await testTruncatedTreeFailsExplicitly();
   await testRootResourceLicensePathIsNormalized();
+  await testScannedSkillsCarryInvocationMetadata();
   await testSuppliedResourceKindsCoversIndexUpdaterImports();
   await testExternalRegistryParsersBuildNormalizedSkills();
   console.log("PASS index updater private source auth");

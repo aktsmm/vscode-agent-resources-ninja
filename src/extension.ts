@@ -78,6 +78,20 @@ import {
   UserResourcesProvider,
 } from "./userResourcesProvider";
 import {
+  describeViewOptions,
+  showSkillViewOptionsPicker,
+} from "./skillViewOptionsPicker";
+import {
+  getSkillViewOptions,
+  getSortModes,
+  isViewOptionsActive,
+  normalizeInvocationFilter,
+  normalizeSortMode,
+  setSkillViewOptions,
+  type SkillViewOptions,
+  type SkillViewScope,
+} from "./skillListOptions";
+import {
   updateIndexFromSources,
   updateIndexFromSourcesWithResult,
   updateIndexFromSingleSource,
@@ -310,6 +324,15 @@ const EXTENSION_VERSION =
 const STALE_SOURCE_PROMPT_DATE_KEY = "resourceNinja.staleSourceLastPromptDate";
 const STALE_SOURCE_CURSOR_KEY = "resourceNinja.staleSourceUpdateCursor";
 const CURSOR_PLUGIN_RECEIPTS_KEY = "resourceNinja.cursorPluginReceipts";
+// 絞り込み・並べ替えの保存先。Installed と User-Global は「local」を共有する
+const VIEW_OPTIONS_STATE_KEYS: Record<SkillViewScope, string> = {
+  local: "resourceNinja.viewOptions.local",
+  browse: "resourceNinja.viewOptions.browse",
+};
+const VIEW_FILTER_CONTEXT_KEYS: Record<SkillViewScope, string> = {
+  local: "resourceNinja.invocationFilterActive",
+  browse: "resourceNinja.browseFilterActive",
+};
 const CODEX_REPAIR_COMMAND =
   "winget install --id OpenAI.Codex -e --source winget --force";
 
@@ -2120,6 +2143,44 @@ export async function activate(
     },
   );
 
+  /** 絞り込み・並べ替えをビューへ反映する。既定から外れている間はタイトルのアイコンを塗りつぶしにする。 */
+  function applyViewOptions(
+    scope: SkillViewScope,
+    options: SkillViewOptions,
+  ): void {
+    setSkillViewOptions(scope, options);
+    void vscode.commands.executeCommand(
+      "setContext",
+      VIEW_FILTER_CONTEXT_KEYS[scope],
+      isViewOptionsActive(options),
+    );
+    // 絞り込み中であることをビュー上に出す。忘れたまま「スキルが無い」と誤解しないため
+    const message = describeViewOptions(scope, options);
+    if (scope === "local") {
+      installedTreeView.message = message;
+      userResourcesTreeView.message = message;
+      workspaceProvider.refreshView();
+      userResourcesProvider.refreshView();
+    } else {
+      browseTreeView.message = message;
+      browseProvider.refreshView();
+    }
+  }
+
+  // 保存済みの絞り込み・並べ替えを復元する
+  for (const scope of ["local", "browse"] as const) {
+    const stored = context.workspaceState.get<Partial<SkillViewOptions>>(
+      VIEW_OPTIONS_STATE_KEYS[scope],
+    );
+    const restored: SkillViewOptions = {
+      filter: normalizeInvocationFilter(stored?.filter),
+      sort: normalizeSortMode(stored?.sort, getSortModes(scope)),
+    };
+    if (isViewOptionsActive(restored)) {
+      applyViewOptions(scope, restored);
+    }
+  }
+
   // ダブルクリックでインストール機能
   let lastClickTime = 0;
   let lastClickedItem: string | undefined;
@@ -2384,6 +2445,43 @@ export async function activate(
     () => {
       userResourcesProvider.refresh();
     },
+  );
+
+  // Commands: Filter and sort the skill views (local = Installed / User-Global, browse = Browse)
+  // 戻り値は確定後の設定。Extension Host テストが、ピッカー操作の結果を観測するために使う
+  const createViewOptionsHandler =
+    (scope: SkillViewScope) => async (): Promise<SkillViewOptions> => {
+      await showSkillViewOptionsPicker(
+        scope,
+        getSkillViewOptions(scope),
+        async (next) => {
+          // 見た目を先に更新し、保存の遅れで反映が待たされないようにする
+          applyViewOptions(scope, next);
+          await context.workspaceState.update(
+            VIEW_OPTIONS_STATE_KEYS[scope],
+            isViewOptionsActive(next) ? next : undefined,
+          );
+        },
+      );
+      return getSkillViewOptions(scope);
+    };
+  const localViewOptionsHandler = createViewOptionsHandler("local");
+  const browseViewOptionsHandler = createViewOptionsHandler("browse");
+  const filterLocalSkillsCmd = vscode.commands.registerCommand(
+    "resourceNinja.filterSkillsByInvocation",
+    localViewOptionsHandler,
+  );
+  const filterLocalSkillsActiveCmd = vscode.commands.registerCommand(
+    "resourceNinja.filterSkillsByInvocationActive",
+    localViewOptionsHandler,
+  );
+  const filterBrowseSkillsCmd = vscode.commands.registerCommand(
+    "resourceNinja.filterBrowseSkills",
+    browseViewOptionsHandler,
+  );
+  const filterBrowseSkillsActiveCmd = vscode.commands.registerCommand(
+    "resourceNinja.filterBrowseSkillsActive",
+    browseViewOptionsHandler,
   );
 
   const toggleRemoteResourceViewModeCmd = vscode.commands.registerCommand(
@@ -9816,6 +9914,10 @@ ${fileUri.fsPath}`,
     showBuiltInResourcesCmd,
     hideBuiltInResourcesCmd,
     toggleRemoteResourceViewModeCmd,
+    filterLocalSkillsCmd,
+    filterLocalSkillsActiveCmd,
+    filterBrowseSkillsCmd,
+    filterBrowseSkillsActiveCmd,
     refreshLocalCmd,
     refreshUserResourcesCmd,
     openUserResourceCmd,

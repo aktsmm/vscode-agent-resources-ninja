@@ -79,6 +79,9 @@ const { markdownToHtml, getWebviewContent } = requireTypeScriptModule(
       path.join(__dirname, "..", "src", "gitHubRefSafety.ts"),
     ),
     "./indexDataNormalization": indexDataNormalization,
+    "./skillInvocationMode": requireTypeScriptModule(
+      path.join(__dirname, "..", "src", "skillInvocationMode.ts"),
+    ),
   },
 );
 

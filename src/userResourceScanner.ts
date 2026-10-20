@@ -31,6 +31,10 @@ import {
   readJsonObject,
   stripSkillMetaLocalPaths,
 } from "./skillInstaller";
+import {
+  readSkillInvocationFromText,
+  type SkillInvocation,
+} from "./skillInvocationMode";
 
 export type UserResourceScope = "userData" | "globalHome" | "extension";
 
@@ -53,6 +57,7 @@ export interface UserResource {
   categories: string[];
   relativePath: string;
   remotePath?: string;
+  invocation?: SkillInvocation; // skill の呼び出しモード（SKILL.md の frontmatter）
   pluginRoot?: string;
   pluginManifestPath?: string;
   pluginManifestKind?: string;
@@ -763,6 +768,10 @@ async function parseResourceFile(
       : getDefaultResourceCategories(kind),
     relativePath: normalizedDetectionPath,
     remotePath: installMeta?.remotePath,
+    invocation:
+      kind === "skill" && bodyText
+        ? readSkillInvocationFromText(bodyText)
+        : undefined,
     pluginRoot: installMeta?.pluginRoot,
     pluginManifestPath: installMeta?.pluginManifestPath,
     pluginManifestKind: installMeta?.pluginManifestKind,

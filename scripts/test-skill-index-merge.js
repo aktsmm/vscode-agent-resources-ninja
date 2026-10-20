@@ -679,4 +679,62 @@ test("the local scan timestamp survives a merge", () => {
   assert.strictEqual(merged.lastUpdated, "2026-03-10");
 });
 
+test("invocation metadata flows from the bundled catalog and is never dropped by a merge", () => {
+  const source = {
+    id: "src",
+    name: "Src",
+    url: "https://github.com/octo/src",
+    type: "official",
+    description: "",
+  };
+  const makeSkill = (name, extra) => ({
+    name,
+    source: "src",
+    path: `skills/${name}`,
+    categories: [],
+    description: name,
+    ...extra,
+  });
+  const makeIndex = (skills) => ({
+    version: "1.0.0",
+    lastUpdated: "2026-03-01",
+    sources: [source],
+    categories: [],
+    skills,
+    bundles: [],
+  });
+
+  const merged = mergeSkillIndexes(
+    makeIndex([
+      makeSkill("old-index"),
+      makeSkill("scanned-here", { invocation: "modelOnly" }),
+      makeSkill("changed-upstream", { invocation: "explicitOnly" }),
+    ]),
+    makeIndex([
+      makeSkill("old-index", {
+        invocation: "explicitOnly",
+        argumentHint: "<topic>",
+        context: "fork",
+      }),
+      makeSkill("scanned-here"),
+      makeSkill("changed-upstream", { invocation: "auto" }),
+    ]),
+  );
+  const byName = new Map(merged.skills.map((skill) => [skill.name, skill]));
+
+  assert.strictEqual(byName.get("old-index").invocation, "explicitOnly");
+  assert.strictEqual(byName.get("old-index").argumentHint, "<topic>");
+  assert.strictEqual(byName.get("old-index").context, "fork");
+  assert.strictEqual(
+    byName.get("scanned-here").invocation,
+    "modelOnly",
+    "a value scanned on this machine survives a bundle that has none",
+  );
+  assert.strictEqual(
+    byName.get("changed-upstream").invocation,
+    "auto",
+    "a newer bundled value replaces the old one",
+  );
+});
+
 console.log("RESULT=PASS");

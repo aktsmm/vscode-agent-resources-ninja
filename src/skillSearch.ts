@@ -15,6 +15,11 @@ import {
   getResourceKindLabel,
 } from "./skillIndex";
 import { isJapanese } from "./i18n";
+import {
+  getInvocationIconId,
+  getInvocationLabelText,
+  normalizeSkillInvocation,
+} from "./skillInvocationMode";
 
 // QuickPick用のアイテム型
 export interface SkillQuickPickItem extends vscode.QuickPickItem {
@@ -218,13 +223,22 @@ function skillToQuickPickItem(
   const desc = getLocalizedDescription(skill, isJa);
   const kind = getResourceKind(skill);
   const kindLabel = getResourceKindLabel(kind, isJa);
-  const icon = getResourceKindIcon(kind);
+  const icon = getInvocationIconId(
+    kind === "skill" ? skill.invocation : undefined,
+    getResourceKindIcon(kind),
+  );
+  const invocation =
+    kind === "skill" ? normalizeSkillInvocation(skill.invocation) : "auto";
+  const invocationBadge =
+    invocation === "auto"
+      ? ""
+      : ` · ${getInvocationLabelText(invocation, isJa)}`;
   const sourceName = formatSourceDisplayName(skill.source, sources);
   const isDuplicate = hasDuplicateName(skill, duplicateNameCounts);
 
   return {
     label: `$(${icon}) ${skill.name}`,
-    description: `$(repo) ${sourceName} · ${kindLabel}`,
+    description: `$(repo) ${sourceName} · ${kindLabel}${invocationBadge}`,
     detail: `${desc || (isJa ? "説明なし" : "No description")}${
       categoryTags ? `  ${categoryTags}` : ""
     }${isDuplicate ? `\n${isJa ? "Source" : "Source"}: ${skill.source} · Path: ${skill.path}` : ""}`,

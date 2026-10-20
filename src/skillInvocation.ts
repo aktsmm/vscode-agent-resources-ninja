@@ -1,29 +1,14 @@
 import * as vscode from "vscode";
+import { readSkillInvocationFromText } from "./skillInvocationMode";
 
 /**
  * SKILL.md の `disable-model-invocation: true` を読む。
  * 手動専用スキルは、モデルが自分で使おうとしないよう既定では一覧に載せない。
  * 正本は常に SKILL.md で、`.skill-meta.json` などの写しは参照しない。
+ * `user-invocable: false`（モデル専用）はモデルが使えるので、ここでは対象にしない。
  */
 export function parseDisableModelInvocation(text: string): boolean {
-  const frontmatter = text
-    .replace(/^\uFEFF/, "")
-    .replace(/\r\n/g, "\n")
-    .match(/^---\n([\s\S]*?)\n---/)?.[1];
-  if (!frontmatter) {
-    return false;
-  }
-
-  const line = frontmatter.match(/^disable-model-invocation:[ \t]*(.*)$/m);
-  if (!line) {
-    return false;
-  }
-
-  const value = line[1]
-    .replace(/\s+#.*$/, "")
-    .trim()
-    .replace(/^(["'])(.*)\1$/, "$2");
-  return value.toLowerCase() === "true";
+  return readSkillInvocationFromText(text) === "explicitOnly";
 }
 
 async function readDisableModelInvocation(filePath: string): Promise<boolean> {

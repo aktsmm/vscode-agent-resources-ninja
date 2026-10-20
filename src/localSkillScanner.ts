@@ -49,10 +49,8 @@ import {
   resolveInstructionFileUri,
 } from "./customizationPaths";
 import { logger } from "./logger";
-import {
-  markExplicitOnlySkillsRegistered,
-  parseDisableModelInvocation,
-} from "./skillInvocation";
+import { markExplicitOnlySkillsRegistered } from "./skillInvocation";
+import { readSkillInvocationFromText } from "./skillInvocationMode";
 
 const MAX_LOCAL_RESOURCE_FILES = 1000;
 
@@ -626,6 +624,8 @@ async function parseLocalSkillFile(
   const installMetaResult = await readResourceInstallMetadata(fileUri, kind);
   const installMeta =
     installMetaResult.status === "loaded" ? installMetaResult.value : undefined;
+  const invocation =
+    kind === "skill" ? readSkillInvocationFromText(normalizedText) : undefined;
 
   let name = "";
   let description = "";
@@ -696,10 +696,8 @@ async function parseLocalSkillFile(
     fullPath: fileUri.fsPath,
     relativePath: skillDir,
     isRegistered: false,
-    disableModelInvocation:
-      kind === "skill" && parseDisableModelInvocation(normalizedText)
-        ? true
-        : undefined,
+    disableModelInvocation: invocation === "explicitOnly" ? true : undefined,
+    invocation,
     isBuiltIn,
     // フラグ導入前のインストールも、既に読み込み済みの本文から判定する。
     incomplete:

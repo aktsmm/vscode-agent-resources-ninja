@@ -9,6 +9,10 @@ import {
   loadSharedStoresIntoSkillIndex,
   syncSharedStoresFromSkillIndex,
 } from "./sharedResourceIndexStore";
+import type {
+  SkillExecutionContext,
+  SkillInvocation,
+} from "./skillInvocationMode";
 
 export type ResourceKind =
   | "skill"
@@ -94,6 +98,15 @@ export interface Skill {
   license?: string; // ライセンス（例: MIT, Apache-2.0）
   author?: string; // 作成者
   version?: string; // バージョン
+  /**
+   * SKILL.md の frontmatter から取った呼び出しモード（skill のみ）。未設定はインデックス未更新（不明）で、
+   * 取得済みの通常スキルは "auto" が入る。
+   */
+  invocation?: SkillInvocation;
+  /** frontmatter の `argument-hint`。`/name` 実行時にチャット入力欄へ出るヒント */
+  argumentHint?: string;
+  /** frontmatter の `context: fork`（サブエージェントで実行する実験的機能） */
+  context?: SkillExecutionContext;
   pluginRoot?: string; // Plugin 全体のリモートルート（manifest 由来 resource 用）
   pluginManifestPath?: string; // Plugin manifest のリモートパス
   pluginManifestKind?: string; // claude-plugin / cursor-plugin / gemini-extension など
@@ -675,6 +688,9 @@ export function mergeSkillIndexes(
         license: bundledSkill.license || localSkill.license,
         author: bundledSkill.author || localSkill.author,
         version: bundledSkill.version || localSkill.version,
+        invocation: bundledSkill.invocation ?? localSkill.invocation,
+        argumentHint: bundledSkill.argumentHint ?? localSkill.argumentHint,
+        context: bundledSkill.context ?? localSkill.context,
         pluginRoot: bundledSkill.pluginRoot || localSkill.pluginRoot,
         pluginManifestPath:
           bundledSkill.pluginManifestPath || localSkill.pluginManifestPath,
@@ -845,6 +861,9 @@ function shouldPersistMergedIndex(
       localSkill.license !== mergedSkill.license ||
       localSkill.author !== mergedSkill.author ||
       localSkill.version !== mergedSkill.version ||
+      localSkill.invocation !== mergedSkill.invocation ||
+      localSkill.argumentHint !== mergedSkill.argumentHint ||
+      localSkill.context !== mergedSkill.context ||
       localSkill.pluginRoot !== mergedSkill.pluginRoot ||
       localSkill.pluginManifestPath !== mergedSkill.pluginManifestPath ||
       localSkill.pluginManifestKind !== mergedSkill.pluginManifestKind ||

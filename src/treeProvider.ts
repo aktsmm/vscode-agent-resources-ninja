@@ -46,6 +46,19 @@ import {
   getRelativeSkillsPathForWorkspace,
   isSameOrChildWorkspacePath,
 } from "./customizationPaths";
+import {
+  getInvocationExplanationText,
+  getInvocationIconId,
+  getInvocationLabelText,
+  normalizeSkillInvocation,
+  type SkillInvocation,
+} from "./skillInvocationMode";
+import {
+  filterSkillsByInvocation,
+  getSkillViewOptions,
+  hasInvocationData,
+  sortSkills,
+} from "./skillListOptions";
 
 const RESOURCE_KIND_ORDER: ResourceKind[] = [
   "skill",
@@ -125,6 +138,44 @@ function getWorkspacePluginId(resource: WorkspaceSkill): string | undefined {
   );
 }
 
+function getInvocationLabel(invocation: SkillInvocation | undefined): string {
+  return getInvocationLabelText(invocation, isJapanese());
+}
+
+function getInvocationExplanation(
+  invocation: SkillInvocation | undefined,
+  name: string,
+): string {
+  return getInvocationExplanationText(invocation, name, isJapanese());
+}
+
+/** 絞り込みで 0 件になったときの案内。インデックス未更新と本当に該当なしを見分ける。 */
+function createFilteredEmptyItem(
+  resources: ReadonlyArray<{ kind?: string; invocation?: unknown }>,
+  checkIndexData: boolean,
+): SkillTreeItem {
+  const isJa = isJapanese();
+  const lacksData = checkIndexData && !hasInvocationData(resources);
+  return new SkillTreeItem(
+    lacksData
+      ? isJa
+        ? "呼び出しモードの情報がインデックスにありません"
+        : "The index has no invocation-mode data yet"
+      : isJa
+        ? "絞り込みに一致するスキルがありません"
+        : "No skills match the filter",
+    lacksData
+      ? isJa
+        ? "「インデックス更新」を実行すると取得されます"
+        : "Run 'Update Index' to fetch it"
+      : isJa
+        ? "ビュー上部のアイコンで「すべて表示」に戻せます"
+        : "Reset the filter with the icon in the view title",
+    vscode.TreeItemCollapsibleState.None,
+    "placeholder",
+  );
+}
+
 /**
  * ワークスペーススキル情報（統合型）
  */
@@ -138,6 +189,7 @@ export interface WorkspaceSkill {
   isInstalled: boolean; // configured skills directory 配下か
   isRegistered: boolean; // instruction file に登録済みか
   disableModelInvocation?: boolean; // 手動専用スキル
+  invocation?: SkillInvocation; // skill の呼び出しモード（SKILL.md の frontmatter）
   isBuiltIn?: boolean; // VS Code / Copilot Chat built-in resource
   incomplete?: boolean; // 実体を取得できず、生成テンプレートだけが残っている
   reinstallDisabled?: boolean;
@@ -243,6 +295,20 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
     this._onDidChangeTreeData.fire();
   }
 
+  /** 再スキャンせず、絞り込み・並べ替えの変更だけをツリーへ反映する。 */
+  refreshView(): void {
+    this._onDidChangeTreeData.fire();
+  }
+
+  /** ビューの絞り込み・並べ替えを適用した一覧。元の `workspaceSkills` は変更しない。 */
+  private getVisibleSkills(): WorkspaceSkill[] {
+    const { filter, sort } = getSkillViewOptions("local");
+    return sortSkills(
+      filterSkillsByInvocation(this.workspaceSkills, filter),
+      sort,
+    );
+  }
+
   getTreeItem(element: SkillTreeItem): vscode.TreeItem {
     return element;
   }
@@ -276,6 +342,14 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
       }
 
       const items: SkillTreeItem[] = [];
+      const visibleSkills = this.getVisibleSkills();
+      const skillsHiddenByFilter =
+        getSkillViewOptions("local").filter !== "all" &&
+        this.workspaceSkills.some((skill) => (skill.kind || "skill") === "skill") &&
+        !visibleSkills.some((skill) => (skill.kind || "skill") === "skill");
+      if (skillsHiddenByFilter) {
+        items.push(createFilteredEmptyItem(this.workspaceSkills, false));
+      }
       this.addWorkspacePluginSection(items);
       items.push(
         ...this.getPresentWorkspaceResourceKinds().map((kind) => {
@@ -335,7 +409,7 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
       element.contextValue === "workspaceResourceType" &&
       element.resourceKind
     ) {
-      return this.workspaceSkills
+      return this.getVisibleSkills()
         .filter(
           (skill) =>
             !skill.isBuiltIn &&
@@ -349,7 +423,7 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
 
   private getPresentWorkspaceResourceKinds(): ResourceKind[] {
     const present = new Set(
-      this.workspaceSkills
+      this.getVisibleSkills()
         .filter((skill) => !skill.isBuiltIn)
         .map((skill) => skill.kind || "skill"),
     );
@@ -357,14 +431,14 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
   }
 
   private getWorkspaceResourceCountForKind(kind: ResourceKind): number {
-    return this.workspaceSkills.filter(
+    return this.getVisibleSkills().filter(
       (skill) => !skill.isBuiltIn && (skill.kind || "skill") === kind,
     ).length;
   }
 
   private getWorkspacePluginGroups(): WorkspacePluginGroup[] {
     const groups = new Map<string, WorkspaceSkill[]>();
-    for (const resource of this.workspaceSkills) {
+    for (const resource of this.getVisibleSkills()) {
       if (resource.isBuiltIn) {
         continue;
       }
@@ -382,7 +456,7 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
   }
 
   private getWorkspacePluginResources(pluginId: string): WorkspaceSkill[] {
-    return this.workspaceSkills.filter(
+    return this.getVisibleSkills().filter(
       (resource) => getWorkspacePluginId(resource) === pluginId,
     );
   }
@@ -498,9 +572,15 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
     const itemDescription = skill.incomplete
       ? [baseDescription, incompleteLabel].filter(Boolean).join(" · ")
       : baseDescription;
+    const invocation =
+      kind === "skill" ? normalizeSkillInvocation(skill.invocation) : "auto";
+    const invocationBadge =
+      invocation === "auto" ? undefined : getInvocationLabel(invocation);
     const item = new SkillTreeItem(
       `${labelPrefix}${skill.name}`,
-      itemDescription,
+      [invocationBadge, itemDescription]
+        .filter((part): part is string => !!part)
+        .join(" · "),
       vscode.TreeItemCollapsibleState.None,
       contextValue,
       {
@@ -518,6 +598,7 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
         relativePath: skill.relativePath,
         isRegistered: skill.isRegistered,
         isBuiltIn: skill.isBuiltIn,
+        invocation: skill.invocation,
         metadataStatus: skill.metadataStatus,
         reinstallDisabled: skill.reinstallDisabled,
         reinstallDisabledReason: skill.reinstallDisabledReason,
@@ -536,7 +617,10 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
             "warning",
             new vscode.ThemeColor("errorForeground"),
           )
-        : new vscode.ThemeIcon(iconId, iconColor);
+        : new vscode.ThemeIcon(
+            getInvocationIconId(invocation, iconId),
+            iconColor,
+          );
     item.resourceUri = vscode.Uri.file(skill.fullPath);
 
     const statusText = skill.isBuiltIn
@@ -598,7 +682,11 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
         ? `\n再インストール確認: 無効${skill.reinstallDisabledReason ? ` (${skill.reinstallDisabledReason})` : ""}`
         : `\nReinstall Check: disabled${skill.reinstallDisabledReason ? ` (${skill.reinstallDisabledReason})` : ""}`
       : "";
-    item.tooltip = `${skill.name}\n${descText}${pluginInfo}${lifecycleInfo}${incompleteInfo}${metadataInfo}${reinstallDisabledInfo}\n${pathLabel}: ${skill.relativePath}\n${statusLabel}: ${accessibleStatusText}${metaInfo}`;
+    const invocationInfo =
+      invocation === "auto"
+        ? ""
+        : `\n${isJapanese() ? "呼び出し" : "Invocation"}: ${getInvocationLabel(invocation)} - ${getInvocationExplanation(invocation, skill.name)}`;
+    item.tooltip = `${skill.name}\n${descText}${invocationInfo}${pluginInfo}${lifecycleInfo}${incompleteInfo}${metadataInfo}${reinstallDisabledInfo}\n${pathLabel}: ${skill.relativePath}\n${statusLabel}: ${accessibleStatusText}${metaInfo}`;
     item.command = {
       command: "vscode.open",
       title: isJapanese() ? "リソースを開く" : "Open Resource",
@@ -659,6 +747,7 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
         isInstalled,
         isRegistered: local.isRegistered,
         disableModelInvocation: local.disableModelInvocation,
+        invocation: local.invocation,
         isBuiltIn: local.isBuiltIn,
         source: local.source || (isInstalled ? undefined : "local"),
         remotePath: local.remotePath,
@@ -804,7 +893,11 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
     SkillTreeItem | undefined | null | void
   >();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
-  private skillIndex: SkillIndex | undefined;
+  // 読み込んだインデックスそのもの。ビューの絞り込みは `skillIndex` の getter が適用する。
+  private rawSkillIndex: SkillIndex | undefined;
+  private filteredIndexCache:
+    | { source: SkillIndex; filter: string; index: SkillIndex }
+    | undefined;
   private installedRemoteResourceKeys: Set<string> = new Set();
   private reinstallDisabledResourceReasons = new Map<
     string,
@@ -816,10 +909,49 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
     private recentlyInstalled?: Set<string>,
   ) {}
 
+  /**
+   * 絞り込み後のインデックス。sources / bundles / categories はそのまま、skills だけを絞る。
+   * 件数・お気に入り・Bundle・Plugin のどの経路も同じ一覧を見るようにするため、ここで 1 回だけ適用する。
+   */
+  private get skillIndex(): SkillIndex | undefined {
+    const raw = this.rawSkillIndex;
+    if (!raw) {
+      return undefined;
+    }
+    const { filter } = getSkillViewOptions("browse");
+    if (filter === "all") {
+      return raw;
+    }
+    if (
+      this.filteredIndexCache?.source !== raw ||
+      this.filteredIndexCache.filter !== filter
+    ) {
+      this.filteredIndexCache = {
+        source: raw,
+        filter,
+        index: {
+          ...raw,
+          skills: filterSkillsByInvocation(getIndexResources(raw), filter),
+        },
+      };
+    }
+    return this.filteredIndexCache.index;
+  }
+
+  private set skillIndex(index: SkillIndex | undefined) {
+    this.rawSkillIndex = index;
+    this.filteredIndexCache = undefined;
+  }
+
   refresh(): void {
     this.skillIndex = undefined;
     this.installedRemoteResourceKeys.clear();
     this.reinstallDisabledResourceReasons.clear();
+    this._onDidChangeTreeData.fire();
+  }
+
+  /** 再読み込みせず、絞り込み・並べ替えの変更だけをツリーへ反映する。 */
+  refreshView(): void {
     this._onDidChangeTreeData.fire();
   }
 
@@ -918,6 +1050,19 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
     if (!element) {
       const items: SkillTreeItem[] = [];
 
+      // 絞り込みで skill が 0 件になったとき、空に見える理由を先頭で案内する
+      const rawResources = getIndexResources(this.rawSkillIndex);
+      const filterActive = getSkillViewOptions("browse").filter !== "all";
+      if (
+        filterActive &&
+        rawResources.some((resource) => getResourceKind(resource) === "skill") &&
+        !getIndexResources(this.skillIndex).some(
+          (resource) => getResourceKind(resource) === "skill",
+        )
+      ) {
+        items.push(createFilteredEmptyItem(rawResources, true));
+      }
+
       // お気に入りセクション
       const favorites = this.context.globalState.get<string[]>("favorites", []);
       if (favorites.length > 0) {
@@ -971,6 +1116,10 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
       this.addBundleSection(items);
 
       for (const source of this.getOrderedSources()) {
+        // 絞り込み中は、該当が無いソースを並べない（空のソースと見分けがつかなくなる）
+        if (filterActive && this.getSkillCountForSource(source.id) === 0) {
+          continue;
+        }
         items.push(this.createSourceItem(source));
       }
 
@@ -1104,7 +1253,11 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
         ];
       }
 
-      return this.createResourceItems(bundleSkills, element.bundle.coreSkill);
+      return this.createResourceItems(
+        bundleSkills,
+        element.bundle.coreSkill,
+        false,
+      );
     }
 
     if (element.contextValue === "pluginSection") {
@@ -1507,12 +1660,17 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
   private createResourceItems(
     resources: Skill[],
     coreSkill?: string,
+    sortable = true,
   ): SkillTreeItem[] {
     const isJa = isJapanese();
     const pluginPackages = getPluginPackageCandidates(
       this.skillIndex?.skills || resources,
     );
-    return resources.map((skill) => {
+    // Bundle はインストール順に意味があるので並べ替えない
+    const ordered = sortable
+      ? sortSkills(resources, getSkillViewOptions("browse").sort)
+      : resources;
+    return ordered.map((skill) => {
       const isInstalled = this.isSkillInstalled(skill);
       const reinstallDisabledReason = this.getReinstallDisabledReason(skill);
       const reinstallDisabled = reinstallDisabledReason !== undefined;
@@ -1537,7 +1695,10 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
             ? "installedRemoteSkill"
             : "installedRemoteResource"
         : "skill";
+      const invocation =
+        kind === "skill" ? normalizeSkillInvocation(skill.invocation) : "auto";
       const descriptionParts = [
+        invocation === "auto" ? undefined : getInvocationLabel(invocation),
         isRecent
           ? isJa
             ? "最近インストール"
@@ -1573,7 +1734,9 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
 
       if (isInstalled) {
         item.iconPath = new vscode.ThemeIcon(
-          reinstallDisabled ? "warning" : getResourceKindIcon(kind),
+          reinstallDisabled
+            ? "warning"
+            : getInvocationIconId(invocation, getResourceKindIcon(kind)),
           new vscode.ThemeColor(
             reinstallDisabled ? "charts.yellow" : "charts.green",
           ),
@@ -1605,7 +1768,9 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
             : ""
         }`;
       } else {
-        item.iconPath = new vscode.ThemeIcon(getResourceKindIcon(kind));
+        item.iconPath = new vscode.ThemeIcon(
+          getInvocationIconId(invocation, getResourceKindIcon(kind)),
+        );
         const singleClickInstall = vscode.workspace
           .getConfiguration("resourceNinja")
           .get<boolean>("singleClickInstall", false);
@@ -1684,6 +1849,18 @@ export class SkillTreeItem extends vscode.TreeItem {
       }
       if (skill.version) {
         metaInfo += `\nVersion: ${skill.version}`;
+      }
+      const invocation = normalizeSkillInvocation(skill.invocation);
+      if (skill.kind === undefined || skill.kind === "skill") {
+        if (invocation !== "auto") {
+          metaInfo += `\n${getInvocationLabel(invocation)}: ${getInvocationExplanation(invocation, skill.name)}`;
+        }
+        if (skill.argumentHint) {
+          metaInfo += `\n${isJa ? "引数ヒント" : "Argument hint"}: ${skill.argumentHint}`;
+        }
+        if (skill.context === "fork") {
+          metaInfo += `\n${isJa ? "サブエージェントで実行 (context: fork)" : "Runs in a subagent (context: fork)"}`;
+        }
       }
 
       this.tooltip = `${skill.name}\n${localizedDesc}${metaInfo}`;

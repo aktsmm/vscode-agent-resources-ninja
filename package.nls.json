@@ -42,6 +42,8 @@
   "command.showBuiltInResources": "Show Built-in Resources",
   "command.hideBuiltInResources": "Hide Built-in Resources",
   "command.toggleRemoteResourceViewMode": "Toggle Remote Resource Layout",
+  "command.filterSkillsByInvocation": "Filter and Sort Skills",
+  "command.filterBrowseSkills": "Filter and Sort Remote Skills",
   "command.openOnGitHub": "Open on GitHub",
   "command.browseByCategory": "Browse by Category",
   "command.showRecent": "Recently Installed Resources",

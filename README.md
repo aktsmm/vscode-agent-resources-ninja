@@ -575,6 +575,8 @@ By default, shared instruction blocks stay intentionally small: `skill` is alway
 
 Skills whose `SKILL.md` sets `disable-model-invocation: true` are manual-only, so they are left out of the generated block unless `resourceNinja.instructionBlock.includeExplicitOnlySkills` is on; a listed skill invites the model to use it on its own. The flag is read from `SKILL.md` on every update, so editing it takes effect on save without any metadata step, in `resourcesDirectory` and every `additionalSkillRoots` entry. Manual-only skills stay in the tree as "Manual-only" and are never shown as unregistered. This policy applies only while Resource NINJA owns the shared block; when Agent Skills Ninja owns it, that extension's own policy decides. `user-invocable: false` skills are model-only and stay listed.
 
+To find those skills in the views, use the Filter and Sort icon in the title of Installed, User-Global, or Remote Resources. It filters skills by invocation mode (Manual only, Model only, Auto) and sorts by name, invocation mode, or (Remote) stars; other resource kinds are never filtered. For Remote Resources the mode comes from the index, so run Update Index once if the tree says the index has no invocation-mode data.
+
 ### Coexistence with Agent Skills Ninja
 
 When the companion extension [Agent Skills Ninja](https://marketplace.visualstudio.com/items?itemName=yamapan.agent-skill-ninja) is also installed, both extensions cooperate on one shared managed block. In `coexistenceMode = auto`, Resource NINJA is the active owner while both are present.

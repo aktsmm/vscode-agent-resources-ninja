@@ -223,6 +223,21 @@ const jaMessages = {
     "plugin フォルダーを登録できませんでした: この VS Code ({0}) には chat.pluginLocations 設定がありません。VS Code 1.116 以降へ更新するまで、この plugin は読み込まれません。",
   pluginsDisabledNote:
     "chat.plugins.enabled が false のため、有効化するまで plugin は読み込まれません。",
+  invocationFilterAll: "すべて表示",
+  viewOptionsTitle: "絞り込みと並べ替え",
+  viewOptionsPlaceholder: "選ぶとすぐ反映されます（Esc で閉じる）",
+  viewOptionsFilterHeading: "呼び出しモードで絞り込み（skill のみ）",
+  viewOptionsSortHeading: "並べ替え",
+  viewOptionsSelected: "選択中",
+  sortDefaultLocal: "既定の順序",
+  sortDefaultBrowse: "既定（インデックス順）",
+  sortName: "名前順",
+  sortStars: "スター数の多い順",
+  sortInvocation: "呼び出しモード順",
+  sortInvocationDetail: "手動専用 → モデル専用 → 自動",
+  viewOptionsFilterPart: "絞り込み: {0}",
+  viewOptionsSortPart: "並べ替え: {0}",
+  viewOptionsActiveMessage: "{0}（タイトルのアイコンで変更）",
 } as const;
 
 type MessageKey = keyof typeof jaMessages;
@@ -446,6 +461,21 @@ const enMessages: MessageDictionary = {
     "Could not register the plugin folder: this VS Code ({0}) has no chat.pluginLocations setting. The plugin will not load until you update to VS Code 1.116 or newer.",
   pluginsDisabledNote:
     "chat.plugins.enabled is false, so the plugin will not load until it is enabled.",
+  invocationFilterAll: "Show all",
+  viewOptionsTitle: "Filter and Sort",
+  viewOptionsPlaceholder: "Changes apply immediately (Esc to close)",
+  viewOptionsFilterHeading: "Filter by invocation mode (skills only)",
+  viewOptionsSortHeading: "Sort",
+  viewOptionsSelected: "Selected",
+  sortDefaultLocal: "Default order",
+  sortDefaultBrowse: "Default (index order)",
+  sortName: "Name",
+  sortStars: "Most stars",
+  sortInvocation: "Invocation mode",
+  sortInvocationDetail: "Manual only → Model only → Auto",
+  viewOptionsFilterPart: "Filter: {0}",
+  viewOptionsSortPart: "Sort: {0}",
+  viewOptionsActiveMessage: "{0} (change it with the icon in the view title)",
 };
 
 /**
@@ -776,6 +806,26 @@ export const messages = {
   pluginLocationUnsupportedVersion: (version: string) =>
     localize("pluginLocationUnsupportedVersion", version),
   pluginsDisabledNote: () => localize("pluginsDisabledNote"),
+
+  // Installed / User-Global / Browse 共通の絞り込みと並べ替え
+  invocationFilterAll: () => localize("invocationFilterAll"),
+  viewOptionsTitle: () => localize("viewOptionsTitle"),
+  viewOptionsPlaceholder: () => localize("viewOptionsPlaceholder"),
+  viewOptionsFilterHeading: () => localize("viewOptionsFilterHeading"),
+  viewOptionsSortHeading: () => localize("viewOptionsSortHeading"),
+  viewOptionsSelected: () => localize("viewOptionsSelected"),
+  sortDefaultLocal: () => localize("sortDefaultLocal"),
+  sortDefaultBrowse: () => localize("sortDefaultBrowse"),
+  sortName: () => localize("sortName"),
+  sortStars: () => localize("sortStars"),
+  sortInvocation: () => localize("sortInvocation"),
+  sortInvocationDetail: () => localize("sortInvocationDetail"),
+  viewOptionsFilterPart: (label: string) =>
+    localize("viewOptionsFilterPart", label),
+  viewOptionsSortPart: (label: string) =>
+    localize("viewOptionsSortPart", label),
+  viewOptionsActiveMessage: (parts: string) =>
+    localize("viewOptionsActiveMessage", parts),
 };
 
 export default messages;

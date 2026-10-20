@@ -56,6 +56,9 @@ const {
   markExplicitOnlySkillsRegistered,
 } = requireTypeScriptModule(path.join(repoRoot, "src", "skillInvocation.ts"), {
   vscode: vscodeStub,
+  "./skillInvocationMode": requireTypeScriptModule(
+    path.join(repoRoot, "src", "skillInvocationMode.ts"),
+  ),
 });
 
 const scannerSource = fs.readFileSync(
@@ -174,7 +177,11 @@ async function test(name, fn) {
       applied < firstReturn,
       "a disabled or missing instruction file must not skip the rule",
     );
-    assert.match(scannerSource, /parseDisableModelInvocation\(normalizedText\)/);
+    assert.match(
+      scannerSource,
+      /readSkillInvocationFromText\(normalizedText\)/,
+    );
+    assert.match(scannerSource, /disableModelInvocation: invocation === "explicitOnly"/);
   });
 
   await test("SKILL.md watchers regenerate output for every skill root", () => {

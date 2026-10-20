@@ -97,6 +97,14 @@ import {
   mergeScannedSource,
   reconcileSourceScanResult,
 } from "./sourceUpdateReconcile";
+import {
+  DISABLE_MODEL_INVOCATION_KEY,
+  USER_INVOCABLE_KEY,
+  parseSkillExecutionContext,
+  resolveSkillInvocationFromValues,
+  type SkillExecutionContext,
+  type SkillInvocation,
+} from "./skillInvocationMode";
 
 const FETCH_CONCURRENCY = 8;
 
@@ -1154,6 +1162,15 @@ async function processTreeResponse(
         if (skillInfo.version) {
           skill.version = skillInfo.version;
         }
+        if (kind === "skill") {
+          skill.invocation = skillInfo.invocation ?? "auto";
+          if (skillInfo.argumentHint) {
+            skill.argumentHint = skillInfo.argumentHint;
+          }
+          if (skillInfo.context) {
+            skill.context = skillInfo.context;
+          }
+        }
         if (kind === "plugin") {
           skill.pluginRoot = skillInfo.pluginRoot;
           skill.pluginManifestPath = skillInfo.pluginManifestPath;
@@ -1629,6 +1646,9 @@ function parseSkillFrontmatter(
   license?: string;
   author?: string;
   version?: string;
+  invocation?: SkillInvocation;
+  argumentHint?: string;
+  context?: SkillExecutionContext;
   pluginRoot?: string;
   pluginManifestPath?: string;
   pluginManifestKind?: string;
@@ -1687,6 +1707,12 @@ function parseSkillFrontmatter(
       license: frontmatter.get("license")?.trim(),
       author: frontmatter.get("author")?.trim() || metadataMatch?.[1]?.trim(),
       version: frontmatter.get("version")?.trim(),
+      invocation: resolveSkillInvocationFromValues({
+        disableModelInvocation: frontmatter.get(DISABLE_MODEL_INVOCATION_KEY),
+        userInvocable: frontmatter.get(USER_INVOCABLE_KEY),
+      }),
+      argumentHint: frontmatter.get("argument-hint")?.trim() || undefined,
+      context: parseSkillExecutionContext(frontmatter.get("context")),
     };
   }
 
@@ -1698,6 +1724,7 @@ function parseSkillFrontmatter(
     name: dirName,
     description,
     categories: getDefaultResourceCategories(kind),
+    invocation: "auto",
   };
 }
 

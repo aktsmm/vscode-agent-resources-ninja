@@ -105,6 +105,7 @@ test("workspace fallback is automatic only when configured roots are empty", () 
       "./resourceKinds": {},
       "./instructionManager": { updateInstructionFile: async () => undefined },
       "./skillInvocation": {},
+      "./skillInvocationMode": {},
       "./skillInstaller": { stripSkillMetaLocalPaths: (value) => value },
       "./customizationPaths": {},
       "./logger": {
@@ -248,6 +249,9 @@ const {
   getPluginManifestPrecedence,
   getPluginManifestScanGlobs,
 } = resourceKindsModule;
+const skillInvocationModeModule = requireTypeScriptModule(
+  path.join(repoRoot, "src", "skillInvocationMode.ts"),
+);
 
 const { getConfiguredWorkspaceResourceRoots } = requireTypeScriptModule(
   path.join(repoRoot, "src", "localSkillScanner.ts"),
@@ -267,8 +271,12 @@ const { getConfiguredWorkspaceResourceRoots } = requireTypeScriptModule(
     "./instructionManager": { updateInstructionFile: () => undefined },
     "./skillInvocation": requireTypeScriptModule(
       path.join(repoRoot, "src", "skillInvocation.ts"),
-      { vscode: vscodeStub },
+      {
+        vscode: vscodeStub,
+        "./skillInvocationMode": skillInvocationModeModule,
+      },
     ),
+    "./skillInvocationMode": skillInvocationModeModule,
     "./skillInstaller": { stripSkillMetaLocalPaths: () => undefined },
   },
 );
@@ -601,6 +609,7 @@ const { collectMarkdownFiles } = requireTypeScriptModule(
       },
     },
     "./userDataPaths": { getVsCodeUserDataPath: () => FIXTURE_ROOT },
+    "./skillInvocationMode": skillInvocationModeModule,
     "./skillInstaller": { stripSkillMetaLocalPaths: () => undefined },
   },
 );

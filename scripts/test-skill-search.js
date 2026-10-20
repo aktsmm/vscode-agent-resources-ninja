@@ -54,6 +54,9 @@ const { searchSkills } = requireTypeScriptModule(
     "./i18n": {
       isJapanese: () => false,
     },
+    "./skillInvocationMode": requireTypeScriptModule(
+      path.join(__dirname, "..", "src", "skillInvocationMode.ts"),
+    ),
     "./skillIndex": {
       getLocalizedDescription: (resource) => resource.description || "",
       getIndexResources: (index) =>

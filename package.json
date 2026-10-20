@@ -689,6 +689,30 @@
         "icon": "$(layout)"
       },
       {
+        "command": "resourceNinja.filterSkillsByInvocation",
+        "title": "%command.filterSkillsByInvocation%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "resourceNinja.filterSkillsByInvocationActive",
+        "title": "%command.filterSkillsByInvocation%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(filter-filled)"
+      },
+      {
+        "command": "resourceNinja.filterBrowseSkills",
+        "title": "%command.filterBrowseSkills%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "resourceNinja.filterBrowseSkillsActive",
+        "title": "%command.filterBrowseSkills%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(filter-filled)"
+      },
+      {
         "command": "resourceNinja.refreshUserResources",
         "title": "%command.refresh%",
         "category": "Agent Resources Ninja",
@@ -932,6 +956,14 @@
           "when": "false"
         },
         {
+          "command": "resourceNinja.filterSkillsByInvocationActive",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.filterBrowseSkillsActive",
+          "when": "false"
+        },
+        {
           "command": "resourceNinja.openUserResource",
           "when": "false"
         },
@@ -1009,6 +1041,16 @@
           "group": "navigation@3"
         },
         {
+          "command": "resourceNinja.filterSkillsByInvocation",
+          "when": "view == resourceNinja.installedView && !resourceNinja.invocationFilterActive",
+          "group": "navigation@4"
+        },
+        {
+          "command": "resourceNinja.filterSkillsByInvocationActive",
+          "when": "view == resourceNinja.installedView && resourceNinja.invocationFilterActive",
+          "group": "navigation@4"
+        },
+        {
           "command": "resourceNinja.uninstallAll",
           "when": "view == resourceNinja.installedView && resourceNinja.hasInstalledSkills",
           "group": "actions@1"
@@ -1074,6 +1116,16 @@
           "group": "navigation@6"
         },
         {
+          "command": "resourceNinja.filterBrowseSkills",
+          "when": "view == resourceNinja.browseView && !resourceNinja.browseFilterActive",
+          "group": "navigation@7"
+        },
+        {
+          "command": "resourceNinja.filterBrowseSkillsActive",
+          "when": "view == resourceNinja.browseView && resourceNinja.browseFilterActive",
+          "group": "navigation@7"
+        },
+        {
           "command": "resourceNinja.openSettings",
           "when": "view == resourceNinja.browseView",
           "group": "z_settings@1"
@@ -1117,6 +1169,16 @@
           "command": "resourceNinja.hideBuiltInResources",
           "when": "view == resourceNinja.userResourcesView && resourceNinja.builtInResourcesVisible",
           "group": "navigation@5"
+        },
+        {
+          "command": "resourceNinja.filterSkillsByInvocation",
+          "when": "view == resourceNinja.userResourcesView && !resourceNinja.invocationFilterActive",
+          "group": "navigation@6"
+        },
+        {
+          "command": "resourceNinja.filterSkillsByInvocationActive",
+          "when": "view == resourceNinja.userResourcesView && resourceNinja.invocationFilterActive",
+          "group": "navigation@6"
         },
         {
           "command": "resourceNinja.openSettings",

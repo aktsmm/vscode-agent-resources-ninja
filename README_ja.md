@@ -570,6 +570,8 @@ workspace skill を主 Workspace Skill Directory 以外に置く場合は、`add
 
 `SKILL.md` に `disable-model-invocation: true` を持つ skill は手動専用のため、`resourceNinja.instructionBlock.includeExplicitOnlySkills` を ON にしない限り生成ブロックに載せません（一覧に載せるとモデルが自分で使おうとするためです）。このフラグは更新のたびに `SKILL.md` から読み直すので、`resourcesDirectory` と `additionalSkillRoots` の全ルートで、保存するだけで反映されます（metadata の更新は不要です）。手動専用 skill はツリーに「手動専用」として残り、「未登録」とは表示されません。この方針は Resource NINJA が shared block の所有者のときだけ効きます。Agent Skills Ninja が所有者のときは、その拡張の方針に従います。`user-invocable: false` の skill はモデル専用で、一覧に載ります。
 
+ビューでそれらを探すには、Installed・User-Global・Remote Resources のタイトルにある「絞り込みと並べ替え」アイコンを使います。skill を呼び出しモード（手動専用・モデル専用・自動）で絞り込み、名前順・呼び出しモード順・（Remote は）スター数順で並べ替えます。他の種別は絞り込みません。Remote Resources の呼び出しモードはインデックスから読むため、「インデックスに情報がありません」と表示されたら、一度「インデックス更新」を実行してください。
+
 ### Agent Skills Ninja との共存
 
 [Agent Skills Ninja](https://marketplace.visualstudio.com/items?itemName=yamapan.agent-skill-ninja) を一緒に入れると、両拡張は 1 つの共有管理ブロックを協調して扱います。`coexistenceMode = auto` では、両方が有効な間は Resource NINJA がオーナーです。

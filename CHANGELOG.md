@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Filter and Sort Skills by Invocation Mode / 呼び出しモードでスキルを絞り込み・並べ替え** - Installed, User-Global, and Remote Resources each get a Filter and Sort icon in the view title. Pick Manual only (`disable-model-invocation: true`), Model only (`user-invocable: false`), or Auto, and sort by name, invocation mode, or (Remote) stars; the picker stays open so you can change both in one go, and an active filter is shown above the tree. Only skills are filtered; agents, prompts, and other kinds always stay. Group actions in User-Global act on the rows you see / Installed・User-Global・Remote Resources の各ビュータイトルに「絞り込みと並べ替え」アイコンを追加しました。手動専用（`disable-model-invocation: true`）、モデル専用（`user-invocable: false`）、自動で絞り込み、名前順・呼び出しモード順・（Remote は）スター数順で並べ替えます。ピッカーは開いたままなので両方を続けて変えられ、絞り込み中はツリーの上部に表示します。絞り込みの対象は skill だけで、agent・prompt などの種別は常に残します。User-Global のグループ操作は、見えている行を対象にします。
+- **Invocation Mode in the Resource Index / リソースインデックスに呼び出しモードを保存** - Update Index now records each skill's `invocation` (`auto` is stored explicitly), `argumentHint`, and `context: fork` from its SKILL.md, and search results, the preview, and tree tooltips show them. An index that was never refreshed says so instead of showing an empty tree. The fields use the same names as Agent Skills Ninja, so the shared index stays consistent / インデックス更新で各 skill の SKILL.md から `invocation`（`auto` も明示的に保存）・`argumentHint`・`context: fork` を保存し、検索結果・プレビュー・ツリーのツールチップに表示します。更新前のインデックスでは、空のツリーではなく「インデックスに情報がありません」と案内します。項目名は Agent Skills Ninja と揃えているため、共有インデックスの内容が食い違いません。
+
+### Changed
+
+- **Bundled Catalog Carries Invocation Modes / 同梱カタログに呼び出しモードを追加** - The bundled Resource Index v1.31.0 now includes the invocation fields for 2,059 skills (19 manual-only) without changing any other entry, the catalog version, or its scan date; skills removed upstream are left as unknown until the next Update Index / 同梱の Resource Index v1.31.0 に、2,059 件の skill の呼び出しモード項目を追加しました（手動専用は 19 件）。他のエントリ、カタログの版、走査日は変えません。上流で削除された skill は、次回のインデックス更新まで「不明」のままです。
 ## [0.2.59] - 2026-10-19
 
 ### Added

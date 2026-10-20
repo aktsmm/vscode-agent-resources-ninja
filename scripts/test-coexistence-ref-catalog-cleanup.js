@@ -264,7 +264,12 @@ async function main() {
         ),
         "./skillInvocation": requireTypeScriptModule(
           path.join(repoRoot, "src", "skillInvocation.ts"),
-          { vscode: vscodeStub },
+          {
+            vscode: vscodeStub,
+            "./skillInvocationMode": requireTypeScriptModule(
+              path.join(repoRoot, "src", "skillInvocationMode.ts"),
+            ),
+          },
         ),
         "./customizationPaths": {
           DISABLED_INSTRUCTION_FILE: "disabled",
