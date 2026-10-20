@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.60] - 2026-10-20
+
 ### Added
 
 - **Workspace Skill Folder Preset / ワークスペースのスキルフォルダのプリセット** - New `resourcesDirectoryPreset` (`custom` / `github` / `claude` / `agents`) picks `.github/skills`, `.claude/skills`, or `.agents/skills` from the settings UI without typing a path. The default `custom` keeps using `resourcesDirectory`, so existing setups do not change; switching does not move installed skills, and the previous folder can be kept listed through `additionalSkillRoots` / 設定画面の新しい `resourcesDirectoryPreset`（`custom` / `github` / `claude` / `agents`）で、パスを入力せずに `.github/skills`・`.claude/skills`・`.agents/skills` を選べます。既定の `custom` は従来どおり `resourcesDirectory` を使うため、既存の設定は変わりません。切り替えてもインストール済みのスキルは移動せず、元のフォルダは `additionalSkillRoots` に足せば引き続き表示できます。
@@ -24,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Batch Installs No Longer Overwrite Each Other / 一括インストールで互いに上書きしない** - Choosing several resources from a curated set or plugin contents now checks the real destinations first. Resources that land in the same place (for example `Code Review` and `code-review`, which share one folder) are listed, and you can install only the first of each instead of silently overwriting / キュレーション済みセットやプラグイン中身から複数を選ぶと、先に実際の宛先を確認します。同じ場所に書き込まれるリソース（例: 同じフォルダになる `Code Review` と `code-review`）を知らせ、黙って上書きせず、最初の 1 件だけをインストールできます。
 - **Reinstall Ignores the Selection Array / 再インストールが選択の配列を読まない** - With multi-select enabled, the menu passes the selected rows as a second argument; the reinstall command no longer reads it as options / 複数選択を有効にしたため、メニューコマンドの第 2 引数に選択の配列が渡ります。再インストールのコマンドは、それをオプションとして読まなくなりました。
 - **Malformed Invocation Fields Can't Break the Preview / 不正な呼び出しモード項目でプレビューが壊れない** - A cached or shared index is untrusted, so a non-string `argumentHint` threw while the preview was built. Argument hints are now treated as untrusted everywhere: non-strings are dropped, control characters become spaces, and the length is capped at 200, both when Update Index stores them and when they are shown (the one longer bundled hint was shortened to match) / キャッシュや共有インデックスは信用できないため、文字列でない `argumentHint` がプレビューの生成中に例外を起こしていました。引数ヒントは、文字列以外を捨て、制御文字を空白にし、長さを 200 文字までにする扱いに統一しました（インデックス更新で保存するときも、表示するときも）。200 文字を超えていた同梱の 1 件も揃えました。
-- **Sibling Folder-Scoped Roots Are Read per Folder / 姉妹拡張のフォルダ単位の追加ルートを反映** - Agent Skills Ninja's dditionalSkillRoots is a folder-scoped setting, but it was read without the workspace folder, so a folder-level value never reached this extension. It is now read for the workspace folder, like its directory preset / Agent Skills Ninja の dditionalSkillRoots はフォルダ単位の設定ですが、ワークスペースフォルダを指定せずに読んでいたため、フォルダ単位の値がこの拡張に届いていませんでした。ディレクトリのプリセットと同じく、ワークスペースフォルダを指定して読みます。
+- **Sibling Folder-Scoped Roots Are Read per Folder / 姉妹拡張のフォルダ単位の追加ルートを反映** - Agent Skills Ninja's `skillNinja.additionalSkillRoots` is a folder-scoped setting, but it was read without the workspace folder, so a folder-level value never reached this extension. It is now read for the workspace folder, like its directory preset / Agent Skills Ninja の `skillNinja.additionalSkillRoots` はフォルダ単位の設定ですが、ワークスペースフォルダを指定せずに読んでいたため、フォルダ単位の値がこの拡張に届いていませんでした。ディレクトリのプリセットと同じく、ワークスペースフォルダを指定して読みます。
 
 ## [0.2.59] - 2026-10-19
 

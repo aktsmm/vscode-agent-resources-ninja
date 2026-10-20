@@ -191,6 +191,14 @@ test("release-facing documents carry no replacement characters", () => {
         text.slice(Math.max(0, index - 40), index + 40),
       )}`,
     );
+    const control = text.search(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/);
+    assert.strictEqual(
+      control,
+      -1,
+      `${fileName} contains a control character near: ${JSON.stringify(
+        text.slice(Math.max(0, control - 40), control + 40),
+      )} (a backtick followed by a letter inside a PowerShell double-quoted string becomes one)`,
+    );
   }
 });
 
