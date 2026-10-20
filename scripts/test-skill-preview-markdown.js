@@ -166,6 +166,48 @@ runTest(
   },
 );
 
+runTest(
+  "a malformed invocation field from a cached or shared index cannot break the preview",
+  () => {
+    const hostile = {
+      ...previewSkill,
+      invocation: "explicitOnly",
+      context: { not: "a string" },
+    };
+    for (const argumentHint of [
+      5,
+      { toString: () => "<b>x</b>" },
+      ["a", "b"],
+      true,
+    ]) {
+      // A non-string must neither throw nor appear in the page.
+      const html = getWebviewContent(
+        { ...hostile, argumentHint },
+        "# Fixture",
+        false,
+        "fixture-nonce",
+      );
+      assertIncludes(html, "Fixture", "the preview still renders");
+    }
+    const html = getWebviewContent(
+      {
+        ...previewSkill,
+        invocation: "explicitOnly",
+        argumentHint: `<img src=x onerror=alert(1)>\n${"x".repeat(5000)}`,
+      },
+      "# Fixture",
+      false,
+      "fixture-nonce",
+    );
+    if (html.includes("<img src=x")) {
+      throw new Error("an argument hint must be escaped");
+    }
+    if (html.includes("x".repeat(300))) {
+      throw new Error("an argument hint must be bounded");
+    }
+  },
+);
+
 if (process.argv.includes("--html-fixture")) {
   const directory = path.resolve(
     process.argv[process.argv.indexOf("--html-fixture") + 1],

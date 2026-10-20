@@ -23,6 +23,7 @@ import { normalizeStarCount } from "./indexDataNormalization";
 import {
   getInvocationExplanationText,
   getInvocationLabelText,
+  normalizeArgumentHint,
   normalizeSkillInvocation,
 } from "./skillInvocationMode";
 
@@ -60,10 +61,13 @@ function getInvocationMetaHtml(skill: Skill): string {
       `<strong>${isJa ? "呼び出し" : "Invocation"}:</strong> <span title="${explanation}">${label}</span>`,
     );
   }
-  if (skill.argumentHint) {
-    parts.push(
-      `<strong>${isJa ? "引数ヒント" : "Argument hint"}:</strong> <code>${escapeHtml(skill.argumentHint)}</code>`,
-    );
+  if (skill.argumentHint !== undefined) {
+    const argumentHint = normalizeArgumentHint(skill.argumentHint);
+    if (argumentHint) {
+      parts.push(
+        `<strong>${isJa ? "引数ヒント" : "Argument hint"}:</strong> <code>${escapeHtml(argumentHint)}</code>`,
+      );
+    }
   }
   if (skill.context === "fork") {
     parts.push(

@@ -140,6 +140,42 @@ test("context accepts only fork", () => {
   assert.strictEqual(modeModule.parseSkillExecutionContext(" Fork "), "fork");
   assert.strictEqual(modeModule.parseSkillExecutionContext("inline"), undefined);
   assert.strictEqual(modeModule.parseSkillExecutionContext(undefined), undefined);
+  // A cached or shared index is untrusted, so a non-string must not throw.
+  for (const hostile of [5, {}, [], true, null]) {
+    assert.strictEqual(modeModule.parseSkillExecutionContext(hostile), undefined);
+  }
+});
+
+test("an argument hint is bounded, single-line, and never a non-string", () => {
+  const normalize = modeModule.normalizeArgumentHint;
+  assert.strictEqual(normalize("  [topic] | [mode]  "), "[topic] | [mode]");
+  assert.strictEqual(normalize("a\nb\tc\r\nd"), "a b c d");
+  assert.strictEqual(normalize("x".repeat(5000)).length, 200);
+  assert.strictEqual(normalize(""), undefined);
+  assert.strictEqual(normalize(" \n\t "), undefined);
+  for (const hostile of [5, {}, [], true, null, undefined]) {
+    assert.strictEqual(normalize(hostile), undefined);
+  }
+  // The rule is idempotent, so a stored value does not change on the next pass.
+  const once = normalize("x\n".repeat(500));
+  assert.strictEqual(normalize(once), once);
+});
+
+test("every bundled argument hint is already in its normalized form", () => {
+  const index = JSON.parse(
+    fs.readFileSync(path.join(repoRoot, "resources", "skill-index.json"), "utf8"),
+  );
+  const drifted = index.skills
+    .filter((skill) => skill.argumentHint !== undefined)
+    .filter(
+      (skill) => modeModule.normalizeArgumentHint(skill.argumentHint) !== skill.argumentHint,
+    )
+    .map((skill) => `${skill.source}/${skill.path}`);
+  assert.deepStrictEqual(
+    drifted,
+    [],
+    "regenerating the catalog would change these hints; store the normalized value",
+  );
 });
 
 test("labels and icons distinguish the two restricted modes", () => {

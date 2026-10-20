@@ -62,9 +62,31 @@ export function resolveSkillInvocationFromValues(values: {
 export type SkillExecutionContext = "fork";
 
 export function parseSkillExecutionContext(
-  value: string | undefined,
+  value: unknown,
 ): SkillExecutionContext | undefined {
-  return value?.trim().toLowerCase() === "fork" ? "fork" : undefined;
+  return typeof value === "string" && value.trim().toLowerCase() === "fork"
+    ? "fork"
+    : undefined;
+}
+
+const ARGUMENT_HINT_MAX_LENGTH = 200;
+
+/**
+ * `argument-hint` を表示・保存してよい形にする。リモートの SKILL.md、キャッシュ、共有インデックスのどれから
+ * 来ても信用できないので、文字列以外は捨て、制御文字を空白にし、長さを抑える。空になったら undefined。
+ */
+export function normalizeArgumentHint(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .trim()
+    .slice(0, ARGUMENT_HINT_MAX_LENGTH)
+    // 切り詰めた末尾が空白で終わると、次に通したとき値が変わる
+    .trimEnd();
+  return normalized || undefined;
 }
 
 /** SKILL.md 全文から、トップレベルの frontmatter キーだけを読んで呼び出しモードを決める。 */

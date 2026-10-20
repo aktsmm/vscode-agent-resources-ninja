@@ -1052,6 +1052,7 @@ async function testScannedSkillsCarryInvocationMetadata() {
   const files = {
     "skills/manual/SKILL.md":
       "---\nname: manual\ndescription: Manual one\ndisable-model-invocation: true\nargument-hint: <topic>\ncontext: fork\n---\n# Manual\n",
+    "skills/wordy/SKILL.md": `---\nname: wordy\ndescription: Wordy one\nargument-hint: ${"w".repeat(5000)}\n---\n# Wordy\n`,
     "skills/model/SKILL.md":
       "---\nname: model\ndescription: Model one\nuser-invocable: false\n---\n# Model\n",
     "skills/plain/SKILL.md":
@@ -1101,6 +1102,11 @@ async function testScannedSkillsCarryInvocationMetadata() {
   assert.strictEqual(byName.get("manual").invocation, "explicitOnly");
   assert.strictEqual(byName.get("manual").argumentHint, "<topic>");
   assert.strictEqual(byName.get("manual").context, "fork");
+  assert.strictEqual(
+    byName.get("wordy").argumentHint.length,
+    200,
+    "a remote SKILL.md cannot store an unbounded argument hint in the index",
+  );
   assert.strictEqual(byName.get("model").invocation, "modelOnly");
   assert.strictEqual(
     byName.get("plain").invocation,

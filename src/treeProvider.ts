@@ -49,6 +49,7 @@ import {
 import {
   getInvocationExplanationText,
   getInvocationIconId,
+  normalizeArgumentHint,
   getInvocationLabelText,
   normalizeSkillInvocation,
   type SkillInvocation,
@@ -1855,8 +1856,9 @@ export class SkillTreeItem extends vscode.TreeItem {
         if (invocation !== "auto") {
           metaInfo += `\n${getInvocationLabel(invocation)}: ${getInvocationExplanation(invocation, skill.name)}`;
         }
-        if (skill.argumentHint) {
-          metaInfo += `\n${isJa ? "引数ヒント" : "Argument hint"}: ${skill.argumentHint}`;
+        const argumentHint = normalizeArgumentHint(skill.argumentHint);
+        if (argumentHint) {
+          metaInfo += `\n${isJa ? "引数ヒント" : "Argument hint"}: ${argumentHint}`;
         }
         if (skill.context === "fork") {
           metaInfo += `\n${isJa ? "サブエージェントで実行 (context: fork)" : "Runs in a subagent (context: fork)"}`;

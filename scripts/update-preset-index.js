@@ -56,6 +56,7 @@ const {
 const {
   DISABLE_MODEL_INVOCATION_KEY,
   USER_INVOCABLE_KEY,
+  normalizeArgumentHint,
   parseSkillExecutionContext,
   resolveSkillInvocationFromValues,
 } = requireTypeScriptModule(
@@ -915,7 +916,7 @@ function parseSkillFrontmatter(content, filePath, kind = "skill") {
       disableModelInvocation: frontmatter.get(DISABLE_MODEL_INVOCATION_KEY),
       userInvocable: frontmatter.get(USER_INVOCABLE_KEY),
     });
-    argumentHint = frontmatter.get("argument-hint")?.trim() || undefined;
+    argumentHint = normalizeArgumentHint(frontmatter.get("argument-hint"));
     context = parseSkillExecutionContext(frontmatter.get("context"));
   }
 
