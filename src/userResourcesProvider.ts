@@ -1,4 +1,3 @@
-import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
 import {
@@ -75,19 +74,6 @@ function getScopeIcon(scope: UserResourceScope): string {
   }
 }
 
-function formatRootPathForDisplay(fsPath: string): string {
-  const normalizedPath = fsPath.replace(/\\/g, "/").replace(/\/+$/g, "");
-  const homePath = os.homedir().replace(/\\/g, "/").replace(/\/+$/g, "");
-  if (normalizedPath.toLowerCase() === homePath.toLowerCase()) {
-    return "~";
-  }
-  const homePrefix = `${homePath}/`.toLowerCase();
-  if (normalizedPath.toLowerCase().startsWith(homePrefix)) {
-    return `~/${normalizedPath.slice(homePath.length + 1)}`;
-  }
-  return normalizedPath;
-}
-
 export function normalizeResourceRootIdentity(
   fsPath: string,
   platform: NodeJS.Platform = process.platform,
@@ -117,10 +103,18 @@ function formatScopeDescription(
     const extensionCount = new Set(resources.map((item) => item.tool)).size;
     return `${extensionCount} extensions · ${count} resources`;
   }
-  const details = [resource.tool];
-  if (resource.scope === "globalHome") {
-    details.push(formatRootPathForDisplay(resource.rootFsPath));
-  }
+  const details =
+    resource.scope === "globalHome"
+      ? [
+          resource.isAlternateGlobalHome
+            ? isJapanese()
+              ? "読み取り専用"
+              : "read-only"
+            : isJapanese()
+              ? "インストール先"
+              : "install target",
+        ]
+      : [resource.tool];
   return `${count} resources · ${details.join(" · ")}`;
 }
 
@@ -225,6 +219,7 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
       this.resources = await scanUserResources(
         this.workspaceUri,
         this.shouldShowBuiltInResources(),
+        { includeAlternateGlobalHomes: this.shouldShowAlternateGlobalHomes() },
       );
       await this.enrichResourceStatuses();
       this.hasLoaded = true;
@@ -386,6 +381,7 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
           plugin.id,
           undefined,
           element.rootFsPath,
+          plugin.resources.every((resource) => resource.isReadOnly),
         );
         item.iconPath = new vscode.ThemeIcon(
           "extensions",
@@ -484,6 +480,12 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
       .get<boolean>("showBuiltInResources", true);
   }
 
+  private shouldShowAlternateGlobalHomes(): boolean {
+    return vscode.workspace
+      .getConfiguration("resourceNinja")
+      .get<boolean>("showAlternateGlobalHomes", true);
+  }
+
   private getRegularResources(): UserResource[] {
     return this.applyViewOptions(
       this.resources.filter((resource) => !resource.isBuiltIn),
@@ -525,12 +527,12 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
       resources.some((resource) => resource.kind === kind),
     );
     return presentKinds.map((kind) => {
-      const count = resources.filter(
+      const kindResources = resources.filter(
         (resource) => resource.kind === kind,
-      ).length;
+      );
       const item = new UserResourceTreeItem(
         getResourceKindLabel(kind, isJapanese()),
-        `${count} resources`,
+        `${kindResources.length} resources`,
         vscode.TreeItemCollapsibleState.Collapsed,
         nodeType,
         undefined,
@@ -540,6 +542,8 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
         undefined,
         undefined,
         parent.rootFsPath,
+        nodeType === "kind" &&
+          kindResources.every((resource) => resource.isReadOnly),
       );
       item.iconPath = new vscode.ThemeIcon(getResourceKindIcon(kind));
       return item;
@@ -719,7 +723,13 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
     // An extension-packaged resource can be incomplete too, so the label cannot live in one branch.
     const descriptionParts = resource.isBuiltIn
       ? [`${isJapanese() ? "組み込み" : "Built-in"} · ${resource.tool}`]
-      : resource.isReadOnly
+      : resource.isAlternateGlobalHome
+        ? [
+            `${isJapanese() ? "別ホーム（読み取り専用）" : "Other home (read-only)"} · ${resource.tool}`,
+            incompleteLabel,
+            resource.description || resource.relativePath,
+          ]
+        : resource.isReadOnly
         ? [
             `${isJapanese() ? "拡張同梱" : "Extension-packaged"} · ${resource.tool}`,
             incompleteLabel,
@@ -774,6 +784,7 @@ export class UserResourceTreeItem extends vscode.TreeItem {
     public readonly pluginId?: string,
     public readonly isRecent?: boolean,
     public readonly rootFsPath?: string,
+    public readonly readOnlyGroup?: boolean,
   ) {
     super(label, collapsibleState);
     this.description = description;
@@ -786,7 +797,11 @@ export class UserResourceTreeItem extends vscode.TreeItem {
             : nodeType === "remoteResource"
               ? "userRemoteResource"
               : "userResource"
-        : nodeType;
+        : readOnlyGroup && (nodeType === "kind" || nodeType === "plugin")
+          ? nodeType === "kind"
+            ? "readOnlyKind"
+            : "readOnlyPlugin"
+          : nodeType;
 
     if (resource) {
       this.resourceUri = vscode.Uri.file(resource.fullPath);
@@ -804,9 +819,11 @@ export class UserResourceTreeItem extends vscode.TreeItem {
             );
       const status = resource.isBuiltIn
         ? `${isJapanese() ? "組み込み" : "Built-in"} · ${resource.tool}`
-        : resource.isReadOnly
-          ? `${isJapanese() ? "拡張同梱" : "Extension-packaged"} · ${resource.tool}`
-          : resource.scopeLabel;
+        : resource.isAlternateGlobalHome
+          ? `${isJapanese() ? "別ホーム（読み取り専用）" : "Other home (read-only)"} · ${resource.tool}`
+          : resource.isReadOnly
+            ? `${isJapanese() ? "拡張同梱" : "Extension-packaged"} · ${resource.tool}`
+            : resource.scopeLabel;
       const pluginId =
         getPluginIdFromPath(resource.remotePath) ||
         getPluginIdFromPath(resource.relativePath) ||

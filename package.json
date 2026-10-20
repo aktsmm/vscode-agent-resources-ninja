@@ -2,7 +2,7 @@
   "name": "agent-resources-ninja",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.60",
+  "version": "0.2.61",
   "publisher": "yamapan",
   "license": "CC-BY-NC-SA-4.0",
   "icon": "resources/icon.png",
@@ -1381,13 +1381,13 @@
         "resourceNinja.autoUpdateInstruction": {
           "type": "boolean",
           "default": true,
-          "order": 15,
+          "order": 16,
           "markdownDescription": "%config.autoUpdateInstruction.markdownDescription%"
         },
         "resourceNinja.autoUpdateResourcesOnUpgrade": {
           "type": "string",
           "default": "prompt",
-          "order": 19,
+          "order": 20,
           "enum": [
             "always",
             "prompt",
@@ -1403,7 +1403,7 @@
         "resourceNinja.instructionFile": {
           "type": "string",
           "default": "AGENTS.md",
-          "order": 16,
+          "order": 17,
           "enum": [
             "none",
             "AGENTS.md",
@@ -1437,13 +1437,13 @@
         "resourceNinja.customInstructionPath": {
           "type": "string",
           "default": "",
-          "order": 17,
+          "order": 18,
           "markdownDescription": "%config.customInstructionPath.markdownDescription%"
         },
         "resourceNinja.includeLocalResources": {
           "type": "boolean",
           "default": false,
-          "order": 18,
+          "order": 19,
           "markdownDescription": "%config.includeLocalResources.markdownDescription%"
         },
         "resourceNinja.resourcesDirectory": {
@@ -1480,7 +1480,7 @@
           "type": "boolean",
           "default": true,
           "scope": "resource",
-          "order": 38,
+          "order": 39,
           "markdownDescription": "%config.autoManageGitignore.markdownDescription%"
         },
         "resourceNinja.additionalSkillRoots": {
@@ -1564,10 +1564,16 @@
           "order": 14,
           "markdownDescription": "%config.globalHomeDirectory.markdownDescription%"
         },
+        "resourceNinja.showAlternateGlobalHomes": {
+          "type": "boolean",
+          "default": true,
+          "order": 15,
+          "markdownDescription": "%config.showAlternateGlobalHomes.markdownDescription%"
+        },
         "resourceNinja.coexistenceMode": {
           "type": "string",
           "default": "auto",
-          "order": 20,
+          "order": 21,
           "enum": [
             "auto",
             "independent"
@@ -1581,7 +1587,7 @@
         "resourceNinja.kindsExcluded": {
           "type": "array",
           "default": [],
-          "order": 21,
+          "order": 22,
           "items": {
             "type": "string",
             "enum": [
@@ -1600,19 +1606,19 @@
         "resourceNinja.useSharedSourcesManifest": {
           "type": "boolean",
           "default": false,
-          "order": 22,
+          "order": 23,
           "markdownDescription": "%config.useSharedSourcesManifest.markdownDescription%"
         },
         "resourceNinja.useSharedResourceIndex": {
           "type": "boolean",
           "default": false,
-          "order": 23,
+          "order": 24,
           "markdownDescription": "%config.useSharedResourceIndex.markdownDescription%"
         },
         "resourceNinja.staleSourceIndexUpdateMode": {
           "type": "string",
           "default": "prompt",
-          "order": 24,
+          "order": 25,
           "enum": [
             "always",
             "prompt",
@@ -1628,13 +1634,13 @@
         "resourceNinja.useRefOutput": {
           "type": "boolean",
           "default": true,
-          "order": 25,
+          "order": 26,
           "markdownDescription": "%config.useRefOutput.markdownDescription%"
         },
         "resourceNinja.outputFormat": {
           "type": "string",
           "default": "full",
-          "order": 26,
+          "order": 27,
           "enum": [
             "full",
             "compact",
@@ -1650,7 +1656,7 @@
         "resourceNinja.refCatalogFormat": {
           "type": "string",
           "default": "full",
-          "order": 27,
+          "order": 28,
           "enum": [
             "full",
             "compact",
@@ -1690,13 +1696,13 @@
         "resourceNinja.showBuiltInResources": {
           "type": "boolean",
           "default": true,
-          "order": 28,
+          "order": 29,
           "markdownDescription": "%config.showBuiltInResources.markdownDescription%"
         },
         "resourceNinja.remoteResourceViewMode": {
           "type": "string",
           "default": "repositoryFirst",
-          "order": 29,
+          "order": 30,
           "enum": [
             "repositoryFirst",
             "resourceTypeFirst"
@@ -1710,7 +1716,7 @@
         "resourceNinja.language": {
           "type": "string",
           "default": "auto",
-          "order": 30,
+          "order": 31,
           "enum": [
             "auto",
             "en",
@@ -1728,25 +1734,25 @@
           "default": "",
           "editPresentation": "password",
           "scope": "machine",
-          "order": 31,
+          "order": 32,
           "markdownDescription": "%config.githubToken.markdownDescription%"
         },
         "resourceNinja.instructionBlock.includeAgents": {
           "type": "boolean",
           "default": false,
-          "order": 32,
+          "order": 33,
           "markdownDescription": "%config.instructionBlock.includeAgents.markdownDescription%"
         },
         "resourceNinja.instructionBlock.includeInstructions": {
           "type": "boolean",
           "default": false,
-          "order": 33,
+          "order": 34,
           "markdownDescription": "%config.instructionBlock.includeInstructions.markdownDescription%"
         },
         "resourceNinja.instructionBlock.globalHome.includeAgents": {
           "type": "string",
           "default": "inherit",
-          "order": 34,
+          "order": 35,
           "enum": [
             "inherit",
             "on",
@@ -1762,7 +1768,7 @@
         "resourceNinja.instructionBlock.globalHome.includeInstructions": {
           "type": "string",
           "default": "inherit",
-          "order": 35,
+          "order": 36,
           "enum": [
             "inherit",
             "on",
@@ -1778,7 +1784,7 @@
         "resourceNinja.registerPluginLocation": {
           "type": "string",
           "default": "prompt",
-          "order": 36,
+          "order": 37,
           "enum": [
             "always",
             "prompt",
@@ -1794,7 +1800,7 @@
         "resourceNinja.defaultPluginHost": {
           "type": "string",
           "default": "auto",
-          "order": 37,
+          "order": 38,
           "enum": [
             "auto",
             "ask",
@@ -1818,12 +1824,12 @@
         "resourceNinja.instructionBlock.includeExplicitOnlySkills": {
           "type": "boolean",
           "default": false,
-          "order": 39,
+          "order": 40,
           "markdownDescription": "%config.instructionBlock.includeExplicitOnlySkills.markdownDescription%"
         },
         "resourceNinja.versionInfo": {
           "type": "null",
-          "order": 100,
+          "order": 101,
           "markdownDescription": "%config.versionInfo.markdownDescription%"
         }
       }

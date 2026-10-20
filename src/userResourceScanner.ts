@@ -10,6 +10,7 @@ import {
   resolveConfiguredUri,
 } from "./customizationPaths";
 import {
+  dedupePluginManifestsByRoot,
   detectResourceKindFromPath,
   getBuiltInResourceSourceLabel,
   getBuiltInResourceDedupeKey,
@@ -47,6 +48,15 @@ export interface UserResourceRoot {
   builtInOnly?: boolean;
   readOnly?: boolean;
   exactFile?: boolean;
+  /** A known global home that is not the selected one; shown read-only. */
+  alternateHome?: boolean;
+  /** Only these top-level directories of the root are walked. */
+  topLevelDirectoryAllowlist?: ReadonlySet<string>;
+}
+
+export interface ScanUserResourcesOptions {
+  /** Also list the other known global homes (~/.copilot, ~/.claude, ~/.agents) read-only. */
+  includeAlternateGlobalHomes?: boolean;
 }
 
 export interface UserResource {
@@ -69,6 +79,7 @@ export interface UserResource {
   rootFsPath: string;
   isBuiltIn?: boolean;
   isReadOnly?: boolean;
+  isAlternateGlobalHome?: boolean;
   incomplete?: boolean;
   reinstallDisabled?: boolean;
   reinstallDisabledReason?: string;
@@ -97,6 +108,7 @@ interface ResourceInstallMeta extends Record<string, unknown> {
 interface CollectResourceFilesOptions {
   prioritizeResourceDirectories?: boolean;
   skipRuntimeDirectories?: boolean;
+  topLevelDirectoryAllowlist?: ReadonlySet<string>;
 }
 
 interface ExtensionPackageJson {
@@ -149,6 +161,37 @@ const GLOBAL_HOME_RUNTIME_DIRECTORY_NAMES = new Set([
   "session-state",
   "session-store",
 ]);
+
+// Directly under the global home, these hold copies or state rather than
+// curated resources. Matching only the first level keeps a user's own
+// `skills/<name>/backup` folder walkable.
+const GLOBAL_HOME_TOP_LEVEL_STATE_DIRECTORY_NAMES = new Set([
+  "attachments",
+  "browser-profiles",
+  "canvas-catalog-probe",
+  "plugin-data",
+  "sidebar-sessions-state",
+  "workflow-state",
+  "workspaces",
+]);
+const GLOBAL_HOME_BACKUP_DIRECTORY_PATTERN =
+  /^\.?(backups?|bak|archives?|trash|tmp|temp)([-_.].*)?$/i;
+const GLOBAL_HOME_BROWSER_PROFILE_DIRECTORY_PATTERN = /(^|[-_.])profiles?$/i;
+
+// Skills, agents and the like are the only places another tool's home is
+// expected to keep resources; its plugin caches and project data are not ours.
+const ALTERNATE_GLOBAL_HOME_DIRECTORY_ALLOWLIST: ReadonlySet<string> = new Set(
+  ["agents", "hooks", "instructions", "prompts", "skills"],
+);
+
+const KNOWN_GLOBAL_HOMES: ReadonlyArray<{
+  directory: string;
+  toolLabel: string;
+}> = [
+  { directory: "~/.copilot", toolLabel: "GitHub Copilot CLI" },
+  { directory: "~/.claude", toolLabel: "Claude-compatible" },
+  { directory: "~/.agents", toolLabel: "Open agent resources" },
+];
 
 const EXTENSION_RESOURCE_DIRECTORIES = [
   "agents",
@@ -216,6 +259,34 @@ function getGlobalHomeToolLabel(config: vscode.WorkspaceConfiguration): string {
   }
 }
 
+function getRootIdentity(fsPath: string): string {
+  return normalizeSeparators(fsPath).replace(/\/+$/, "").toLowerCase();
+}
+
+function getAlternateGlobalHomeRoots(
+  workspaceUri: vscode.Uri | undefined,
+  activeRoot: vscode.Uri,
+): UserResourceRoot[] {
+  const activeIdentity = getRootIdentity(activeRoot.fsPath);
+  return KNOWN_GLOBAL_HOMES.flatMap((home) => {
+    const uri = resolveConfiguredUri(workspaceUri, home.directory, home.directory);
+    if (getRootIdentity(uri.fsPath) === activeIdentity) {
+      return [];
+    }
+    return [
+      {
+        scope: "globalHome" as const,
+        label: `${home.toolLabel} (${home.directory})`,
+        tool: home.toolLabel,
+        uri,
+        readOnly: true,
+        alternateHome: true,
+        topLevelDirectoryAllowlist: ALTERNATE_GLOBAL_HOME_DIRECTORY_ALLOWLIST,
+      },
+    ];
+  });
+}
+
 function getInstalledExtensionsScopeLabel(): string {
   return isJapanese() ? "インストール済み拡張機能" : "Installed Extensions";
 }
@@ -251,6 +322,7 @@ function getFileName(fsPath: string): string {
 function getKnownRoots(
   workspaceUri?: vscode.Uri,
   includeBuiltInResources: boolean = false,
+  includeAlternateGlobalHomes: boolean = false,
 ): UserResourceRoot[] {
   const roots: UserResourceRoot[] = [];
   const config = vscode.workspace.getConfiguration("resourceNinja");
@@ -290,16 +362,21 @@ function getKnownRoots(
     },
   );
 
-  roots.push({
+  const globalHomeTool = getGlobalHomeToolLabel(config);
+  const globalHomeRoot: UserResourceRoot = {
     scope: "globalHome",
-    label: "Global Resource Home",
-    tool: getGlobalHomeToolLabel(config),
+    label: `${globalHomeTool} (${getConfiguredGlobalHomeDirectory(config)})`,
+    tool: globalHomeTool,
     uri: resolveConfiguredUri(
       workspaceUri,
       getConfiguredGlobalHomeDirectory(config),
       DEFAULT_GLOBAL_HOME_DIRECTORY,
     ),
-  });
+  };
+  roots.push(globalHomeRoot);
+  if (includeAlternateGlobalHomes) {
+    roots.push(...getAlternateGlobalHomeRoots(workspaceUri, globalHomeRoot.uri));
+  }
 
   if (includeBuiltInResources) {
     roots.push(
@@ -447,10 +524,19 @@ function hasFileType(
   return (type & expectedType) !== 0;
 }
 
+function isTopLevelGlobalHomeStateDirectory(lowerName: string): boolean {
+  return (
+    GLOBAL_HOME_TOP_LEVEL_STATE_DIRECTORY_NAMES.has(lowerName) ||
+    GLOBAL_HOME_BACKUP_DIRECTORY_PATTERN.test(lowerName) ||
+    GLOBAL_HOME_BROWSER_PROFILE_DIRECTORY_PATTERN.test(lowerName)
+  );
+}
+
 function shouldSkipScanDirectory(
   name: string,
   includeBuiltInResources: boolean,
   options: CollectResourceFilesOptions,
+  isTopLevelDirectory: boolean,
 ): boolean {
   const lowerName = name.toLowerCase();
   return (
@@ -458,7 +544,11 @@ function shouldSkipScanDirectory(
     lowerName === ".git" ||
     (!includeBuiltInResources && lowerName === "pkg") ||
     (!!options.skipRuntimeDirectories &&
-      GLOBAL_HOME_RUNTIME_DIRECTORY_NAMES.has(lowerName))
+      (GLOBAL_HOME_RUNTIME_DIRECTORY_NAMES.has(lowerName) ||
+        (isTopLevelDirectory && isTopLevelGlobalHomeStateDirectory(lowerName)))) ||
+    (isTopLevelDirectory &&
+      !!options.topLevelDirectoryAllowlist &&
+      !options.topLevelDirectoryAllowlist.has(lowerName))
   );
 }
 
@@ -655,12 +745,20 @@ export async function collectMarkdownFiles(
       });
 
     for (const [name, type] of sortedEntries) {
-      if (shouldSkipScanDirectory(name, includeBuiltInResources, options)) {
+      const isDirectory = hasFileType(type, vscode.FileType.Directory);
+      if (
+        shouldSkipScanDirectory(
+          name,
+          includeBuiltInResources,
+          options,
+          isScanRoot && isDirectory,
+        )
+      ) {
         continue;
       }
 
       const child = vscode.Uri.joinPath(current, name);
-      if (hasFileType(type, vscode.FileType.Directory)) {
+      if (isDirectory) {
         await walk(child, false);
       } else if (
         hasFileType(type, vscode.FileType.File) &&
@@ -679,7 +777,9 @@ export async function collectMarkdownFiles(
   }
 
   await walk(root, true);
-  return files;
+  // A package that ships several manifests (e.g. installed-plugins/<market>/<name>)
+  // is still one plugin.
+  return dedupePluginManifestsByRoot(files, (file) => file.fsPath);
 }
 
 function parseFrontmatterValue(frontmatter: string, key: string): string {
@@ -786,6 +886,7 @@ async function parseResourceFile(
     rootFsPath: root.uri.fsPath,
     isBuiltIn,
     isReadOnly,
+    isAlternateGlobalHome: root.alternateHome ? true : undefined,
     metadataStatus:
       installMetaResult.status === "unreadable" ||
       installMetaResult.status === "invalid"
@@ -803,8 +904,13 @@ async function parseResourceFile(
 export async function scanUserResources(
   workspaceUri?: vscode.Uri,
   includeBuiltInResources: boolean = false,
+  options: ScanUserResourcesOptions = {},
 ): Promise<UserResource[]> {
-  const roots = getKnownRoots(workspaceUri, includeBuiltInResources);
+  const roots = getKnownRoots(
+    workspaceUri,
+    includeBuiltInResources,
+    options.includeAlternateGlobalHomes === true,
+  );
   const resources = new Map<string, UserResource>();
   const seenPaths = new Set<string>();
 
@@ -821,6 +927,7 @@ export async function scanUserResources(
           root.scope === "globalHome" && !root.builtInOnly && !root.exactFile,
         skipRuntimeDirectories:
           root.scope === "globalHome" && !root.builtInOnly && !root.exactFile,
+        topLevelDirectoryAllowlist: root.topLevelDirectoryAllowlist,
       },
     );
     for (const file of files) {
@@ -835,9 +942,13 @@ export async function scanUserResources(
         if (resource.isBuiltIn && !includeBuiltInResources) {
           continue;
         }
+        // The same relative path in two different homes is two resources.
+        const rootKeyPart = root.alternateHome
+          ? `${getRootIdentity(root.uri.fsPath)}:`
+          : "";
         const resourceKey = resource.isBuiltIn
           ? getBuiltInResourceDedupeKey(resource)
-          : `${resource.scope}:${resource.kind}:${resource.relativePath.toLowerCase()}`;
+          : `${resource.scope}:${rootKeyPart}${resource.kind}:${resource.relativePath.toLowerCase()}`;
         const existing = resources.get(resourceKey);
         if (
           existing?.isBuiltIn &&
@@ -857,6 +968,9 @@ export async function scanUserResources(
     const scopeOrderCompare =
       getUserResourceScopeOrder(a.scope) - getUserResourceScopeOrder(b.scope);
     if (scopeOrderCompare !== 0) return scopeOrderCompare;
+    const alternateCompare =
+      Number(!!a.isAlternateGlobalHome) - Number(!!b.isAlternateGlobalHome);
+    if (alternateCompare !== 0) return alternateCompare;
     if (a.scope === "extension" || b.scope === "extension") {
       const toolCompare = a.tool.localeCompare(b.tool);
       if (toolCompare !== 0) return toolCompare;

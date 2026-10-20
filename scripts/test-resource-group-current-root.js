@@ -206,6 +206,116 @@ async function main() {
     /if \(!this\.hasLoaded\) \{\s*await this\.loadWorkspaceSkills\(\);\s*this\.hasLoaded = true;\s*\}/,
     "workspace child access must load current resources even before the root row is read",
   );
+
+  // Other global homes are read-only, so their groups must not offer
+  // reinstall or delete and must not reach the delete handler.
+  const altRoot = "C:\\Users\\Demo\\.claude";
+  provider.resources = [
+    resource(altRoot, {
+      isReadOnly: true,
+      isAlternateGlobalHome: true,
+      scopeLabel: "Global Resource Home (~/.claude)",
+    }),
+    resource("C:\\Users\\Demo\\.copilot", { name: "writable" }),
+  ];
+  const altScope = new UserResourceTreeItem(
+    "Global Resource Home (~/.claude)",
+    "",
+    2,
+    "scope",
+    undefined,
+    "globalHome",
+    undefined,
+    "Global Resource Home (~/.claude)",
+    undefined,
+    undefined,
+    altRoot,
+  );
+  const altKinds = await provider.getChildren(altScope);
+  assert.ok(altKinds.length > 0, "the alternate home should list its kinds");
+  assert.ok(altKinds.every((item) => item.contextValue === "readOnlyKind"));
+  const writableScope = new UserResourceTreeItem(
+    "Global Resource Home",
+    "",
+    2,
+    "scope",
+    undefined,
+    "globalHome",
+    undefined,
+    "Global Resource Home",
+    undefined,
+    undefined,
+    "C:\\Users\\Demo\\.copilot",
+  );
+  const writableKinds = await provider.getChildren(writableScope);
+  assert.ok(writableKinds.every((item) => item.contextValue === "kind"));
+  assert.strictEqual(
+    new UserResourceTreeItem(
+      "plugin",
+      "",
+      1,
+      "plugin",
+      undefined,
+      "globalHome",
+      undefined,
+      "Global Resource Home (~/.claude)",
+      "demo",
+      undefined,
+      altRoot,
+      true,
+    ).contextValue,
+    "readOnlyPlugin",
+  );
+  const deleteStart = extensionSource.indexOf(
+    '"resourceNinja.deletePluginResources"',
+  );
+  assert.match(
+    extensionSource.slice(deleteStart, deleteStart + 2200),
+    /groupItem\.readOnlyGroup === true[\s\S]*resolveCurrentGroupResources\(\s*groupItem,?\s*\)/,
+    "deleting a user plugin group must refuse read-only groups and resolve the current group",
+  );
+  assert.match(
+    extensionSource.slice(deleteStart, deleteStart + 2200),
+    /wsFolder && !isUserGroup/,
+    "a user group delete must not widen to workspace resources",
+  );
+
+  // The delete command receives the clicked tree item. Even as a plain object, a
+  // read-only (other-home) or stale group must resolve to nothing.
+  provider.resources = [
+    resource(altRoot, {
+      isReadOnly: true,
+      isAlternateGlobalHome: true,
+      remotePath: "plugins/demo/skills/x",
+    }),
+    resource("C:\\Users\\Demo\\.copilot", {
+      remotePath: "plugins/demo/skills/x",
+    }),
+  ];
+  const plainGroup = (rootFsPath) => ({
+    nodeType: "plugin",
+    scope: "globalHome",
+    pluginId: "demo",
+    rootFsPath,
+  });
+  assert.strictEqual(
+    await provider.resolveCurrentGroupResources(plainGroup(altRoot)),
+    undefined,
+    "a plain-object group for the other home must not resolve",
+  );
+  assert.strictEqual(
+    await provider.resolveCurrentGroupResources(plainGroup("E:\\Old\\.copilot")),
+    undefined,
+    "a stale group must not resolve to another home",
+  );
+  const resolvedPlain = await provider.resolveCurrentGroupResources(
+    plainGroup("c:/users/demo/.copilot"),
+  );
+  assert.deepStrictEqual(
+    resolvedPlain.map((entry) => entry.rootFsPath),
+    ["C:\\Users\\Demo\\.copilot"],
+  );
+
   assert.match(
     treeProviderSource,
     /"workspaceResourceType"[\s\S]{0,300}?workspaceRootFsPath/,

@@ -459,4 +459,76 @@ suite("Agent Resources Ninja smoke test", () => {
       "closing the picker without a choice must not install anything",
     );
   });
+
+  // 他ホームの読み取り専用グループや古いグループは、プラグイン削除コマンドに「実行時に」拒否される必要がある。
+  // 拒否されずに通常経路へ進むと、同じプラグイン ID を持つ書き込み可能なリソースの削除確認（モーダル）に到達して止まる。
+  test("deleting a plugin group refuses read-only and stale user groups", async function () {
+    this.timeout(60000);
+    const extension = vscode.extensions.getExtension(
+      "yamapan.agent-resources-ninja",
+    );
+    await extension.activate();
+    const folder = vscode.workspace.workspaceFolders[0];
+    const home = file(folder.uri, "smoke-home");
+    const planted = file(home, "plugins", "smokeplug", "skills", "plugged");
+    const config = vscode.workspace.getConfiguration(
+      "resourceNinja",
+      folder.uri,
+    );
+    await vscode.workspace.fs.createDirectory(planted);
+    await write(
+      file(planted, "SKILL.md"),
+      "---\nname: plugged\ndescription: smoke fixture\n---\nPlugin-origin fixture.",
+    );
+    try {
+      await config.update(
+        "globalHomeDirectory",
+        "smoke-home",
+        vscode.ConfigurationTarget.Workspace,
+      );
+      await vscode.commands.executeCommand("resourceNinja.refresh");
+      const otherHome = file(folder.uri, "smoke-other-home").fsPath;
+      for (const group of [
+        { readOnlyGroup: true },
+        { readOnlyGroup: false },
+        {},
+      ]) {
+        const settled = await Promise.race([
+          Promise.resolve(
+            vscode.commands.executeCommand(
+              "resourceNinja.deletePluginResources",
+              {
+                nodeType: "plugin",
+                scope: "globalHome",
+                pluginId: "smokeplug",
+                rootFsPath: otherHome,
+                ...group,
+              },
+            ),
+          ).then(() => "settled"),
+          new Promise((resolve) => setTimeout(() => resolve("blocked"), 8000)),
+        ]);
+        assert.strictEqual(
+          settled,
+          "settled",
+          "a read-only or stale user group must be refused before any delete confirmation",
+        );
+        assert.ok(
+          await vscode.workspace.fs.stat(file(planted, "SKILL.md")),
+          "no resource may be deleted by a refused group",
+        );
+      }
+    } finally {
+      await config.update(
+        "globalHomeDirectory",
+        undefined,
+        vscode.ConfigurationTarget.Workspace,
+      );
+      await vscode.workspace.fs.delete(home, {
+        recursive: true,
+        useTrash: false,
+      });
+      await vscode.commands.executeCommand("resourceNinja.refresh");
+    }
+  });
 });

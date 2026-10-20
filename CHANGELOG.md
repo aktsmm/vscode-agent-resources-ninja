@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.61] - 2026-10-20
+
+### Added
+
+- **Other Global Homes in the Tree / 他のグローバルホームも表示** - User / Global Resource Home now also lists the known homes that are not selected (`~/.copilot`, `~/.claude`, `~/.agents`) as separate read-only groups, limited to their `skills`, `agents`, `instructions`, `prompts`, and `hooks` folders so plugin caches and project data stay out. Installs, the generated instruction block, and updates still use the selected home only. Each group is now named by its tool and folder (for example `GitHub Copilot CLI (~/.copilot)`) instead of a generic "Global Resource Home", and the selected one is marked "install target". Turn it off with the new `showAlternateGlobalHomes` setting / User / Global Resource Home に、選択されていない既知のホーム（`~/.copilot` / `~/.claude` / `~/.agents`）も別の読み取り専用グループとして表示します。対象は `skills` / `agents` / `instructions` / `prompts` / `hooks` だけで、プラグインのキャッシュやプロジェクトデータは含めません。インストール、生成 instruction block、更新は引き続き選択中のホームだけが対象です。各グループは汎用的な「Global Resource Home」ではなく、ツールとフォルダー（例: `GitHub Copilot CLI (~/.copilot)`）で名前を付け、選択中のものには「インストール先」と表示します。新しい `showAlternateGlobalHomes` 設定で無効にできます。新しい `showAlternateGlobalHomes` 設定で無効にできます。
+
+### Fixed
+
+- **Backup Copies No Longer Show as Duplicates / バックアップのコピーが重複して表示されない** - The global home scan walked `~/.copilot/backup/...` and listed every backed-up skill, agent, and instruction a second time. The same plugin that ships several manifests (for example `.claude-plugin` and `.codex-plugin`) is now one row, not three. Backup folders (`backup`, `backups`, `backup-*`, `.bak`, `archive`, `trash`, `tmp`), browser profile folders, and state folders such as `workspaces` and `plugin-data` are now skipped, but only directly under the home root, so a `backup` folder inside your own skill is still scanned / グローバルホームのスキャンが `~/.copilot/backup/...` まで辿り、バックアップ済みのスキル・エージェント・インストラクションを二重に表示していました。複数のマニフェスト（`.claude-plugin` と `.codex-plugin` など）を持つ同じプラグインは、3 行ではなく 1 行にまとめます。バックアップフォルダー（`backup` / `backups` / `backup-*` / `.bak` / `archive` / `trash` / `tmp`）、ブラウザーのプロファイルフォルダー、`workspaces` や `plugin-data` などの状態フォルダーは、ホーム直下にあるときだけ除外します。自作スキルの中にある `backup` フォルダーは引き続き対象です。
+
 ## [0.2.60] - 2026-10-20
 
 ### Added

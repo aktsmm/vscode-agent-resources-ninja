@@ -389,4 +389,40 @@ test("global home scan skips Copilot CLI runtime directories", () => {
   );
 });
 
+test("global home scan skips top-level backup and state directories", () => {
+  assert.match(
+    userResourceScannerSource,
+    /GLOBAL_HOME_TOP_LEVEL_STATE_DIRECTORY_NAMES/,
+  );
+  assert.match(userResourceScannerSource, /GLOBAL_HOME_BACKUP_DIRECTORY_PATTERN/);
+  assert.match(userResourceScannerSource, /isTopLevelDirectory/);
+  assert.match(userResourceScannerSource, /"workspaces"/);
+});
+
+test("other known global homes are read-only and never feed the instruction block", () => {
+  assert.match(userResourceScannerSource, /includeAlternateGlobalHomes/);
+  assert.match(userResourceScannerSource, /ALTERNATE_GLOBAL_HOME_DIRECTORY_ALLOWLIST/);
+  assert.match(userResourceScannerSource, /alternateHome: true/);
+  assert.match(userResourceScannerSource, /readOnly: true/);
+  const instructionManagerSource = fs.readFileSync(
+    path.join(repoRoot, "src", "instructionManager.ts"),
+    "utf8",
+  );
+  assert.doesNotMatch(instructionManagerSource, /includeAlternateGlobalHomes/);
+  const providerSource = fs.readFileSync(
+    path.join(repoRoot, "src", "userResourcesProvider.ts"),
+    "utf8",
+  );
+  assert.match(providerSource, /showAlternateGlobalHomes/);
+  const pkg = JSON.parse(
+    fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"),
+  );
+  assert.strictEqual(
+    pkg.contributes.configuration.properties[
+      "resourceNinja.showAlternateGlobalHomes"
+    ]?.default,
+    true,
+  );
+});
+
 console.log("Global home routing tests passed");

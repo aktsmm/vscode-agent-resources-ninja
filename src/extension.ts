@@ -843,6 +843,7 @@ const RESETTABLE_RESOURCE_NINJA_SETTINGS = [
   "userPromptsDirectory",
   "globalResourceHomePreset",
   "globalHomeDirectory",
+  "showAlternateGlobalHomes",
   "language",
   "useRefOutput",
   "outputFormat",
@@ -2305,6 +2306,7 @@ export async function activate(
       "resourceNinja.userPromptsDirectory",
       "resourceNinja.globalResourceHomePreset",
       "resourceNinja.globalHomeDirectory",
+      "resourceNinja.showAlternateGlobalHomes",
     ];
     if (
       resourcePathSettings.some((setting) => e.affectsConfiguration(setting))
@@ -3156,20 +3158,41 @@ export async function activate(
       }
 
       const wsFolder = vscode.workspace.workspaceFolders?.[0];
-      const workspaceResources = wsFolder
-        ? workspaceProvider
-            .getWorkspaceSkills()
-            .filter(
-              (resource) =>
-                !resource.isBuiltIn &&
-                getInstalledPluginId(resource) === pluginId,
-            )
-        : [];
-      const userResources = await scanUserResources(wsFolder?.uri, false);
-      const userPluginResources = userResources.filter(
-        (resource) =>
-          !resource.isReadOnly && getInstalledPluginId(resource) === pluginId,
-      );
+      // A group in the User / Global tree is deleted only through the current
+      // state of that exact group; a read-only, stale, or other-home group is rejected.
+      const isUserGroup =
+        item instanceof UserResourceTreeItem ||
+        (item as { nodeType?: string }).nodeType === "plugin";
+      let userGroupTargets: UserResource[] | undefined;
+      if (isUserGroup) {
+        const groupItem = item as UserResourceTreeItem;
+        userGroupTargets =
+          groupItem.readOnlyGroup === true
+            ? undefined
+            : await userResourcesProvider.resolveCurrentGroupResources(
+                groupItem,
+              );
+        if (!userGroupTargets) {
+          showStaleResourceGroupMessage();
+          return;
+        }
+      }
+      const workspaceResources =
+        wsFolder && !isUserGroup
+          ? workspaceProvider
+              .getWorkspaceSkills()
+              .filter(
+                (resource) =>
+                  !resource.isBuiltIn &&
+                  getInstalledPluginId(resource) === pluginId,
+              )
+          : [];
+      const userPluginResources =
+        userGroupTargets ??
+        (await scanUserResources(wsFolder?.uri, false)).filter(
+          (resource) =>
+            !resource.isReadOnly && getInstalledPluginId(resource) === pluginId,
+        );
       const resources = [
         ...workspaceResources.map((resource) => ({
           kind: resource.kind || ("skill" as ResourceKind),

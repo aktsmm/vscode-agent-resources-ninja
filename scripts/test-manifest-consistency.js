@@ -1301,6 +1301,7 @@ test("settings order keeps install and destination paths first", () => {
     "resourceNinja.userPromptsDirectory",
     "resourceNinja.globalResourceHomePreset",
     "resourceNinja.globalHomeDirectory",
+    "resourceNinja.showAlternateGlobalHomes",
     "resourceNinja.autoUpdateInstruction",
     "resourceNinja.instructionFile",
     "resourceNinja.customInstructionPath",
@@ -1401,7 +1402,7 @@ test("stale source index freshness setting is wired through manifest docs and co
   assert.ok(setting, "Missing stale source index update mode setting");
   assert.strictEqual(setting.default, "prompt");
   assert.deepStrictEqual(setting.enum, ["always", "prompt", "never"]);
-  assert.strictEqual(setting.order, 24);
+  assert.strictEqual(setting.order, 25);
   for (const key of [
     "config.staleSourceIndexUpdateMode.markdownDescription",
     "config.staleSourceIndexUpdateMode.always",
@@ -1427,7 +1428,7 @@ test("plugin location registration setting is wired through manifest and code", 
   assert.strictEqual(setting.type, "string");
   assert.strictEqual(setting.default, "prompt");
   assert.deepStrictEqual(setting.enum, ["always", "prompt", "never"]);
-  assert.strictEqual(setting.order, 36);
+  assert.strictEqual(setting.order, 37);
   for (const key of [
     "config.registerPluginLocation.markdownDescription",
     "config.registerPluginLocation.always",

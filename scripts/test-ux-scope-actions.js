@@ -744,6 +744,20 @@ test("user-facing terminology prefers global resource home", () => {
   assert.match(readmeJa, /グローバル リソース|Global Resource Home/);
 });
 
+test("user global welcome copy and docs match the multi-home tree", () => {
+  assert.doesNotMatch(
+    nls["viewsWelcome.userResources"],
+    /~\/\.copilot/,
+    "the welcome text must not claim a single shared root",
+  );
+  assert.match(nls["viewsWelcome.userResources"], /install target/);
+  assert.match(nlsJa["viewsWelcome.userResources"], /インストール先/);
+  assert.match(readme, /showAlternateGlobalHomes[\s\S]{0,200}read-only/);
+  assert.match(readmeJa, /showAlternateGlobalHomes[\s\S]{0,200}読み取り専用/);
+  assert.match(readme, /Backup folders[\s\S]{0,250}skipped/);
+  assert.match(readmeJa, /backup フォルダー[\s\S]{0,250}除外/);
+});
+
 test("user global resource empty state gives next action", () => {
   assert.match(
     userResourcesProviderSource,
@@ -768,15 +782,24 @@ test("workspace empty state search hint uses localized runtime copy", () => {
 
 test("global resource home tree description is not repetitive", () => {
   assert.match(userResourcesProviderSource, /function formatScopeDescription/);
-  assert.match(userResourcesProviderSource, /formatRootPathForDisplay/);
   assert.match(userResourcesProviderSource, /resource\.scope === "globalHome"/);
-  assert.match(
-    fs.readFileSync(
-      path.join(repoRoot, "src", "userResourceScanner.ts"),
-      "utf8",
-    ),
-    /GitHub Copilot CLI/,
+  assert.match(userResourcesProviderSource, /install target/);
+  assert.doesNotMatch(
+    userResourcesProviderSource,
+    /formatRootPathForDisplay/,
+    "the group label already names the tool and root, so the description must not repeat the path",
   );
+  const scannerSource = fs.readFileSync(
+    path.join(repoRoot, "src", "userResourceScanner.ts"),
+    "utf8",
+  );
+  assert.match(scannerSource, /GitHub Copilot CLI/);
+  assert.match(
+    scannerSource,
+    /label: `\$\{globalHomeTool\} \(\$\{getConfiguredGlobalHomeDirectory\(config\)\}\)`/,
+    "the selected home group is named by tool and root, not a generic label",
+  );
+  assert.match(scannerSource, /label: `\$\{home\.toolLabel\} \(\$\{home\.directory\}\)`/);
 });
 
 test("an empty remote source is flagged only when it truly holds nothing", () => {
