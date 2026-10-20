@@ -16,11 +16,17 @@ import {
   getSkillGitHubUrlAsync,
   getIndexResources,
   getIndexSources,
+  getLocalizedDescription,
   getResourceKind,
   getResourceKindIcon,
   getResourceKindLabel,
   getSourceBranch,
 } from "./skillIndex";
+import {
+  getInvocationIconId,
+  getInvocationLabelText,
+  normalizeSkillInvocation,
+} from "./skillInvocationMode";
 import { searchSkills, SkillQuickPickItem } from "./skillSearch";
 import {
   initializeGitHubAuth,
@@ -35,6 +41,7 @@ import {
 } from "./githubAuth";
 import {
   installSkill,
+  InstallSkillOptions,
   InstallSkillResult,
   InstallTargetScope,
   getResourceTargetUri,
@@ -50,6 +57,10 @@ import {
   refreshSingleSkillMetadata,
   stripSkillMetaLocalPaths,
 } from "./skillInstaller";
+import {
+  findInstallCollisions,
+  keepFirstOfEachCollision,
+} from "./installCollisions";
 import {
   formatHookConfigUpdateSummary,
   restoreHookConfigFromBackup,
@@ -82,12 +93,14 @@ import {
   showSkillViewOptionsPicker,
 } from "./skillViewOptionsPicker";
 import {
+  filterSkillsByInvocation,
   getSkillViewOptions,
   getSortModes,
   isViewOptionsActive,
   normalizeInvocationFilter,
   normalizeSortMode,
   setSkillViewOptions,
+  sortSkills,
   type SkillViewOptions,
   type SkillViewScope,
 } from "./skillListOptions";
@@ -817,6 +830,7 @@ const RESETTABLE_RESOURCE_NINJA_SETTINGS = [
   "registerPluginLocation",
   "defaultPluginHost",
   "resourcesDirectory",
+  "resourcesDirectoryPreset",
   "additionalSkillRoots",
   "autoManageGitignore",
   "workspaceAgentsDirectory",
@@ -1953,7 +1967,11 @@ export async function activate(
     if (typeof value === "boolean") {
       return { suppressSuccessMessage: value };
     }
-    return value ?? {};
+    // 複数選択のツリーでは、メニューコマンドの第 2 引数に選択の配列が渡る。オプションとして読まない
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return {};
+    }
+    return value;
   }
 
   async function maybeOfferManualReinstallRetry<T>(
@@ -2132,6 +2150,8 @@ export async function activate(
     {
       treeDataProvider: browseProvider,
       showCollapseAll: true,
+      // 複数選択して一括インストールできるようにする。メニューコマンドの第 2 引数に選択の配列が渡る
+      canSelectMany: true,
     },
   );
 
@@ -2218,9 +2238,11 @@ export async function activate(
       [
         "resourceNinja.autoManageGitignore",
         "resourceNinja.resourcesDirectory",
+        "resourceNinja.resourcesDirectoryPreset",
         "resourceNinja.skillsDirectory",
         "resourceNinja.additionalSkillRoots",
         "skillNinja.skillsDirectory",
+        "skillNinja.skillsDirectoryPreset",
         "skillNinja.additionalSkillRoots",
       ].some((setting) => e.affectsConfiguration(setting))
     ) {
@@ -2269,6 +2291,9 @@ export async function activate(
 
     const resourcePathSettings = [
       "resourceNinja.resourcesDirectory",
+      "resourceNinja.resourcesDirectoryPreset",
+      "skillNinja.skillsDirectory",
+      "skillNinja.skillsDirectoryPreset",
       "resourceNinja.additionalSkillRoots",
       "resourceNinja.workspaceAgentsDirectory",
       "resourceNinja.workspaceInstructionsDirectory",
@@ -3479,6 +3504,300 @@ export async function activate(
       workspaceProvider.refresh();
     },
   );
+
+  /**
+   * 一括インストールで、同じ場所へ書き込まれる項目があれば、黙って上書きし合わないように確認する。
+   * 宛先は実際のインストールと同じ getResourceTargetUri で求める。undefined は中止。
+   */
+  async function resolveBatchInstallCollisions<T extends { skill: Skill }>(
+    items: readonly T[],
+    workspaceUri: vscode.Uri,
+    installTarget: InstallSkillOptions,
+  ): Promise<T[] | undefined> {
+    const config = vscode.workspace.getConfiguration("resourceNinja");
+    const collisions = findInstallCollisions(
+      items,
+      ({ skill }) => {
+        try {
+          return getResourceTargetUri(workspaceUri, config, skill, installTarget)
+            .fsPath;
+        } catch {
+          return undefined;
+        }
+      },
+      process.platform === "linux",
+    );
+    if (collisions.length === 0) {
+      return [...items];
+    }
+
+    const isJa = isJapanese();
+    const describeGroup = (group: (typeof collisions)[number]) =>
+      `${group.items.map(({ skill }) => skill.name).join(isJa ? "、" : ", ")}`;
+    const summary = collisions.slice(0, 3).map(describeGroup).join(" / ");
+    const more =
+      collisions.length > 3
+        ? isJa
+          ? ` ほか ${collisions.length - 3} 組`
+          : ` and ${collisions.length - 3} more`
+        : "";
+    const keepFirst = isJa ? "最初の 1 件だけインストール" : "Install the first of each";
+    const choice = await vscode.window.showWarningMessage(
+      isJa
+        ? `選択したリソースのうち ${collisions.length} 組は、同じ場所へインストールされ、後のものが先のものを上書きします。\n${summary}${more}`
+        : `${collisions.length} group(s) of the selected resources would be installed to the same location, and a later one would overwrite an earlier one.\n${summary}${more}`,
+      { modal: true },
+      keepFirst,
+    );
+    if (choice !== keepFirst) {
+      return undefined;
+    }
+    return keepFirstOfEachCollision(items, collisions);
+  }
+
+  /**
+   * 選んだ複数のリソースを、1 回の確認でまとめてインストールする。
+   * 入口は 3 つ（Browse の複数選択、Browse 上部の一覧、ソース行）で、確認・衝突チェック・結果通知は共通。
+   * キュレーション済みのセット / プラグイン中身の選択（installBundle）とは別の流れで、
+   * 複数のソースにまたがる選択も扱う。
+   */
+  async function installResourceBatch(
+    candidates: readonly Skill[],
+    label: string,
+  ): Promise<void> {
+    const wsFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!wsFolder) {
+      vscode.window.showErrorMessage(messages.noWorkspace());
+      return;
+    }
+    const isJa = isJapanese();
+
+    const seen = new Set<string>();
+    const resources = candidates.filter((skill) => {
+      const key = getResourceIdentityKeys(skill)[0] || `${skill.source}:${skill.path}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+    const installable = resources.filter(
+      (skill) => !browseProvider.isSkillInstalled(skill),
+    );
+    const alreadyInstalled = resources.length - installable.length;
+    if (installable.length === 0) {
+      vscode.window.showInformationMessage(
+        isJa
+          ? "インストールできるリソースが選択されていません（選択したものはインストール済みです）"
+          : "Nothing to install: the selected resources are already installed",
+      );
+      return;
+    }
+
+    const installTarget = await pickInstallTarget(installable[0]);
+    if (!installTarget) {
+      return;
+    }
+    const pickedItems = installable.map((skill) => ({ skill }));
+    const resolved = await resolveBatchInstallCollisions(
+      pickedItems,
+      wsFolder.uri,
+      installTarget,
+    );
+    if (!resolved) {
+      return;
+    }
+    const toInstall = resolved.map(({ skill }) => skill);
+
+    const kindCounts = toInstall.reduce((counts, skill) => {
+      const kind = getResourceKind(skill);
+      counts.set(kind, (counts.get(kind) || 0) + 1);
+      return counts;
+    }, new Map<ResourceKind, number>());
+    const kindSummary = Array.from(kindCounts.entries())
+      .map(([kind, count]) => `${getResourceKindLabel(kind, isJa)}: ${count}`)
+      .join(", ");
+    const hasMcpConfig = kindCounts.has("mcp");
+    const mcpInstallOptions = hasMcpConfig
+      ? await pickMcpInstallMode(kindCounts.get("mcp") || 0)
+      : {};
+    if (!mcpInstallOptions) {
+      return;
+    }
+
+    const skippedNote =
+      alreadyInstalled > 0
+        ? isJa
+          ? `\nインストール済みの ${alreadyInstalled} 個は対象外です。`
+          : `\n${alreadyInstalled} already installed resource(s) are left out.`
+        : "";
+    const installLabel = isJa ? "インストール" : "Install";
+    const confirm = await vscode.window.showInformationMessage(
+      isJa
+        ? `${label}: ${toInstall.length} 個のリソースをインストールしますか？\n${kindSummary}${skippedNote}`
+        : `${label}: install ${toInstall.length} resource(s)?\n${kindSummary}${skippedNote}`,
+      { modal: true },
+      installLabel,
+    );
+    if (confirm !== installLabel) {
+      return;
+    }
+
+    let completed = 0;
+    let cancelled = false;
+    let installedSkills = 0;
+    const failedResources: string[] = [];
+    const mcpConfigSummaries: string[] = [];
+    const installedPluginUris: vscode.Uri[] = [];
+
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: isJa ? `${label} をインストール中...` : `Installing ${label}...`,
+        cancellable: true,
+      },
+      async (progress, token) => {
+        for (const skill of toInstall) {
+          if (token.isCancellationRequested) {
+            cancelled = true;
+            break;
+          }
+          progress.report({
+            message: `${skill.name} (${completed + 1}/${toInstall.length})`,
+            increment: 100 / toInstall.length,
+          });
+          try {
+            const installResult = await installSkill(skill, wsFolder.uri, context, {
+              ...installTarget,
+              ...mcpInstallOptions,
+              suppressRecoveryPrompt: true,
+            });
+            if (!installWasClean(installResult)) {
+              throw new Error(`Incomplete install: ${skill.name}`);
+            }
+            const mcpConfigSummary = formatMcpConfigUpdateSummary(
+              installResult.mcpConfigUpdate,
+            );
+            if (mcpConfigSummary) {
+              mcpConfigSummaries.push(`${skill.name}: ${mcpConfigSummary}`);
+            }
+            markRecentlyInstalled(skill);
+            if (getResourceKind(skill) === "skill") {
+              installedSkills++;
+            }
+            if (getResourceKind(skill) === "plugin") {
+              installedPluginUris.push(installResult.destinationUri);
+            }
+          } catch (error) {
+            logger.error(`Failed to install ${skill.name}:`, error);
+            failedResources.push(skill.name);
+          }
+          completed++;
+        }
+      },
+    );
+
+    const failed = failedResources.length;
+    const cancelSuffix = cancelled
+      ? getBatchCancellationSuffix(completed, toInstall.length)
+      : "";
+    if (failed > 0) {
+      const failedSummary = `${failedResources.slice(0, 3).join(", ")}${failed > 3 ? "..." : ""}`;
+      vscode.window.showWarningMessage(
+        isJa
+          ? `${label}: ${completed - failed}/${completed} 個インストール完了（${failed} 個失敗: ${failedSummary}）${cancelSuffix}。原因は出力ログで確認してください。`
+          : `${label}: ${completed - failed}/${completed} installed (${failed} failed: ${failedSummary})${cancelSuffix}. Check the output log for the cause.`,
+      );
+    } else if (cancelled) {
+      vscode.window.showWarningMessage(
+        `${label}: ${completed} ${isJa ? "件インストール完了" : "installed"}${cancelSuffix}`,
+      );
+    } else {
+      vscode.window.showInformationMessage(
+        isJa
+          ? `${label} のインストール完了（${toInstall.length} 個のリソース）`
+          : `${label} installed (${toInstall.length} resources)`,
+      );
+    }
+
+    if (mcpConfigSummaries.length > 0) {
+      vscode.window.showInformationMessage(mcpConfigSummaries.join("\n"));
+    }
+
+    try {
+      await offerPluginLocationRegistration(installedPluginUris);
+    } catch (error) {
+      logger.warn(`[Resource Ninja] Batch plugin registration failed:`, error);
+      vscode.window.showWarningMessage(
+        isJa
+          ? "リソースのインストールは完了しましたが、プラグインの登録は完了しませんでした。出力ログを確認し、登録を再実行してください。"
+          : "Resources were installed, but plugin registration did not complete. Check the output log and retry registration.",
+      );
+    }
+
+    const config = vscode.workspace.getConfiguration("resourceNinja");
+    if (
+      installedSkills > 0 &&
+      canInstructionSyncForTarget(installTarget) &&
+      config.get<boolean>("autoUpdateInstruction")
+    ) {
+      await updateInstructionFile(wsFolder.uri, context);
+    }
+
+    workspaceProvider.refresh();
+    browseProvider.refresh();
+  }
+
+  /** 候補の一覧から、複数のリソースをチェックして選ぶ。何も選ばなければ undefined。 */
+  async function pickResourcesToInstall(
+    resources: readonly Skill[],
+    title: string,
+  ): Promise<Skill[] | undefined> {
+    const isJa = isJapanese();
+    const index = skillIndex ?? (await loadSkillIndex(context));
+    const sources = getIndexSources(index);
+    const items = resources
+      .filter((skill) => !browseProvider.isSkillInstalled(skill))
+      .map((skill) => {
+        const kind = getResourceKind(skill);
+        const source = sources.find((candidate) => candidate.id === skill.source);
+        const invocation =
+          kind === "skill" ? normalizeSkillInvocation(skill.invocation) : "auto";
+        return {
+          label: `$(${getInvocationIconId(
+            kind === "skill" ? skill.invocation : undefined,
+            getResourceKindIcon(kind),
+          )}) ${skill.name}`,
+          description: [
+            source?.name || skill.source,
+            getResourceKindLabel(kind, isJa),
+            invocation === "auto" ? undefined : getInvocationLabelText(invocation, isJa),
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          detail: getLocalizedDescription(skill, isJa),
+          skill,
+        };
+      });
+    if (items.length === 0) {
+      vscode.window.showInformationMessage(
+        isJa
+          ? "インストールできるリソースがありません（すべてインストール済みか、絞り込みで 0 件です）"
+          : "No installable resources (all are installed, or the filter matches none)",
+      );
+      return undefined;
+    }
+    const picked = await vscode.window.showQuickPick(items, {
+      canPickMany: true,
+      title,
+      placeHolder: isJa
+        ? "インストールするリソースにチェック（複数選択可）"
+        : "Check the resources to install (multiple selection)",
+      matchOnDescription: true,
+      matchOnDetail: true,
+    });
+    return picked && picked.length > 0 ? picked.map((item) => item.skill) : undefined;
+  }
 
   async function pickInstallTarget(skill: Skill): Promise<
     | {
@@ -7139,7 +7458,7 @@ export async function activate(
         };
       });
 
-      const selectedItems = await vscode.window.showQuickPick(selectableItems, {
+      const pickedItems = await vscode.window.showQuickPick(selectableItems, {
         canPickMany: true,
         placeHolder: isJapanese()
           ? isPluginPick
@@ -7157,12 +7476,20 @@ export async function activate(
             : "Select Curated Set Resources",
       });
 
-      if (!selectedItems || selectedItems.length === 0) {
+      if (!pickedItems || pickedItems.length === 0) {
         return;
       }
 
-      const installTarget = await pickInstallTarget(selectedItems[0].skill);
+      const installTarget = await pickInstallTarget(pickedItems[0].skill);
       if (!installTarget) {
+        return;
+      }
+      const selectedItems = await resolveBatchInstallCollisions(
+        pickedItems,
+        wsFolder.uri,
+        installTarget,
+      );
+      if (!selectedItems) {
         return;
       }
       const destinationNotice =
@@ -7385,6 +7712,89 @@ export async function activate(
 
       workspaceProvider.refresh();
       browseProvider.refresh();
+    },
+  );
+
+  // Commands: install several resources at once (Browse multi-select / title list / source row)
+  const installSelectedResourcesCmd = vscode.commands.registerCommand(
+    "resourceNinja.installSelectedResources",
+    // 複数選択のツリーでは、メニューコマンドの第 2 引数に選択の配列が渡る。選択として読む
+    async (clicked?: SkillTreeItem, selection?: readonly SkillTreeItem[]) => {
+      const selected =
+        Array.isArray(selection) && selection.length > 0
+          ? selection
+          : browseTreeView.selection.length > 0
+            ? browseTreeView.selection
+            : clicked
+              ? [clicked]
+              : [];
+      const skills = selected
+        .filter(
+          (entry): entry is SkillTreeItem & { skill: Skill } =>
+            entry instanceof SkillTreeItem &&
+            !!entry.skill &&
+            entry.contextValue === "skill",
+        )
+        .map((entry) => entry.skill);
+      if (skills.length === 0) {
+        vscode.window.showInformationMessage(
+          isJapanese()
+            ? "インストールできるリソースが選択されていません"
+            : "No installable resources are selected",
+        );
+        return;
+      }
+      await installResourceBatch(
+        skills,
+        isJapanese() ? "選択したリソース" : "Selected resources",
+      );
+    },
+  );
+
+  const getBrowseCandidates = async (): Promise<Skill[]> => {
+    const index = skillIndex ?? (await loadSkillIndex(context));
+    const { filter, sort } = getSkillViewOptions("browse");
+    return sortSkills(
+      filterSkillsByInvocation(getIndexResources(index), filter),
+      sort,
+    );
+  };
+
+  const installMultipleCmd = vscode.commands.registerCommand(
+    "resourceNinja.installMultiple",
+    async () => {
+      const picked = await pickResourcesToInstall(
+        await getBrowseCandidates(),
+        isJapanese() ? "複数のリソースをインストール" : "Install Multiple Resources",
+      );
+      if (picked) {
+        await installResourceBatch(
+          picked,
+          isJapanese() ? "選択したリソース" : "Selected resources",
+        );
+      }
+    },
+  );
+
+  const installSourceResourcesCmd = vscode.commands.registerCommand(
+    "resourceNinja.installSourceResources",
+    async (item?: SkillTreeItem) => {
+      const source = item?.source;
+      if (!source) {
+        vscode.window.showErrorMessage(
+          isJapanese() ? "ソースが選択されていません" : "No source is selected",
+        );
+        return;
+      }
+      const kind = item?.resourceKind;
+      const candidates = (await getBrowseCandidates()).filter(
+        (skill) =>
+          skill.source === source.id && (!kind || getResourceKind(skill) === kind),
+      );
+      const picked = await pickResourcesToInstall(candidates, source.name);
+      if (picked) {
+        await installResourceBatch(picked, source.name);
+      }
     },
   );
 
@@ -9906,6 +10316,9 @@ ${fileUri.fsPath}`,
     uninstallAllCmd,
     installBundleCmd,
     installPluginResourcesCmd,
+    installSelectedResourcesCmd,
+    installMultipleCmd,
+    installSourceResourcesCmd,
     uninstallMultipleCmd,
     reinstallMultipleCmd,
     showInstalledCmd,
@@ -10054,6 +10467,9 @@ ${fileUri.fsPath}`,
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (
         event.affectsConfiguration("resourceNinja.resourcesDirectory") ||
+        event.affectsConfiguration("resourceNinja.resourcesDirectoryPreset") ||
+        event.affectsConfiguration("skillNinja.skillsDirectory") ||
+        event.affectsConfiguration("skillNinja.skillsDirectoryPreset") ||
         event.affectsConfiguration("resourceNinja.additionalSkillRoots") ||
         event.affectsConfiguration("skillNinja.additionalSkillRoots")
       ) {

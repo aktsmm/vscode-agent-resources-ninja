@@ -299,6 +299,7 @@ v1 で可搬なのは skills と MCP サーバーだけです。agents、hooks�
 | `Agent Resources Ninja: ワークスペース skill をすべて削除`                   | インストール済み workspace skills を全削除（確認ダイアログあり）              |
 | `Agent Resources Ninja: 選択した skill を削除`                               | 複数のインストール済み skill を選択して削除                                   |
 | `Agent Resources Ninja: 選択した skill を再インストール`                     | 複数のインストール済み skill を選択して再インストール                         |
+| `Agent Resources Ninja: 複数のリソースをインストール`                        | リモートのリソースを複数チェックして、まとめてインストール                    |
 | `Agent Resources Ninja: リソース出力を更新`                                  | 現在のスコープの生成リソース出力を手動再生成                                  |
 | `Agent Resources Ninja: リソース出力を開く...`                               | Command Palette から開く対象の managed scope を選択                           |
 | `Agent Resources Ninja: リソースフォルダを開く`                              | インストール済みリソースのフォルダを開く                                      |
@@ -498,42 +499,43 @@ workspace skill を主 Workspace Skill Directory 以外に置く場合は、`add
 |  0   | `resourceNinja.defaultInstallTarget`                            | `workspace`            | クリック/ダブルクリックインストールの既定保存先                                                                               |
 |  1   | `resourceNinja.singleClickInstall`                              | `false`                | シングルクリックでリソースをインストール                                                                                      |
 |  2   | `resourceNinja.resourcesDirectory`                              | `.github/skills`       | Workspace skill directory                                                                                                     |
-|  3   | `resourceNinja.additionalSkillRoots`                            | `[]`                   | 追加の workspace skill discovery root                                                                                         |
-|  4   | `resourceNinja.workspaceAgentsDirectory`                        | `.github/agents`       | Workspace agent directory                                                                                                     |
-|  5   | `resourceNinja.workspaceInstructionsDirectory`                  | `.github/instructions` | Workspace instruction directory                                                                                               |
-|  6   | `resourceNinja.workspacePromptsDirectory`                       | `.github/prompts`      | Workspace prompt directory                                                                                                    |
-|  7   | `resourceNinja.workspaceHooksDirectory`                         | `.github/hooks`        | Workspace hook directory                                                                                                      |
-|  8   | `resourceNinja.workspaceMcpDirectory`                           | `.github/mcp`          | 任意の `.vscode/mcp.json` マージ前に使う安全な Workspace MCP config staging directory                                         |
-|  9   | `resourceNinja.userAgentsDirectory`                             | `""`                   | User Profile agent override。空の場合 `.agent.md` は VS Code User `prompts` に保存                                            |
-|  10  | `resourceNinja.userInstructionsDirectory`                       | `""`                   | User Profile instruction directory override                                                                                   |
-|  11  | `resourceNinja.userPromptsDirectory`                            | `""`                   | User Profile prompt directory override                                                                                        |
-|  12  | `resourceNinja.globalResourceHomePreset`                        | `copilot`              | 代表的な Global Resource Home preset（`~/.copilot`, `~/.claude`, `~/.agents`）                                                |
-|  13  | `resourceNinja.globalHomeDirectory`                             | `""`                   | 任意の Global Resource Home override                                                                                          |
-|  14  | `resourceNinja.autoUpdateInstruction`                           | `true`                 | resource 変更後に生成 instruction block を自動更新                                                                            |
-|  15  | `resourceNinja.instructionFile`                                 | `AGENTS.md`            | 生成 instruction block の同期先 _(要: Auto Update)_                                                                           |
-|  16  | `resourceNinja.customInstructionPath`                           | `""`                   | カスタム生成 instruction block パス _(instructionFile が 'custom' の時のみ)_                                                  |
-|  17  | `resourceNinja.includeLocalResources`                           | `false`                | workspace-wide fallback で検出した `SKILL.md` を生成 instruction block に含める                                               |
-|  18  | `resourceNinja.autoUpdateResourcesOnUpgrade`                    | `prompt`               | 拡張機能アップグレード時にインストール済みリソースを更新                                                                      |
-|  19  | `resourceNinja.coexistenceMode`                                 | `auto`                 | 共有 marker の ownership mode (`auto` / `independent`)                                                                        |
-|  20  | `resourceNinja.kindsExcluded`                                   | `[]`                   | shared instruction block 用の旧 standalone 互換 exclusion                                                                     |
-|  21  | `resourceNinja.useSharedSourcesManifest`                        | `false`                | skill-only sibling extension と source 一覧を共有する `sources.json` SSOT を有効化                                            |
-|  22  | `resourceNinja.useSharedResourceIndex`                          | `false`                | skill-only sibling extension と scan cache を共有する `index.json` SSOT を有効化                                              |
-|  23  | `resourceNinja.staleSourceIndexUpdateMode`                      | `prompt`               | 30日超更新されていない source index の起動時処理（`always` / `prompt` / `never`）                                             |
-|  24  | `resourceNinja.useRefOutput`                                    | `true`                 | 生成リソース出力を kind 別 catalog 参照で軽量化するか                                                                         |
-|  25  | `resourceNinja.outputFormat`                                    | `full`                 | Ref 出力が off のときに使う inline 出力形式（`full` / `compact` / `legacy`）                                                  |
-|  26  | `resourceNinja.refCatalogFormat`                                | `full`                 | Ref 出力が on のときに README index 内で使う詳細形式（`full` / `compact` / `legacy`）                                         |
-|  27  | `resourceNinja.showBuiltInResources`                            | `true`                 | User / Global Resource Home に組み込みリソースを表示                                                                          |
-|  28  | `resourceNinja.remoteResourceViewMode`                          | `repositoryFirst`      | Remote Resources の表示レイアウト                                                                                             |
-|  29  | `resourceNinja.language`                                        | `auto`                 | UI 言語（auto / en / ja）                                                                                                     |
-|  30  | `resourceNinja.githubToken`                                     | `""`                   | GitHub Token（API 制限緩和 / private source repository 用）                                                                   |
-|  31  | `resourceNinja.instructionBlock.includeAgents`                  | `false`                | workspace の instruction block に `agent` を含める                                                                            |
-|  32  | `resourceNinja.instructionBlock.includeInstructions`            | `false`                | workspace の instruction block に `instruction` を含める                                                                      |
-|  33  | `resourceNinja.instructionBlock.globalHome.includeAgents`       | `inherit`              | Global Resource Home 向け agent 掲載ポリシーの上書き（`inherit` / `on` / `off`）                                              |
-|  34  | `resourceNinja.instructionBlock.globalHome.includeInstructions` | `inherit`              | Global Resource Home 向け instruction 掲載ポリシーの上書き（`inherit` / `on` / `off`）                                        |
-|  35  | `resourceNinja.registerPluginLocation`                          | `prompt`               | インストール済み plugin のフォルダーを VS Code の `chat.pluginLocations` に登録するか（`always` / `prompt` / `never`）        |
-|  36  | `resourceNinja.defaultPluginHost`                               | `auto`                 | 互換 plugin host のおすすめと表示順（`auto` / `ask` / `vscode-copilot` / `copilot-cli` / `claude-code` / `codex` / `cursor`） |
-|  37  | `resourceNinja.autoManageGitignore`                             | `true`                 | workspace skill 保存先の Resources Ninja gitignore ブロックを管理                                                             |
-|  38  | `resourceNinja.instructionBlock.includeExplicitOnlySkills`      | `false`                | 手動専用 skill（`disable-model-invocation: true`）を生成する instruction block に含める                                       |
+|  3   | `resourceNinja.resourcesDirectoryPreset`                        | `custom`               | Workspace skill directory preset (`custom` / `github` / `claude` / `agents`)                                                  |
+|  4   | `resourceNinja.additionalSkillRoots`                            | `[]`                   | 追加の workspace skill discovery root                                                                                         |
+|  5   | `resourceNinja.workspaceAgentsDirectory`                        | `.github/agents`       | Workspace agent directory                                                                                                     |
+|  6   | `resourceNinja.workspaceInstructionsDirectory`                  | `.github/instructions` | Workspace instruction directory                                                                                               |
+|  7   | `resourceNinja.workspacePromptsDirectory`                       | `.github/prompts`      | Workspace prompt directory                                                                                                    |
+|  8   | `resourceNinja.workspaceHooksDirectory`                         | `.github/hooks`        | Workspace hook directory                                                                                                      |
+|  9   | `resourceNinja.workspaceMcpDirectory`                           | `.github/mcp`          | 任意の `.vscode/mcp.json` マージ前に使う安全な Workspace MCP config staging directory                                         |
+|  10  | `resourceNinja.userAgentsDirectory`                             | `""`                   | User Profile agent override。空の場合 `.agent.md` は VS Code User `prompts` に保存                                            |
+|  11  | `resourceNinja.userInstructionsDirectory`                       | `""`                   | User Profile instruction directory override                                                                                   |
+|  12  | `resourceNinja.userPromptsDirectory`                            | `""`                   | User Profile prompt directory override                                                                                        |
+|  13  | `resourceNinja.globalResourceHomePreset`                        | `copilot`              | 代表的な Global Resource Home preset（`~/.copilot`, `~/.claude`, `~/.agents`）                                                |
+|  14  | `resourceNinja.globalHomeDirectory`                             | `""`                   | 任意の Global Resource Home override                                                                                          |
+|  15  | `resourceNinja.autoUpdateInstruction`                           | `true`                 | resource 変更後に生成 instruction block を自動更新                                                                            |
+|  16  | `resourceNinja.instructionFile`                                 | `AGENTS.md`            | 生成 instruction block の同期先 _(要: Auto Update)_                                                                           |
+|  17  | `resourceNinja.customInstructionPath`                           | `""`                   | カスタム生成 instruction block パス _(instructionFile が 'custom' の時のみ)_                                                  |
+|  18  | `resourceNinja.includeLocalResources`                           | `false`                | workspace-wide fallback で検出した `SKILL.md` を生成 instruction block に含める                                               |
+|  19  | `resourceNinja.autoUpdateResourcesOnUpgrade`                    | `prompt`               | 拡張機能アップグレード時にインストール済みリソースを更新                                                                      |
+|  20  | `resourceNinja.coexistenceMode`                                 | `auto`                 | 共有 marker の ownership mode (`auto` / `independent`)                                                                        |
+|  21  | `resourceNinja.kindsExcluded`                                   | `[]`                   | shared instruction block 用の旧 standalone 互換 exclusion                                                                     |
+|  22  | `resourceNinja.useSharedSourcesManifest`                        | `false`                | skill-only sibling extension と source 一覧を共有する `sources.json` SSOT を有効化                                            |
+|  23  | `resourceNinja.useSharedResourceIndex`                          | `false`                | skill-only sibling extension と scan cache を共有する `index.json` SSOT を有効化                                              |
+|  24  | `resourceNinja.staleSourceIndexUpdateMode`                      | `prompt`               | 30日超更新されていない source index の起動時処理（`always` / `prompt` / `never`）                                             |
+|  25  | `resourceNinja.useRefOutput`                                    | `true`                 | 生成リソース出力を kind 別 catalog 参照で軽量化するか                                                                         |
+|  26  | `resourceNinja.outputFormat`                                    | `full`                 | Ref 出力が off のときに使う inline 出力形式（`full` / `compact` / `legacy`）                                                  |
+|  27  | `resourceNinja.refCatalogFormat`                                | `full`                 | Ref 出力が on のときに README index 内で使う詳細形式（`full` / `compact` / `legacy`）                                         |
+|  28  | `resourceNinja.showBuiltInResources`                            | `true`                 | User / Global Resource Home に組み込みリソースを表示                                                                          |
+|  29  | `resourceNinja.remoteResourceViewMode`                          | `repositoryFirst`      | Remote Resources の表示レイアウト                                                                                             |
+|  30  | `resourceNinja.language`                                        | `auto`                 | UI 言語（auto / en / ja）                                                                                                     |
+|  31  | `resourceNinja.githubToken`                                     | `""`                   | GitHub Token（API 制限緩和 / private source repository 用）                                                                   |
+|  32  | `resourceNinja.instructionBlock.includeAgents`                  | `false`                | workspace の instruction block に `agent` を含める                                                                            |
+|  33  | `resourceNinja.instructionBlock.includeInstructions`            | `false`                | workspace の instruction block に `instruction` を含める                                                                      |
+|  34  | `resourceNinja.instructionBlock.globalHome.includeAgents`       | `inherit`              | Global Resource Home 向け agent 掲載ポリシーの上書き（`inherit` / `on` / `off`）                                              |
+|  35  | `resourceNinja.instructionBlock.globalHome.includeInstructions` | `inherit`              | Global Resource Home 向け instruction 掲載ポリシーの上書き（`inherit` / `on` / `off`）                                        |
+|  36  | `resourceNinja.registerPluginLocation`                          | `prompt`               | インストール済み plugin のフォルダーを VS Code の `chat.pluginLocations` に登録するか（`always` / `prompt` / `never`）        |
+|  37  | `resourceNinja.defaultPluginHost`                               | `auto`                 | 互換 plugin host のおすすめと表示順（`auto` / `ask` / `vscode-copilot` / `copilot-cli` / `claude-code` / `codex` / `cursor`） |
+|  38  | `resourceNinja.autoManageGitignore`                             | `true`                 | workspace skill 保存先の Resources Ninja gitignore ブロックを管理                                                             |
+|  39  | `resourceNinja.instructionBlock.includeExplicitOnlySkills`      | `false`                | 手動専用 skill（`disable-model-invocation: true`）を生成する instruction block に含める                                       |
 
 `autoManageGitignore` は外部 skill のフォルダーと自作 skill の metadata だけを除外し、既存ルールと Skills Ninja のブロックを保持します。OFF は Resources のブロックだけを除去します。導入後、保存先・設定変更、**ビュー更新**で現在と過去の管理先を同期し、起動だけでは作成しません。User/Global の保存先と skill 以外は対象外です。未保存の ignore file や不正な Ninja マーカーを検出した場合は原本を上書きせず停止します。Output Channel の理由を確認し、解消後にビューを更新してください。拡張が停止中の設定変更も次のビュー更新で同期します。
 
@@ -571,6 +573,10 @@ workspace skill を主 Workspace Skill Directory 以外に置く場合は、`add
 `SKILL.md` に `disable-model-invocation: true` を持つ skill は手動専用のため、`resourceNinja.instructionBlock.includeExplicitOnlySkills` を ON にしない限り生成ブロックに載せません（一覧に載せるとモデルが自分で使おうとするためです）。このフラグは更新のたびに `SKILL.md` から読み直すので、`resourcesDirectory` と `additionalSkillRoots` の全ルートで、保存するだけで反映されます（metadata の更新は不要です）。手動専用 skill はツリーに「手動専用」として残り、「未登録」とは表示されません。この方針は Resource NINJA が shared block の所有者のときだけ効きます。Agent Skills Ninja が所有者のときは、その拡張の方針に従います。`user-invocable: false` の skill はモデル専用で、一覧に載ります。
 
 ビューでそれらを探すには、Installed・User-Global・Remote Resources のタイトルにある「絞り込みと並べ替え」アイコンを使います。skill を呼び出しモード（手動専用・モデル専用・自動）で絞り込み、名前順・呼び出しモード順・（Remote は）スター数順で並べ替えます。他の種別は絞り込みません。Remote Resources の呼び出しモードはインデックスから読むため、「インデックスに情報がありません」と表示されたら、一度「インデックス更新」を実行してください。
+
+**ワークスペースのスキルフォルダのプリセット。** `resourcesDirectoryPreset` で、使うツールの標準フォルダを選べます。`.github/skills`（GitHub Copilot / VS Code）、`.claude/skills`（Claude Code）、`.agents/skills`（Codex・共通）です。既定の `custom` は従来どおり `resourcesDirectory` を使うため、既存の設定は変わりません。切り替えてもインストール済みのスキルは移動せず、元のフォルダは一覧に表示されなくなります。引き続き表示したい場合は `additionalSkillRoots` に追加してください。Agent Skills Ninja も入れていて、この拡張側の設定が既定のままなら、そちらの `skillsDirectoryPreset` の選択に従い、両拡張が同じフォルダを管理します。
+
+**複数のリソースをまとめてインストール。** Remote Resources は複数選択に対応しています。行を選んでコンテキストメニューの「選択したリソースをインストール」を使うか、ビュータイトルのクラウドアイコンで（絞り込み後の）全体からチェックするか、ソース行のアイコンでそのソースからチェックします。どの入口も確認は 1 回で、同じチェックを通ります。同じ場所へ書き込まれるリソース（例: `Code Review` と `code-review` は同じフォルダになります）は、インストール前に知らせ、最初の 1 件だけをインストールできます。
 
 ### Agent Skills Ninja との共存
 

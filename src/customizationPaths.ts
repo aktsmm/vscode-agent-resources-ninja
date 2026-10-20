@@ -148,9 +148,67 @@ function readUserSetConfigString(
   return trimmed ? trimmed : undefined;
 }
 
+/**
+ * ワークスペースのスキルフォルダのプリセット。値と対応表は姉妹拡張 Agent Skills Ninja の
+ * `skillNinja.skillsDirectoryPreset` と同じにし、同居時に同じフォルダを指すようにする。
+ * `custom` は「`resourcesDirectory` の値を使う」（既定）で、既存ユーザーの挙動を変えない。
+ */
+export type WorkspaceSkillsDirectoryPreset =
+  | "custom"
+  | "github"
+  | "claude"
+  | "agents";
+
+export const WORKSPACE_SKILLS_DIRECTORY_PRESET_PATHS: Readonly<
+  Record<Exclude<WorkspaceSkillsDirectoryPreset, "custom">, string>
+> = {
+  github: ".github/skills",
+  claude: ".claude/skills",
+  agents: ".agents/skills",
+};
+
+/** 知らない値（手書きの誤りや将来の値）は、プリセットなし（= custom）として扱う。 */
+export function resolveWorkspaceSkillsDirectoryPreset(
+  value: unknown,
+): string | undefined {
+  return typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(
+      WORKSPACE_SKILLS_DIRECTORY_PRESET_PATHS,
+      value,
+    )
+    ? WORKSPACE_SKILLS_DIRECTORY_PRESET_PATHS[
+        value as keyof typeof WORKSPACE_SKILLS_DIRECTORY_PRESET_PATHS
+      ]
+    : undefined;
+}
+
+/**
+ * 姉妹拡張の設定を読む。`skillsDirectory` と `skillsDirectoryPreset` は resource スコープなので、
+ * フォルダ指定なしで読むとフォルダごとの値が届かない。このリポジトリが他でも前提にしている
+ * 先頭のワークスペースフォルダを resource として渡す。
+ */
+function getSiblingSkillNinjaConfig(): vscode.WorkspaceConfiguration {
+  return vscode.workspace.getConfiguration(
+    "skillNinja",
+    vscode.workspace.workspaceFolders?.[0]?.uri,
+  );
+}
+
+/**
+ * 解決順: 本拡張のプリセット（custom 以外）> `resourcesDirectory` > 旧 `skillsDirectory` >
+ * 姉妹拡張のプリセット（custom 以外）> 姉妹拡張の `skillsDirectory` > 既定。
+ * プリセットは利用者が明示して選ぶものなので、同じ拡張の他の値より優先する。
+ */
 export function getConfiguredSkillsDirectory(
   config: vscode.WorkspaceConfiguration,
 ): string {
+  const presetPath = resolveWorkspaceSkillsDirectoryPreset(
+    config.get<unknown>("resourcesDirectoryPreset"),
+  );
+  if (presetPath) {
+    return presetPath;
+  }
+
   const configuredResourcesDirectory = readUserSetConfigString(
     config,
     "resourcesDirectory",
@@ -167,8 +225,15 @@ export function getConfiguredSkillsDirectory(
     return configuredLegacySkillsDirectory;
   }
 
-  const siblingSkillsDirectory = vscode.workspace
-    .getConfiguration("skillNinja")
+  const siblingConfig = getSiblingSkillNinjaConfig();
+  const siblingPresetPath = resolveWorkspaceSkillsDirectoryPreset(
+    siblingConfig.get<unknown>("skillsDirectoryPreset"),
+  );
+  if (siblingPresetPath) {
+    return siblingPresetPath;
+  }
+
+  const siblingSkillsDirectory = siblingConfig
     .get<string>("skillsDirectory")
     ?.trim();
   if (siblingSkillsDirectory) {

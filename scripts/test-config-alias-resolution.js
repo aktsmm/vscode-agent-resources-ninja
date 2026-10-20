@@ -26,7 +26,11 @@ function test(name, fn) {
   }
 }
 
-function loadCustomizationPaths(sourceText, siblingSkillsDirectory) {
+function loadCustomizationPaths(
+  sourceText,
+  siblingSkillsDirectory,
+  { siblingValues = {}, workspaceFolders, onGetConfiguration } = {},
+) {
   const transpiled = ts.transpileModule(sourceText, {
     compilerOptions: {
       module: ts.ModuleKind.CommonJS,
@@ -38,9 +42,18 @@ function loadCustomizationPaths(sourceText, siblingSkillsDirectory) {
   const stubs = {
     vscode: {
       workspace: {
-        getConfiguration: () => ({
-          get: () => siblingSkillsDirectory,
-        }),
+        workspaceFolders,
+        getConfiguration: (section, resource) => {
+          if (onGetConfiguration) {
+            onGetConfiguration(section, resource);
+          }
+          return {
+            get: (key) =>
+              Object.prototype.hasOwnProperty.call(siblingValues, key)
+                ? siblingValues[key]
+                : siblingSkillsDirectory,
+          };
+        },
       },
       Uri: { file: (fsPath) => ({ fsPath }) },
       env: { appName: "Visual Studio Code" },
@@ -120,6 +133,7 @@ const MANIFEST_DEFAULTS = {
   includeLocalResources: false,
   autoUpdateResourcesOnUpgrade: "prompt",
   resourcesDirectory: ".github/skills",
+  resourcesDirectoryPreset: "custom",
 };
 
 function isConfigLikeReceiver(node, sourceFile) {
@@ -305,8 +319,9 @@ test("an unset string falls back to the manifest default", () => {
   );
 });
 
-// No `resourceNinja` setting declares `scope: "resource"` today, so the folder
-// branch is forward-looking rather than reachable in the shipped manifest.
+// `autoManageGitignore` is the only `resourceNinja` setting that declares `scope: "resource"`, and it
+// is read per folder; the directory setting is window-scoped, so the folder branch below stays
+// forward-looking for it rather than reachable in the shipped manifest.
 test("the resolver prefers folder scope, then workspace, then user", () => {
   const allScopes = createConfigDouble({
     declaredDefaults: MANIFEST_DEFAULTS,
@@ -341,6 +356,91 @@ test("the resolver prefers folder scope, then workspace, then user", () => {
     preFix.getConfiguredSkillsDirectory(allScopes),
     "folder/skills",
     "The shared resolver is expected to be identical in both loads",
+  );
+});
+
+test("a skills directory preset wins over a typed path, and custom keeps it", () => {
+  const withPreset = (preset, typed) =>
+    createConfigDouble({
+      declaredDefaults: MANIFEST_DEFAULTS,
+      userValues: {
+        resourcesDirectoryPreset: { workspaceValue: preset },
+        ...(typed ? { resourcesDirectory: { workspaceValue: typed } } : {}),
+      },
+    });
+  assert.strictEqual(
+    current.getConfiguredSkillsDirectory(withPreset("claude", "my/skills")),
+    ".claude/skills",
+    "an explicit preset is a deliberate choice and wins",
+  );
+  assert.strictEqual(
+    current.getConfiguredSkillsDirectory(withPreset("agents")),
+    ".agents/skills",
+  );
+  assert.strictEqual(
+    current.getConfiguredSkillsDirectory(withPreset("github")),
+    ".github/skills",
+  );
+  assert.strictEqual(
+    current.getConfiguredSkillsDirectory(withPreset("custom", "my/skills")),
+    "my/skills",
+    "custom keeps using the typed path",
+  );
+  assert.strictEqual(
+    current.getConfiguredSkillsDirectory(withPreset("bogus", "my/skills")),
+    "my/skills",
+    "an unknown value is treated as no preset",
+  );
+  assert.strictEqual(
+    current.getConfiguredSkillsDirectory(
+      createConfigDouble({ declaredDefaults: MANIFEST_DEFAULTS }),
+    ),
+    ".github/skills",
+    "the default changes nothing for existing users",
+  );
+});
+
+test("the sibling's skills directory preset is honored when ours is unset", () => {
+  const unset = createConfigDouble({ declaredDefaults: MANIFEST_DEFAULTS });
+  const seen = [];
+  const folder = { fsPath: "C:\\ws" };
+  const withSibling = (siblingValues) =>
+    loadCustomizationPaths(customizationPathsSource, ".github/skills", {
+      siblingValues,
+      workspaceFolders: [{ uri: folder }],
+      onGetConfiguration: (section, resource) => seen.push([section, resource]),
+    });
+
+  assert.strictEqual(
+    withSibling({
+      skillsDirectoryPreset: "claude",
+    }).getConfiguredSkillsDirectory(unset),
+    ".claude/skills",
+    "the sibling's preset reaches this extension",
+  );
+  assert.strictEqual(
+    withSibling({
+      skillsDirectoryPreset: "custom",
+      skillsDirectory: "team/skills",
+    }).getConfiguredSkillsDirectory(unset),
+    "team/skills",
+    "the sibling's typed path still applies under custom",
+  );
+  assert.strictEqual(
+    withSibling({
+      skillsDirectoryPreset: "agents",
+    }).getConfiguredSkillsDirectory(
+      createConfigDouble({
+        declaredDefaults: MANIFEST_DEFAULTS,
+        userValues: { resourcesDirectory: { workspaceValue: "ours/skills" } },
+      }),
+    ),
+    "ours/skills",
+    "our own explicit directory outranks the sibling's preset",
+  );
+  assert.ok(
+    seen.some(([section, resource]) => section === "skillNinja" && resource === folder),
+    "the sibling's resource-scoped settings are read with the workspace folder",
   );
 });
 

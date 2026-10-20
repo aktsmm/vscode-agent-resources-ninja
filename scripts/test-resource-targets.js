@@ -1283,11 +1283,21 @@ test("every plugin registration site is gated on a clean install", () => {
     /await offerPluginLocationRegistration\(installedPluginUris\);/,
     "the batch must keep its single collected prompt",
   );
+  // Two batch flows collect plugin destinations (the curated-set / plugin-contents pick and the
+  // shared bulk install). Each appends only after it has confirmed the install was clean.
+  const pushSites = [...extensionSource.matchAll(/installedPluginUris\.push\(/g)];
   assert.strictEqual(
-    (extensionSource.match(/installedPluginUris\.push\(/g) || []).length,
-    1,
-    "the collected batch list must have exactly one append site",
+    pushSites.length,
+    2,
+    "the collected batch list must have exactly the two known append sites",
   );
+  for (const site of pushSites) {
+    assert.match(
+      extensionSource.slice(Math.max(0, site.index - 1800), site.index),
+      /installWasClean\(installResult\)/,
+      "a collected plugin destination must follow the clean-install check",
+    );
+  }
 });
 
 console.log("Resource target tests passed");

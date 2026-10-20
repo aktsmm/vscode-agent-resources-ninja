@@ -139,6 +139,60 @@ suite("Agent Resources Ninja smoke test", () => {
     }
   });
 
+  // 設定の値が単体テストで正しくても、設定から実体のフォルダまで通ったことの証拠にはならない。
+  // プリセットを切り替えると、管理するフォルダが実際に切り替わることを実機で確かめる。
+  test("the workspace skill folder preset switches the managed folder", async function () {
+    this.timeout(90000);
+    const folder = vscode.workspace.workspaceFolders[0];
+    const preset = file(folder.uri, ".claude", "skills");
+    const config = vscode.workspace.getConfiguration(
+      "resourceNinja",
+      folder.uri,
+    );
+    try {
+      await createRemote(preset);
+      await config.update(
+        "resourcesDirectoryPreset",
+        "claude",
+        vscode.ConfigurationTarget.Workspace,
+      );
+      await config.update(
+        "autoManageGitignore",
+        true,
+        vscode.ConfigurationTarget.WorkspaceFolder,
+      );
+      await vscode.commands.executeCommand("resourceNinja.refresh");
+      const managed = await read(file(preset, ".gitignore"));
+      assert(
+        managed.includes("# Agent Resources Ninja START"),
+        "the preset folder must be the one being managed",
+      );
+      assert(managed.includes("/remote/"));
+    } finally {
+      await config.update(
+        "resourcesDirectoryPreset",
+        undefined,
+        vscode.ConfigurationTarget.Workspace,
+      );
+      await config.update(
+        "autoManageGitignore",
+        false,
+        vscode.ConfigurationTarget.WorkspaceFolder,
+      );
+      await vscode.commands.executeCommand("resourceNinja.refresh");
+      try {
+        await vscode.workspace.fs.delete(file(folder.uri, ".claude"), {
+          recursive: true,
+          useTrash: false,
+        });
+      } catch (error) {
+        if (error.code !== "FileNotFound") {
+          throw error;
+        }
+      }
+    }
+  });
+
   test("SKILL.md edits regenerate the block in additional roots and honor manual-only skills", async function () {
     this.timeout(90000);
     const folder = vscode.workspace.workspaceFolders[0];

@@ -408,7 +408,7 @@ test("bundle install uses selectable resource checklist", () => {
   assert.match(extensionSource, /MCP config の有効化方法/);
   assert.match(
     extensionSource,
-    /const installTarget = await pickInstallTarget\(selectedItems\[0\]\.skill\)/,
+    /const installTarget = await pickInstallTarget\(pickedItems\[0\]\.skill\)/,
   );
   assert.match(
     extensionSource,
@@ -1289,6 +1289,7 @@ test("settings order keeps install and destination paths first", () => {
     "resourceNinja.defaultInstallTarget",
     "resourceNinja.singleClickInstall",
     "resourceNinja.resourcesDirectory",
+    "resourceNinja.resourcesDirectoryPreset",
     "resourceNinja.additionalSkillRoots",
     "resourceNinja.workspaceAgentsDirectory",
     "resourceNinja.workspaceInstructionsDirectory",
@@ -1354,7 +1355,7 @@ test("stale source index freshness setting is wired through manifest docs and co
   assert.ok(setting, "Missing stale source index update mode setting");
   assert.strictEqual(setting.default, "prompt");
   assert.deepStrictEqual(setting.enum, ["always", "prompt", "never"]);
-  assert.strictEqual(setting.order, 23);
+  assert.strictEqual(setting.order, 24);
   for (const key of [
     "config.staleSourceIndexUpdateMode.markdownDescription",
     "config.staleSourceIndexUpdateMode.always",
@@ -1380,7 +1381,7 @@ test("plugin location registration setting is wired through manifest and code", 
   assert.strictEqual(setting.type, "string");
   assert.strictEqual(setting.default, "prompt");
   assert.deepStrictEqual(setting.enum, ["always", "prompt", "never"]);
-  assert.strictEqual(setting.order, 35);
+  assert.strictEqual(setting.order, 36);
   for (const key of [
     "config.registerPluginLocation.markdownDescription",
     "config.registerPluginLocation.always",

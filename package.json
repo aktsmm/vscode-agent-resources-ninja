@@ -689,6 +689,24 @@
         "icon": "$(layout)"
       },
       {
+        "command": "resourceNinja.installMultiple",
+        "title": "%command.installMultiple%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "resourceNinja.installSelectedResources",
+        "title": "%command.installSelectedResources%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "resourceNinja.installSourceResources",
+        "title": "%command.installSourceResources%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(cloud-download)"
+      },
+      {
         "command": "resourceNinja.filterSkillsByInvocation",
         "title": "%command.filterSkillsByInvocation%",
         "category": "Agent Resources Ninja",
@@ -960,6 +978,14 @@
           "when": "false"
         },
         {
+          "command": "resourceNinja.installSelectedResources",
+          "when": "false"
+        },
+        {
+          "command": "resourceNinja.installSourceResources",
+          "when": "false"
+        },
+        {
           "command": "resourceNinja.filterBrowseSkillsActive",
           "when": "false"
         },
@@ -1126,6 +1152,11 @@
           "group": "navigation@7"
         },
         {
+          "command": "resourceNinja.installMultiple",
+          "when": "view == resourceNinja.browseView",
+          "group": "navigation@8"
+        },
+        {
           "command": "resourceNinja.openSettings",
           "when": "view == resourceNinja.browseView",
           "group": "z_settings@1"
@@ -1201,6 +1232,16 @@
           "command": "resourceNinja.install",
           "when": "view == resourceNinja.browseView && viewItem == skill",
           "group": "inline@1"
+        },
+        {
+          "command": "resourceNinja.installSelectedResources",
+          "when": "view == resourceNinja.browseView && viewItem == skill",
+          "group": "navigation@1"
+        },
+        {
+          "command": "resourceNinja.installSourceResources",
+          "when": "view == resourceNinja.browseView && (viewItem == source || viewItem == remoteKindSource)",
+          "group": "inline@3"
         },
         {
           "command": "resourceNinja.reinstall",
@@ -1340,13 +1381,13 @@
         "resourceNinja.autoUpdateInstruction": {
           "type": "boolean",
           "default": true,
-          "order": 14,
+          "order": 15,
           "markdownDescription": "%config.autoUpdateInstruction.markdownDescription%"
         },
         "resourceNinja.autoUpdateResourcesOnUpgrade": {
           "type": "string",
           "default": "prompt",
-          "order": 18,
+          "order": 19,
           "enum": [
             "always",
             "prompt",
@@ -1362,7 +1403,7 @@
         "resourceNinja.instructionFile": {
           "type": "string",
           "default": "AGENTS.md",
-          "order": 15,
+          "order": 16,
           "enum": [
             "none",
             "AGENTS.md",
@@ -1396,13 +1437,13 @@
         "resourceNinja.customInstructionPath": {
           "type": "string",
           "default": "",
-          "order": 16,
+          "order": 17,
           "markdownDescription": "%config.customInstructionPath.markdownDescription%"
         },
         "resourceNinja.includeLocalResources": {
           "type": "boolean",
           "default": false,
-          "order": 17,
+          "order": 18,
           "markdownDescription": "%config.includeLocalResources.markdownDescription%"
         },
         "resourceNinja.resourcesDirectory": {
@@ -1411,17 +1452,41 @@
           "order": 2,
           "markdownDescription": "%config.resourcesDirectory.markdownDescription%"
         },
+        "resourceNinja.resourcesDirectoryPreset": {
+          "type": "string",
+          "default": "custom",
+          "order": 3,
+          "enum": [
+            "custom",
+            "github",
+            "claude",
+            "agents"
+          ],
+          "enumItemLabels": [
+            "%config.resourcesDirectoryPreset.label.custom%",
+            "%config.resourcesDirectoryPreset.label.github%",
+            "%config.resourcesDirectoryPreset.label.claude%",
+            "%config.resourcesDirectoryPreset.label.agents%"
+          ],
+          "enumDescriptions": [
+            "%config.resourcesDirectoryPreset.custom%",
+            "%config.resourcesDirectoryPreset.github%",
+            "%config.resourcesDirectoryPreset.claude%",
+            "%config.resourcesDirectoryPreset.agents%"
+          ],
+          "markdownDescription": "%config.resourcesDirectoryPreset.markdownDescription%"
+        },
         "resourceNinja.autoManageGitignore": {
           "type": "boolean",
           "default": true,
           "scope": "resource",
-          "order": 37,
+          "order": 38,
           "markdownDescription": "%config.autoManageGitignore.markdownDescription%"
         },
         "resourceNinja.additionalSkillRoots": {
           "type": "array",
           "default": [],
-          "order": 3,
+          "order": 4,
           "items": {
             "type": "string"
           },
@@ -1430,55 +1495,55 @@
         "resourceNinja.workspaceAgentsDirectory": {
           "type": "string",
           "default": ".github/agents",
-          "order": 4,
+          "order": 5,
           "markdownDescription": "%config.workspaceAgentsDirectory.markdownDescription%"
         },
         "resourceNinja.workspaceInstructionsDirectory": {
           "type": "string",
           "default": ".github/instructions",
-          "order": 5,
+          "order": 6,
           "markdownDescription": "%config.workspaceInstructionsDirectory.markdownDescription%"
         },
         "resourceNinja.workspacePromptsDirectory": {
           "type": "string",
           "default": ".github/prompts",
-          "order": 6,
+          "order": 7,
           "markdownDescription": "%config.workspacePromptsDirectory.markdownDescription%"
         },
         "resourceNinja.workspaceHooksDirectory": {
           "type": "string",
           "default": ".github/hooks",
-          "order": 7,
+          "order": 8,
           "markdownDescription": "%config.workspaceHooksDirectory.markdownDescription%"
         },
         "resourceNinja.workspaceMcpDirectory": {
           "type": "string",
           "default": ".github/mcp",
-          "order": 8,
+          "order": 9,
           "markdownDescription": "%config.workspaceMcpDirectory.markdownDescription%"
         },
         "resourceNinja.userAgentsDirectory": {
           "type": "string",
           "default": "",
-          "order": 9,
+          "order": 10,
           "markdownDescription": "%config.userAgentsDirectory.markdownDescription%"
         },
         "resourceNinja.userInstructionsDirectory": {
           "type": "string",
           "default": "",
-          "order": 10,
+          "order": 11,
           "markdownDescription": "%config.userInstructionsDirectory.markdownDescription%"
         },
         "resourceNinja.userPromptsDirectory": {
           "type": "string",
           "default": "",
-          "order": 11,
+          "order": 12,
           "markdownDescription": "%config.userPromptsDirectory.markdownDescription%"
         },
         "resourceNinja.globalResourceHomePreset": {
           "type": "string",
           "default": "copilot",
-          "order": 12,
+          "order": 13,
           "enum": [
             "copilot",
             "claude",
@@ -1496,13 +1561,13 @@
         "resourceNinja.globalHomeDirectory": {
           "type": "string",
           "default": "",
-          "order": 13,
+          "order": 14,
           "markdownDescription": "%config.globalHomeDirectory.markdownDescription%"
         },
         "resourceNinja.coexistenceMode": {
           "type": "string",
           "default": "auto",
-          "order": 19,
+          "order": 20,
           "enum": [
             "auto",
             "independent"
@@ -1516,7 +1581,7 @@
         "resourceNinja.kindsExcluded": {
           "type": "array",
           "default": [],
-          "order": 20,
+          "order": 21,
           "items": {
             "type": "string",
             "enum": [
@@ -1535,19 +1600,19 @@
         "resourceNinja.useSharedSourcesManifest": {
           "type": "boolean",
           "default": false,
-          "order": 21,
+          "order": 22,
           "markdownDescription": "%config.useSharedSourcesManifest.markdownDescription%"
         },
         "resourceNinja.useSharedResourceIndex": {
           "type": "boolean",
           "default": false,
-          "order": 22,
+          "order": 23,
           "markdownDescription": "%config.useSharedResourceIndex.markdownDescription%"
         },
         "resourceNinja.staleSourceIndexUpdateMode": {
           "type": "string",
           "default": "prompt",
-          "order": 23,
+          "order": 24,
           "enum": [
             "always",
             "prompt",
@@ -1563,13 +1628,13 @@
         "resourceNinja.useRefOutput": {
           "type": "boolean",
           "default": true,
-          "order": 24,
+          "order": 25,
           "markdownDescription": "%config.useRefOutput.markdownDescription%"
         },
         "resourceNinja.outputFormat": {
           "type": "string",
           "default": "full",
-          "order": 25,
+          "order": 26,
           "enum": [
             "full",
             "compact",
@@ -1585,7 +1650,7 @@
         "resourceNinja.refCatalogFormat": {
           "type": "string",
           "default": "full",
-          "order": 26,
+          "order": 27,
           "enum": [
             "full",
             "compact",
@@ -1625,13 +1690,13 @@
         "resourceNinja.showBuiltInResources": {
           "type": "boolean",
           "default": true,
-          "order": 27,
+          "order": 28,
           "markdownDescription": "%config.showBuiltInResources.markdownDescription%"
         },
         "resourceNinja.remoteResourceViewMode": {
           "type": "string",
           "default": "repositoryFirst",
-          "order": 28,
+          "order": 29,
           "enum": [
             "repositoryFirst",
             "resourceTypeFirst"
@@ -1645,7 +1710,7 @@
         "resourceNinja.language": {
           "type": "string",
           "default": "auto",
-          "order": 29,
+          "order": 30,
           "enum": [
             "auto",
             "en",
@@ -1663,25 +1728,25 @@
           "default": "",
           "editPresentation": "password",
           "scope": "machine",
-          "order": 30,
+          "order": 31,
           "markdownDescription": "%config.githubToken.markdownDescription%"
         },
         "resourceNinja.instructionBlock.includeAgents": {
           "type": "boolean",
           "default": false,
-          "order": 31,
+          "order": 32,
           "markdownDescription": "%config.instructionBlock.includeAgents.markdownDescription%"
         },
         "resourceNinja.instructionBlock.includeInstructions": {
           "type": "boolean",
           "default": false,
-          "order": 32,
+          "order": 33,
           "markdownDescription": "%config.instructionBlock.includeInstructions.markdownDescription%"
         },
         "resourceNinja.instructionBlock.globalHome.includeAgents": {
           "type": "string",
           "default": "inherit",
-          "order": 33,
+          "order": 34,
           "enum": [
             "inherit",
             "on",
@@ -1697,7 +1762,7 @@
         "resourceNinja.instructionBlock.globalHome.includeInstructions": {
           "type": "string",
           "default": "inherit",
-          "order": 34,
+          "order": 35,
           "enum": [
             "inherit",
             "on",
@@ -1713,7 +1778,7 @@
         "resourceNinja.registerPluginLocation": {
           "type": "string",
           "default": "prompt",
-          "order": 35,
+          "order": 36,
           "enum": [
             "always",
             "prompt",
@@ -1729,7 +1794,7 @@
         "resourceNinja.defaultPluginHost": {
           "type": "string",
           "default": "auto",
-          "order": 36,
+          "order": 37,
           "enum": [
             "auto",
             "ask",
@@ -1753,7 +1818,7 @@
         "resourceNinja.instructionBlock.includeExplicitOnlySkills": {
           "type": "boolean",
           "default": false,
-          "order": 38,
+          "order": 39,
           "markdownDescription": "%config.instructionBlock.includeExplicitOnlySkills.markdownDescription%"
         },
         "resourceNinja.versionInfo": {
