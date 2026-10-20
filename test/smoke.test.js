@@ -410,4 +410,53 @@ suite("Agent Resources Ninja smoke test", () => {
       }
     }
   });
+
+  // 一括インストールの 3 つの入口は、静的チェックだけでは「実際に動く」ことの証拠にならない。
+  // 何も選んでいないとき・ピッカーを何も選ばずに閉じたときに、例外にせず、何もインストールしないことを確かめる。
+  test("bulk install entry points open, close, and install nothing without a selection", async function () {
+    this.timeout(60000);
+    const extension = vscode.extensions.getExtension(
+      "yamapan.agent-resources-ninja",
+    );
+    await extension.activate();
+    const commands = await vscode.commands.getCommands(true);
+    for (const id of [
+      "resourceNinja.installMultiple",
+      "resourceNinja.installSelectedResources",
+      "resourceNinja.installSourceResources",
+    ]) {
+      assert.ok(commands.includes(id), `Missing command: ${id}`);
+    }
+
+    const folder = vscode.workspace.workspaceFolders[0];
+    const root = file(folder.uri, "smoke-skills");
+    const listRoot = async () =>
+      (await vscode.workspace.fs.readDirectory(root))
+        .map(([name]) => name)
+        .sort();
+    const before = await listRoot();
+    const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    // 選択も対象の行もない呼び出しは、案内を出して何もしない
+    await vscode.commands.executeCommand(
+      "resourceNinja.installSelectedResources",
+    );
+    await vscode.commands.executeCommand(
+      "resourceNinja.installSourceResources",
+    );
+
+    // 実際のピッカーを開き、何も選ばずに閉じる。約 3,000 件の候補でも開閉でき、何もインストールされない
+    const pending = vscode.commands.executeCommand(
+      "resourceNinja.installMultiple",
+    );
+    await pause(1500);
+    await vscode.commands.executeCommand("workbench.action.closeQuickOpen");
+    await pending;
+
+    assert.deepStrictEqual(
+      await listRoot(),
+      before,
+      "closing the picker without a choice must not install anything",
+    );
+  });
 });

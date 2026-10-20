@@ -1349,6 +1349,52 @@ test("workspace installed non-skill resources preserve source metadata", () => {
   );
 });
 
+test("workspace skill folder preset is wired through manifest, copy and code", () => {
+  const config = packageJson.contributes?.configuration?.properties || {};
+  const setting = config["resourceNinja.resourcesDirectoryPreset"];
+  assert.ok(setting, "Missing workspace skill folder preset setting");
+  assert.strictEqual(setting.type, "string");
+  assert.strictEqual(
+    setting.default,
+    "custom",
+    "the default must keep using resourcesDirectory so existing setups do not change",
+  );
+  assert.deepStrictEqual(setting.enum, ["custom", "github", "claude", "agents"]);
+  assert.strictEqual(setting.enumItemLabels.length, setting.enum.length);
+  assert.strictEqual(setting.enumDescriptions.length, setting.enum.length);
+  assert.ok(
+    config["resourceNinja.resourcesDirectory"].order <
+      setting.order &&
+      setting.order < config["resourceNinja.additionalSkillRoots"].order,
+    "the preset sits between the directory it overrides and the extra roots",
+  );
+  for (const reference of [
+    ...setting.enumItemLabels,
+    ...setting.enumDescriptions,
+    setting.markdownDescription,
+  ]) {
+    const key = reference.replace(/^%|%$/g, "");
+    assert.ok(nls[key], `Missing English NLS key: ${key}`);
+    assert.ok(nlsJa[key], `Missing Japanese NLS key: ${key}`);
+  }
+  // The one-sided coexistence must stay documented while the sibling ignores this setting.
+  for (const text of [
+    nls["config.resourcesDirectoryPreset.markdownDescription"],
+    nlsJa["config.resourcesDirectoryPreset.markdownDescription"],
+  ]) {
+    assert.match(text, /Agent Skills Ninja/);
+  }
+  assert.match(
+    customizationPathsSource,
+    /resolveWorkspaceSkillsDirectoryPreset\(\s*siblingConfig\.get<unknown>\("skillsDirectoryPreset"\)/,
+    "the sibling's preset must be read from the folder-scoped configuration",
+  );
+  assert.match(extensionSource, /"resourceNinja\.resourcesDirectoryPreset"/);
+  assert.match(extensionSource, /"skillNinja\.skillsDirectoryPreset"/);
+  assert.match(readme, /resourcesDirectoryPreset/);
+  assert.match(readmeJa, /resourcesDirectoryPreset/);
+});
+
 test("stale source index freshness setting is wired through manifest docs and code", () => {
   const config = packageJson.contributes?.configuration?.properties || {};
   const setting = config["resourceNinja.staleSourceIndexUpdateMode"];

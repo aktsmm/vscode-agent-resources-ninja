@@ -574,7 +574,7 @@ workspace skill を主 Workspace Skill Directory 以外に置く場合は、`add
 
 ビューでそれらを探すには、Installed・User-Global・Remote Resources のタイトルにある「絞り込みと並べ替え」アイコンを使います。skill を呼び出しモード（手動専用・モデル専用・自動）で絞り込み、名前順・呼び出しモード順・（Remote は）スター数順で並べ替えます。他の種別は絞り込みません。Remote Resources の呼び出しモードはインデックスから読むため、「インデックスに情報がありません」と表示されたら、一度「インデックス更新」を実行してください。
 
-**ワークスペースのスキルフォルダのプリセット。** `resourcesDirectoryPreset` で、使うツールの標準フォルダを選べます。`.github/skills`（GitHub Copilot / VS Code）、`.claude/skills`（Claude Code）、`.agents/skills`（Codex・共通）です。既定の `custom` は従来どおり `resourcesDirectory` を使うため、既存の設定は変わりません。切り替えてもインストール済みのスキルは移動せず、元のフォルダは一覧に表示されなくなります。引き続き表示したい場合は `additionalSkillRoots` に追加してください。Agent Skills Ninja も入れていて、この拡張側の設定が既定のままなら、そちらの `skillsDirectoryPreset` の選択に従い、両拡張が同じフォルダを管理します。
+**ワークスペースのスキルフォルダのプリセット。** `resourcesDirectoryPreset` で、使うツールの標準フォルダを選べます。`.github/skills`（GitHub Copilot / VS Code）、`.claude/skills`（Claude Code）、`.agents/skills`（Codex・共通）です。既定の `custom` は従来どおり `resourcesDirectory` を使うため、既存の設定は変わりません。切り替えてもインストール済みのスキルは移動せず、元のフォルダは一覧に表示されなくなります。引き続き表示したい場合は `additionalSkillRoots` に追加してください。Agent Skills Ninja も入れていて、この拡張側の設定が既定のままなら、そちらの `skillsDirectoryPreset` の選択に従い、両拡張が同じフォルダを管理します。逆方向はまだ対応していません。Agent Skills Ninja は `resourcesDirectoryPreset` を読まないため、両方の拡張で同じプリセットを選んでください。
 
 **複数のリソースをまとめてインストール。** Remote Resources は複数選択に対応しています。行を選んでコンテキストメニューの「選択したリソースをインストール」を使うか、ビュータイトルのクラウドアイコンで（絞り込み後の）全体からチェックするか、ソース行のアイコンでそのソースからチェックします。どの入口も確認は 1 回で、同じチェックを通ります。同じ場所へ書き込まれるリソース（例: `Code Review` と `code-review` は同じフォルダになります）は、インストール前に知らせ、最初の 1 件だけをインストールできます。
 

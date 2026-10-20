@@ -65,7 +65,7 @@
   "config.instructionFile.custom": "Custom (カスタムパス)",
   "config.customInstructionPath.markdownDescription": "生成した instruction block のカスタムファイルパス *（Instruction File で 'custom' を選択した場合のみ使用）*",
   "config.resourcesDirectory.markdownDescription": "**Workspace Skill Directory** - `skill` リソースと skill metadata のワークスペース既定保存先です。ワークスペース相対パス、絶対パス、`~/` パスを指定できます。`#resourceNinja.resourcesDirectoryPreset#` が `custom` のときだけ使われます。",
-  "config.resourcesDirectoryPreset.markdownDescription": "**Workspace Skill Directory Preset** - 使うツールの標準のワークスペーススキルフォルダを選びます。一覧にない場所は、最初の項目を選んで `#resourceNinja.resourcesDirectory#` に自由に入力してください（既定の `.github/skills` は従来どおりの動作です）。\n\n切り替えても、インストール済みのスキルは移動せず、元のフォルダは一覧に表示されなくなります（ファイルは残ります）。引き続き表示したい場合は `#resourceNinja.additionalSkillRoots#` にそのフォルダを追加してください。値は Agent Skills Ninja の `skillNinja.skillsDirectoryPreset` と揃えてあり、この拡張側の設定が既定のままなら、そちらの選択にも従います。",
+  "config.resourcesDirectoryPreset.markdownDescription": "**Workspace Skill Directory Preset** - 使うツールの標準のワークスペーススキルフォルダを選びます。一覧にない場所は、最初の項目を選んで `#resourceNinja.resourcesDirectory#` に自由に入力してください（既定の `.github/skills` は従来どおりの動作です）。\n\n切り替えても、インストール済みのスキルは移動せず、元のフォルダは一覧に表示されなくなります（ファイルは残ります）。引き続き表示したい場合は `#resourceNinja.additionalSkillRoots#` にそのフォルダを追加してください。値は Agent Skills Ninja の `skillNinja.skillsDirectoryPreset` と揃えてあり、この拡張側の設定が既定のままなら、そちらの選択にも従います。逆方向はまだ対応していません。Agent Skills Ninja はこの設定を読まないため、両拡張を同じフォルダにするには、そちらでも同じプリセットを選んでください。",
   "config.resourcesDirectoryPreset.label.custom": "Workspace Skill Directory の値を使う（既定: .github/skills）",
   "config.resourcesDirectoryPreset.label.github": "GitHub Copilot / VS Code (.github/skills)",
   "config.resourcesDirectoryPreset.label.claude": "Claude Code (.claude/skills)",

@@ -247,10 +247,9 @@ export function getConfiguredAdditionalSkillRoots(
   config: vscode.WorkspaceConfiguration,
 ): string[] {
   const configuredRoots = config.get<string[]>("additionalSkillRoots") || [];
+  // 姉妹拡張の additionalSkillRoots は resource スコープ。フォルダ指定なしでは、フォルダごとの値が届かない
   const siblingConfiguredRoots =
-    vscode.workspace
-      .getConfiguration("skillNinja")
-      .get<string[]>("additionalSkillRoots") || [];
+    getSiblingSkillNinjaConfig().get<string[]>("additionalSkillRoots") || [];
   const seenRoots = new Set<string>();
   const roots: string[] = [];
 

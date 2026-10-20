@@ -164,7 +164,11 @@ test("configured roots include skill and non-skill workspace directories", () =>
 test("additional skill roots are contributed and scanned as skill roots", () => {
   assert.match(customizationPathsSource, /getConfiguredAdditionalSkillRoots/);
   assert.match(customizationPathsSource, /isSameOrChildWorkspacePath/);
-  assert.match(customizationPathsSource, /getConfiguration\("skillNinja"\)/);
+  // 姉妹拡張の resource スコープの設定は、ワークスペースフォルダを指定して読む
+  assert.match(
+    customizationPathsSource,
+    /getConfiguration\(\s*"skillNinja",\s*vscode\.workspace\.workspaceFolders\?\.\[0\]\?\.uri/,
+  );
   assert.match(
     scannerSource,
     /\.\.\.getConfiguredAdditionalSkillRoots\(config\)/,

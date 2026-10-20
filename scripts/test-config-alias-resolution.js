@@ -444,6 +444,33 @@ test("the sibling's skills directory preset is honored when ours is unset", () =
   );
 });
 
+test("the sibling's folder-scoped additional roots are read with the workspace folder", () => {
+  const folder = { fsPath: "C:\\ws" };
+  const seen = [];
+  const loaded = loadCustomizationPaths(customizationPathsSource, undefined, {
+    siblingValues: { additionalSkillRoots: ["team/skills", " ", "team/skills"] },
+    workspaceFolders: [{ uri: folder }],
+    onGetConfiguration: (section, resource) => seen.push([section, resource]),
+  });
+  const ours = createConfigDouble({
+    declaredDefaults: { ...MANIFEST_DEFAULTS, additionalSkillRoots: ["own/skills"] },
+  });
+  assert.deepStrictEqual(loaded.getConfiguredAdditionalSkillRoots(ours), [
+    "own/skills",
+    "team/skills",
+  ]);
+  assert.ok(
+    seen.some(([section, resource]) => section === "skillNinja" && resource === folder),
+    "skillNinja.additionalSkillRoots is resource-scoped, so it needs the folder",
+  );
+  // No other read of a skillNinja setting may skip the folder.
+  assert.doesNotMatch(
+    customizationPathsSource,
+    /getConfiguration\("skillNinja"\)/,
+    "read sibling settings through getSiblingSkillNinjaConfig",
+  );
+});
+
 test("a legacy directory alias still resolves when the current key is unset", () => {
   const config = createConfigDouble({
     declaredDefaults: MANIFEST_DEFAULTS,
