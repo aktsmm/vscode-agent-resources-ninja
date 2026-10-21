@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.62] - 2026-10-21
+
+### Changed
+
+- **Dead Source Warnings Once per Cause / 使えない source の警告は原因ごとに 1 回** - A source whose scan returns no resources, or whose URL now points to a different repository, used to raise the same warning at every startup. It is now classified by error type (not by message text), reported once per cause with Open URL / Stop Updating / Remove, and checked again later (7 days for a changed repository, 30 days for an empty source). A successful manual update clears the record. Unreadable candidate files and registry fetch failures are treated as failed reads, not as an empty source, so they stay actionable and are never silenced. A source you chose to stop updating is marked "auto-update off" in the tree until a manual update succeeds / スキャン結果が 0 件、または URL が別リポジトリを指す source は、起動のたびに同じ警告を出していました。メッセージ文ではなくエラーの型で分類し、原因ごとに 1 回だけ URL を開く / 更新しない / 削除つきで通知し、後で再確認します（リポジトリの差し替えは 7 日、空の source は 30 日）。手動更新が成功すると記録を解除します。候補ファイルが読めない場合や registry の取得失敗は「空」ではなく読み取り失敗として扱うため、通知は消えず、対処できる状態のままです。「更新しない」を選んだ source は、ツリーに「自動更新オフ」と表示し、手動更新が成功すると戻ります。
+- **Gitignore Warning Shows the Cause / Gitignore の警告に原因を表示** - The synchronization warning now names the cause and the folder in English and Japanese, and offers Show Folder and, for a leftover lock, Show Lock File. A failure while removing the managed block is worded apart, because the exclusions stay in `.gitignore`. The lock is never deleted automatically / 同期の警告に原因と対象フォルダーを日英で表示し、フォルダーの表示と、ロックが残っている場合のロックファイルの表示を選べます。管理ブロックを外せなかった場合は、除外設定が `.gitignore` に残るため別の文言にします。ロックは自動では削除しません。
+
+### Removed
+
+- **OpenAI Codex Preset Retired / OpenAI Codex プリセットを退役** - `openai/codex` no longer publishes resources under `.codex/skills/`, so the preset could only fail. The catalog now lists it as retired (index v1.32.0), and it is removed from the local index and no longer re-imported from the shared stores. It stays in the shared file for any extension that has not retired it yet / `openai/codex` が `.codex/skills/` でリソースを公開しなくなり、プリセットは失敗するだけになっていました。カタログで退役扱い（index v1.32.0）にし、ローカル index から外し、共有ストアから再び取り込まないようにしました。まだ退役していない拡張のために、共有ファイルには残します。
+
 ## [0.2.61] - 2026-10-20
 
 ### Added

@@ -5,6 +5,7 @@ import * as vscode from "vscode";
 import { fetchGitHubWithOptionalAuthRetry } from "./githubFetch";
 import { encodeGitHubPathForUrl, encodeGitRefForPath } from "./gitHubRefSafety";
 import { logger } from "./logger";
+import { applyRetiredSources } from "./retiredSources";
 import {
   loadSharedStoresIntoSkillIndex,
   syncSharedStoresFromSkillIndex,
@@ -199,10 +200,16 @@ export interface SkillIndex {
   lastUpdated: string;
   /** この端末で source を最後に scan した ISO 時刻 */
   lastScannedAt?: string;
+  /** 同梱カタログが退役させた preset source。ローカル index と共有ストアからも外す */
+  retiredSources?: RetiredSource[];
   sources: Source[];
   skills: Skill[];
   categories: Category[];
   bundles?: Bundle[]; // Bundle一覧
+}
+
+export interface RetiredSource {
+  id: string;
 }
 
 /**
@@ -282,6 +289,9 @@ function normalizeSkillIndex(
     version: index.version || "1.0.0",
     lastUpdated: index.lastUpdated || new Date().toISOString().split("T")[0],
     lastScannedAt: index.lastScannedAt,
+    retiredSources: Array.isArray(index.retiredSources)
+      ? index.retiredSources
+      : undefined,
     sources: getNormalizedArrayField<Source>(index, "sources").map((source) => {
       const normalized = {
         ...source,
@@ -721,18 +731,22 @@ export function mergeSkillIndexes(
   const droppedLocalBundles =
     retainedLocalBundles.length < getIndexBundles(localIndex).length;
 
-  return {
-    ...localIndex,
-    version: bundledIndex.version,
-    lastUpdated: bundledIndex.lastUpdated,
-    sources: [...updatedSources, ...newSources],
-    categories: [...updatedCategories, ...newCategories],
-    skills: [...updatedSkills, ...newSkills],
-    bundles:
-      mergedBundles.length > 0 || droppedLocalBundles
-        ? mergedBundles
-        : localIndex.bundles,
-  };
+  return applyRetiredSources(
+    {
+      ...localIndex,
+      version: bundledIndex.version,
+      lastUpdated: bundledIndex.lastUpdated,
+      retiredSources: bundledIndex.retiredSources,
+      sources: [...updatedSources, ...newSources],
+      categories: [...updatedCategories, ...newCategories],
+      skills: [...updatedSkills, ...newSkills],
+      bundles:
+        mergedBundles.length > 0 || droppedLocalBundles
+          ? mergedBundles
+          : localIndex.bundles,
+    },
+    bundledIndex.retiredSources,
+  );
 }
 
 function areStringArraysEqual(left?: string[], right?: string[]): boolean {

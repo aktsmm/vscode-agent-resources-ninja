@@ -7,6 +7,7 @@ import {
 } from "./customizationPaths";
 import { logger } from "./logger";
 import { messages } from "./i18n";
+import { applyRetiredSources, getRetiredSourceIds } from "./retiredSources";
 import { buildSelfBeacon, RESOURCE_NINJA_KINDS } from "./coexistence";
 import {
   createEmptySharedResourceBuckets,
@@ -639,7 +640,11 @@ export async function syncSharedStoresFromSkillIndex(
       };
       // Read before write to apply raw-preserving merge (A-6).
       // Without this, concurrent writes to the shared manifest are lost.
-      const writeResult = await writeSharedSourcesManifest(manifest);
+      // A retired source is gone from our view only, so it stays in the shared file
+      // for any writer that has not retired it yet.
+      const writeResult = await writeSharedSourcesManifest(manifest, {
+        preservedIds: getRetiredSourceIds(currentIndex.retiredSources),
+      });
       if (writeResult?.status === "written") {
         await context.globalState.update(
           SHARED_SOURCES_MANIFEST_RECONCILED_KEY,
@@ -861,7 +866,9 @@ export async function loadSharedStoresIntoSkillIndex(
     }
   }
 
-  return nextIndex;
+  // The shared files are written by both extensions and may still carry a source
+  // the catalog retired, so it is dropped again after every merge.
+  return applyRetiredSources(nextIndex, currentIndex.retiredSources);
 }
 
 /**

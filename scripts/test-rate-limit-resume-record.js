@@ -127,6 +127,9 @@ const store = requireTypeScriptModule(
         sharedStoreSyncPaused: (reason) => `paused: ${reason}`,
       },
     },
+    "./retiredSources": requireTypeScriptModule(
+      path.join(srcDir, "retiredSources.ts"),
+    ),
     "./skillIndex": {
       getIndexResources: () => [],
       getResourceKind: (resource) => resource?.kind || "skill",

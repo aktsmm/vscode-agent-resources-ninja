@@ -32,6 +32,13 @@ export async function runSourceIndexUpdateBatch<TEntry, TValue>(
       succeeded.push(entry);
     } catch (error) {
       failures.push({ entry, error });
+      // A failure can still have changed the index (a lasting empty scan stamps its
+      // source as indexed). Dropping that would let the next source overwrite it.
+      const carried = (error as { indexAfterFailure?: TValue } | null)
+        ?.indexAfterFailure;
+      if (carried !== undefined) {
+        value = carried;
+      }
       if (isGitHubResponseError(error) && error.kind === "rate-limit") {
         skipped = entries.slice(index + 1);
         break;

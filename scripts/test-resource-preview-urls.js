@@ -68,6 +68,9 @@ const skillIndexModule = requireTypeScriptModule(
       fetchGitHubWithOptionalAuthRetry: async (url, options = {}) =>
         fetch(url, { method: options.method }),
     },
+    "./retiredSources": requireTypeScriptModule(
+      path.join(__dirname, "..", "src", "retiredSources.ts"),
+    ),
     "./sharedResourceIndexStore": {
       loadSharedStoresIntoSkillIndex: async (index) => index,
       syncSharedStoresFromSkillIndex: async () => undefined,

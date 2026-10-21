@@ -177,6 +177,9 @@ function createModule() {
           `Updated ${count} resource(s)`,
       },
     },
+    "./retiredSources": requireTypeScriptModule(
+      path.join(__dirname, "..", "src", "retiredSources.ts"),
+    ),
     "./sharedResourceIndexStore": {
       shouldRunSharedScan: async () => true,
       updateSharedScanMetadata: async () => undefined,
@@ -824,6 +827,9 @@ async function testSaveSkillIndexSyncsSharedStores() {
           error: () => undefined,
         },
       },
+      "./retiredSources": requireTypeScriptModule(
+        path.join(__dirname, "..", "src", "retiredSources.ts"),
+      ),
       "./sharedResourceIndexStore": {
         loadSharedStoresIntoSkillIndex: async (_context, index) => index,
         syncSharedStoresFromSkillIndex: async (_context, index) => {
@@ -1098,7 +1104,9 @@ async function testScannedSkillsCarryInvocationMetadata() {
     "https://github.com/octo/invocation-source",
   );
 
-  const byName = new Map(result.index.skills.map((skill) => [skill.name, skill]));
+  const byName = new Map(
+    result.index.skills.map((skill) => [skill.name, skill]),
+  );
   assert.strictEqual(byName.get("manual").invocation, "explicitOnly");
   assert.strictEqual(byName.get("manual").argumentHint, "<topic>");
   assert.strictEqual(byName.get("manual").context, "fork");
@@ -1129,12 +1137,128 @@ async function testScannedSkillsCarryInvocationMetadata() {
   );
 }
 
+async function runEmptyScanUpdate(treePaths, bulk = false) {
+  const { moduleExports, writes } = createModule();
+  global.fetch = async (url) => {
+    if (url === "https://api.github.com/repos/octo/emptied") {
+      return response(200, { default_branch: "main" });
+    }
+    if (
+      url ===
+      "https://api.github.com/repos/octo/emptied/git/trees/main?recursive=1"
+    ) {
+      return response(200, {
+        tree: treePaths.map((item) => ({ path: item, type: "blob" })),
+      });
+    }
+    return response(404, "Not Found");
+  };
+  const index = {
+    version: "1.0.0",
+    lastUpdated: "2026-06-20",
+    sources: [
+      {
+        id: "emptied",
+        name: "Emptied",
+        url: "https://github.com/octo/emptied",
+        type: "official",
+        branch: "main",
+        description: "Emptied",
+      },
+    ],
+    skills: [
+      {
+        kind: "skill",
+        name: "old",
+        source: "emptied",
+        path: "skills/old",
+        categories: [],
+        description: "Old",
+      },
+    ],
+    categories: [],
+    bundles: [],
+  };
+  const context = {
+    globalStorageUri: { fsPath: path.join("D:", "tmp", "storage") },
+  };
+
+  if (bulk) {
+    const result = await moduleExports.updateIndexFromSourcesWithResult(
+      context,
+      index,
+      undefined,
+      { forceScan: true },
+    );
+    return { result, writes };
+  }
+  try {
+    await moduleExports.updateIndexFromSingleSource(
+      context,
+      index,
+      "emptied",
+      undefined,
+      { forceScan: true },
+    );
+  } catch (error) {
+    return { error, writes };
+  }
+  assert.fail("the empty scan should have been refused");
+}
+
+async function testLastingEmptyScanIsStampedAndPersistent() {
+  const { error, writes } = await runEmptyScanUpdate(["README.md"]);
+
+  assert.strictEqual(error.kind, "empty-scan");
+  assert.strictEqual(
+    writes.filter((write) => write.path === "skill-index.json").length,
+    1,
+    "a lasting empty result refreshes freshness so it is not retried as stale",
+  );
+  assert.ok(
+    error.indexAfterFailure,
+    "the stamped index travels with the error so a batch cannot overwrite it",
+  );
+}
+
+async function testUnreadableCandidatesAreTransientAndNotStamped() {
+  const { error, writes } = await runEmptyScanUpdate(["skills/demo/SKILL.md"]);
+
+  assert.strictEqual(error.kind, "empty-scan-unverified");
+  assert.strictEqual(
+    writes.filter((write) => write.path === "skill-index.json").length,
+    0,
+    "unreadable candidates must stay stale until a scan can read them",
+  );
+}
+
+async function testBulkRefreshReportsUnreadableCandidatesAsFailure() {
+  const lasting = await runEmptyScanUpdate(["README.md"], true);
+  assert.strictEqual(lasting.result.failures.length, 0);
+  assert.strictEqual(lasting.result.succeeded.length, 1);
+
+  const unreadable = await runEmptyScanUpdate(["skills/demo/SKILL.md"], true);
+  assert.strictEqual(unreadable.result.failures.length, 1);
+  assert.strictEqual(
+    unreadable.result.failures[0].error.kind,
+    "empty-scan-unverified",
+  );
+  assert.strictEqual(
+    unreadable.result.index.skills.length,
+    1,
+    "the existing resources are kept",
+  );
+}
+
 async function main() {
   await testPrivateSourceUsesContentsFallback();
   await testPublicRawDoesNotAttachToken();
   await testFullUpdateStopsAfterRateLimit();
   await testFullUpdateScansOldestSourceFirst();
   await testSingleSourceProgressAdvancesAfterScan();
+  await testLastingEmptyScanIsStampedAndPersistent();
+  await testUnreadableCandidatesAreTransientAndNotStamped();
+  await testBulkRefreshReportsUnreadableCandidatesAsFailure();
   await testForeignScannerIsNotExecutedOrStamped();
   await testRemoveSourceRemovesOnlyIndexedEntries();
   await testMutationBoundariesRejectMalformedIndexShape();

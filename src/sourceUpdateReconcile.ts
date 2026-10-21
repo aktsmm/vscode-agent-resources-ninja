@@ -1,16 +1,45 @@
-import type { Bundle, Skill, Source } from "./skillIndex";
+import type { Bundle, Skill, SkillIndex, Source } from "./skillIndex";
+
+/**
+ * Why a scan failed, as a type so the classification survives translation of the
+ * message. `empty-scan-unverified` means candidate files were found but none could
+ * be read, which a retry can fix; the other two do not change by themselves.
+ */
+export type SourceScanErrorKind =
+  | "empty-scan"
+  | "empty-scan-unverified"
+  | "identity-changed";
+
+export class SourceScanError extends Error {
+  constructor(
+    public readonly kind: SourceScanErrorKind,
+    public readonly sourceId: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "SourceScanError";
+  }
+}
+
+export function isSourceScanError(error: unknown): error is SourceScanError {
+  return error instanceof SourceScanError;
+}
 
 /**
  * A scan that succeeds but returns nothing is indistinguishable from a repository
  * that was renamed, emptied, or restructured, so the existing index is kept unless
  * the caller explicitly opts into shrinking it.
  */
-export class EmptySourceScanError extends Error {
+export class EmptySourceScanError extends SourceScanError {
+  /** The index after the scan stamped its source as indexed, when it did. */
+  indexAfterFailure?: SkillIndex;
+
   constructor(
-    public readonly sourceId: string,
+    sourceId: string,
     message: string,
+    kind: "empty-scan" | "empty-scan-unverified" = "empty-scan",
   ) {
-    super(message);
+    super(kind, sourceId, message);
     this.name = "EmptySourceScanError";
   }
 }
@@ -21,13 +50,21 @@ export function isEmptySourceScanError(
   return error instanceof EmptySourceScanError;
 }
 
+/**
+ * `candidateCount` is how many resource files the scan read. Zero resources out of
+ * a non-zero count means the reads failed, not that the source is empty, so only a
+ * scan with no candidates at all is reported as a lasting empty result.
+ * `undefined` (a scanner that does not count) is treated as lasting.
+ */
 export function createEmptySourceScanError(
   sourceId: string,
   sourceName?: string,
+  candidateCount?: number,
 ): EmptySourceScanError {
   return new EmptySourceScanError(
     sourceId,
     `Scanning ${sourceName || sourceId} returned no resources while ${sourceId} still has indexed resources. The existing index was kept.`,
+    candidateCount ? "empty-scan-unverified" : "empty-scan",
   );
 }
 
@@ -77,14 +114,14 @@ export function reconcileSourceScanResult(
  * a takeover (repo-jacking) rather than an update, because the name can be
  * re-registered by anyone after the original repository is deleted or renamed away.
  */
-export class SourceRepositoryChangedError extends Error {
+export class SourceRepositoryChangedError extends SourceScanError {
   constructor(
-    public readonly sourceId: string,
+    sourceId: string,
     public readonly expectedRepoId: number,
     public readonly actualRepoId: number,
     message: string,
   ) {
-    super(message);
+    super("identity-changed", sourceId, message);
     this.name = "SourceRepositoryChangedError";
   }
 }

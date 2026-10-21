@@ -103,6 +103,31 @@ const {
     assert.deepStrictEqual(result.skipped, []);
   });
 
+  await test("a failure that changed the index hands it to the next source", async () => {
+    const seen = [];
+    const result = await runSourceIndexUpdateBatch(
+      ["first", "second"],
+      ["start"],
+      async (value, entry) => {
+        seen.push([...value]);
+        if (entry === "first") {
+          const error = new Error("lasting empty result");
+          error.indexAfterFailure = [...value, "stamped-by-first"];
+          throw error;
+        }
+        return [...value, entry];
+      },
+    );
+
+    assert.deepStrictEqual(seen[1], ["start", "stamped-by-first"]);
+    assert.deepStrictEqual(result.value, [
+      "start",
+      "stamped-by-first",
+      "second",
+    ]);
+    assert.strictEqual(result.failures.length, 1);
+  });
+
   await test("the resume plan keeps the source that raised the rate limit", async () => {
     const nowMs = Date.parse("2026-06-24T12:00:00.000Z");
     const plan = planRateLimitResume(

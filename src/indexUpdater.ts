@@ -704,6 +704,14 @@ function parseTopLevelFrontmatter(frontmatter: string): Map<string, string> {
   return values;
 }
 
+type ScanResult = {
+  skills: Skill[];
+  source: Source;
+  bundles?: Bundle[];
+  /** Resource files the scan tried to read; separates an empty source from failed reads. */
+  resourceCandidateCount?: number;
+};
+
 /**
  * リポジトリ内のSKILL.mdファイルを検索
  */
@@ -716,7 +724,7 @@ export async function scanRepositoryForSkills(
     "id" | "name" | "repoId" | "scanner" | "includePaths" | "excludePaths"
   >,
   scanOptions?: { allowRepositoryChange?: boolean },
-): Promise<{ skills: Skill[]; source: Source; bundles?: Bundle[] } | null> {
+): Promise<ScanResult | null> {
   const normalizedRepoUrl = normalizeGitHubRepoUrl(repoUrl);
   // URLからowner/repoを抽出
   const match = normalizedRepoUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
@@ -757,9 +765,10 @@ export async function scanRepositoryForSkills(
   // ブランチを決定: 指定されたブランチ → デフォルトブランチ → フォールバック
   const branch = preferredBranch || metadata?.defaultBranch || "main";
 
-  const applyRepositoryIdentity = (
-    result: { skills: Skill[]; source: Source; bundles?: Bundle[] } | null,
-  ) => {
+  // A registry that could not be read says nothing about the repository itself, so
+  // the tree scan that follows must not report its zero as a confirmed empty source.
+  let registryFallback = false;
+  const applyRepositoryIdentity = (result: ScanResult | null) => {
     if (!result) {
       return result;
     }
@@ -768,6 +777,9 @@ export async function scanRepositoryForSkills(
       url: canonicalRepoUrl,
       repoId: metadata?.id ?? sourceOptions?.repoId,
     };
+    if (registryFallback) {
+      result.resourceCandidateCount = result.resourceCandidateCount || 1;
+    }
     return result;
   };
 
@@ -784,6 +796,7 @@ export async function scanRepositoryForSkills(
       return applyRepositoryIdentity(registryResult);
     }
     // registry.json がない場合は通常処理にフォールバック
+    registryFallback = true;
   }
 
   // リポジトリのツリーを取得
@@ -951,7 +964,7 @@ async function processTreeResponse(
   branch: string,
   token?: string,
   sourceOptions?: Pick<Source, "scanner" | "includePaths" | "excludePaths">,
-): Promise<{ skills: Skill[]; source: Source; bundles?: Bundle[] }> {
+): Promise<ScanResult> {
   const allowedBlobFiles = data.tree.filter(
     (item) =>
       item.type === "blob" && isResourcePathAllowed(item.path, sourceOptions),
@@ -1031,7 +1044,16 @@ async function processTreeResponse(
       branch, // ブランチを保存
       description: `User added repository: ${owner}/${repoName}`,
     };
-    return { skills: claudeCommandSkills, source };
+    return {
+      skills: claudeCommandSkills,
+      source,
+      resourceCandidateCount: data.tree.filter(
+        (item) =>
+          item.type === "blob" &&
+          item.path.startsWith(".claude/commands/") &&
+          item.path.endsWith(".md"),
+      ).length,
+    };
   }
 
   // トップレベルディレクトリをスキル扱いするリポジトリ。
@@ -1222,7 +1244,12 @@ async function processTreeResponse(
     description: `User added repository: ${owner}/${repoName}`,
   };
 
-  return { skills: deduplicatedSkills, source, bundles };
+  return {
+    skills: deduplicatedSkills,
+    source,
+    bundles,
+    resourceCandidateCount: resourceFiles.length,
+  };
 }
 
 /**
@@ -1860,7 +1887,11 @@ export async function updateSingleSource(
     });
 
     if (reconciled.keptExisting) {
-      throw createEmptySourceScanError(sourceId, source.name);
+      throw createEmptySourceScanError(
+        sourceId,
+        source.name,
+        result.resourceCandidateCount,
+      );
     }
 
     const updatedSkills = reconciled.skills;
@@ -2067,8 +2098,16 @@ export async function updateIndexFromSourcesWithResult(
 
       // A bulk refresh keeps the existing index instead of failing the whole run.
       // The scan itself succeeded, so the source is still stamped as indexed and
-      // will not be retried as stale on every startup.
+      // will not be retried as stale on every startup. Candidates that could not
+      // be read are the exception: that is a failed read, so it is reported as one.
       if (reconciled.keptExisting) {
+        if (result.resourceCandidateCount) {
+          throw createEmptySourceScanError(
+            source.id,
+            source.name,
+            result.resourceCandidateCount,
+          );
+        }
         logger.warn(
           `[Resource Ninja] Kept the existing index for ${source.id}: the scan succeeded but returned no resources.`,
         );
@@ -2234,28 +2273,37 @@ export async function updateIndexFromSingleSource(
   });
 
   if (reconciled.keptExisting) {
-    // The scan itself succeeded, so refresh freshness before refusing the empty
-    // result; otherwise the source stays stale and is retried on every startup.
-    const guardedAt = new Date().toISOString();
-    const guardedIndex: SkillIndex = {
-      ...currentIndex,
-      sources: stampIndexedSources(
-        currentIndex.sources,
+    const emptyError = createEmptySourceScanError(
+      sourceId,
+      source.name,
+      result.resourceCandidateCount,
+    );
+    // A lasting empty result will not change on a retry, so freshness is refreshed
+    // to stop it from being retried as stale on every startup. Unreadable candidates
+    // are a failure to read, not an empty source, and stay stale until they succeed.
+    if (emptyError.kind === "empty-scan") {
+      const guardedAt = new Date().toISOString();
+      const guardedIndex: SkillIndex = {
+        ...currentIndex,
+        sources: stampIndexedSources(
+          currentIndex.sources,
+          [sourceId],
+          guardedAt,
+          SELF_EXTENSION_ID,
+        ).map((s) =>
+          s.id === sourceId ? mergeScannedSource(s, result.source) : s,
+        ),
+      };
+      await saveSkillIndex(context, guardedIndex);
+      await updateSharedScanMetadata(
+        context,
+        guardedIndex,
         [sourceId],
         guardedAt,
-        SELF_EXTENSION_ID,
-      ).map((s) =>
-        s.id === sourceId ? mergeScannedSource(s, result.source) : s,
-      ),
-    };
-    await saveSkillIndex(context, guardedIndex);
-    await updateSharedScanMetadata(
-      context,
-      guardedIndex,
-      [sourceId],
-      guardedAt,
-    );
-    throw createEmptySourceScanError(sourceId, source.name);
+      );
+      emptyError.indexAfterFailure = guardedIndex;
+    }
+    throw emptyError;
   }
 
   const newSkills = reconciled.skills;

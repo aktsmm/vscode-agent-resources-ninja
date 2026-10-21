@@ -1,6 +1,11 @@
 {
-  "version": "1.31.0",
-  "lastUpdated": "2026-07-30",
+  "version": "1.32.0",
+  "lastUpdated": "2026-10-21",
+  "retiredSources": [
+    {
+      "id": "openai-codex"
+    }
+  ],
   "sources": [
     {
       "id": "anthropics-skills",
@@ -171,15 +176,6 @@
       "includePaths": ["skills/"],
       "description": "Official Google Agent Skills for Google Cloud and Google products",
       "description_ja": "Google Cloud と Google プロダクト向けの Google 公式 Agent Skills"
-    },
-    {
-      "id": "openai-codex",
-      "name": "OpenAI Codex Skills (Official)",
-      "url": "https://github.com/openai/codex",
-      "type": "official",
-      "includePaths": [".codex/skills/"],
-      "description": "Official Codex repository skills",
-      "description_ja": "OpenAI Codex 公式リポジトリの skills"
     },
     {
       "id": "anthropic-claude-code",
@@ -6651,15 +6647,6 @@
       "pluginManifestKind": "marketplace"
     },
     {
-      "kind": "skill",
-      "name": "babysit-pr",
-      "source": "openai-codex",
-      "path": ".codex/skills/babysit-pr",
-      "categories": [],
-      "description": "Babysit a GitHub pull request after creation by continuously polling review comments, CI checks/workflow runs, and mergeability state until the PR is merged/closed or user help is required. Diagnose failures, retry likely flaky failures up to 3 times, auto-fix/push branch-related issues when appropriate, and keep watching open PRs so fresh review feedback is surfaced promptly. Use when the user asks Codex to monitor a PR, watch CI, handle review comments, or keep an eye on failures and feedback on an open PR.",
-      "description_ja": ""
-    },
-    {
       "name": "backendless-automation",
       "source": "composio-awesome",
       "path": "composio-skills/backendless-automation",
@@ -9370,15 +9357,6 @@
     },
     {
       "kind": "skill",
-      "name": "code-breaking-changes",
-      "source": "openai-codex",
-      "path": ".codex/skills/code-review-breaking-changes",
-      "categories": [],
-      "description": "Breaking changes",
-      "description_ja": ""
-    },
-    {
-      "kind": "skill",
       "name": "code-exemplars-blueprint-generator",
       "source": "github-awesome-copilot",
       "path": "skills/code-exemplars-blueprint-generator",
@@ -9401,15 +9379,6 @@
       "pluginRoot": "plugins/feature-dev",
       "pluginManifestPath": "plugins/feature-dev/.claude-plugin/plugin.json",
       "pluginManifestKind": "claude-plugin"
-    },
-    {
-      "kind": "skill",
-      "name": "code-review",
-      "source": "openai-codex",
-      "path": ".codex/skills/code-review",
-      "categories": [],
-      "description": "Run a final code review on a pull request",
-      "description_ja": ""
     },
     {
       "kind": "skill",
@@ -9439,24 +9408,6 @@
       "pluginManifestKind": "claude-plugin"
     },
     {
-      "kind": "skill",
-      "name": "code-review-change-size",
-      "source": "openai-codex",
-      "path": ".codex/skills/code-review-change-size",
-      "categories": [],
-      "description": "Change size guidance (800 lines)",
-      "description_ja": ""
-    },
-    {
-      "kind": "skill",
-      "name": "code-review-context",
-      "source": "openai-codex",
-      "path": ".codex/skills/code-review-context",
-      "categories": [],
-      "description": "Model visible context",
-      "description_ja": ""
-    },
-    {
       "kind": "instruction",
       "name": "code-review-generic",
       "source": "github-awesome-copilot",
@@ -9467,15 +9418,6 @@
       "pluginRoot": ".",
       "pluginManifestPath": ".github/plugin/marketplace.json",
       "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "skill",
-      "name": "code-review-testing",
-      "source": "openai-codex",
-      "path": ".codex/skills/code-review-testing",
-      "categories": [],
-      "description": "Test authoring guidance",
-      "description_ja": ""
     },
     {
       "kind": "agent",
@@ -9641,15 +9583,6 @@
       "invocation": "auto",
       "categories": [],
       "description": "Automate Codereadr tasks via Rube MCP (Composio). Always search tools first for current schemas.",
-      "description_ja": ""
-    },
-    {
-      "kind": "skill",
-      "name": "codex-pr-body",
-      "source": "openai-codex",
-      "path": ".codex/skills/codex-pr-body",
-      "categories": [],
-      "description": "Update the title and body of one or more pull requests.",
       "description_ja": ""
     },
     {
@@ -22262,15 +22195,6 @@
       "description_ja": ""
     },
     {
-      "kind": "skill",
-      "name": "path-types",
-      "source": "openai-codex",
-      "path": ".codex/skills/path-types",
-      "categories": [],
-      "description": "Choose Rust types for operating system paths across the Codex repository. Use when defining new path-bearing types or explicitly migrating existing ones.",
-      "description_ja": ""
-    },
-    {
       "name": "payhip-automation",
       "source": "composio-awesome",
       "path": "composio-skills/payhip-automation",
@@ -26360,15 +26284,6 @@
     },
     {
       "kind": "skill",
-      "name": "remote-tests",
-      "source": "openai-codex",
-      "path": ".codex/skills/remote-tests",
-      "categories": [],
-      "description": "Testing against remote executors in integration tests.",
-      "description_ja": ""
-    },
-    {
-      "kind": "skill",
       "name": "Remotion",
       "source": "pai-packs",
       "path": "LifeOS/install/skills/Remotion",
@@ -29898,15 +29813,6 @@
       "description_ja": "Test-driven development (TDD)"
     },
     {
-      "kind": "skill",
-      "name": "test-tui",
-      "source": "openai-codex",
-      "path": ".codex/skills/test-tui",
-      "categories": [],
-      "description": "Guide for testing Codex TUI interactively",
-      "description_ja": ""
-    },
-    {
       "kind": "plugin",
       "name": "testing-automation",
       "source": "github-awesome-copilot",
@@ -30784,15 +30690,6 @@
       "pluginRoot": ".",
       "pluginManifestPath": ".github/plugin/marketplace.json",
       "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "skill",
-      "name": "update-v8-version",
-      "source": "openai-codex",
-      "path": ".codex/skills/update-v8-version",
-      "categories": [],
-      "description": "Update Codex's pinned `v8` / `rusty_v8` versions, validate the release-candidate path, and investigate failed V8 canary or artifact builds. Use when asked to bump V8, update `rusty_v8` artifacts, prepare or validate a V8 release candidate, check `v8-canary`, or diagnose why a V8 version update no longer builds.",
-      "description_ja": ""
     },
     {
       "name": "updown-io-automation",

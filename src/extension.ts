@@ -129,6 +129,8 @@ import { registerMcpTools } from "./mcpTools";
 import { logger, registerLogger } from "./logger";
 import {
   createGitignoreInventory,
+  formatGitignoreFailure,
+  GITIGNORE_LOCK_NAME,
   observeGitignoreSynchronization,
   reconcileSkillGitignores,
 } from "./gitignoreManager";
@@ -263,6 +265,20 @@ import {
   isSourceRepositoryChangedError,
 } from "./sourceUpdateReconcile";
 import {
+  clearFailure,
+  clearRecoveredSources,
+  getMutedSourceIds,
+  isEligibleForAutoUpdate,
+  muteSource,
+  normalizeFailureState,
+  pruneFailureState,
+  SOURCE_INDEX_FAILURES_KEY,
+  takeUnshownFailures,
+  triageSourceFailures,
+  type PersistentSourceFailureKind,
+  type SourceFailureState,
+} from "./sourceIndexFailures";
+import {
   formatIndexedResourceChanges,
   formatSourceIndexResetAt,
   getIndexedResourceChanges,
@@ -336,6 +352,7 @@ const EXTENSION_VERSION =
     ?.version || "0.0.0";
 const STALE_SOURCE_PROMPT_DATE_KEY = "resourceNinja.staleSourceLastPromptDate";
 const STALE_SOURCE_CURSOR_KEY = "resourceNinja.staleSourceUpdateCursor";
+const MAX_SOURCE_UNAVAILABLE_NOTICES = 3;
 const CURSOR_PLUGIN_RECEIPTS_KEY = "resourceNinja.cursorPluginReceipts";
 // 絞り込み・並べ替えの保存先。Installed と User-Global は「local」を共有する
 const VIEW_OPTIONS_STATE_KEYS: Record<SkillViewScope, string> = {
@@ -1197,21 +1214,36 @@ export async function activate(
         }
         const reason = result.warning || result.reason || "io-failure";
         logger.warn(`[Gitignore] ${reason}`);
-        if (gitignoreFailures.get(key) === reason) {
+        const dedupeKey = `${reason}:${result.cleanup ? "cleanup" : "sync"}`;
+        if (gitignoreFailures.get(key) === dedupeKey) {
           return;
         }
-        gitignoreFailures.set(key, reason);
+        gitignoreFailures.set(key, dedupeKey);
         const details = messages.actionShowDetails();
+        const showFolder = messages.actionShowFolder();
+        const showLock = messages.actionShowGitignoreLock();
+        const actions =
+          result.reason === "busy"
+            ? [details, showLock, showFolder]
+            : [details, showFolder];
         void vscode.window
           .showWarningMessage(
-            isJapanese()
-              ? "Gitignore の同期を完了できませんでした。導入結果とは別の問題です。詳細を確認し、解消後にビューを更新してください。"
-              : "Gitignore synchronization could not finish. This is separate from the installation result. Check Details, then refresh the view after resolving the cause.",
-            details,
+            formatGitignoreFailure(result, {
+              rootLabel: root.fsPath,
+              japanese: isJapanese(),
+            }),
+            ...actions,
           )
-          .then((action) => {
+          .then(async (action) => {
             if (action === details) {
               logger.show();
+            } else if (action === showFolder) {
+              await vscode.commands.executeCommand("revealFileInOS", root);
+            } else if (action === showLock) {
+              await vscode.commands.executeCommand(
+                "revealFileInOS",
+                vscode.Uri.joinPath(root, GITIGNORE_LOCK_NAME),
+              );
             }
           });
       }),
@@ -1623,6 +1655,20 @@ export async function activate(
     sourceIds: Array<string | undefined>,
     reasonLabel?: string,
   ): Promise<SkillIndex> {
+    const refreshed = await refreshKnownSourceIndexes(
+      index,
+      sourceIds,
+      reasonLabel,
+    );
+    await forgetRecoveredSourceFailures(index, refreshed);
+    return refreshed;
+  }
+
+  async function refreshKnownSourceIndexes(
+    index: SkillIndex,
+    sourceIds: Array<string | undefined>,
+    reasonLabel?: string,
+  ): Promise<SkillIndex> {
     const knownSourceIds = Array.from(
       new Set(sourceIds.filter(isKnownIndexedSourceId)),
     );
@@ -1690,6 +1736,83 @@ export async function activate(
 
   let startupIndexMaintenanceStarted = false;
 
+  function readSourceFailureState(): SourceFailureState {
+    return normalizeFailureState(
+      context.globalState.get<unknown>(SOURCE_INDEX_FAILURES_KEY),
+    );
+  }
+
+  async function writeSourceFailureState(
+    state: SourceFailureState,
+  ): Promise<void> {
+    await context.globalState.update(SOURCE_INDEX_FAILURES_KEY, state);
+    syncMutedSourcesToTree(state);
+  }
+
+  function syncMutedSourcesToTree(state: SourceFailureState): void {
+    if (skillIndex) {
+      browseProvider.setMutedSourceIds(
+        getMutedSourceIds(state, skillIndex.sources),
+      );
+    }
+  }
+
+  /** A manual update stamps only the sources that succeeded, so comparing the index before and after finds the recovered ones. */
+  async function forgetRecoveredSourceFailures(
+    before: SkillIndex,
+    after: SkillIndex,
+  ): Promise<void> {
+    const current = readSourceFailureState();
+    const next = clearRecoveredSources(current, before.sources, after.sources);
+    if (next !== current) {
+      await writeSourceFailureState(next);
+    }
+  }
+
+  function describeSourceScanFailure(
+    kind: PersistentSourceFailureKind,
+  ): string {
+    return kind === "identity-changed"
+      ? messages.sourceIndexFailureIdentityChanged()
+      : messages.sourceIndexFailureEmptyScan();
+  }
+
+  async function notifySourceUnavailable(
+    source: Source,
+    kind: PersistentSourceFailureKind,
+  ): Promise<void> {
+    const detailAction = messages.actionShowDetails();
+    const openAction = messages.actionOpenSourceUrl();
+    const skipAction = messages.actionSkipSource();
+    const removeAction = messages.actionRemove();
+    const action = await vscode.window.showWarningMessage(
+      messages.sourceIndexSourceUnavailable(
+        getSourceUpdateDisplayName(source),
+        describeSourceScanFailure(kind),
+      ),
+      detailAction,
+      openAction,
+      skipAction,
+      removeAction,
+    );
+    if (action === detailAction) {
+      logger.show(true);
+    } else if (action === openAction) {
+      await vscode.env.openExternal(vscode.Uri.parse(source.url));
+    } else if (action === skipAction) {
+      await writeSourceFailureState(
+        muteSource(readSourceFailureState(), source),
+      );
+      void vscode.window.showInformationMessage(
+        messages.sourceIndexSourceSkipped(getSourceUpdateDisplayName(source)),
+      );
+    } else if (action === removeAction) {
+      await vscode.commands.executeCommand("resourceNinja.removeSource", {
+        source,
+      });
+    }
+  }
+
   async function runStartupIndexMaintenance(): Promise<void> {
     if (startupIndexMaintenanceStarted) {
       return;
@@ -1703,6 +1826,7 @@ export async function activate(
     try {
       let index = skillIndex || (await loadSkillIndex(context));
       skillIndex = index;
+      syncMutedSourcesToTree(readSourceFailureState());
       logger.info(
         `Loaded ${getIndexResources(index).length} resources from index`,
       );
@@ -1763,9 +1887,40 @@ export async function activate(
       }
 
       const sharedIndex = await readSharedResourceIndex();
+      const storedFailureState = readSourceFailureState();
+      const prunedFailureState = pruneFailureState(
+        storedFailureState,
+        index.sources,
+      );
+      // A cause recorded during a run that hit its notice limit is shown now, with
+      // no scan, so it is never delayed until the source is stale again.
+      const pendingNotices = takeUnshownFailures(
+        prunedFailureState,
+        index.sources,
+        MAX_SOURCE_UNAVAILABLE_NOTICES,
+      );
+      const failureStateAtStart = pendingNotices.state;
+      // Records of removed or retired sources are dropped for good, even when no
+      // source is stale this time, so a source that returns later starts clean.
+      if (
+        pendingNotices.notices.length > 0 ||
+        Object.keys(failureStateAtStart).length !==
+          Object.keys(storedFailureState).length
+      ) {
+        await writeSourceFailureState(failureStateAtStart);
+      }
+      for (const item of pendingNotices.notices) {
+        void notifySourceUnavailable(item.source, item.kind).catch((error) =>
+          logger.warn("[Source Index] Failed to show the source notice:", error),
+        );
+      }
       const staleSources = collectStaleSources(index, sharedIndex?.scanMeta, {
         selfExtensionId: SELF_EXTENSION_ID,
-      }).map((entry) => entry.source);
+      })
+        .map((entry) => entry.source)
+        .filter((source) =>
+          isEligibleForAutoUpdate(failureStateAtStart, source),
+        );
       if (staleSources.length === 0) {
         return;
       }
@@ -1874,14 +2029,35 @@ export async function activate(
       skillIndex = index;
       browseProvider.refresh();
 
+      // Failures that a retry cannot fix are recorded and shown once per cause;
+      // everything else (auth, network, rate limit, unreadable files) is reported
+      // every time because the user can act on it.
+      let failureState = pruneFailureState(
+        readSourceFailureState(),
+        nextIndex.sources,
+      );
       for (const source of succeeded) {
         logger.info(
           `[Source Index] [OK] ${getSourceUpdateDisplayName(source)}`,
         );
+        failureState = clearFailure(failureState, source.id);
       }
       for (const failure of failures) {
         logger.warn(
           `[Source Index] [FAILED] ${getSourceUpdateDisplayName(failure.entry)}: ${formatSourceUpdateFailureReason(failure.error)}`,
+        );
+      }
+      const triaged = triageSourceFailures(failureState, failures, {
+        maxNotices: MAX_SOURCE_UNAVAILABLE_NOTICES,
+      });
+      const transientFailures = triaged.transient;
+      await writeSourceFailureState(triaged.state);
+      for (const item of triaged.notices) {
+        void notifySourceUnavailable(item.source, item.kind).catch((error) =>
+          logger.warn(
+            "[Source Index] Failed to show the source notice:",
+            error,
+          ),
         );
       }
       for (const source of skipped) {
@@ -1897,8 +2073,8 @@ export async function activate(
         await vscode.window.showInformationMessage(
           messages.staleSourceIndexUpdated(succeeded.length, selected.length),
         );
-      } else {
-        const firstFailure = failures[0];
+      } else if (transientFailures.length > 0 || skipped.length > 0) {
+        const firstFailure = transientFailures[0] ?? failures[0];
         const detailAction = messages.actionShowDetails();
         const authAction = messages.actionConfigureGitHubAuth();
         const actions = shouldOfferGitHubAuth(firstFailure.error)
@@ -1915,9 +2091,9 @@ export async function activate(
           [
             messages.staleSourceIndexPartialFailed(
               succeeded.length,
-              failures.length,
+              transientFailures.length,
               selected.length,
-              failures
+              transientFailures
                 .slice(0, 3)
                 .map((failure) => getSourceUpdateDisplayName(failure.entry))
                 .join(", "),
@@ -1935,7 +2111,7 @@ export async function activate(
         }
       }
 
-      if (failures.length === 0 && staleUpdateMode !== "always") {
+      if (transientFailures.length === 0 && staleUpdateMode !== "always") {
         await context.globalState.update(
           STALE_SOURCE_PROMPT_DATE_KEY,
           getLocalDateString(),
@@ -7670,13 +7846,14 @@ export async function activate(
             },
             async (progress) => {
               const currentIndex = await loadSkillIndex(context);
-              await updateIndexFromSingleSource(
+              const refreshedIndex = await updateIndexFromSingleSource(
                 context,
                 currentIndex,
                 bundle.source,
                 progress,
                 { forceScan: true },
               );
+              await forgetRecoveredSourceFailures(currentIndex, refreshedIndex);
             },
           );
           browseProvider.refresh();
@@ -8219,7 +8396,14 @@ export async function activate(
           );
           return undefined;
         }
+        const indexBeforeManualUpdate = skillIndex;
         skillIndex = updateResult.index;
+        if (indexBeforeManualUpdate) {
+          await forgetRecoveredSourceFailures(
+            indexBeforeManualUpdate,
+            skillIndex,
+          );
+        }
         const newCount = getIndexResources(skillIndex).length;
         const diff = newCount - oldCount;
         const diffText = diff > 0 ? `+${diff}` : diff === 0 ? "±0" : `${diff}`;
@@ -8417,13 +8601,15 @@ export async function activate(
             cancellable: false,
           },
           async (progress) => {
+            const indexBefore = skillIndex!;
             skillIndex = await updateIndexFromSingleSource(
               context,
-              skillIndex!,
+              indexBefore,
               sourceId,
               progress,
               { forceScan: true, allowEmptyResult },
             );
+            await forgetRecoveredSourceFailures(indexBefore, skillIndex);
           },
         );
         const newResources = getIndexResources(skillIndex).filter(

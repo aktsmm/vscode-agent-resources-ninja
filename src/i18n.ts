@@ -41,6 +41,21 @@ const jaMessages = {
     "ソースインデックスの更新結果: {0}/{2} 件更新、{1} 件失敗、{5} 件未試行。失敗: {3}。理由: {4}",
   sourceIndexResourcesUpdatedProgress: "{0} 件のリソースを更新",
   sourceIndexUpdated: "✅ {0} を更新しました: {1} → {2} リソース ({3})",
+  sourceIndexSourceUnavailable:
+    "ソース {0} を自動更新できません: {1} 同じ原因では再通知せず、後で自動的に再確認します。",
+  sourceIndexFailureEmptyScan:
+    "スキャンしてもリソースが 0 件でした（リポジトリの構成が変わったか、公開が終了した可能性があります）。",
+  sourceIndexFailureIdentityChanged:
+    "同じ URL が別の GitHub リポジトリを指しています（リポジトリの差し替えの可能性があります）。",
+  sourceIndexSourceSkipped:
+    "{0} を自動更新の対象から外しました。手動で更新して成功すると解除されます。",
+  actionOpenSourceUrl: "URL を開く",
+  sourceAutoUpdateOffLabel: "自動更新オフ",
+  sourceAutoUpdateOffHint:
+    "このソースは自動更新の対象から外しています。「インデックス更新」で手動更新して成功すると、自動更新に戻ります。",
+  actionShowFolder: "フォルダーを表示",
+  actionShowGitignoreLock: "ロックファイルを表示",
+  actionSkipSource: "更新しない",
   githubRateLimitReason: "GitHub API の rate limit に達しました",
   githubRateLimitResetAt: "再試行可能: {0}",
   githubSsoRequiredReason: "GitHub organization の SSO 認証が必要です",
@@ -280,6 +295,21 @@ const enMessages: MessageDictionary = {
     "Source index update result: {0}/{2} updated, {1} failed, {5} not attempted. Failed: {3}. Reason: {4}",
   sourceIndexResourcesUpdatedProgress: "Updated {0} resource(s)",
   sourceIndexUpdated: "✅ Updated {0}: {1} → {2} resource(s) ({3})",
+  sourceIndexSourceUnavailable:
+    "Source {0} cannot be updated automatically: {1} This cause is not shown again, and the source is checked again automatically later.",
+  sourceIndexFailureEmptyScan:
+    "Scanning returned no resources (the repository layout may have changed or it may no longer be published).",
+  sourceIndexFailureIdentityChanged:
+    "The same URL now points to a different GitHub repository (the repository may have been replaced).",
+  sourceIndexSourceSkipped:
+    "{0} was excluded from automatic updates. A successful manual update restores it.",
+  actionOpenSourceUrl: "Open URL",
+  sourceAutoUpdateOffLabel: "auto-update off",
+  sourceAutoUpdateOffHint:
+    "This source is excluded from automatic updates. A successful manual Update Index restores it.",
+  actionShowFolder: "Show Folder",
+  actionShowGitignoreLock: "Show Lock File",
+  actionSkipSource: "Stop Updating",
   githubRateLimitReason: "GitHub API rate limit exceeded",
   githubRateLimitResetAt: "retry after {0}",
   githubSsoRequiredReason: "GitHub organization SSO authorization is required",
@@ -597,6 +627,19 @@ export const messages = {
     newCount: number,
     diff: string,
   ) => localize("sourceIndexUpdated", name, oldCount, newCount, diff),
+  sourceIndexSourceUnavailable: (name: string, cause: string) =>
+    localize("sourceIndexSourceUnavailable", name, cause),
+  sourceIndexFailureEmptyScan: () => localize("sourceIndexFailureEmptyScan"),
+  sourceIndexFailureIdentityChanged: () =>
+    localize("sourceIndexFailureIdentityChanged"),
+  sourceIndexSourceSkipped: (name: string) =>
+    localize("sourceIndexSourceSkipped", name),
+  actionOpenSourceUrl: () => localize("actionOpenSourceUrl"),
+  sourceAutoUpdateOffLabel: () => localize("sourceAutoUpdateOffLabel"),
+  sourceAutoUpdateOffHint: () => localize("sourceAutoUpdateOffHint"),
+  actionShowFolder: () => localize("actionShowFolder"),
+  actionShowGitignoreLock: () => localize("actionShowGitignoreLock"),
+  actionSkipSource: () => localize("actionSkipSource"),
   githubRateLimitReason: () => localize("githubRateLimitReason"),
   githubRateLimitResetAt: (resetAt: string) =>
     localize("githubRateLimitResetAt", resetAt),

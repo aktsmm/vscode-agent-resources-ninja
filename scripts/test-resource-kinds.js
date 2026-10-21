@@ -791,7 +791,6 @@ test("bundled awesome-copilot index includes non-skill resources", () => {
 test("bundled official product presets use filtered resource roots", () => {
   const skillOnlyExpectedCounts = {
     "google-gemini-cli": 11,
-    "openai-codex": 11,
     "cline-official": 1,
   };
 

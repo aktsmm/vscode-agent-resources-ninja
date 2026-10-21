@@ -102,6 +102,9 @@ const skillIndex = requireTypeScriptModule(
         error: () => undefined,
       },
     },
+    "./retiredSources": requireTypeScriptModule(
+      path.join(__dirname, "..", "src", "retiredSources.ts"),
+    ),
     "./sharedResourceIndexStore": {
       loadSharedStoresIntoSkillIndex: async (_context, index) => index,
       syncSharedStoresFromSkillIndex: async () => undefined,
@@ -250,6 +253,9 @@ async function main() {
             error: () => undefined,
           },
         },
+        "./retiredSources": requireTypeScriptModule(
+          path.join(__dirname, "..", "src", "retiredSources.ts"),
+        ),
         "./sharedResourceIndexStore": {
           loadSharedStoresIntoSkillIndex: async (_context, index) => index,
           syncSharedStoresFromSkillIndex: async () => undefined,
@@ -353,6 +359,9 @@ async function main() {
             error: () => undefined,
           },
         },
+        "./retiredSources": requireTypeScriptModule(
+          path.join(__dirname, "..", "src", "retiredSources.ts"),
+        ),
         "./sharedResourceIndexStore": {
           loadSharedStoresIntoSkillIndex: async (_context, index) => index,
           syncSharedStoresFromSkillIndex: async () => undefined,
@@ -408,6 +417,9 @@ async function main() {
             error: () => undefined,
           },
         },
+        "./retiredSources": requireTypeScriptModule(
+          path.join(__dirname, "..", "src", "retiredSources.ts"),
+        ),
         "./sharedResourceIndexStore": {
           loadSharedStoresIntoSkillIndex: async (_context, index) => index,
           syncSharedStoresFromSkillIndex: async (_context, index) => {
@@ -514,6 +526,9 @@ async function main() {
             error: () => undefined,
           },
         },
+        "./retiredSources": requireTypeScriptModule(
+          path.join(__dirname, "..", "src", "retiredSources.ts"),
+        ),
         "./sharedResourceIndexStore": {
           loadSharedStoresIntoSkillIndex: async (_context, index) => {
             events.push("read-shared");
@@ -632,6 +647,9 @@ async function main() {
             error: () => undefined,
           },
         },
+        "./retiredSources": requireTypeScriptModule(
+          path.join(__dirname, "..", "src", "retiredSources.ts"),
+        ),
         "./sharedResourceIndexStore": {
           loadSharedStoresIntoSkillIndex: async (_context, index) => {
             events.push("read-shared");

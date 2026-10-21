@@ -60,6 +60,9 @@ const { mergeSkillIndexes } = requireTypeScriptModule(
         error: () => undefined,
       },
     },
+    "./retiredSources": requireTypeScriptModule(
+      path.join(__dirname, "..", "src", "retiredSources.ts"),
+    ),
     "./sharedResourceIndexStore": {
       loadSharedStoresIntoSkillIndex: async (_context, index) => index,
       syncSharedStoresFromSkillIndex: async () => undefined,

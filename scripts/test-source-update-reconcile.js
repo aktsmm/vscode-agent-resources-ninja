@@ -152,4 +152,34 @@ test("the empty-scan error is identifiable and names the source", () => {
   );
 });
 
+test("candidates that could not be read are an unverified empty scan", () => {
+  const lasting = reconcile.createEmptySourceScanError("acme", "Acme", 0);
+  const unreadable = reconcile.createEmptySourceScanError("acme", "Acme", 3);
+  const uncounted = reconcile.createEmptySourceScanError("acme", "Acme");
+
+  assert.strictEqual(lasting.kind, "empty-scan");
+  assert.strictEqual(unreadable.kind, "empty-scan-unverified");
+  assert.strictEqual(uncounted.kind, "empty-scan");
+  assert.ok(reconcile.isEmptySourceScanError(unreadable));
+});
+
+test("scan failures carry a kind so classification never reads the message", () => {
+  const empty = reconcile.createEmptySourceScanError("acme", "Acme");
+  const changed = new reconcile.SourceRepositoryChangedError(
+    "acme",
+    1,
+    2,
+    "translated text that must not matter",
+  );
+
+  assert.ok(reconcile.isSourceScanError(empty));
+  assert.ok(reconcile.isSourceScanError(changed));
+  assert.strictEqual(changed.kind, "identity-changed");
+  assert.strictEqual(changed.sourceId, "acme");
+  assert.strictEqual(
+    reconcile.isSourceScanError(new Error("empty-scan")),
+    false,
+  );
+});
+
 console.log("\nAll source update reconcile tests passed.");

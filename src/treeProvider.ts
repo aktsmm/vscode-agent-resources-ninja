@@ -905,10 +905,23 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
     string | undefined
   >();
 
+  private mutedSourceIds: ReadonlySet<string> = new Set();
+
   constructor(
     private context: vscode.ExtensionContext,
     private recentlyInstalled?: Set<string>,
   ) {}
+
+  /** Sources the user stopped auto-updating, so the tree can say why they never refresh. */
+  setMutedSourceIds(ids: ReadonlySet<string>): void {
+    const changed =
+      ids.size !== this.mutedSourceIds.size ||
+      [...ids].some((id) => !this.mutedSourceIds.has(id));
+    this.mutedSourceIds = ids;
+    if (changed) {
+      this._onDidChangeTreeData.fire();
+    }
+  }
 
   /**
    * 絞り込み後のインデックス。sources / bundles / categories はそのまま、skills だけを絞る。
@@ -1527,9 +1540,12 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
     const count = resourceKind
       ? this.getResourceCountForSourceAndKind(source.id, resourceKind)
       : this.getSkillCountForSource(source.id);
+    const autoUpdateOff = this.mutedSourceIds.has(source.id);
     const item = new SkillTreeItem(
       source.name,
-      `${count} resources`,
+      autoUpdateOff
+        ? `${count} resources · ${messages.sourceAutoUpdateOffLabel()}`
+        : `${count} resources`,
       vscode.TreeItemCollapsibleState.Collapsed,
       resourceKind ? "remoteKindSource" : "source",
       undefined,
@@ -1566,6 +1582,10 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
         new vscode.ThemeColor("charts.orange"),
       );
       item.tooltip = `${item.tooltip}\n\n${this.getEmptySourceHint(source)}`;
+    }
+
+    if (autoUpdateOff) {
+      item.tooltip = `${item.tooltip}\n\n${messages.sourceAutoUpdateOffHint()}`;
     }
 
     return item;

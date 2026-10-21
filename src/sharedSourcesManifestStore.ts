@@ -321,7 +321,7 @@ function toDefinedFields(entry: SourceEntry): Record<string, unknown> {
 export function mergeSourceEntriesForRewrite(
   rawEntries: readonly unknown[],
   ownEntries: readonly SourceEntry[],
-  options: { allowRemoval: boolean },
+  options: { allowRemoval: boolean; preservedIds?: ReadonlySet<string> },
 ): Record<string, unknown>[] {
   const ownById = new Map(ownEntries.map((entry) => [entry.id, entry]));
   const emittedIds = new Set<string>();
@@ -354,8 +354,9 @@ export function mergeSourceEntriesForRewrite(
     const own = ownById.get(rawId);
     if (!own) {
       // Only a current view can tell a local removal apart from a source the
-      // sibling added since we last read the file.
-      if (!options.allowRemoval) {
+      // sibling added since we last read the file. An id we retired is hidden from
+      // our view on purpose, so it is never a removal.
+      if (!options.allowRemoval || options.preservedIds?.has(rawId)) {
         merged.push({ ...inspected.unknown, ...inspected.known });
       }
       continue;
@@ -549,6 +550,7 @@ export async function readSharedSourcesManifest(): Promise<SharedSourcesManifest
  */
 export async function writeSharedSourcesManifest(
   manifest: SharedSourcesManifest,
+  options?: { preservedIds?: ReadonlySet<string> },
 ): Promise<SharedSourcesManifestWriteResult> {
   const ownEntries = manifest.sources.map(normalizeSourceEntry);
   const sharedDir = getAgentNinjaSharedDirectoryPath();
@@ -585,7 +587,7 @@ export async function writeSharedSourcesManifest(
       const mergedSources = mergeSourceEntriesForRewrite(
         rawEntries,
         ownEntries,
-        { allowRemoval },
+        { allowRemoval, preservedIds: options?.preservedIds },
       );
       const lastUpdated = manifest.lastUpdated || new Date().toISOString();
 

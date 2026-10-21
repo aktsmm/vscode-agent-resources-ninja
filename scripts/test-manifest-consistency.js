@@ -1920,7 +1920,7 @@ test("startup stale update flow avoids duplicate missing-index prompts", () => {
   );
   assert.match(
     extensionSource,
-    /if \(failures\.length === 0 && staleUpdateMode !== "always"\) \{\s*await context\.globalState\.update\(/,
+    /if \(transientFailures\.length === 0 && staleUpdateMode !== "always"\) \{\s*await context\.globalState\.update\(/,
     "Successful prompt-driven stale source updates should record the daily prompt after updates finish",
   );
   assert.match(extensionSource, /runSourceIndexUpdateBatch\(/);
@@ -3054,7 +3054,6 @@ test("preset source path filters are wired through scripts and runtime", () => {
 
   for (const sourceId of [
     "google-gemini-cli",
-    "openai-codex",
     "anthropic-claude-code",
     "aws-agent-plugins",
     "elastic-agent-skills",
