@@ -443,6 +443,8 @@ GitHub Copilot の **Agent Mode** では、自動的に MCP ツールとして�
 | `#removeResourceSource` | リソースソースをインデックスから削除 |
 | `#localizeResource`     | リソース説明をローカライズ           |
 
+ツールはリソースを正確な名前で指定します。同じ名前が複数の source やフォルダーにある場合は、名前だけでなく `#searchResources` が表示する `source` と `path`（アンインストールは `#listResources` が表示する `path`）を指定してください。名前が曖昧なとき、または部分一致のときは対象を決めず、候補を表示して何も変更しません。`#installResource` は、置き換えに同意したうえで `overwrite: true` を付けない限り、既存の配置先を変更しません。
+
 ### 使用例
 
 ```

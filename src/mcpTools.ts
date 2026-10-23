@@ -23,6 +23,13 @@ import {
   getInstalledSkills,
   uninstallSkillByPath,
 } from "./skillInstaller";
+import {
+  findUnknownKind,
+  selectResource,
+  toSelectorText,
+  type ResourceSelection,
+  type ResourceSelector,
+} from "./mcpResourceSelection";
 import { formatHookConfigUpdateSummary } from "./hookConfigManager";
 import {
   escapeMarkdownTableText as escapeMarkdownCell,
@@ -191,24 +198,43 @@ function getSourceStats(index: SkillIndex): string {
   );
 }
 
+const RESOURCE_KINDS: readonly string[] = [
+  "skill",
+  "agent",
+  "instruction",
+  "prompt",
+  "hook",
+  "mcp",
+  "plugin",
+  "cursor-rule",
+];
+
 function normalizeKindFilter(kind?: string): ResourceKind | undefined {
   const normalized = kind?.trim().toLowerCase();
   if (!normalized || normalized === "all") {
     return undefined;
   }
-  if (
-    normalized === "skill" ||
-    normalized === "agent" ||
-    normalized === "instruction" ||
-    normalized === "prompt" ||
-    normalized === "hook" ||
-    normalized === "mcp" ||
-    normalized === "plugin" ||
-    normalized === "cursor-rule"
-  ) {
-    return normalized;
+  return RESOURCE_KINDS.includes(normalized)
+    ? (normalized as ResourceKind)
+    : undefined;
+}
+
+/** A kind that is set but unknown would silently widen the target, so the tool stops instead. */
+function unknownKindResult(
+  kind: unknown,
+): vscode.LanguageModelToolResult | undefined {
+  const unknown = findUnknownKind(kind, RESOURCE_KINDS);
+  if (!unknown) {
+    return undefined;
   }
-  return undefined;
+  return new vscode.LanguageModelToolResult([
+    new vscode.LanguageModelTextPart(
+      localizeMcpText(
+        `❌ Unknown kind "${unknown}". Nothing was changed. Use one of: ${RESOURCE_KINDS.join(", ")}.`,
+        `❌ 不明な kind「${unknown}」です。何も変更していません。次のいずれかを指定してください: ${RESOURCE_KINDS.join(", ")}`,
+      ),
+    ),
+  ]);
 }
 
 function resourceMatchesKind(resource: Skill, kind?: ResourceKind): boolean {
@@ -240,37 +266,49 @@ function toDisplayPath(
 
 function findIndexedResourceCandidates(
   resources: Skill[],
-  resourceName: string,
-  kind?: ResourceKind,
-): { match?: Skill; candidates: Skill[]; reason?: string } {
-  const query = resourceName.trim().toLowerCase();
-  if (!query) {
-    return { candidates: [], reason: "empty" };
-  }
+  selector: ResourceSelector,
+): ResourceSelection<Skill> {
+  return selectResource(resources, selector, (resource) => resource.path);
+}
 
-  const kindFiltered = resources.filter((resource) =>
-    resourceMatchesKind(resource, kind),
-  );
-  const exactMatches = kindFiltered.filter(
-    (resource) => resource.name.toLowerCase() === query,
-  );
-  if (exactMatches.length === 1) {
-    return { match: exactMatches[0], candidates: exactMatches };
-  }
-  if (exactMatches.length > 1) {
-    return { candidates: exactMatches, reason: "ambiguous" };
-  }
-
-  const partialMatches = kindFiltered.filter((resource) =>
-    resource.name.toLowerCase().includes(query),
-  );
-  if (partialMatches.length === 1) {
-    return { match: partialMatches[0], candidates: partialMatches };
-  }
+/** install / uninstall の入力から対象指定だけを取り出す。型が不正な値は捨てる。 */
+function readResourceSelector(input: {
+  resourceName?: unknown;
+  skillName?: unknown;
+  kind?: unknown;
+  source?: unknown;
+  path?: unknown;
+}): ResourceSelector {
   return {
-    candidates: partialMatches,
-    reason: partialMatches.length > 1 ? "ambiguous" : "missing",
+    name: toSelectorText(input.resourceName) || toSelectorText(input.skillName),
+    kind: normalizeKindFilter(
+      typeof input.kind === "string" ? input.kind : undefined,
+    ),
+    source: toSelectorText(input.source),
+    path: toSelectorText(input.path),
   };
+}
+
+async function pathExists(uri: vscode.Uri): Promise<boolean> {
+  try {
+    await vscode.workspace.fs.stat(uri);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** インストール直後に、成功メッセージではなく実ファイルの存在で結果を確認する。 */
+async function verifyInstalledDestination(
+  kind: ResourceKind,
+  destination: vscode.Uri,
+): Promise<boolean> {
+  if (kind === "hook") {
+    return true;
+  }
+  return pathExists(
+    kind === "skill" ? vscode.Uri.joinPath(destination, "SKILL.md") : destination,
+  );
 }
 
 /**
@@ -447,7 +485,7 @@ ${updateInfo.warning}
         const trust = getTrustBadge(skill.source || "");
         const desc = getLocalizedDescription(skill, isJa);
         const kind = getResourceKind(skill);
-        return `| ${getResourceKindLabel(kind, isJa)} | ${escapeMarkdownCell(skill.name)} | ${escapeMarkdownCell(
+        return `| ${getResourceKindLabel(kind, isJa)} | ${escapeMarkdownCell(skill.name)} | ${escapeMarkdownCell(skill.source || "")} | \`${escapeMarkdownCell(skill.path || "")}\` | ${escapeMarkdownCell(
           desc || (isJa ? "説明なし" : "No description"),
         )} | ${escapeMarkdownCell(categories)} | ${trust} |${stars}`;
       })
@@ -479,11 +517,11 @@ ${updateInfo.warning}
 
 Search results for "${query}"${kindFilter ? ` (${getResourceKindLabel(kindFilter, false)})` : ""}: ${results.length}
 
-| Kind | Resource | Description | Categories | Trust |
-|---|---|---|---|---|
+| Kind | Resource | Source | Path | Description | Categories | Trust |
+|---|---|---|---|---|---|---|
 ${formatted}
 ${recommendSection}
-Choose a resource to install, or search GitHub/add a source/update the index for more results.`,
+Choose a resource to install, or search GitHub/add a source/update the index for more results. When the same name appears more than once, pass that row's Source and Path as \`source\` and \`path\` to installResource.`,
           `🔎 ${sourceStats}から検索しました（最終更新: ${
             updateInfo.lastUpdated
           }）
@@ -491,13 +529,14 @@ ${updateInfo.warning}
 
 "${query}"${kindFilter ? ` (${getResourceKindLabel(kindFilter, isJa)})` : ""} の検索結果: ${results.length} 件
 
-| Kind | Resource | Description | Categories | Trust |
-|---|---|------------|------|-------|
+| Kind | Resource | Source | Path | Description | Categories | Trust |
+|---|---|---|---|---|---|---|
 ${formatted}
 ${recommendSection}
 ---
 **Agent Instructions (MUST FOLLOW):**
 - Show the table above to user in a clean format
+- When installing, pass the chosen row's Source and Path as \`source\` and \`path\` so same-name resources are never mixed up
 - Highlight the recommended resource
 - Community resources: warn users to use at their own risk
 - NEVER show commands to user - execute directly when approved
@@ -529,29 +568,30 @@ ${
   }
 }
 
-/**
- * スキルインストールツール
- */
-class SkillInstallTool implements vscode.LanguageModelTool<{
+type InstallToolInput = {
   resourceName?: string;
   skillName?: string;
   kind?: string;
-}> {
+  source?: string;
+  path?: string;
+  overwrite?: boolean;
+};
+
+/**
+ * スキルインストールツール
+ */
+class SkillInstallTool implements vscode.LanguageModelTool<InstallToolInput> {
   async invoke(
-    options: vscode.LanguageModelToolInvocationOptions<{
-      resourceName?: string;
-      skillName?: string;
-      kind?: string;
-    }>,
+    options: vscode.LanguageModelToolInvocationOptions<InstallToolInput>,
     _token: vscode.CancellationToken,
   ): Promise<vscode.LanguageModelToolResult> {
-    const skillName = (
-      options.input.resourceName ||
-      options.input.skillName ||
-      ""
-    ).trim();
-    const kindFilter = normalizeKindFilter(options.input.kind);
-    if (!skillName) {
+    const unknownKind = unknownKindResult(options.input.kind);
+    if (unknownKind) {
+      return unknownKind;
+    }
+    const selector = readResourceSelector(options.input);
+    const skillName = selector.name || selector.path || "";
+    if (!selector.name && !selector.path) {
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
           localizeMcpText(
@@ -564,28 +604,27 @@ class SkillInstallTool implements vscode.LanguageModelTool<{
     const index = await getSkillIndex();
     const skills = getIndexResources(index);
 
-    const matchResult = findIndexedResourceCandidates(
-      skills,
-      skillName,
-      kindFilter,
-    );
+    const matchResult = findIndexedResourceCandidates(skills, selector);
     const skill = matchResult.match;
 
     if (!skill) {
       const candidates = matchResult.candidates;
-      if (candidates.length > 1) {
+      if (matchResult.reason === "ambiguous") {
         return new vscode.LanguageModelToolResult([
           new vscode.LanguageModelTextPart(
             localizeMcpText(
-              `⚠️ Multiple resources match "${skillName}". Retry with an exact resourceName${kindFilter ? "" : " or kind"}.\n\n| Kind | Resource | Source | Path |\n|---|---|---|---|\n${formatResourceCandidates(candidates, false)}`,
-              `⚠️ リソース「${skillName}」に複数候補があります。正確なresourceName${kindFilter ? "" : "またはkind"}で再実行してください。\n\n| 種別 | リソース | Source | Path |\n|---|---|---|---|\n${formatResourceCandidates(candidates, true)}`,
+              `⚠️ Multiple resources match "${skillName}". Nothing was installed. Retry with the exact resourceName plus the source and path of the intended row${selector.kind ? "" : " (or kind)"}.\n\n| Kind | Resource | Source | Path |\n|---|---|---|---|\n${formatResourceCandidates(candidates, false)}`,
+              `⚠️ リソース「${skillName}」に複数候補があります。何もインストールしていません。対象の行の source と path を resourceName と併せて指定して再実行してください${selector.kind ? "" : "（または kind）"}。\n\n| 種別 | リソース | Source | Path |\n|---|---|---|---|\n${formatResourceCandidates(candidates, true)}`,
             ),
           ),
         ]);
       }
+      const suggestions = candidates.length
+        ? `\n\nSimilar resources (not installed, retry with the exact name${selector.kind ? "" : " and source/path"}):\n\n| Kind | Resource | Source | Path |\n|---|---|---|---|\n${formatResourceCandidates(candidates, false)}`
+        : "";
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
-          `❌ Resource "${skillName}" not found.
+          `❌ Resource "${skillName}" not found.${suggestions}
 
 ---
 **📋 Next Actions:**
@@ -603,6 +642,23 @@ class SkillInstallTool implements vscode.LanguageModelTool<{
     }
 
     const context = requireExtContext();
+
+    // 既存の配置先は、ローカルで編集した内容を含む可能性があるので確認なしに上書きしない。
+    const existingTarget = getResourceTargetUri(
+      workspaceFolder.uri,
+      vscode.workspace.getConfiguration("resourceNinja"),
+      skill,
+    );
+    if (options.input.overwrite !== true && (await pathExists(existingTarget))) {
+      return new vscode.LanguageModelToolResult([
+        new vscode.LanguageModelTextPart(
+          localizeMcpText(
+            `⚠️ "${skill.name}" already exists at ${toDisplayPath(workspaceFolder, existingTarget)}. Nothing was changed. Retry with overwrite: true only if the user agreed to replace the existing files (local edits will be lost).`,
+            `⚠️ 「${skill.name}」は ${toDisplayPath(workspaceFolder, existingTarget)} に既に存在します。何も変更していません。既存ファイルの置き換え（ローカルの編集は失われます）にユーザーが同意した場合のみ、overwrite: true を付けて再実行してください。`,
+          ),
+        ),
+      ]);
+    }
 
     // インストール実行
     try {
@@ -622,8 +678,24 @@ class SkillInstallTool implements vscode.LanguageModelTool<{
         return new vscode.LanguageModelToolResult([
           new vscode.LanguageModelTextPart(
             localizeMcpText(
-              `⚠️ Resource "${skill.name}" was only partially installed. ${installErrorCount} file(s) failed to download. Review the installed folder and retry the install.`,
-              `⚠️ リソース「${skill.name}」は一部だけインストールされました。${installErrorCount}件のファイル取得に失敗しています。インストール先を確認して再実行してください。`,
+              `⚠️ Resource "${skill.name}" was only partially installed. ${installErrorCount} file(s) failed to download. Review the installed folder and retry the install with overwrite: true.`,
+              `⚠️ リソース「${skill.name}」は一部だけインストールされました。${installErrorCount}件のファイル取得に失敗しています。インストール先を確認し、overwrite: true を付けて再実行してください。`,
+            ),
+          ),
+        ]);
+      }
+
+      // 実際に書き込まれた場所を使う。設定はインストール中に変わりうる。
+      const targetUri = installResult.destinationUri;
+      if (
+        !(await verifyInstalledDestination(getResourceKind(skill), targetUri))
+      ) {
+        await vscode.commands.executeCommand("resourceNinja.refresh");
+        return new vscode.LanguageModelToolResult([
+          new vscode.LanguageModelTextPart(
+            localizeMcpText(
+              `❌ Install of "${skill.name}" reported success but the expected file was not found at ${toDisplayPath(workspaceFolder, targetUri)}. Treat it as failed and check the Agent Resources Ninja output channel.`,
+              `❌ 「${skill.name}」のインストールは成功と報告されましたが、${toDisplayPath(workspaceFolder, targetUri)} に期待するファイルが見つかりません。失敗として扱い、Agent Resources Ninja の出力を確認してください。`,
             ),
           ),
         ]);
@@ -631,11 +703,6 @@ class SkillInstallTool implements vscode.LanguageModelTool<{
 
       // インストラクションファイル (AGENTS.md) を更新（設定で有効な場合のみ）
       const config = vscode.workspace.getConfiguration("resourceNinja");
-      const targetUri = getResourceTargetUri(
-        workspaceFolder.uri,
-        config,
-        skill,
-      );
       let outputWarning = "";
       if (config.get<boolean>("autoUpdateInstruction")) {
         const outputResult = await updateInstructionFile(
@@ -789,6 +856,7 @@ ${overflowNote}
 - Show the table in clean format
 - Offer to open or preview any listed resource
 - A name prefixed with \`${INCOMPLETE_ROW_MARKER}\` was never downloaded fully; do not rely on its contents and suggest reinstalling it
+- To uninstall, pass the row's Path as \`path\` (with resourceName) so same-name resources are never mixed up
 
 **📋 Next Actions (show to user):**
 1. 📄 View details? → Ask which resource
@@ -1031,16 +1099,21 @@ class SkillUninstallTool implements vscode.LanguageModelTool<{
   resourceName?: string;
   skillName?: string;
   kind?: string;
+  path?: string;
 }> {
   prepareInvocation(
     options: vscode.LanguageModelToolInvocationPrepareOptions<{
       resourceName?: string;
       skillName?: string;
       kind?: string;
+      path?: string;
     }>,
   ): vscode.PreparedToolInvocation {
     const resourceName =
-      options.input.resourceName || options.input.skillName || "resource";
+      toSelectorText(options.input.resourceName) ||
+      toSelectorText(options.input.skillName) ||
+      toSelectorText(options.input.path) ||
+      "resource";
     return {
       invocationMessage: localizeMcpText(
         `Removing workspace resource "${resourceName}"`,
@@ -1064,16 +1137,17 @@ class SkillUninstallTool implements vscode.LanguageModelTool<{
       resourceName?: string;
       skillName?: string;
       kind?: string;
+      path?: string;
     }>,
     _token: vscode.CancellationToken,
   ): Promise<vscode.LanguageModelToolResult> {
-    const skillName = (
-      options.input.resourceName ||
-      options.input.skillName ||
-      ""
-    ).trim();
-    const kindFilter = normalizeKindFilter(options.input.kind);
-    if (!skillName) {
+    const unknownKind = unknownKindResult(options.input.kind);
+    if (unknownKind) {
+      return unknownKind;
+    }
+    const selector = readResourceSelector(options.input);
+    const skillName = selector.name || selector.path || "";
+    if (!selector.name && !selector.path) {
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
           localizeMcpText(
@@ -1091,27 +1165,18 @@ class SkillUninstallTool implements vscode.LanguageModelTool<{
       ]);
     }
 
-    // ワークスペースリソースを確認
+    // ワークスペースリソースを確認。部分一致は対象に決めず、候補として返すだけにする。
     const workspaceResources = (
       await scanLocalSkills(workspaceFolder.uri, true, true)
-    ).filter(
-      (resource) =>
-        !resource.isBuiltIn &&
-        (!kindFilter || (resource.kind || "skill") === kindFilter),
+    ).filter((resource) => !resource.isBuiltIn);
+    const selection = selectResource(
+      workspaceResources,
+      selector,
+      (resource) => [resource.relativePath, resource.fullPath],
     );
-    const lowerName = skillName.toLowerCase();
-    const exactResourceMatches = workspaceResources.filter(
-      (resource) => resource.name.toLowerCase() === lowerName,
-    );
-    const partialResourceMatches = workspaceResources.filter((resource) =>
-      resource.name.toLowerCase().includes(lowerName),
-    );
-    const resourceMatches =
-      exactResourceMatches.length > 0
-        ? exactResourceMatches
-        : partialResourceMatches;
+    const resourceMatches = selection.candidates;
 
-    if (resourceMatches.length > 1) {
+    if (selection.reason === "ambiguous") {
       const candidates = resourceMatches
         .slice(0, 20)
         .map((resource) => {
@@ -1124,26 +1189,30 @@ class SkillUninstallTool implements vscode.LanguageModelTool<{
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
           localizeMcpText(
-            `⚠️ Multiple workspace resources match "${skillName}". Retry with a more specific name.\n\n| Kind | Name | Path |\n|---|---|---|\n${candidates}`,
-            `⚠️ workspaceリソース「${skillName}」に複数候補があります。より具体的な名前で再実行してください。\n\n| 種別 | 名前 | Path |\n|---|---|---|\n${candidates}`,
+            `⚠️ Multiple workspace resources match "${skillName}". Nothing was removed. Retry with the Path of the intended row as \`path\`.\n\n| Kind | Name | Path |\n|---|---|---|\n${candidates}`,
+            `⚠️ workspaceリソース「${skillName}」に複数候補があります。何も削除していません。対象の行の Path を \`path\` として指定して再実行してください。\n\n| 種別 | 名前 | Path |\n|---|---|---|\n${candidates}`,
           ),
         ),
       ]);
     }
-    const matchedResource = resourceMatches[0];
+    const matchedResource = selection.match;
 
     if (!matchedResource) {
       const installed = await getInstalledSkills(workspaceFolder.uri);
+      const similar = resourceMatches
+        .slice(0, 10)
+        .map((resource) => `${resource.name} (${resource.relativePath})`)
+        .join(", ");
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
           localizeMcpText(
-            `❌ Resource "${skillName}" is not installed.
-
+            `❌ Resource "${skillName}" is not installed. Nothing was removed.
+${similar ? `\nSimilar names (not removed, retry with the exact name or path): ${similar}\n` : ""}
 Installed resources: ${installed.length > 0 ? installed.join(", ") : "none"}
 
 List workspace resources or search the index to find the exact resource name.`,
-            `❌ リソース「${skillName}」はインストールされていません。
-
+            `❌ リソース「${skillName}」はインストールされていません。何も削除していません。
+${similar ? `\n名前が近いもの（削除していません。正確な名前または path で再実行してください）: ${similar}\n` : ""}
 インストール済みリソース: ${installed.length > 0 ? installed.join(", ") : "なし"}
 
 ---
@@ -1731,6 +1800,9 @@ class RemoveSourceTool implements vscode.LanguageModelTool<{
 interface LocalizeInput {
   resourceName?: string;
   skillName?: string;
+  kind?: string;
+  source?: string;
+  path?: string;
   description_en?: string;
   description_ja?: string;
 }
@@ -1740,11 +1812,16 @@ class LocalizeSkillsTool implements vscode.LanguageModelTool<LocalizeInput> {
     options: vscode.LanguageModelToolInvocationOptions<LocalizeInput>,
     _token: vscode.CancellationToken,
   ): Promise<vscode.LanguageModelToolResult> {
-    const { description_en, description_ja } = options.input;
-    const skillName =
-      options.input.resourceName || options.input.skillName || "";
+    const description_en = toSelectorText(options.input.description_en);
+    const description_ja = toSelectorText(options.input.description_ja);
+    const unknownKind = unknownKindResult(options.input.kind);
+    if (unknownKind) {
+      return unknownKind;
+    }
+    const selector = readResourceSelector(options.input);
+    const skillName = selector.name || selector.path || "";
 
-    if (!skillName) {
+    if (!selector.name && !selector.path) {
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(
           `${localizeMcpText(
@@ -1770,9 +1847,22 @@ Usage: Provide resourceName and at least one of description_en or description_ja
 
     try {
       const index = await getSkillIndex();
-      const skill = getIndexResources(index).find(
-        (s) => s.name.toLowerCase() === skillName.toLowerCase(),
+      const selection = findIndexedResourceCandidates(
+        getIndexResources(index),
+        selector,
       );
+      const skill = selection.match;
+
+      if (selection.reason === "ambiguous") {
+        return new vscode.LanguageModelToolResult([
+          new vscode.LanguageModelTextPart(
+            localizeMcpText(
+              `⚠️ Multiple resources match "${skillName}". Nothing was changed. Retry with the Source and Path of the intended row as \`source\` and \`path\`.\n\n| Kind | Resource | Source | Path |\n|---|---|---|---|\n${formatResourceCandidates(selection.candidates, false)}`,
+              `⚠️ リソース「${skillName}」に複数候補があります。何も変更していません。対象の行の Source と Path を \`source\` と \`path\` として指定して再実行してください。\n\n| 種別 | リソース | Source | Path |\n|---|---|---|---|\n${formatResourceCandidates(selection.candidates, true)}`,
+            ),
+          ),
+        ]);
+      }
 
       if (!skill) {
         return new vscode.LanguageModelToolResult([

@@ -392,7 +392,7 @@ test("language model resource actions are kind-aware and ambiguity-safe", () => 
   assert.match(mcpToolsSource, /Multiple resources match/);
   assert.match(mcpToolsSource, /findIndexedResourceCandidates/);
   assert.match(chatParticipantSource, /findChatInstallCandidates/);
-  assert.match(chatParticipantSource, /Multiple resources match/);
+  assert.match(chatParticipantSource, /Multiple resources are named/);
 });
 
 test("bundle install uses selectable resource checklist", () => {

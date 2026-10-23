@@ -460,6 +460,88 @@ suite("Agent Resources Ninja smoke test", () => {
     );
   });
 
+  // ツール入力の解決は stub では確かめられても、実ホストの登録・schema・実 index では未確認だった。
+  // 変更を起こさない入力（不明な kind、部分一致、存在しない名前、同名の曖昧さ）だけを実際に呼び、何も変わらないことを確かめる。
+  test("registered language model tools refuse ambiguous, partial and unknown targets without changing anything", async function () {
+    this.timeout(60000);
+    const extension = vscode.extensions.getExtension(
+      "yamapan.agent-resources-ninja",
+    );
+    await extension.activate();
+    const folder = vscode.workspace.workspaceFolders[0];
+    const root = file(folder.uri, "smoke-skills");
+    const listRoot = async () =>
+      (await vscode.workspace.fs.readDirectory(root))
+        .map(([name]) => name)
+        .sort();
+    const before = await listRoot();
+
+    const names = vscode.lm.tools.map((tool) => tool.name);
+    for (const name of [
+      "resourceNinja_search",
+      "resourceNinja_install",
+      "resourceNinja_uninstall",
+      "resourceNinja_localize",
+    ]) {
+      assert.ok(names.includes(name), `Missing tool: ${name}`);
+    }
+    const schemaOf = (name) =>
+      vscode.lm.tools.find((tool) => tool.name === name).inputSchema
+        .properties;
+    for (const key of ["source", "path", "overwrite"]) {
+      assert.ok(schemaOf("resourceNinja_install")[key], `install.${key}`);
+    }
+    assert.ok(schemaOf("resourceNinja_uninstall").path, "uninstall.path");
+
+    const invoke = async (name, input) => {
+      const result = await vscode.lm.invokeTool(
+        name,
+        { input, toolInvocationToken: undefined },
+        new vscode.CancellationTokenSource().token,
+      );
+      return result.content
+        .map((part) => part.value || "")
+        .join("\n");
+    };
+
+    // search は実 index を返し、Source / Path の列を持つ
+    const search = await invoke("resourceNinja_search", { query: "skill" });
+    assert.match(search, /\| Kind \| Resource \| Source \| Path \|/);
+
+    assert.match(
+      await invoke("resourceNinja_install", {
+        resourceName: "skill",
+        kind: "skills",
+      }),
+      /Unknown kind/,
+    );
+    assert.match(
+      await invoke("resourceNinja_localize", {
+        resourceName: "skill",
+        kind: "skills",
+        description_ja: "x",
+      }),
+      /Unknown kind/,
+    );
+    // 部分一致だけの名前は対象にならない（インストールされない）
+    assert.match(
+      await invoke("resourceNinja_install", { resourceName: "skil" }),
+      /not found|見つかりません/i,
+    );
+    assert.match(
+      await invoke("resourceNinja_uninstall", {
+        resourceName: "no-such-resource-for-smoke",
+      }),
+      /not installed|インストールされていません/,
+    );
+
+    assert.deepStrictEqual(
+      await listRoot(),
+      before,
+      "refused tool calls must not change the workspace",
+    );
+  });
+
   // 他ホームの読み取り専用グループや古いグループは、プラグイン削除コマンドに「実行時に」拒否される必要がある。
   // 拒否されずに通常経路へ進むと、同じプラグイン ID を持つ書き込み可能なリソースの削除確認（モーダル）に到達して止まる。
   test("deleting a plugin group refuses read-only and stale user groups", async function () {
@@ -528,6 +610,84 @@ suite("Agent Resources Ninja smoke test", () => {
         recursive: true,
         useTrash: false,
       });
+      await vscode.commands.executeCommand("resourceNinja.refresh");
+    }
+  });
+
+  // 状態を実際に変える呼び出しも実ホストで確かめる。同名の 2 つの skill に対し、名前だけでは何も削除されず、
+  // path を指定したときだけ指定した 1 件が削除される（対象外は残る）。install は GitHub への取得が要るため対象外。
+  test("registered uninstall tool removes only the skill selected by path when two share a name", async function () {
+    this.timeout(60000);
+    const extension = vscode.extensions.getExtension(
+      "yamapan.agent-resources-ninja",
+    );
+    await extension.activate();
+    const folder = vscode.workspace.workspaceFolders[0];
+    const root = file(folder.uri, "smoke-skills");
+    const exists = async (uri) => {
+      try {
+        await vscode.workspace.fs.stat(uri);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const gitignoreExisted = await exists(file(root, ".gitignore"));
+    const dirs = ["dup-a", "dup-b"];
+    for (const dir of dirs) {
+      await vscode.workspace.fs.createDirectory(file(root, dir));
+      await write(
+        file(root, dir, "SKILL.md"),
+        "---\nname: smoke-dup\ndescription: same name in two folders\n---\nFixture.",
+      );
+    }
+    const invoke = async (input) =>
+      (
+        await vscode.lm.invokeTool(
+          "resourceNinja_uninstall",
+          { input, toolInvocationToken: undefined },
+          new vscode.CancellationTokenSource().token,
+        )
+      ).content
+        .map((part) => part.value || "")
+        .join("\n");
+    try {
+      const ambiguous = await invoke({ resourceName: "smoke-dup" });
+      assert.match(ambiguous, /Multiple workspace resources match/);
+      for (const dir of dirs) {
+        assert.ok(
+          await exists(file(root, dir, "SKILL.md")),
+          `${dir} must survive an ambiguous name`,
+        );
+      }
+
+      const removed = await invoke({
+        resourceName: "smoke-dup",
+        path: "smoke-skills/dup-b",
+      });
+      assert.match(removed, /Uninstalled \*\*smoke-dup\*\*/);
+      assert.ok(
+        await exists(file(root, "dup-a", "SKILL.md")),
+        "the skill that was not selected must remain",
+      );
+      assert.ok(
+        !(await exists(file(root, "dup-b", "SKILL.md"))),
+        "the selected skill must be removed",
+      );
+    } finally {
+      for (const dir of dirs) {
+        await vscode.workspace.fs.delete(file(root, dir), {
+          recursive: true,
+          useTrash: false,
+        });
+      }
+      if (!gitignoreExisted) {
+        try {
+          await vscode.workspace.fs.delete(file(root, ".gitignore"));
+        } catch {
+          // 作られていなければ何もしない
+        }
+      }
       await vscode.commands.executeCommand("resourceNinja.refresh");
     }
   });

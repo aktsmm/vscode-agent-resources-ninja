@@ -2,7 +2,7 @@
   "name": "agent-resources-ninja",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.62",
+  "version": "0.2.63",
   "publisher": "yamapan",
   "license": "CC-BY-NC-SA-4.0",
   "icon": "resources/icon.png",
@@ -159,6 +159,18 @@
                 "cursor-rule"
               ],
               "description": "Optional resource kind filter used to disambiguate resources with similar names."
+            },
+            "source": {
+              "type": "string",
+              "description": "Source (owner/repo) of the intended row from searchResources. Use together with path when the same name exists in several sources."
+            },
+            "path": {
+              "type": "string",
+              "description": "Path of the intended row from searchResources. Together with source it identifies exactly one resource."
+            },
+            "overwrite": {
+              "type": "boolean",
+              "description": "Set true only after the user agreed to replace an existing installation. Default false: an existing destination is left untouched."
             }
           },
           "required": [
@@ -245,6 +257,10 @@
                 "cursor-rule"
               ],
               "description": "Optional installed resource kind filter used to disambiguate resources with similar names."
+            },
+            "path": {
+              "type": "string",
+              "description": "Path of the intended row from listResources. Use it when the same name exists more than once; the name alone never selects among several."
             }
           },
           "required": [
@@ -389,6 +405,28 @@
             "resourceName": {
               "type": "string",
               "description": "Name of the resource to localize"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "skill",
+                "agent",
+                "instruction",
+                "prompt",
+                "hook",
+                "mcp",
+                "plugin",
+                "cursor-rule"
+              ],
+              "description": "Optional resource kind filter used to disambiguate resources with the same name."
+            },
+            "source": {
+              "type": "string",
+              "description": "Source (owner/repo) of the intended row from searchResources. Use together with path when the same name exists in several sources."
+            },
+            "path": {
+              "type": "string",
+              "description": "Path of the intended row from searchResources. Together with source it identifies exactly one resource."
             },
             "description_en": {
               "type": "string",

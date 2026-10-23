@@ -281,6 +281,151 @@ export function createBundleKey(bundle: Pick<Bundle, "source" | "id">): string {
   return `${bundle.source}:${bundle.id}`;
 }
 
+const INDEX_RESOURCE_KINDS: readonly string[] = [
+  "skill",
+  "agent",
+  "instruction",
+  "prompt",
+  "hook",
+  "mcp",
+  "plugin",
+  "cursor-rule",
+];
+const INDEX_DESCRIPTION_MAX_LENGTH = 4_000;
+const INDEX_CATEGORY_MAX_LENGTH = 64;
+const INDEX_CATEGORY_MAX_COUNT = 50;
+const INDEX_REQUIRES_MAX_COUNT = 100;
+const INDEX_TEXT_FIELDS = [
+  "remotePath",
+  "url",
+  "rawUrl",
+  "owner",
+  "bundle",
+  "license",
+  "author",
+  "version",
+  "pluginRoot",
+  "pluginManifestPath",
+  "pluginManifestKind",
+] as const;
+
+function nonEmptyIndexString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+/**
+ * The local cache, the bundled catalog and the shared index are all files another
+ * writer can change, and the commands read these fields without checking them. One
+ * mistyped field would stop a search for every resource, so each entry is reduced to
+ * the field types `Skill` declares. An entry that cannot be identified is dropped,
+ * because guessing a kind or a source would install it from the wrong place. The
+ * result is a fixed point: running it again changes nothing, so a read and a later
+ * write agree.
+ */
+export function sanitizeIndexResource(value: unknown): Skill | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const raw = value as Record<string, unknown>;
+  if (
+    !nonEmptyIndexString(raw.name) ||
+    !nonEmptyIndexString(raw.source) ||
+    // A collection entry is indexed with an empty path, so only the type is checked.
+    typeof raw.path !== "string"
+  ) {
+    return undefined;
+  }
+  if (
+    raw.kind !== undefined &&
+    !(typeof raw.kind === "string" && INDEX_RESOURCE_KINDS.includes(raw.kind))
+  ) {
+    return undefined;
+  }
+
+  const entry: Record<string, unknown> = { ...raw };
+  entry.description =
+    typeof raw.description === "string"
+      ? raw.description.slice(0, INDEX_DESCRIPTION_MAX_LENGTH)
+      : "";
+  if (typeof raw.description_ja === "string") {
+    entry.description_ja = raw.description_ja.slice(
+      0,
+      INDEX_DESCRIPTION_MAX_LENGTH,
+    );
+  } else {
+    delete entry.description_ja;
+  }
+  entry.categories = Array.isArray(raw.categories)
+    ? raw.categories
+        .filter((category): category is string => typeof category === "string")
+        .slice(0, INDEX_CATEGORY_MAX_COUNT)
+        .map((category) => category.slice(0, INDEX_CATEGORY_MAX_LENGTH))
+    : [];
+  for (const field of INDEX_TEXT_FIELDS) {
+    if (raw[field] !== undefined && typeof raw[field] !== "string") {
+      delete entry[field];
+    }
+  }
+  if (
+    raw.stars !== undefined &&
+    !(
+      typeof raw.stars === "number" &&
+      Number.isFinite(raw.stars) &&
+      raw.stars >= 0
+    )
+  ) {
+    delete entry.stars;
+  }
+  for (const field of ["isOrg", "standalone"] as const) {
+    if (raw[field] !== undefined && typeof raw[field] !== "boolean") {
+      delete entry[field];
+    }
+  }
+  if (raw.requires !== undefined) {
+    if (Array.isArray(raw.requires)) {
+      entry.requires = raw.requires
+        .filter((item): item is string => typeof item === "string")
+        .slice(0, INDEX_REQUIRES_MAX_COUNT);
+    } else {
+      delete entry.requires;
+    }
+  }
+  if (
+    raw.invocation !== undefined &&
+    raw.invocation !== "auto" &&
+    raw.invocation !== "explicitOnly" &&
+    raw.invocation !== "modelOnly"
+  ) {
+    delete entry.invocation;
+  }
+  if (raw.context !== undefined && raw.context !== "fork") {
+    delete entry.context;
+  }
+  if (raw.argumentHint !== undefined && typeof raw.argumentHint !== "string") {
+    delete entry.argumentHint;
+  }
+  return entry as unknown as Skill;
+}
+
+export function sanitizeIndexResources(values: unknown[]): Skill[] {
+  const resources: Skill[] = [];
+  let dropped = 0;
+  for (const value of values) {
+    const resource = sanitizeIndexResource(value);
+    if (resource) {
+      resources.push(resource);
+    } else {
+      dropped += 1;
+    }
+  }
+  if (dropped > 0) {
+    logger.warn(
+      `[Resource Ninja] Ignored ${dropped} malformed resource entr${dropped === 1 ? "y" : "ies"} in the index.`,
+    );
+  }
+  return resources;
+}
+
 function normalizeSkillIndex(
   index: Partial<SkillIndex>,
   preserveRuntimeMarkers = false,
@@ -302,7 +447,9 @@ function normalizeSkillIndex(
       }
       return normalized;
     }),
-    skills: getNormalizedArrayField<Skill>(index, "skills"),
+    skills: sanitizeIndexResources(
+      getNormalizedArrayField<unknown>(index, "skills"),
+    ),
     categories: getNormalizedArrayField<Category>(index, "categories"),
     bundles: getNormalizedArrayField<Bundle>(index, "bundles"),
   };
@@ -474,10 +621,18 @@ export async function loadSkillIndex(
     }
   }
 
-  const sharedMergedIndex = await loadSharedStoresIntoSkillIndex(
+  const loadedSharedIndex = await loadSharedStoresIntoSkillIndex(
     context,
     effectiveIndex,
   );
+  // Entries copied in from a sibling's shared index never passed the local read.
+  const sharedMergedIndex =
+    loadedSharedIndex === effectiveIndex
+      ? loadedSharedIndex
+      : {
+          ...loadedSharedIndex,
+          skills: sanitizeIndexResources(getIndexResources(loadedSharedIndex)),
+        };
   const sharedSourceIds = new Set(
     sharedMergedIndex.sources.map((source) => source.id),
   );

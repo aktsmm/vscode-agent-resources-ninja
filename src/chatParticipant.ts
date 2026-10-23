@@ -20,6 +20,10 @@ import {
   INCOMPLETE_ROW_MARKER,
 } from "./instructionManager";
 import { isJapanese } from "./i18n";
+import {
+  selectResource,
+  type ResourceSelection,
+} from "./mcpResourceSelection";
 import { logger } from "./logger";
 
 /** Resource index cache. */
@@ -64,36 +68,9 @@ function chatText(en: string, ja: string): string {
 function findChatInstallCandidates(
   resources: Skill[],
   resourceName: string,
-): {
-  match?: Skill;
-  candidates: Skill[];
-  reason?: "empty" | "ambiguous" | "missing";
-} {
-  const query = resourceName.trim().toLowerCase();
-  if (!query) {
-    return { candidates: [], reason: "empty" };
-  }
-
-  const exactMatches = resources.filter(
-    (resource) => resource.name.toLowerCase() === query,
-  );
-  if (exactMatches.length === 1) {
-    return { match: exactMatches[0], candidates: exactMatches };
-  }
-  if (exactMatches.length > 1) {
-    return { candidates: exactMatches, reason: "ambiguous" };
-  }
-
-  const partialMatches = resources.filter((resource) =>
-    resource.name.toLowerCase().includes(query),
-  );
-  if (partialMatches.length === 1) {
-    return { match: partialMatches[0], candidates: partialMatches };
-  }
-  return {
-    candidates: partialMatches,
-    reason: partialMatches.length > 1 ? "ambiguous" : "missing",
-  };
+): ResourceSelection<Skill> {
+  // Exact name only; a partial name is a suggestion and never a target.
+  return selectResource(resources, { name: resourceName }, (r) => r.path);
 }
 
 function renderResourceCandidateTable(
@@ -288,11 +265,20 @@ async function handleInstall(
 
   if (!resource) {
     const isJa = isJapanese();
-    if (matchResult.candidates.length > 1) {
+    if (matchResult.reason === "ambiguous") {
       stream.markdown(
         `${chatText(
-          `Multiple resources match "${query}". Please install with a more specific name.`,
-          `"${query}" に一致するリソースが複数あります。より具体的な名前で指定してください。`,
+          `Multiple resources are named "${query}". Nothing was installed; use /search and press the Install button on the intended row.`,
+          `"${query}" という名前のリソースが複数あります。何もインストールしていません。/search で対象の行の Install ボタンを押してください。`,
+        )}\n\n${renderResourceCandidateTable(matchResult.candidates, isJa)}`,
+      );
+      return {};
+    }
+    if (matchResult.candidates.length > 0) {
+      stream.markdown(
+        `${chatText(
+          `No resource is named exactly "${query}". Nothing was installed. Similar names:`,
+          `"${query}" と完全に一致する名前のリソースはありません。何もインストールしていません。名前が近いもの:`,
         )}\n\n${renderResourceCandidateTable(matchResult.candidates, isJa)}`,
       );
       return {};

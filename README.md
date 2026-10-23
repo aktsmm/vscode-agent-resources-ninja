@@ -448,6 +448,8 @@ In GitHub Copilot's **Agent Mode**, tools are automatically available.
 | `#removeResourceSource` | Remove a resource source from the index |
 | `#localizeResource`     | Localize resource descriptions          |
 
+Tools identify a resource by its exact name. When the same name exists in more than one source or folder, pass the `source` and `path` shown by `#searchResources` (or the `path` shown by `#listResources` for uninstall) instead of the name alone. An ambiguous or partial name never selects a target: the tool lists the candidates and changes nothing. `#installResource` also leaves an existing destination untouched unless `overwrite: true` is passed after you agreed to replace it.
+
 ### Usage Examples
 
 ```
