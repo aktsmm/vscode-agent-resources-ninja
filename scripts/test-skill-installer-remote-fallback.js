@@ -95,6 +95,7 @@ function createVscodeStub(writes, options = {}) {
         },
         writeFile: async (uri, content) => {
           writes.set(uri.fsPath, Buffer.from(content).toString("utf-8"));
+          options.rawWrites?.set(uri.fsPath, Buffer.from(content));
         },
         readFile: async (uri) => {
           const content = writes.get(uri.fsPath);
@@ -151,6 +152,41 @@ function createVscodeStub(writes, options = {}) {
       },
     },
   };
+}
+
+// 本物の Response は arrayBuffer() を持つ。text() しか持たない fetch スタブにも同じ形を与える。
+function withArrayBuffer(response) {
+  if (
+    !response ||
+    typeof response.text !== "function" ||
+    typeof response.arrayBuffer === "function"
+  ) {
+    return response;
+  }
+  return {
+    ...response,
+    arrayBuffer: async () => {
+      const bytes = Buffer.from(await response.text(), "utf-8");
+      return bytes.buffer.slice(
+        bytes.byteOffset,
+        bytes.byteOffset + bytes.byteLength,
+      );
+    },
+  };
+}
+
+function shimFetchArrayBuffer() {
+  let current = global.fetch;
+  Object.defineProperty(global, "fetch", {
+    configurable: true,
+    get: () => current,
+    set: (fn) => {
+      current =
+        typeof fn === "function"
+          ? async (...args) => withArrayBuffer(await fn(...args))
+          : fn;
+    },
+  });
 }
 
 function createDiskVscodeStub() {
@@ -406,6 +442,7 @@ function loadWindowsInstaller(recorded, options = {}) {
             realDestination(uri),
             Buffer.from(content).toString("utf-8"),
           );
+          recorded.rawWrites?.set(realDestination(uri), Buffer.from(content));
         },
         readFile: async (uri) => {
           const content = recorded.writes.get(realDestination(uri));
@@ -557,7 +594,11 @@ async function run() {
 
   const realSkillMd = `---\nname: cloud-run-basics\ndescription: Deploy to Cloud Run\n---\n\n# Cloud Run Basics\n\n${"detailed content ".repeat(20)}`;
 
-  const originalFetch = global.fetch;
+  const originalFetchDescriptor = Object.getOwnPropertyDescriptor(
+    global,
+    "fetch",
+  );
+  shimFetchArrayBuffer();
   let passed = 0;
 
   try {
@@ -2292,16 +2333,182 @@ async function run() {
         fs.rmSync(fixtureRoot, { recursive: true, force: true });
       }
     }
+    // --- Test 36: バイナリと UTF-8 BOM はバイト単位でそのまま書かれる ---
+    {
+      const recorded = {
+        writes: new Map(),
+        rawWrites: new Map(),
+        directories: [],
+        deleted: [],
+        warnings: [],
+      };
+      const { installSkill } = loadWindowsInstaller(recorded);
+
+      // 0x80 / 0xFF は UTF-8 として不正。文字列経由だと U+FFFD に置換されて膨らむ。
+      const binaryBytes = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x80, 0xff, 0x00]);
+      const bomBytes = Buffer.concat([
+        Buffer.from([0xef, 0xbb, 0xbf]),
+        Buffer.from(realSkillMd, "utf-8"),
+      ]);
+      const payloads = new Map([
+        ["https://raw/skill", bomBytes],
+        ["https://raw/template", binaryBytes],
+      ]);
+
+      global.fetch = async (url) => {
+        if (url.startsWith("https://api.github.com/")) {
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            json: async () => [
+              {
+                name: "SKILL.md",
+                type: "file",
+                download_url: "https://raw/skill",
+              },
+              {
+                name: "template.pptx",
+                type: "file",
+                download_url: "https://raw/template",
+              },
+            ],
+          };
+        }
+        const bytes = payloads.get(url);
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          // 実 Response と同様、text() は BOM を落とし不正バイトを置換する。
+          text: async () => new TextDecoder("utf-8").decode(bytes),
+          arrayBuffer: async () =>
+            bytes.buffer.slice(
+              bytes.byteOffset,
+              bytes.byteOffset + bytes.byteLength,
+            ),
+        };
+      };
+
+      await installSkill(
+        {
+          name: "bytes-demo",
+          source: "traversal-source",
+          path: "skills/bytes-demo",
+          categories: [],
+          description: "Bytes demo",
+        },
+        makeWindowsUri("/C:/ws"),
+        {},
+      );
+
+      const installRoot = "C:\\ws\\.github\\skills\\bytes-demo";
+      assert.deepStrictEqual(
+        recorded.rawWrites.get(`${installRoot}\\template.pptx`),
+        binaryBytes,
+        "binary assets must be written byte for byte",
+      );
+      assert.deepStrictEqual(
+        recorded.rawWrites.get(`${installRoot}\\SKILL.md`),
+        bomBytes,
+        "a UTF-8 BOM must survive the download",
+      );
+      passed++;
+    }
+    // --- Test 37: 残りの書き込み経路（復旧 / 単一 .md / non-skill 単一ファイル）も無変換 ---
+    {
+      // BOM と不正な UTF-8 バイト（0xFF）を含む。文字列を経由すると両方が変わる。
+      const payload = Buffer.concat([
+        Buffer.from([0xef, 0xbb, 0xbf]),
+        Buffer.from(realSkillMd, "utf-8"),
+        Buffer.from([0xff]),
+      ]);
+      const respondWithPayload = async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        text: async () => new TextDecoder("utf-8").decode(payload),
+        arrayBuffer: async () =>
+          payload.buffer.slice(
+            payload.byteOffset,
+            payload.byteOffset + payload.byteLength,
+          ),
+      });
+      const findRawWrite = (rawWrites, suffix) => {
+        const keys = [...rawWrites.keys()].filter((key) =>
+          key.endsWith(suffix),
+        );
+        assert.strictEqual(keys.length, 1, `exactly one write ends with ${suffix}`);
+        return rawWrites.get(keys[0]);
+      };
+
+      {
+        const rawWrites = new Map();
+        const { recoverPrimarySkillMdFromRaw: recover } = loadInstaller(
+          new Map(),
+          { rawWrites },
+        );
+        global.fetch = respondWithPayload;
+        const recovered = await recover(
+          makeUri("/tmp/.github/skills/bytes-recover"),
+          "google",
+          "skills",
+          "main",
+          "skills/bytes-recover",
+          undefined,
+        );
+        assert.strictEqual(recovered, true);
+        assert.deepStrictEqual(
+          findRawWrite(rawWrites, "/SKILL.md"),
+          payload,
+          "SKILL.md recovery must write the bytes it fetched",
+        );
+      }
+
+      for (const [label, resource, suffix] of [
+        [
+          "single .md skill",
+          { ...privateSkill, name: "bytes-single" },
+          "/SKILL.md",
+        ],
+        [
+          "non-skill file",
+          {
+            name: "bytes-agent",
+            kind: "agent",
+            source: "private-source",
+            path: "agents/bytes-agent.agent.md",
+            categories: [],
+            description: "Bytes agent",
+          },
+          "/bytes-agent.agent.md",
+        ],
+      ]) {
+        const rawWrites = new Map();
+        const { installSkill } = loadInstaller(new Map(), {
+          rawWrites,
+          skillIndex: privateSourceIndex,
+        });
+        global.fetch = respondWithPayload;
+        await installSkill(resource, makeUri("/tmp/workspace"), {});
+        assert.deepStrictEqual(
+          findRawWrite(rawWrites, suffix),
+          payload,
+          `${label} must be written byte for byte`,
+        );
+      }
+      passed++;
+    }
   } finally {
-    if (originalFetch) {
-      global.fetch = originalFetch;
+    if (originalFetchDescriptor) {
+      Object.defineProperty(global, "fetch", originalFetchDescriptor);
     } else {
       delete global.fetch;
     }
   }
 
   console.log(
-    `PASS: test-skill-installer-remote-fallback.js (${passed}/35 cases)`,
+    `PASS: test-skill-installer-remote-fallback.js (${passed}/37 cases)`,
   );
 }
 

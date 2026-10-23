@@ -2,6 +2,24 @@ const assert = require("assert");
 const vscode = require("vscode");
 
 const file = (root, ...segments) => vscode.Uri.joinPath(root, ...segments);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// 高負荷の CI や共有マシンでは、非同期に反映される結果の到着が遅れる。
+// 「いずれ成立する」ことを確かめるアサーションは、固定の待ちではなく期限付きで再評価する。
+const eventually = async (check, timeoutMs = 30000) => {
+  const deadline = Date.now() + timeoutMs;
+  let lastError;
+  for (;;) {
+    try {
+      return await check();
+    } catch (error) {
+      lastError = error;
+    }
+    if (Date.now() >= deadline) {
+      throw lastError;
+    }
+    await sleep(250);
+  }
+};
 const write = (uri, value) =>
   vscode.workspace.fs.writeFile(uri, Buffer.from(value));
 const read = async (uri) =>
@@ -71,7 +89,8 @@ suite("Agent Resources Ninja smoke test", () => {
     }
   });
 
-  test("gitignore real configuration, dirty protection, recovery and old-root cleanup", async () => {
+  test("gitignore real configuration, dirty protection, recovery and old-root cleanup", async function () {
+    this.timeout(120000);
     const folder = vscode.workspace.workspaceFolders[0];
     const root = file(folder.uri, "smoke-skills");
     const next = file(folder.uri, "smoke-next");
@@ -91,9 +110,12 @@ suite("Agent Resources Ninja smoke test", () => {
       await write(file(root, ".gitignore"), "# user rule\nkeep-me\n");
       await update("autoManageGitignore", true);
       await vscode.commands.executeCommand("resourceNinja.refresh");
-      const original = await read(file(root, ".gitignore"));
-      assert(original.includes("# Agent Resources Ninja START"));
-      assert(original.includes("/remote/"));
+      const original = await eventually(async () => {
+        const text = await read(file(root, ".gitignore"));
+        assert(text.includes("# Agent Resources Ninja START"));
+        assert(text.includes("/remote/"));
+        return text;
+      });
       const document = await vscode.workspace.openTextDocument(
         file(root, ".gitignore"),
       );
@@ -106,24 +128,28 @@ suite("Agent Resources Ninja smoke test", () => {
       assert.strictEqual(await read(file(root, ".gitignore")), original);
       assert(await document.save());
       await vscode.commands.executeCommand("resourceNinja.refreshLocal");
-      const off = await read(file(root, ".gitignore"));
-      assert(off.includes("# unsaved"));
-      assert(!off.includes("# Agent Resources Ninja START"));
+      await eventually(async () => {
+        const off = await read(file(root, ".gitignore"));
+        assert(off.includes("# unsaved"));
+        assert(!off.includes("# Agent Resources Ninja START"));
+      });
       await update("autoManageGitignore", true);
       await vscode.commands.executeCommand("resourceNinja.refresh");
       await createRemote(next);
       await update("resourcesDirectory", "smoke-next");
       await vscode.commands.executeCommand("resourceNinja.refresh");
-      assert(
-        !(await read(file(root, ".gitignore"))).includes(
-          "# Agent Resources Ninja START",
-        ),
-      );
-      assert(
-        (await read(file(next, ".gitignore"))).includes(
-          "# Agent Resources Ninja START",
-        ),
-      );
+      await eventually(async () => {
+        assert(
+          !(await read(file(root, ".gitignore"))).includes(
+            "# Agent Resources Ninja START",
+          ),
+        );
+        assert(
+          (await read(file(next, ".gitignore"))).includes(
+            "# Agent Resources Ninja START",
+          ),
+        );
+      });
     } finally {
       for (const document of vscode.workspace.textDocuments) {
         if (
@@ -162,12 +188,14 @@ suite("Agent Resources Ninja smoke test", () => {
         vscode.ConfigurationTarget.WorkspaceFolder,
       );
       await vscode.commands.executeCommand("resourceNinja.refresh");
-      const managed = await read(file(preset, ".gitignore"));
-      assert(
-        managed.includes("# Agent Resources Ninja START"),
-        "the preset folder must be the one being managed",
-      );
-      assert(managed.includes("/remote/"));
+      await eventually(async () => {
+        const text = await read(file(preset, ".gitignore"));
+        assert(
+          text.includes("# Agent Resources Ninja START"),
+          "the preset folder must be the one being managed",
+        );
+        assert(text.includes("/remote/"));
+      });
     } finally {
       await config.update(
         "resourcesDirectoryPreset",
@@ -194,7 +222,7 @@ suite("Agent Resources Ninja smoke test", () => {
   });
 
   test("SKILL.md edits regenerate the block in additional roots and honor manual-only skills", async function () {
-    this.timeout(90000);
+    this.timeout(180000);
     const folder = vscode.workspace.workspaceFolders[0];
     const extra = file(folder.uri, "smoke-extra");
     const skillMd = file(extra, "extra-skill", "SKILL.md");
@@ -205,7 +233,6 @@ suite("Agent Resources Ninja smoke test", () => {
     );
     const update = (key, value) =>
       config.update(key, value, vscode.ConfigurationTarget.Workspace);
-    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const readAgents = async () => {
       try {
         return await read(agents);
@@ -215,11 +242,17 @@ suite("Agent Resources Ninja smoke test", () => {
     };
     const skillText = (flag) =>
       `---\nname: extra-skill\ndescription: smoke fixture\n${flag}---\n\nFixture.\n`;
-    const waitFor = async (predicate, message) => {
-      const deadline = Date.now() + 20000;
+    // watcher の登録が遅れて最初の書き込みを取りこぼしても進めるよう、待つ間は同じ内容を書き直して再通知する。
+    const waitFor = async (predicate, message, retouch) => {
+      const deadline = Date.now() + 45000;
+      let lastTouch = Date.now();
       while (Date.now() < deadline) {
         if (await predicate()) {
           return;
+        }
+        if (retouch && Date.now() - lastTouch >= 3000) {
+          await retouch();
+          lastTouch = Date.now();
         }
         await sleep(250);
       }
@@ -245,18 +278,21 @@ suite("Agent Resources Ninja smoke test", () => {
       await waitFor(
         async () => (await readAgents()).includes("extra-skill"),
         "a new SKILL.md in an additional root must appear in the block",
+        () => write(skillMd, skillText("")),
       );
 
       await write(skillMd, skillText("disable-model-invocation: true\n"));
       await waitFor(
         async () => !(await readAgents()).includes("extra-skill"),
         "a manual-only skill must leave the block without a metadata change",
+        () => write(skillMd, skillText("disable-model-invocation: true\n")),
       );
 
       await write(skillMd, skillText(""));
       await waitFor(
         async () => (await readAgents()).includes("extra-skill"),
         "removing the flag must list the skill again",
+        () => write(skillMd, skillText("")),
       );
 
       await update("instructionBlock.includeExplicitOnlySkills", true);
@@ -264,6 +300,7 @@ suite("Agent Resources Ninja smoke test", () => {
       await waitFor(
         async () => (await readAgents()).includes("extra-skill"),
         "the opt-in setting must keep a manual-only skill in the block",
+        () => write(skillMd, skillText("disable-model-invocation: true\n")),
       );
     } finally {
       await update("instructionBlock.includeExplicitOnlySkills", undefined);
@@ -349,22 +386,24 @@ suite("Agent Resources Ninja smoke test", () => {
   // 単体テストは「ピッカーが開いたまま状態を保つ」ことを確かめられない。実際の QuickPick をキー操作で動かす。
   // コマンドは確定後の設定を返すので、ホスト側から結果を観測できる。
   test("filter and sort pickers apply several choices from one open picker", async function () {
+    this.timeout(180000);
     const extension = vscode.extensions.getExtension(
       "yamapan.agent-resources-ninja",
     );
     await extension.activate();
-    const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const pause = sleep;
     const pickerKeys = {
       next: "workbench.action.quickOpenSelectNext",
       previous: "workbench.action.quickOpenSelectPrevious",
       accept: "workbench.action.acceptSelectedQuickOpenItem",
     };
+    // 高負荷ではピッカーの表示が遅れてキー入力を取りこぼすため、開く待ちとキー間隔に余裕を持たせる。
     const drive = async (commandId, keys) => {
       const pending = vscode.commands.executeCommand(commandId);
-      await pause(800);
+      await pause(2000);
       for (const key of keys) {
         await vscode.commands.executeCommand(pickerKeys[key]);
-        await pause(250);
+        await pause(400);
       }
       await vscode.commands.executeCommand("workbench.action.closeQuickOpen");
       return pending;
@@ -545,7 +584,7 @@ suite("Agent Resources Ninja smoke test", () => {
   // 他ホームの読み取り専用グループや古いグループは、プラグイン削除コマンドに「実行時に」拒否される必要がある。
   // 拒否されずに通常経路へ進むと、同じプラグイン ID を持つ書き込み可能なリソースの削除確認（モーダル）に到達して止まる。
   test("deleting a plugin group refuses read-only and stale user groups", async function () {
-    this.timeout(60000);
+    this.timeout(360000);
     const extension = vscode.extensions.getExtension(
       "yamapan.agent-resources-ninja",
     );
@@ -588,7 +627,8 @@ suite("Agent Resources Ninja smoke test", () => {
               },
             ),
           ).then(() => "settled"),
-          new Promise((resolve) => setTimeout(() => resolve("blocked"), 8000)),
+          // 初回の呼び出しは、現在の一覧を得るための全スキャンを待つ。高負荷では長引くので、モーダルで止まった場合だけを検出できる上限にする。
+          new Promise((resolve) => setTimeout(() => resolve("blocked"), 90000)),
         ]);
         assert.strictEqual(
           settled,

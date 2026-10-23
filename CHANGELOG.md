@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.64] - 2026-10-23
+
+### Fixed
+
+- **Downloaded Files Are Written Byte for Byte / ダウンロードしたファイルをバイト列のまま書き込む** - Files fetched from GitHub were read as text and written back as UTF-8, so binary files shipped in a resource (`.pptx`, `.tar.gz`, images) were corrupted and a UTF-8 BOM was dropped from text files. Folder downloads, single-file installs and the `SKILL.md` recovery now keep the response as bytes and write it unchanged, and a regression test compares the written bytes with the source / GitHub から取得したファイルを文字列として読み、UTF-8 で書き戻していたため、リソースに含まれるバイナリ（`.pptx`、`.tar.gz`、画像など）が壊れ、テキストファイルの UTF-8 BOM も失われていました。フォルダーのダウンロード、単一ファイルのインストール、`SKILL.md` の復旧は、応答をバイト列のまま保持して無変換で書き込みます。書き込まれたバイト列を取得元と比べる回帰テストを追加しました。
+
 ## [0.2.63] - 2026-10-23
 
 ### Changed

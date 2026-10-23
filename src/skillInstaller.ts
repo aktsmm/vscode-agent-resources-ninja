@@ -1239,7 +1239,7 @@ async function downloadDirectory(
     const contentPath = [remotePath === "." ? "" : remotePath, entry.name]
       .filter(Boolean)
       .join("/");
-    const content = await fetchFileContent(
+    const content = await fetchFileBytes(
       entry.download_url,
       token,
       buildGitHubContentsApiUrl(owner, repo, branch, contentPath),
@@ -1249,10 +1249,7 @@ async function downloadDirectory(
       downloadRootPath,
       "download write",
     );
-    await vscode.workspace.fs.writeFile(
-      localFilePath,
-      Buffer.from(content, "utf-8"),
-    );
+    await vscode.workspace.fs.writeFile(localFilePath, content);
   };
 
   logger.info(
@@ -1511,7 +1508,7 @@ export async function installSkill(
           downloadErrors = result.errors;
         } else {
           const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}/${encodeGitHubPathForUrl(remotePath)}`;
-          const content = await fetchFileContent(
+          const content = await fetchFileBytes(
             rawUrl,
             token,
             buildGitHubContentsApiUrl(owner, repo, branch, remotePath),
@@ -1521,10 +1518,7 @@ export async function installSkill(
             installRootUri,
             "resource write",
           );
-          await vscode.workspace.fs.writeFile(
-            skillPath,
-            Buffer.from(content, "utf-8"),
-          );
+          await vscode.workspace.fs.writeFile(skillPath, content);
         }
         await writeResourceInstallMetadata(skillPath, skill);
         await removeOwnedLegacyPluginResource(skillPath, skill);
@@ -1589,7 +1583,7 @@ export async function installSkill(
       const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}/${encodeGitHubPathForUrl(remotePath)}`;
       logger.info(`[Resource Ninja] Downloading single file: ${rawUrl}`);
       try {
-        const content = await fetchFileContent(
+        const content = await fetchFileBytes(
           rawUrl,
           token,
           buildGitHubContentsApiUrl(owner, repo, branch, remotePath),
@@ -1598,10 +1592,7 @@ export async function installSkill(
 
         // SKILL.md として保存（メインファイル）
         const skillMdPath = vscode.Uri.joinPath(skillPath, "SKILL.md");
-        await vscode.workspace.fs.writeFile(
-          skillMdPath,
-          Buffer.from(content, "utf-8"),
-        );
+        await vscode.workspace.fs.writeFile(skillMdPath, content);
         logger.info(`[Resource Ninja] Saved as SKILL.md`);
       } catch (error) {
         logger.error(`[Resource Ninja] Failed to download ${rawUrl}:`, error);
@@ -3040,19 +3031,16 @@ export async function recoverPrimarySkillMdFromRaw(
     : `${rawBase}/SKILL.md`;
   const contentPath = cleanPath ? `${cleanPath}/SKILL.md` : "SKILL.md";
   try {
-    const content = await fetchFileContent(
+    const content = await fetchFileBytes(
       rawUrl,
       token,
       buildGitHubContentsApiUrl(owner, repo, branch, contentPath),
     );
-    if (!content || content.trim().length <= 100) {
+    if (Buffer.from(content).toString("utf-8").trim().length <= 100) {
       return false;
     }
     const skillMdPath = vscode.Uri.joinPath(skillPath, "SKILL.md");
-    await vscode.workspace.fs.writeFile(
-      skillMdPath,
-      Buffer.from(content, "utf-8"),
-    );
+    await vscode.workspace.fs.writeFile(skillMdPath, content);
     logger.info(
       `Recovered SKILL.md from raw URL after directory listing failure: ${rawUrl}`,
     );
@@ -3122,11 +3110,13 @@ function buildGitHubContentsApiUrl(
   return `https://api.github.com/repos/${owner}/${repo}/contents/${encodeGitHubPathForUrl(contentPath)}?ref=${encodeURIComponent(branch)}`;
 }
 
-async function fetchFileContent(
+// バイナリ（.pptx / .tar.gz など）や UTF-8 BOM を壊さないよう、文字列を経由せず
+// バイト列のまま取得して書き込む。
+async function fetchFileBytes(
   url: string,
   token?: string,
   authenticatedUrl?: string,
-): Promise<string> {
+): Promise<Uint8Array> {
   const response = await fetchGitHubWithOptionalAuthRetry(url, {
     accept: "text/plain",
     token,
@@ -3139,6 +3129,5 @@ async function fetchFileContent(
   }
   // 空ファイル（例: Python の __init__.py）も正常なので、
   // HTTP 200 が返れば内容が空でもエラーにしない
-  const text = await response.text();
-  return text;
+  return new Uint8Array(await response.arrayBuffer());
 }

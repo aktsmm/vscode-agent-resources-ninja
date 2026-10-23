@@ -72,7 +72,7 @@ for (const { relativePath, call } of directRawCalls) {
 }
 
 const installer = parse("src/skillInstaller.ts");
-const installerContentCalls = collectCalls(installer, "fetchFileContent");
+const installerContentCalls = collectCalls(installer, "fetchFileBytes");
 assert.strictEqual(
   installerContentCalls.length,
   4,

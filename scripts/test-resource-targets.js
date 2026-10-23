@@ -749,7 +749,7 @@ test("plugin resources migrate only owned legacy files", () => {
   );
   assert.match(
     skillInstallerSource,
-    /isHookConfigFile[\s\S]*?fetchFileContent[\s\S]*?writeFile\(\s*skillPath/,
+    /isHookConfigFile[\s\S]*?fetchFileBytes[\s\S]*?writeFile\(\s*skillPath/,
   );
   assert.match(
     skillInstallerSource,

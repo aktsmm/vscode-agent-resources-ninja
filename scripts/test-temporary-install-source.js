@@ -142,6 +142,13 @@ async function main() {
         ok: true,
         status: 200,
         text: async () => skillContent,
+        arrayBuffer: async () => {
+          const bytes = Buffer.from(skillContent, "utf-8");
+          return bytes.buffer.slice(
+            bytes.byteOffset,
+            bytes.byteOffset + bytes.byteLength,
+          );
+        },
       };
     }
 
