@@ -48,7 +48,15 @@ import {
   resolveConfiguredUri,
   resolveSkillsDirectoryUri,
 } from "./customizationPaths";
-import { getEffectiveOwner, isSiblingActive } from "./coexistence";
+import {
+  SELF_EXTENSION_ID,
+  getEffectiveOwner,
+  isSiblingActive,
+} from "./coexistence";
+import {
+  withSharedStoreLockOutcome,
+  type SharedStoreLease,
+} from "./sharedStoreLock";
 import {
   loadSkillIndex,
   ResourceKind,
@@ -1483,6 +1491,65 @@ async function performInstructionFileUpdate(
     instructionUri,
     instructionPath,
   );
+  const input: ResolvedInstructionOutputInput = {
+    workspaceUri,
+    context,
+    instructionUri,
+    config,
+    format,
+    coexistenceMode,
+    owner,
+    resourcesDirectory,
+    skillSource,
+  };
+  if (skillSource.scope === "workspace") {
+    return writeResolvedInstructionOutput(input);
+  }
+
+  // User/global outputs can also be written by the skill-only sibling from
+  // another extension host, so they share its writer lock: the index.lock
+  // contract in sharedStoreLock.ts. Nothing is read or written unless the lock is ours.
+  const outcome = await withSharedStoreLockOutcome(
+    SELF_EXTENSION_ID,
+    (lease) => writeResolvedInstructionOutput({ ...input, lease }),
+  );
+  return outcome.locked
+    ? {
+        status: "locked",
+        target: instructionUri.fsPath,
+        message: `shared output lock: ${outcome.reason}`,
+      }
+    : outcome.value;
+}
+
+interface ResolvedInstructionOutputInput {
+  workspaceUri: vscode.Uri;
+  context: vscode.ExtensionContext;
+  instructionUri: vscode.Uri;
+  config: vscode.WorkspaceConfiguration;
+  format: Awaited<ReturnType<typeof resolveOutputFormat>>["format"];
+  coexistenceMode: ReturnType<typeof getConfiguredCoexistenceMode>;
+  owner: Awaited<ReturnType<typeof getEffectiveOwner>> | "self";
+  resourcesDirectory: string;
+  skillSource: Awaited<ReturnType<typeof resolveInstructionSkillSource>>;
+  lease?: SharedStoreLease;
+}
+
+async function writeResolvedInstructionOutput(
+  input: ResolvedInstructionOutputInput,
+): Promise<InstructionFileUpdateResult> {
+  const {
+    workspaceUri,
+    context,
+    instructionUri,
+    config,
+    format,
+    coexistenceMode,
+    owner,
+    resourcesDirectory,
+    skillSource,
+    lease,
+  } = input;
   const { skillsUri, installedSkills } = skillSource;
   const includeLocalResources = getConfiguredIncludeLocalResources(config);
 
@@ -1696,6 +1763,9 @@ async function performInstructionFileUpdate(
     instructionContent,
   );
 
+  // The lease can be lost to a paused process being reclaimed; nothing has been
+  // written yet, so refusing here leaves every existing byte untouched.
+  await lease?.assertStillOwned();
   await applyFileMutations(relatedOutputMutations);
 
   if (newContent !== instructionContent) {

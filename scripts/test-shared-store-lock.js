@@ -228,6 +228,69 @@ test("a live owner keeps its lock through the soft window", async () => {
   );
 });
 
+test("an output writer is refused, not started, while another process holds the lock", async () => {
+  reset({ isProcessAlive: () => true });
+  writeForeignLock({
+    pid: 424242,
+    acquiredAt: new Date(clock).toISOString(),
+    extensionId: "yamapan.agent-skill-ninja",
+    generation: "sibling-writer",
+  });
+  let started = false;
+  const outcome = await lock.withSharedStoreLockOutcome(OWNER, async () => {
+    started = true;
+    return "written";
+  });
+  assert.deepStrictEqual(outcome, { locked: true, reason: "lock-unavailable" });
+  assert.strictEqual(started, false, "a refused writer must never begin");
+  assert.strictEqual(
+    readLockFile().generation,
+    "sibling-writer",
+    "the sibling's lock stays intact",
+  );
+});
+
+test("an output writer reports its value and releases the lock", async () => {
+  reset();
+  const outcome = await lock.withSharedStoreLockOutcome(OWNER, async (lease) => {
+    lease.assertHeld();
+    return "written";
+  });
+  assert.deepStrictEqual(outcome, { locked: false, value: "written" });
+  assert.ok(!fs.existsSync(lockPath), "the lock is released after the writer");
+});
+
+test("a writer that loses its lease before committing is reported as locked", async () => {
+  reset();
+  let committed = false;
+  const outcome = await lock.withSharedStoreLockOutcome(OWNER, async (lease) => {
+    writeForeignLock({
+      pid: 999,
+      acquiredAt: new Date(clock).toISOString(),
+      extensionId: "yamapan.agent-skill-ninja",
+      generation: "took-over",
+    });
+    await lease.assertStillOwned();
+    committed = true;
+    return "written";
+  });
+  assert.deepStrictEqual(outcome, { locked: true, reason: "lease-lost" });
+  assert.strictEqual(committed, false, "nothing is committed after the lease is lost");
+  assert.strictEqual(readLockFile().generation, "took-over");
+});
+
+test("a real fault inside an output writer keeps propagating", async () => {
+  reset();
+  await assert.rejects(
+    () =>
+      lock.withSharedStoreLockOutcome(OWNER, async () => {
+        throw new Error("disk on fire");
+      }),
+    /disk on fire/,
+  );
+  assert.ok(!fs.existsSync(lockPath), "the lock is released after a fault");
+});
+
 test("a lock past the hard window is reclaimed even from a living pid", async () => {
   reset({ isProcessAlive: () => true });
   writeForeignLock({

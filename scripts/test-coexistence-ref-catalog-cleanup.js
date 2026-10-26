@@ -107,6 +107,8 @@ async function main() {
   let writeFailureCode;
   let instructionFileSetting = "AGENTS.md";
   let effectiveOwner = "self";
+  let lockRequests = 0;
+  let lockRefusal;
 
   const vscodeStub = {
     Uri: {
@@ -311,8 +313,8 @@ async function main() {
           getConfiguredWorkspaceInstructionsDirectory: () => undefined,
           getConfiguredWorkspaceMcpDirectory: () => undefined,
           getConfiguredWorkspacePromptsDirectory: () => undefined,
-          isAbsoluteConfiguredPath: () => false,
-          isHomeRelativePath: () => false,
+          isAbsoluteConfiguredPath: (value) => path.isAbsolute(value),
+          isHomeRelativePath: (value) => value.startsWith("~"),
           getRelativeSkillsPathForWorkspace: () => ".github/skills",
           isSameOrChildWorkspacePath: (candidatePath, rootPath) =>
             candidatePath === rootPath ||
@@ -335,6 +337,24 @@ async function main() {
         "./coexistence": {
           getEffectiveOwner: async () => effectiveOwner,
           isSiblingActive: async () => true,
+          SELF_EXTENSION_ID: "yamapan.agent-resources-ninja",
+        },
+        // The lock itself is exercised against the real module in test-shared-store-lock.js;
+        // here it only decides whether the writer may start.
+        "./sharedStoreLock": {
+          withSharedStoreLockOutcome: async (_extensionId, task) => {
+            lockRequests++;
+            if (lockRefusal) {
+              return { locked: true, reason: lockRefusal };
+            }
+            return {
+              locked: false,
+              value: await task({
+                assertHeld() {},
+                assertStillOwned: async () => undefined,
+              }),
+            };
+          },
         },
         "./skillIndex": {
           loadSkillIndex: async () => undefined,
@@ -563,6 +583,68 @@ async function main() {
   );
   assert.strictEqual(lockedResult.status, "locked");
   writeFailureCode = undefined;
+
+  // A user/global output can be written by the sibling from another process, so
+  // it runs under the shared writer lock; a workspace output never asks for it.
+  const lockRequestsBefore = lockRequests;
+  assert.strictEqual(
+    (
+      await updateInstructionFileAtUri(
+        vscodeStub.Uri.file(workspaceRoot),
+        {},
+        vscodeStub.Uri.file(instructionPath),
+        "AGENTS.md",
+      )
+    ).status.length > 0,
+    true,
+  );
+  assert.strictEqual(
+    lockRequests,
+    lockRequestsBefore,
+    "a workspace output must not take the cross-process lock",
+  );
+
+  const globalInstructionPath = path.join(
+    repoRoot,
+    "output_sessions",
+    "coexistence-fixture-global-home",
+    "copilot-instructions.md",
+  );
+  const globalInstruction = "# Global notes\n\nKeep this line.\n";
+  files.set(globalInstructionPath, globalInstruction);
+  const globalWritesBefore = writes.length;
+  lockRefusal = "lock-unavailable";
+  const refused = await updateInstructionFileAtUri(
+    vscodeStub.Uri.file(workspaceRoot),
+    {},
+    vscodeStub.Uri.file(globalInstructionPath),
+    globalInstructionPath,
+    { notifyOnFailure: false },
+  );
+  assert.strictEqual(refused.status, "locked");
+  assert.match(refused.message, /shared output lock: lock-unavailable/);
+  assert.strictEqual(lockRequests, lockRequestsBefore + 1);
+  assert.strictEqual(
+    files.get(globalInstructionPath),
+    globalInstruction,
+    "a refused global write leaves every existing byte untouched",
+  );
+  assert.strictEqual(writes.length, globalWritesBefore, "nothing was written");
+
+  lockRefusal = undefined;
+  const granted = await updateInstructionFileAtUri(
+    vscodeStub.Uri.file(workspaceRoot),
+    {},
+    vscodeStub.Uri.file(globalInstructionPath),
+    globalInstructionPath,
+    { notifyOnFailure: false },
+  );
+  assert.strictEqual(lockRequests, lockRequestsBefore + 2);
+  assert.notStrictEqual(granted.status, "locked");
+  assert.ok(
+    files.get(globalInstructionPath).includes("Keep this line."),
+    "the hand-written part survives a lock-held write",
+  );
 
   console.log("RESULT=PASS");
 }

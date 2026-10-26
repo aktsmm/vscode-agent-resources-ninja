@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **User/Global Output Writes Share the Sibling's Writer Lock / ユーザー/グローバル出力の書き込みを姉妹拡張と同じロックで直列化** - Updating a user/global instruction file or reference catalog now runs under the shared store lock that Agent Skills Ninja already takes for the same files, so two extension hosts no longer interleave a read-modify-write. If the other extension holds the lock past the retry budget, or the lock is lost before the write, the update ends as `locked` with every existing byte untouched and is retried by the next automatic update. Workspace outputs are unchanged. See `docs/output-write-locking.md` / ユーザー/グローバルの instruction ファイルや参照カタログの更新は、Agent Skills Ninja が同じファイルに対してすでに取っている共有ストアのロックの下で実行します。2 つの拡張ホストが読み取り・変更・書き込みを交互に実行することがなくなります。相手が再試行の上限を超えてロックを保持している場合や、書き込み前にロックを失った場合は、既存のバイトを一切変えずに `locked` で終了し、次の自動更新で再試行します。ワークスペースの出力は変わりません。詳細は `docs/output-write-locking.md` を参照してください。
+
 ## [0.2.67] - 2026-10-26
 
 ### Added

@@ -453,3 +453,32 @@ export async function withSharedStoreLock<T>(
 
   throw new Error(SHARED_STORE_LOCK_UNAVAILABLE_MESSAGE);
 }
+
+/**
+ * Runs a writer under the shared store lock and reports a lost or unavailable
+ * lock as an outcome. `task` is never started without the lock, so a refusal
+ * leaves everything it would have written untouched.
+ */
+export async function withSharedStoreLockOutcome<T>(
+  extensionId: string,
+  task: (lease: SharedStoreLease) => Promise<T>,
+): Promise<
+  | { locked: false; value: T }
+  | { locked: true; reason: "lease-lost" | "lock-unavailable" }
+> {
+  try {
+    return {
+      locked: false,
+      value: await withSharedStoreLock(extensionId, async (lease) => {
+        lease.assertHeld();
+        return task(lease);
+      }),
+    };
+  } catch (error) {
+    const reason = describeSharedStoreLockFailure(error);
+    if (!reason) {
+      throw error;
+    }
+    return { locked: true, reason };
+  }
+}
