@@ -77,6 +77,7 @@ const resourceKindsModule = requireTypeScriptModule(
   {},
 );
 
+let japaneseUi = false;
 const providerModule = requireTypeScriptModule(providerPath, {
   vscode: vscodeStub,
   "./skillInvocationMode": skillInvocationModeModule,
@@ -86,7 +87,7 @@ const providerModule = requireTypeScriptModule(providerPath, {
     getResourceKindLabel: (kind) => kind,
   },
   "./userResourceScanner": { scanUserResources: async () => [] },
-  "./i18n": { isJapanese: () => false },
+  "./i18n": { isJapanese: () => japaneseUi },
   "./resourceKinds": {
     getPluginIdFromPath: (value) => value?.match(/plugins[\\/]([^\\/]+)/i)?.[1],
     getResourceIdentityKeys: () => [],
@@ -233,6 +234,17 @@ async function main() {
   const outerItem = nestedTop.find((item) => item.resource === outer);
   assert.strictEqual(outerItem.collapsibleState, 1, "the parent expands");
   assert.match(outerItem.description, /1 contained/);
+  japaneseUi = true;
+  try {
+    const japaneseTop = await provider.getChildren(currentKind);
+    assert.match(
+      japaneseTop.find((item) => item.resource === outer).description,
+      /内包スキル 1 件/,
+      "the parent row count is localized",
+    );
+  } finally {
+    japaneseUi = false;
+  }
   assert.doesNotMatch(
     nestedTop.find((item) => item.resource === sibling).description,
     /contained/,

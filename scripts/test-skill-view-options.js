@@ -513,7 +513,7 @@ function createTreeProviders() {
       "./skillInstaller": { getInstalledSkillsWithMeta: async () => [] },
       "./localSkillScanner": { scanLocalSkills: async () => [] },
       "./i18n": {
-        isJapanese: () => false,
+        isJapanese: () => globalThis.__testJapaneseUi === true,
         messages: {
           noResourcesFound: () => "none",
           installResourcesHint: () => "hint",
@@ -753,6 +753,15 @@ test("the Installed view shows a skill inside another skill under its parent", a
     const parent = top.find((item) => item.skill.name === "deploy-model");
     assert.strictEqual(parent.collapsibleState, 1, "the parent expands");
     assert.match(parent.description, /1 contained/, "the parent row says how many skills it holds");
+    globalThis.__testJapaneseUi = true;
+    try {
+      const japaneseParent = (await provider.getChildren(group)).find(
+        (item) => item.skill.name === "deploy-model",
+      );
+      assert.match(japaneseParent.description, /内包スキル 1 件/);
+    } finally {
+      globalThis.__testJapaneseUi = false;
+    }
     assert.doesNotMatch(
       top.find((item) => item.skill.name === "plain").description,
       /contained/,
