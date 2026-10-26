@@ -1378,11 +1378,45 @@ function deriveRepositoryRef(
   return { source, rawUrlRef, githubUrlRef, repositoryRef };
 }
 
+/**
+ * Installs in a batch come from the same few repositories, so they share one
+ * resolver (one commit and tree snapshot per branch) for a short window instead
+ * of asking GitHub again for every skill. A snapshot older than the download is
+ * safe: the recorded baseline can only be older than the copied files, which
+ * costs one extra update later and never a skipped one.
+ */
+const SHARED_REVISION_RESOLVER_TTL_MS = 30_000;
+let sharedRevisionResolver:
+  | {
+      token: string | undefined;
+      createdAt: number;
+      resolve: (target: RevisionTarget) => Promise<SourceRevision>;
+    }
+  | undefined;
+
+function getSharedRevisionResolver(
+  token: string | undefined,
+  now: number = Date.now(),
+): (target: RevisionTarget) => Promise<SourceRevision> {
+  if (
+    !sharedRevisionResolver ||
+    sharedRevisionResolver.token !== token ||
+    now - sharedRevisionResolver.createdAt > SHARED_REVISION_RESOLVER_TTL_MS
+  ) {
+    sharedRevisionResolver = {
+      token,
+      createdAt: now,
+      resolve: createRevisionResolver(token),
+    };
+  }
+  return sharedRevisionResolver.resolve;
+}
+
 /** Reads the revision a skill would be installed from now, or undefined when it cannot be read. */
 async function tryResolveSourceRevision(
   target: RevisionTarget,
   token: string | undefined,
-  resolver: (target: RevisionTarget) => Promise<SourceRevision> = createRevisionResolver(
+  resolver: (target: RevisionTarget) => Promise<SourceRevision> = getSharedRevisionResolver(
     token,
   ),
 ): Promise<SourceRevision | undefined> {

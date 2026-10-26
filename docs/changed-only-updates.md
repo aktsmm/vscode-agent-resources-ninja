@@ -26,6 +26,7 @@ The recorded baseline is the `sourceRevision` field of `.skill-meta.json` (`owne
 - **Baseline timing.** The revision is read before the download and written only for a complete install. If upstream moves in between, the baseline is older than the copied files, which can only cause one extra update later. An incomplete copy keeps no baseline.
 - **Failure and cancellation** use the existing reinstall behavior (bounded retry of transient failures, removed copies recoverable from the trash, a failure summary that keeps resources outside the retry set, cancelled resources counted as not started). A revision check that is still waiting is aborted on cancel.
 - **Packages and groups.** Plugin children are not updated individually; a plugin is replaced as a whole by an explicit reinstall. Standalone resources are checked once each.
+- **API cost.** Installs within 30 seconds share one resolver, so a batch from one repository costs one commit and one tree request instead of two per skill; the changed-only check itself always uses a fresh snapshot so it never compares against stale upstream data.
 - **Forced reinstall remains** as the first button in the same dialog and as the default for automatic callers.
 
 ## Not covered yet

@@ -174,6 +174,7 @@ async function main() {
     kind: "tree",
   };
   let revisionFails = false;
+  let resolverCreations = 0;
   const moduleExports = requireTypeScriptModule(
     path.join(__dirname, "..", "src", "skillInstaller.ts"),
     {
@@ -275,11 +276,14 @@ async function main() {
             "./githubResponse": githubResponseModule,
           },
         ),
-        createRevisionResolver: () => async () => {
-          if (revisionFails) {
-            throw new Error("offline");
-          }
-          return baselineRevision;
+        createRevisionResolver: () => {
+          resolverCreations++;
+          return async () => {
+            if (revisionFails) {
+              throw new Error("offline");
+            }
+            return baselineRevision;
+          };
         },
       },
       "./gitignoreManager": {
@@ -355,6 +359,11 @@ async function main() {
   assert.ok(
     !("sourceRevision" in JSON.parse(metaWrites().at(-1).content)),
     "an unreadable revision leaves no stale baseline behind",
+  );
+  assert.strictEqual(
+    resolverCreations,
+    1,
+    "installs in a short window share one resolver and its repository snapshot",
   );
 
   // A changed-only update skips a skill only when the baseline provably equals upstream.
