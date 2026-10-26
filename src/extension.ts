@@ -56,6 +56,7 @@ import {
   refreshSkillMetadata,
   refreshSingleSkillMetadata,
   stripSkillMetaLocalPaths,
+  createSkillRevisionChecker,
 } from "./skillInstaller";
 import {
   findInstallCollisions,
@@ -2140,6 +2141,8 @@ export async function activate(
     skipConfirmation?: boolean;
     suppressSuccessMessage?: boolean;
     suppressRecoveryPrompt?: boolean;
+    /** Skip skills whose upstream folder is unchanged since they were installed. */
+    onlyChanged?: boolean;
   };
 
   function normalizeReinstallCommandOptions(
@@ -6791,18 +6794,30 @@ export async function activate(
         return false;
       }
 
+      let onlyChanged = options.onlyChanged === true;
       if (!options.skipConfirmation) {
+        const forcedLabel = isJapanese() ? "再インストール" : "Reinstall";
+        const changedLabel = isJapanese()
+          ? "変更分だけ更新"
+          : "Update Changed Only";
         const confirm = await vscode.window.showWarningMessage(
           isJapanese()
             ? `${installedMeta.length} 個のスキルを再インストールしますか？`
             : `Reinstall ${installedMeta.length} skills?`,
-          { modal: true },
-          isJapanese() ? "再インストール" : "Reinstall",
+          {
+            modal: true,
+            detail: isJapanese()
+              ? "「再インストール」はすべて入れ直します（修復用）。「変更分だけ更新」は、インストール後に配布元のフォルダーが変わったスキルだけを入れ直します。記録された基準のないスキルは、基準を記録するために 1 回入れ直します。"
+              : "Reinstall replaces every skill (the repair path). Update Changed Only replaces just the skills whose upstream folder changed since they were installed; a skill with no recorded baseline is reinstalled once to record one.",
+          },
+          forcedLabel,
+          changedLabel,
         );
 
         if (!confirm) {
           return false;
         }
+        onlyChanged = confirm === changedLabel;
       }
 
       let index = await loadSkillIndex(context);
@@ -6856,6 +6871,7 @@ export async function activate(
 
       let success = 0;
       let completed = 0;
+      let upToDate = 0;
       let cancelled = false;
       const records: ReinstallBatchRecord<InstallSkillResult>[] = [];
 
@@ -6868,6 +6884,12 @@ export async function activate(
           cancellable: true,
         },
         async (progress, token) => {
+          // A cancellation also stops a revision check that is still waiting on GitHub.
+          const revisionAbort = new AbortController();
+          token.onCancellationRequested(() => revisionAbort.abort());
+          const checkRevision = onlyChanged
+            ? await createSkillRevisionChecker(context, revisionAbort.signal)
+            : undefined;
           for (const meta of installedMeta) {
             if (token.isCancellationRequested) {
               cancelled = true;
@@ -6882,6 +6904,19 @@ export async function activate(
 
             // スキル情報を取得
             const skill = findIndexedSkillForInstalledMeta(index, meta);
+
+            if (skill && checkRevision) {
+              // Anything but a proven "unchanged" (no baseline, a different source,
+              // a failed read) is updated, so the check can only ever skip safely.
+              const status = await checkRevision(skill, meta.sourceRevision).catch(
+                () => "unknown" as const,
+              );
+              if (status === "unchanged") {
+                upToDate++;
+                completed++;
+                continue;
+              }
+            }
 
             if (skill) {
               const task: ReinstallTask<InstallSkillResult> = {
@@ -6967,7 +7002,8 @@ export async function activate(
       installedProvider.refresh();
       browseProvider.refresh();
       if (failedSkills.length > 0 || cancelled) {
-        const total = cancelled ? completed : installedMeta.length;
+        const total =
+          (cancelled ? completed : installedMeta.length) - upToDate;
         showReinstallBatchFailure(
           `${getBatchFailureMessage(
             isJapanese() ? "スキル再インストール" : "Skill reinstall",
@@ -6980,9 +7016,13 @@ export async function activate(
         return false;
       } else if (!options.suppressSuccessMessage) {
         vscode.window.showInformationMessage(
-          isJapanese()
-            ? `${success} 個のスキルを再インストールしました`
-            : `Reinstalled ${success} skills`,
+          onlyChanged
+            ? isJapanese()
+              ? `${success} 個のスキルを更新しました（${upToDate} 個は最新のためそのまま）`
+              : `Updated ${success} skills (${upToDate} already up to date)`
+            : isJapanese()
+              ? `${success} 個のスキルを再インストールしました`
+              : `Reinstalled ${success} skills`,
         );
       }
       return true;

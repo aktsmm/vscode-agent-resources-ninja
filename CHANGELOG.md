@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Update Changed Only for Workspace Skills / ワークスペースのスキルを変更分だけ更新** - "Reinstall All Workspace Skills" now offers **Update Changed Only** next to Reinstall. It compares each skill's upstream folder with the revision recorded when it was installed and replaces only the skills that changed; a skill with no recorded baseline is reinstalled once to record one, and a failed check never skips a skill. Installs now record that baseline (`sourceRevision` in `.skill-meta.json`, the same field Agent Skills Ninja uses). Reinstall stays as the repair path that replaces everything. See `docs/changed-only-updates.md` for the per-kind decisions and what is not covered yet / 「ワークスペースのスキルを一括再インストール」に、再インストールと並べて「変更分だけ更新」を追加しました。各スキルの配布元フォルダーを、インストール時に記録した revision と比較し、変わったスキルだけを入れ直します。基準が記録されていないスキルは、基準を記録するために 1 回入れ直します。確認に失敗したスキルをスキップすることはありません。インストール時に、この基準（`.skill-meta.json` の `sourceRevision`。Agent Skills Ninja と同じフィールド）を記録するようになりました。すべてを入れ直す再インストールは、修復用としてそのまま残ります。種別ごとの判断とまだ対象外の範囲は `docs/changed-only-updates.md` を参照してください。
+
 ### Changed
 
 - **User/Global Output Writes Share the Sibling's Writer Lock / ユーザー/グローバル出力の書き込みを姉妹拡張と同じロックで直列化** - Updating a user/global instruction file or reference catalog now runs under the shared store lock that Agent Skills Ninja already takes for the same files, so two extension hosts no longer interleave a read-modify-write. If the other extension holds the lock past the retry budget, or the lock is lost before the write, the update ends as `locked` with every existing byte untouched and is retried by the next automatic update. Workspace outputs are unchanged. See `docs/output-write-locking.md` / ユーザー/グローバルの instruction ファイルや参照カタログの更新は、Agent Skills Ninja が同じファイルに対してすでに取っている共有ストアのロックの下で実行します。2 つの拡張ホストが読み取り・変更・書き込みを交互に実行することがなくなります。相手が再試行の上限を超えてロックを保持している場合や、書き込み前にロックを失った場合は、既存のバイトを一切変えずに `locked` で終了し、次の自動更新で再試行します。ワークスペースの出力は変わりません。詳細は `docs/output-write-locking.md` を参照してください。

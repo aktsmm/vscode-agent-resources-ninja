@@ -24,7 +24,16 @@ const ts = require("typescript");
  * stubs を差し込みつつ TypeScript モジュールを require する簡易ハーネス。
  * （test-skill-installer-auth-fallback.js と同じ方式）
  */
+// Revision lookups are not part of this test and must never reach the network.
+const offlineRevisionStub = {
+  createRevisionResolver: () => async () => {
+    throw new Error("revision lookup is not part of this test");
+  },
+  classifyRevision: () => "no-baseline",
+};
+
 function requireTypeScriptModule(tsFilePath, stubs) {
+  stubs = { "./resourceRevision": offlineRevisionStub, ...stubs };
   const source = fs.readFileSync(tsFilePath, "utf-8");
   const transpiled = ts.transpileModule(source, {
     compilerOptions: {

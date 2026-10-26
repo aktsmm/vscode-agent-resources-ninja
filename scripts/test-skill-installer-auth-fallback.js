@@ -6,7 +6,16 @@ const Module = require("module");
 const path = require("path");
 const ts = require("typescript");
 
+// Revision lookups are not part of this test and must never reach the network.
+const offlineRevisionStub = {
+  createRevisionResolver: () => async () => {
+    throw new Error("revision lookup is not part of this test");
+  },
+  classifyRevision: () => "no-baseline",
+};
+
 function requireTypeScriptModule(filePath, stubs = {}) {
+  stubs = { "./resourceRevision": offlineRevisionStub, ...stubs };
   const source = fs.readFileSync(filePath, "utf8");
   const transpiled = ts.transpileModule(source, {
     compilerOptions: {

@@ -18,6 +18,13 @@ import {
   resolveGitHubToken,
 } from "./githubAuth";
 import { fetchGitHubWithOptionalAuthRetry } from "./githubFetch";
+import {
+  classifyRevision,
+  createRevisionResolver,
+  type RevisionStatus,
+  type RevisionTarget,
+  type SourceRevision,
+} from "./resourceRevision";
 import { resetGitHubCredentialBlocklist } from "./githubCredentialBlocklist";
 import {
   containsHttpStatus,
@@ -1338,6 +1345,117 @@ async function downloadDirectory(
  * スキルをインストールする
  * GitHub からスキルファイルをダウンロードしてワークスペースに配置
  */
+function deriveRepositoryRef(
+  skill: Skill,
+  sources: Source[],
+): {
+  source: Source | undefined;
+  rawUrlRef: ReturnType<typeof extractContentRefFromRawUrl>;
+  githubUrlRef: ReturnType<typeof extractContentRefFromGitHubUrl>;
+  repositoryRef: GitHubRepositoryRef | undefined;
+} {
+  const source = findSourceByRepository(skill, sources);
+  const rawUrlRef = extractContentRefFromRawUrl(skill.rawUrl);
+  const githubUrlRef = extractContentRefFromGitHubUrl(skill.url);
+  const repositoryRef =
+    (source && extractRepositoryRefFromGitHubUrl(source.url)) ||
+    rawUrlRef ||
+    githubUrlRef ||
+    (skill.source.includes("/")
+      ? (() => {
+          const normalized = normalizeOwnerRepo(skill.source);
+          const parts = normalized.split("/");
+          if (parts.length !== 2 || !parts[0] || !parts[1]) {
+            return undefined;
+          }
+          return {
+            owner: parts[0],
+            repo: parts[1],
+            repoUrl: `https://github.com/${parts[0]}/${parts[1]}`,
+          } satisfies GitHubRepositoryRef;
+        })()
+      : undefined);
+  return { source, rawUrlRef, githubUrlRef, repositoryRef };
+}
+
+/** Reads the revision a skill would be installed from now, or undefined when it cannot be read. */
+async function tryResolveSourceRevision(
+  target: RevisionTarget,
+  token: string | undefined,
+  resolver: (target: RevisionTarget) => Promise<SourceRevision> = createRevisionResolver(
+    token,
+  ),
+): Promise<SourceRevision | undefined> {
+  try {
+    return await resolver(target);
+  } catch (error) {
+    // A baseline is an optimization: failing to read one never fails an install.
+    logger.info(
+      `[Resource Ninja] Source revision unavailable for ${target.owner}/${target.repo}:${target.remotePath}: ${error instanceof Error ? error.message : "unknown"}`,
+    );
+    return undefined;
+  }
+}
+
+/**
+ * Compares an installed skill's recorded baseline with the revision upstream
+ * has now. Anything that cannot be established (not a GitHub skill, no
+ * baseline, a failed read) is reported as such and never as "unchanged".
+ */
+export async function checkSkillRevisionStatus(
+  skill: Skill,
+  baseline: unknown,
+  context: vscode.ExtensionContext,
+  resolver?: (target: RevisionTarget) => Promise<SourceRevision>,
+): Promise<RevisionStatus | "unknown"> {
+  if (getResourceKind(skill) !== "skill") {
+    return "unknown";
+  }
+  const index = await loadSkillIndex(context);
+  const { source, rawUrlRef, githubUrlRef, repositoryRef } =
+    deriveRepositoryRef(skill, index.sources);
+  if (!repositoryRef) {
+    return "unknown";
+  }
+  const token = await getGitHubToken();
+  const branch =
+    rawUrlRef?.branch ||
+    githubUrlRef?.branch ||
+    (await getSourceBranch(
+      source ||
+        createSyntheticSource(
+          skill,
+          repositoryRef,
+          rawUrlRef?.branch || githubUrlRef?.branch,
+        ),
+      token,
+      skill.path,
+    ));
+  const current = await tryResolveSourceRevision(
+    {
+      owner: repositoryRef.owner,
+      repo: repositoryRef.repo,
+      branch,
+      remotePath: skill.path,
+    },
+    token,
+    resolver ?? createRevisionResolver(token),
+  );
+  return current ? classifyRevision(baseline, current) : "unknown";
+}
+
+/** One resolver for a whole batch, so skills from the same repository share a single snapshot. */
+export async function createSkillRevisionChecker(
+  context: vscode.ExtensionContext,
+  signal?: AbortSignal,
+): Promise<
+  (skill: Skill, baseline: unknown) => Promise<RevisionStatus | "unknown">
+> {
+  const resolver = createRevisionResolver(await getGitHubToken(), signal);
+  return (skill, baseline) =>
+    checkSkillRevisionStatus(skill, baseline, context, resolver);
+}
+
 export async function installSkill(
   skill: Skill,
   workspaceUri: vscode.Uri,
@@ -1362,30 +1480,16 @@ export async function installSkill(
 
   // インデックスからソース情報を取得
   const index = await loadSkillIndex(context);
-  const source = findSourceByRepository(skill, index.sources);
-  const rawUrlRef = extractContentRefFromRawUrl(skill.rawUrl);
-  const githubUrlRef = extractContentRefFromGitHubUrl(skill.url);
-  const repositoryRef =
-    (source && extractRepositoryRefFromGitHubUrl(source.url)) ||
-    rawUrlRef ||
-    githubUrlRef ||
-    (skill.source.includes("/")
-      ? (() => {
-          const normalized = normalizeOwnerRepo(skill.source);
-          const parts = normalized.split("/");
-          if (parts.length !== 2 || !parts[0] || !parts[1]) {
-            return undefined;
-          }
-          return {
-            owner: parts[0],
-            repo: parts[1],
-            repoUrl: `https://github.com/${parts[0]}/${parts[1]}`,
-          } satisfies GitHubRepositoryRef;
-        })()
-      : undefined);
+  const { source, rawUrlRef, githubUrlRef, repositoryRef } =
+    deriveRepositoryRef(skill, index.sources);
 
   // GitHub Token を取得
   const token = await getGitHubToken();
+
+  // Pinned before the download. If upstream moves meanwhile, the recorded
+  // revision is older than the copied content, which can only cause one extra
+  // update later, never a skipped one.
+  let baselineRevision: SourceRevision | undefined;
 
   // テンプレートで代替した時点を記録する。後段で frontmatter から再推定しない。
   let usedFallbackTemplate = false;
@@ -1429,6 +1533,12 @@ export async function installSkill(
           skill.path
         : skill.path;
 
+    if (resourceKind === "skill") {
+      baselineRevision = await tryResolveSourceRevision(
+        { owner, repo, branch, remotePath },
+        token,
+      );
+    }
     logger.info(`[Resource Ninja] Installing ${resourceKind}: ${skill.name}`);
     logger.info(
       `[Resource Ninja] Owner: ${owner}, Repo: ${repo}, Branch: ${branch}`,
@@ -1781,6 +1891,8 @@ export async function installSkill(
     installedAt: new Date().toISOString(),
     // 正常に入れ直せたら undefined になり、JSON からフラグごと消える。
     incomplete: incomplete ? true : undefined,
+    // An incomplete copy must not look current, so it keeps no baseline.
+    sourceRevision: incomplete ? undefined : baselineRevision,
   });
   await vscode.workspace.fs.writeFile(
     metaPath,
