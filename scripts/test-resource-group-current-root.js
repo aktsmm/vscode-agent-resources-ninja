@@ -232,6 +232,11 @@ async function main() {
   );
   const outerItem = nestedTop.find((item) => item.resource === outer);
   assert.strictEqual(outerItem.collapsibleState, 1, "the parent expands");
+  assert.match(outerItem.description, /1 contained/);
+  assert.doesNotMatch(
+    nestedTop.find((item) => item.resource === sibling).description,
+    /contained/,
+  );
   assert.strictEqual(
     nestedTop.find((item) => item.resource === sibling).collapsibleState,
     0,

@@ -752,6 +752,11 @@ test("the Installed view shows a skill inside another skill under its parent", a
     assert.deepStrictEqual(names(top), ["deploy-model", "plain"]);
     const parent = top.find((item) => item.skill.name === "deploy-model");
     assert.strictEqual(parent.collapsibleState, 1, "the parent expands");
+    assert.match(parent.description, /1 contained/, "the parent row says how many skills it holds");
+    assert.doesNotMatch(
+      top.find((item) => item.skill.name === "plain").description,
+      /contained/,
+    );
     assert.strictEqual(
       top.find((item) => item.skill.name === "plain").collapsibleState,
       0,

@@ -84,16 +84,28 @@ export function normalizeResourceRootIdentity(
   return platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
-const parentSetCache = new WeakMap<object, Set<unknown>>();
+const containedCountCache = new WeakMap<object, Map<unknown, number>>();
 
-/** 親スキルの集合。行ごとに全件を走査しないよう、対応表ごとに 1 回だけ作る。 */
-function getParentsWithChildren<T>(containedParents: Map<T, T>): Set<T> {
-  let parents = parentSetCache.get(containedParents);
-  if (!parents) {
-    parents = new Set(containedParents.values());
-    parentSetCache.set(containedParents, parents);
+/** 親スキルごとの内包スキル数。行ごとに全件を走査しないよう、対応表ごとに 1 回だけ数える。 */
+function getContainedSkillCounts<T>(
+  containedParents: Map<T, T>,
+): Map<T, number> {
+  let counts = containedCountCache.get(containedParents);
+  if (!counts) {
+    counts = new Map<unknown, number>();
+    for (const parent of containedParents.values()) {
+      counts.set(parent, (counts.get(parent) ?? 0) + 1);
+    }
+    containedCountCache.set(containedParents, counts);
   }
-  return parents as Set<T>;
+  return counts as Map<T, number>;
+}
+
+function getContainedSkillsLabel(count: number): string | undefined {
+  if (count === 0) {
+    return undefined;
+  }
+  return isJapanese() ? `内包スキル ${count} 件` : `${count} contained`;
 }
 
 function isResourceInTreeRoot(
@@ -735,9 +747,9 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
     resource: UserResource,
     containedParents: Map<UserResource, UserResource>,
   ): UserResourceTreeItem {
-    const hasContainedSkills = getParentsWithChildren(
-      containedParents,
-    ).has(resource);
+    const containedCount =
+      getContainedSkillCounts(containedParents).get(resource) ?? 0;
+    const hasContainedSkills = containedCount > 0;
     const isRecent = getResourceIdentityKeys(resource).some((key) =>
       this.recentlyInstalled?.has(key),
     );
@@ -799,8 +811,14 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
     return new UserResourceTreeItem(
       `${isRecent ? "🆕 " : ""}${resource.name}`,
       invocation === "auto"
-        ? description
-        : [getInvocationLabelText(invocation, isJapanese()), description]
+        ? [getContainedSkillsLabel(containedCount), description]
+            .filter(Boolean)
+            .join(" · ")
+        : [
+            getInvocationLabelText(invocation, isJapanese()),
+            getContainedSkillsLabel(containedCount),
+            description,
+          ]
             .filter(Boolean)
             .join(" · "),
       hasContainedSkills

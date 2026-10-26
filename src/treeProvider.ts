@@ -132,16 +132,28 @@ function formatResourceKindCountSummary(
     .join(" + ");
 }
 
-const parentSetCache = new WeakMap<object, Set<unknown>>();
+const containedCountCache = new WeakMap<object, Map<unknown, number>>();
 
-/** 親スキルの集合。行ごとに全件を走査しないよう、対応表ごとに 1 回だけ作る。 */
-function getParentsWithChildren<T>(containedParents: Map<T, T>): Set<T> {
-  let parents = parentSetCache.get(containedParents);
-  if (!parents) {
-    parents = new Set(containedParents.values());
-    parentSetCache.set(containedParents, parents);
+/** 親スキルごとの内包スキル数。行ごとに全件を走査しないよう、対応表ごとに 1 回だけ数える。 */
+function getContainedSkillCounts<T>(
+  containedParents: Map<T, T>,
+): Map<T, number> {
+  let counts = containedCountCache.get(containedParents);
+  if (!counts) {
+    counts = new Map<unknown, number>();
+    for (const parent of containedParents.values()) {
+      counts.set(parent, (counts.get(parent) ?? 0) + 1);
+    }
+    containedCountCache.set(containedParents, counts);
   }
-  return parents as Set<T>;
+  return counts as Map<T, number>;
+}
+
+function getContainedSkillsLabel(count: number): string | undefined {
+  if (count === 0) {
+    return undefined;
+  }
+  return isJapanese() ? `内包スキル ${count} 件` : `${count} contained`;
 }
 
 function getWorkspacePluginId(resource: WorkspaceSkill): string | undefined {
@@ -537,9 +549,9 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
     parent?: SkillTreeItem,
     containedParents: Map<WorkspaceSkill, WorkspaceSkill> = new Map(),
   ): SkillTreeItem {
-    const hasContainedSkills = getParentsWithChildren(
-      containedParents,
-    ).has(skill);
+    const containedCount =
+      getContainedSkillCounts(containedParents).get(skill) ?? 0;
+    const hasContainedSkills = containedCount > 0;
     let statusIcon: string;
     let iconId: string;
     let iconColor: vscode.ThemeColor;
@@ -631,7 +643,7 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
       invocation === "auto" ? undefined : getInvocationLabel(invocation);
     const item = new SkillTreeItem(
       `${labelPrefix}${skill.name}`,
-      [invocationBadge, itemDescription]
+      [invocationBadge, getContainedSkillsLabel(containedCount), itemDescription]
         .filter((part): part is string => !!part)
         .join(" · "),
       hasContainedSkills

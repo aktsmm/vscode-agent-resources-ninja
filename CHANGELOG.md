@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Skills Inside Skills Are Grouped Under Their Parent / スキル内のスキルを親の下にまとめる** - A skill folder that sits inside another skill folder (for example `deploy-model/capacity`) is now shown as a child of that parent in the Installed and User-Global views instead of a separate entry with a long relative path. A contained skill is not counted as unregistered and is left out of the generated skill lists, so the tree and the instruction block share one rule. When a filter hides the parent, the child stays visible at the top level / SKILL.md を持つフォルダーの中にさらに SKILL.md を持つフォルダー（例: `deploy-model/capacity`）がある場合、Installed / User-Global ビューで長い相対パスの別項目として並べず、親スキルの子として表示します。内包スキルは未登録として数えず、生成するスキル一覧にも載せないため、ツリーと instruction block が同じ規則を使います。絞り込みで親が非表示になった場合、子は最上位に表示されます。
+- **Skills Inside Skills Are Grouped Under Their Parent / スキル内のスキルを親の下にまとめる** - A skill folder that sits inside another skill folder (for example `deploy-model/capacity`) is now shown as a child of that parent in the Installed and User-Global views instead of a separate entry with a long relative path. A contained skill is not counted as unregistered and is left out of the generated skill lists, so the tree and the instruction block share one rule. When a filter hides the parent, the child stays visible at the top level; a parent row shows how many skills it holds / SKILL.md を持つフォルダーの中にさらに SKILL.md を持つフォルダー（例: `deploy-model/capacity`）がある場合、Installed / User-Global ビューで長い相対パスの別項目として並べず、親スキルの子として表示します。内包スキルは未登録として数えず、生成するスキル一覧にも載せないため、ツリーと instruction block が同じ規則を使います。絞り込みで親が非表示になった場合、子は最上位に表示されます。親の行には内包スキルの件数を表示します。
 
 ### Fixed
 
