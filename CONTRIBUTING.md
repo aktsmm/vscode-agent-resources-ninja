@@ -32,7 +32,7 @@ npm test
 npm audit --audit-level=moderate
 ```
 
-`npm run test:resources` discovers every offline `scripts/test-*.js` file. Do not maintain a separate handwritten test list. Network-backed catalog checks are available through `npm run test:upstream` and are required for a release.
+`npm run test:resources` discovers every offline `scripts/test-*.js` file. Do not maintain a separate handwritten test list. Network-backed catalog checks are available through `npm run test:upstream` and are required for a release. A release also needs `npm run test:locales` (the Extension Host smoke test in English and Japanese) and, after packaging, `npm run verify:vsix` (isolated install and readback of the built VSIX).
 
 ## Pull Requests
 

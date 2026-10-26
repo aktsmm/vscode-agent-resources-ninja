@@ -803,6 +803,8 @@ npm test
 
 - `npm test` は Windows の `vscode-updating` mutex を先に確認し、VS Code の更新処理が残っている間は既知の popup/EPIPE 経路を起動せず、明示メッセージで中断します。
 - mutex が空いているときは、machine-installed な VS Code を使い、`.vscode-test/manual-local-launch` 配下の分離した user-data / extensions ディレクトリで smoke test を実行します。
+- `npm run test:locales` は同じ smoke test を英語と日本語で 2 回、それぞれ分離した user-data ディレクトリとワークスペースで実行します。リリース前に使います。
+- `npm run verify:vsix` は生成済み VSIX を VS Code CLI で一時プロファイルへインストールして読み戻し、インストールされたコンパイル済みエントリポイント、NLS ファイル、リソースインデックスを VSIX のバイト列と比較します。
 
 # 依存関係監査
 npm run audit:runtime

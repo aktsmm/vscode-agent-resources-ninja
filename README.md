@@ -808,6 +808,8 @@ npm test
 
 - `npm test` now preflights the Windows `vscode-updating` mutex and aborts early with a clear message when VS Code update activity is still in progress, instead of launching the known popup/EPIPE path.
 - When the mutex is clear, the smoke run uses the machine-installed VS Code executable with isolated `.vscode-test/manual-local-launch` user-data and extensions directories.
+- `npm run test:locales` runs the same smoke test twice, in English and in Japanese, each with its own isolated user-data directory and workspace; use it before a release.
+- `npm run verify:vsix` installs the built VSIX into a temporary profile with the VS Code CLI, reads it back, and compares the installed compiled entrypoint, NLS files and resource index with the VSIX bytes.
 
 # Dependency audit
 npm run audit:runtime
