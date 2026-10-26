@@ -758,6 +758,46 @@ test("user global welcome copy and docs match the multi-home tree", () => {
   assert.match(readmeJa, /backup フォルダー[\s\S]{0,250}除外/);
 });
 
+test("every known global home is named in the docs and the setting text", () => {
+  const scannerSource = fs.readFileSync(
+    path.join(repoRoot, "src", "userResourceScanner.ts"),
+    "utf8",
+  );
+  const block = scannerSource.match(
+    /const KNOWN_GLOBAL_HOMES[\s\S]*?\n\];/,
+  );
+  assert.ok(block, "KNOWN_GLOBAL_HOMES must stay a literal list");
+  const homes = [...block[0].matchAll(/directory: "(~\/[^"]+)"/g)].map(
+    (match) => match[1],
+  );
+  assert.deepStrictEqual(homes, [
+    "~/.copilot",
+    "~/.claude",
+    "~/.agents",
+    "~/.codex",
+  ]);
+  const surfaces = {
+    README: readme,
+    README_ja: readmeJa,
+    nls: nls["config.showAlternateGlobalHomes.markdownDescription"],
+    nlsJa: nlsJa["config.showAlternateGlobalHomes.markdownDescription"],
+  };
+  // The list sentence must carry every home in order; a stray later mention is not enough.
+  const homeList = new RegExp(
+    homes
+      .map((home) => `\`${home.replace(/[.*+?^${}()|[\]\\\/]/g, "\\$&")}\``)
+      .join("[^`]{0,8}"),
+  );
+  for (const [name, text] of Object.entries(surfaces)) {
+    assert.match(text, homeList, `${name} must list ${homes.join(", ")}`);
+  }
+  // Codex keeps sessions and caches beside its skills, so only skills may be walked.
+  assert.match(
+    scannerSource,
+    /CODEX_HOME_DIRECTORY_ALLOWLIST: ReadonlySet<string> = new Set\(\["skills"\]\)/,
+  );
+});
+
 test("user global resource empty state gives next action", () => {
   assert.match(
     userResourcesProviderSource,

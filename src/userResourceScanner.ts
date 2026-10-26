@@ -55,7 +55,7 @@ export interface UserResourceRoot {
 }
 
 export interface ScanUserResourcesOptions {
-  /** Also list the other known global homes (~/.copilot, ~/.claude, ~/.agents) read-only. */
+  /** Also list the other known global homes (~/.copilot, ~/.claude, ~/.agents, ~/.codex) read-only. */
   includeAlternateGlobalHomes?: boolean;
 }
 
@@ -184,13 +184,22 @@ const ALTERNATE_GLOBAL_HOME_DIRECTORY_ALLOWLIST: ReadonlySet<string> = new Set(
   ["agents", "hooks", "instructions", "prompts", "skills"],
 );
 
+// Codex only reads skills from its home; sessions, config and caches live next to them.
+const CODEX_HOME_DIRECTORY_ALLOWLIST: ReadonlySet<string> = new Set(["skills"]);
+
 const KNOWN_GLOBAL_HOMES: ReadonlyArray<{
   directory: string;
   toolLabel: string;
+  directoryAllowlist?: ReadonlySet<string>;
 }> = [
   { directory: "~/.copilot", toolLabel: "GitHub Copilot CLI" },
   { directory: "~/.claude", toolLabel: "Claude-compatible" },
   { directory: "~/.agents", toolLabel: "Open agent resources" },
+  {
+    directory: "~/.codex",
+    toolLabel: "Codex",
+    directoryAllowlist: CODEX_HOME_DIRECTORY_ALLOWLIST,
+  },
 ];
 
 const EXTENSION_RESOURCE_DIRECTORIES = [
@@ -281,7 +290,8 @@ function getAlternateGlobalHomeRoots(
         uri,
         readOnly: true,
         alternateHome: true,
-        topLevelDirectoryAllowlist: ALTERNATE_GLOBAL_HOME_DIRECTORY_ALLOWLIST,
+        topLevelDirectoryAllowlist:
+          home.directoryAllowlist ?? ALTERNATE_GLOBAL_HOME_DIRECTORY_ALLOWLIST,
       },
     ];
   });

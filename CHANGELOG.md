@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.65] - 2026-10-26
+
+### Added
+
+- **Codex Home in the Tree / Codex ホームをツリーに表示** - With `showAlternateGlobalHomes` on, `~/.codex/skills` now appears as a read-only "Codex (~/.codex)" group next to the other known homes. Only the `skills` folder is scanned, so Codex sessions, plugin caches and config stay out of the tree; installs, the generated instruction block and updates still use the selected Global Resource Home / `showAlternateGlobalHomes` が on のとき、`~/.codex/skills` を他の既知ホームと並べて読み取り専用の「Codex (~/.codex)」グループとして表示します。走査するのは `skills` フォルダーだけなので、Codex のセッション、プラグインキャッシュ、設定はツリーに出ません。インストール、生成 instruction block、更新は引き続き選択中の Global Resource Home を使います。
+
 ## [0.2.64] - 2026-10-23
 
 ### Fixed

@@ -247,7 +247,7 @@ v1 で可搬なのは skills と MCP サーバーだけです。agents、hooks�
 - 組み込みリソースは、VS Code / GitHub Copilot Chat / GitHub Copilot CLI の既知の場所からスキャンする読み取り専用定義です。発見用に表示し、変更対象にはしません。
 - installed extension resources も読み取り専用で、確認用に表示します。
 - `~/.copilot` 配下の Copilot CLI runtime logs、session state、OAuth cache、restart state は除外するため、CLI home に多数の session file があってもユーザー作成リソースを優先して表示できます。ホーム直下の backup フォルダー（`backup` / `backups` / `backup-*` / `.bak` など）と `workspaces`・`plugin-data` などの状態フォルダーも除外するため、バックアップのコピーが重複して表示されることはありません。
-- `showAlternateGlobalHomes` が on のときは、選択外の既知ホーム（`~/.copilot`, `~/.claude`, `~/.agents`）も別の読み取り専用グループとして表示します（`skills` / `agents` / `instructions` / `prompts` / `hooks` のみ）。インストール先になるのは選択中のホームだけです
+- `showAlternateGlobalHomes` が on のときは、選択外の既知ホーム（`~/.copilot`, `~/.claude`, `~/.agents`, `~/.codex`）も別の読み取り専用グループとして表示します（`skills` / `agents` / `instructions` / `prompts` / `hooks` のみ。`~/.codex` は `skills` のみ）。インストール先になるのは選択中のホームだけです
 - 選択中のホームの組み込み以外の User / Global リソースは右クリックで開く、表示、パスコピー、削除が可能。他のホームのリソースは開く、表示、パスコピーのみ可能
 - 組み込みリソースと installed extension resources は読み取り専用で、インストール先にはなりません
 - workspace `.github` 配下は **Workspace Resources** 側で確認
@@ -490,7 +490,7 @@ MCP ツールが不要な場合は、GitHub Copilot Chat のツール一覧か�
 | Shared caches        | `useSharedSourcesManifest`, `useSharedResourceIndex`, `staleSourceIndexUpdateMode`                                                                                                                                                                                                                         | cross-extension SSOT と source index 鮮度管理                       |
 | 表示とメンテナンス   | `outputFormat`, `refCatalogFormat`, `showBuiltInResources`, `remoteResourceViewMode`, `language`, `githubToken`                                                                                                                                                                                            | 表示、探索、GitHub API 利用の調整                                   |
 
-通常は `globalResourceHomePreset` を選ぶだけで十分です。`globalHomeDirectory` は override なので、空でない場合は preset より優先されます。`custom` を選ぶ場合は、あわせて override path を指定してください。`showAlternateGlobalHomes` が on（既定）のときは、選択外の既知ホーム（`~/.copilot` / `~/.claude` / `~/.agents`）も、`skills` / `agents` / `instructions` / `prompts` / `hooks` だけを対象に、別の読み取り専用グループとして表示します。インストール、生成 instruction block、更新は引き続き選択中のホームだけが対象です。
+通常は `globalResourceHomePreset` を選ぶだけで十分です。`globalHomeDirectory` は override なので、空でない場合は preset より優先されます。`custom` を選ぶ場合は、あわせて override path を指定してください。`showAlternateGlobalHomes` が on（既定）のときは、選択外の既知ホーム（`~/.copilot` / `~/.claude` / `~/.agents` / `~/.codex`）も、`skills` / `agents` / `instructions` / `prompts` / `hooks` だけ（`~/.codex` は `skills` のみ）を対象に、別の読み取り専用グループとして表示します。インストール、生成 instruction block、更新は引き続き選択中のホームだけが対象です。
 
 preset は global instruction file の名前も決めます。`copilot` は `copilot-instructions.md`、`claude` は `CLAUDE.md`、`agents` と `custom` は `AGENTS.md` です。2026-08-24 に同梱の VS Code と Copilot CLI の bundle を調べたところ、`~/.agents/skills` の読み手は存在しますが、ホーム直下の `AGENTS.md` を読む経路は見つかりませんでした。`agents` / `custom` preset ではこのファイルを利用者側で参照する前提で書き出します。skill や agent など他の種別に影響はありません。
 
@@ -513,7 +513,7 @@ workspace skill を主 Workspace Skill Directory 以外に置く場合は、`add
 |  12  | `resourceNinja.userPromptsDirectory`                            | `""`                   | User Profile prompt directory override                                                                                        |
 |  13  | `resourceNinja.globalResourceHomePreset`                        | `copilot`              | 代表的な Global Resource Home preset（`~/.copilot`, `~/.claude`, `~/.agents`）                                                |
 |  14  | `resourceNinja.globalHomeDirectory`                             | `""`                   | 任意の Global Resource Home override                                                                                          |
-|  15  | `resourceNinja.showAlternateGlobalHomes`                        | `true`                 | 選択外の既知ホーム（`~/.copilot` / `~/.claude` / `~/.agents`）も読み取り専用グループとして表示                                |
+|  15  | `resourceNinja.showAlternateGlobalHomes`                        | `true`                 | 選択外の既知ホーム（`~/.copilot` / `~/.claude` / `~/.agents` / `~/.codex`）も読み取り専用グループとして表示                                |
 |  16  | `resourceNinja.autoUpdateInstruction`                           | `true`                 | resource 変更後に生成 instruction block を自動更新                                                                            |
 |  17  | `resourceNinja.instructionFile`                                 | `AGENTS.md`            | 生成 instruction block の同期先 _(要: Auto Update)_                                                                           |
 |  18  | `resourceNinja.customInstructionPath`                           | `""`                   | カスタム生成 instruction block パス _(instructionFile が 'custom' の時のみ)_                                                  |

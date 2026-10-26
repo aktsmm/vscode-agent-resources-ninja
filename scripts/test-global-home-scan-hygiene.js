@@ -90,6 +90,13 @@ write(".claude/projects/x/skills/proj/SKILL.md", skill("proj"));
 write(".claude/backups/skills/old/SKILL.md", skill("old"));
 write(".agents/skills/alpha/SKILL.md", skill("alpha"));
 
+// ~/.codex: only skills are Codex resources; state and config stay hidden.
+write(".codex/skills/alpha/SKILL.md", skill("alpha"));
+write(".codex/skills/.system/sys-skill/SKILL.md", skill("sys-skill"));
+write(".codex/agents/codex-helper.agent.md", agent("codex-helper"));
+write(".codex/sessions/2026/s/skills/leak/SKILL.md", skill("leak"));
+write(".codex/plugins/cache/p/skills/plugged/SKILL.md", skill("plugged"));
+
 const FILE_TYPE = { Unknown: 0, File: 1, Directory: 2, SymbolicLink: 64 };
 
 function createUri(fsPath) {
@@ -100,9 +107,10 @@ function createUri(fsPath) {
   };
 }
 
-function createVscodeStub(preset) {
+function createVscodeStub(preset, overrides = {}) {
   const config = {
-    get: (key) => (key === "globalResourceHomePreset" ? preset : undefined),
+    get: (key) =>
+      key === "globalResourceHomePreset" ? preset : overrides[key],
     inspect: () => undefined,
   };
   return {
@@ -138,8 +146,8 @@ function createVscodeStub(preset) {
   };
 }
 
-function loadScanner(preset) {
-  const vscodeStub = createVscodeStub(preset);
+function loadScanner(preset, overrides) {
+  const vscodeStub = createVscodeStub(preset, overrides);
   const resourceKindsModule = requireTypeScriptModule(
     path.join(repoRoot, "src", "resourceKinds.ts"),
   );
@@ -258,12 +266,14 @@ async function main() {
           ".agents/skills/alpha/SKILL.md",
           ".claude/agents/claude-helper.agent.md",
           ".claude/skills/alpha/SKILL.md",
+          ".codex/skills/.system/sys-skill/SKILL.md",
+          ".codex/skills/alpha/SKILL.md",
         ],
       );
       const alternates = resources.filter(
         (resource) => resource.isAlternateGlobalHome,
       );
-      assert.strictEqual(alternates.length, 3);
+      assert.strictEqual(alternates.length, 5);
       for (const resource of alternates) {
         assert.strictEqual(resource.isReadOnly, true);
         assert.strictEqual(resource.scope, "globalHome");
@@ -271,7 +281,11 @@ async function main() {
       assert.deepStrictEqual(
         Array.from(new Set(alternates.map((resource) => resource.scopeLabel)))
           .sort(),
-        ["Claude-compatible (~/.claude)", "Open agent resources (~/.agents)"],
+        [
+          "Claude-compatible (~/.claude)",
+          "Codex (~/.codex)",
+          "Open agent resources (~/.agents)",
+        ],
       );
       assert.ok(
         resources.some(
@@ -283,7 +297,7 @@ async function main() {
   );
 
   await asyncTest(
-    "the same skill in three homes stays three resources",
+    "the same skill in four homes stays four resources",
     async () => {
       const resources = await scanUserResources(undefined, false, {
         includeAlternateGlobalHomes: true,
@@ -294,10 +308,10 @@ async function main() {
           resource.name === "alpha" &&
           /skills[\\/]alpha[\\/]SKILL\.md$/.test(resource.fullPath),
       );
-      assert.strictEqual(alphas.length, 3);
+      assert.strictEqual(alphas.length, 4);
       assert.strictEqual(
         new Set(alphas.map((resource) => resource.rootFsPath)).size,
-        3,
+        4,
       );
     },
   );
@@ -322,6 +336,33 @@ async function main() {
       );
       assert.strictEqual(selectedClaude.length, 0);
       assert.ok(files.includes(".copilot/skills/alpha/SKILL.md"));
+    },
+  );
+  await asyncTest(
+    "a Codex home chosen as the selected home is not listed twice",
+    async () => {
+      const { scanUserResources: scanWithCodex } = loadScanner("custom", {
+        globalHomeDirectory: "~/.codex",
+      });
+      const resources = await scanWithCodex(undefined, false, {
+        includeAlternateGlobalHomes: true,
+      });
+      const codexSkills = resources.filter(
+        (resource) =>
+          resource.kind === "skill" &&
+          resource.fullPath.includes(`${path.sep}.codex${path.sep}`) &&
+          /skills[\\/]alpha[\\/]SKILL\.md$/.test(resource.fullPath),
+      );
+      assert.strictEqual(codexSkills.length, 1);
+      assert.ok(!codexSkills[0].isAlternateGlobalHome);
+      assert.ok(
+        resources.some(
+          (resource) =>
+            resource.isAlternateGlobalHome &&
+            resource.fullPath.includes(`${path.sep}.copilot${path.sep}`),
+        ),
+        "the other known homes still appear as alternates",
+      );
     },
   );
 }
