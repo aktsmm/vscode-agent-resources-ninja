@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.67] - 2026-10-26
+
 ### Added
 
 - **Preview Before a Batch Failure Draft Opens / 一括失敗の下書きを開く前にプレビュー** - Choosing Report Bug on a batch reinstall failure now first shows the exact issue title and body in a confirmation dialog, and the GitHub draft opens only after you choose Open GitHub Draft. The diagnostics also count the failed resources by a fixed kind list and the failed stages by a fixed stage list; anything outside the lists is counted as `other`, so resource names, paths and raw errors still never reach the draft / 一括再インストールの失敗通知で「バグ報告」を選ぶと、まず Issue のタイトルと本文を確認ダイアログに表示し、「GitHub の下書きを開く」を選んだ場合だけ下書きを開きます。診断には、失敗したリソースを固定のリソース種別リスト、失敗した段階を固定の段階リストで数えた件数が加わります。リスト外の値は `other` として数えるため、リソース名・パス・生のエラーが下書きに入ることはありません。
