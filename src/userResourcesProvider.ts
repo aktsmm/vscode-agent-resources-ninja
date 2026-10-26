@@ -84,6 +84,18 @@ export function normalizeResourceRootIdentity(
   return platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
+const parentSetCache = new WeakMap<object, Set<unknown>>();
+
+/** 親スキルの集合。行ごとに全件を走査しないよう、対応表ごとに 1 回だけ作る。 */
+function getParentsWithChildren<T>(containedParents: Map<T, T>): Set<T> {
+  let parents = parentSetCache.get(containedParents);
+  if (!parents) {
+    parents = new Set(containedParents.values());
+    parentSetCache.set(containedParents, parents);
+  }
+  return parents as Set<T>;
+}
+
 function isResourceInTreeRoot(
   resource: UserResource,
   item: UserResourceTreeItem,
@@ -723,9 +735,9 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
     resource: UserResource,
     containedParents: Map<UserResource, UserResource>,
   ): UserResourceTreeItem {
-    const hasContainedSkills = [...containedParents.values()].includes(
-      resource,
-    );
+    const hasContainedSkills = getParentsWithChildren(
+      containedParents,
+    ).has(resource);
     const isRecent = getResourceIdentityKeys(resource).some((key) =>
       this.recentlyInstalled?.has(key),
     );

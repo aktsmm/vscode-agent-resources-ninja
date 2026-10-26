@@ -132,6 +132,18 @@ function formatResourceKindCountSummary(
     .join(" + ");
 }
 
+const parentSetCache = new WeakMap<object, Set<unknown>>();
+
+/** 親スキルの集合。行ごとに全件を走査しないよう、対応表ごとに 1 回だけ作る。 */
+function getParentsWithChildren<T>(containedParents: Map<T, T>): Set<T> {
+  let parents = parentSetCache.get(containedParents);
+  if (!parents) {
+    parents = new Set(containedParents.values());
+    parentSetCache.set(containedParents, parents);
+  }
+  return parents as Set<T>;
+}
+
 function getWorkspacePluginId(resource: WorkspaceSkill): string | undefined {
   return (
     getPluginIdFromPath(resource.remotePath) ||
@@ -525,7 +537,9 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
     parent?: SkillTreeItem,
     containedParents: Map<WorkspaceSkill, WorkspaceSkill> = new Map(),
   ): SkillTreeItem {
-    const hasContainedSkills = [...containedParents.values()].includes(skill);
+    const hasContainedSkills = getParentsWithChildren(
+      containedParents,
+    ).has(skill);
     let statusIcon: string;
     let iconId: string;
     let iconColor: vscode.ThemeColor;
