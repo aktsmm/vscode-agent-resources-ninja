@@ -92,6 +92,52 @@ test("configured roots are scanned before workspace fallback", () => {
   );
 });
 
+test("a skill inside another skill is marked contained and counted as registered", () => {
+  const { markContainedSkills } = requireTypeScriptModule(
+    path.join(repoRoot, "src", "localSkillScanner.ts"),
+    {
+      vscode: {
+        workspace: { getConfiguration: () => ({ get: () => undefined }) },
+        Uri: { file: (fsPath) => ({ fsPath }) },
+        RelativePattern: class {},
+      },
+      "./skillIndex": {},
+      "./resourceKinds": requireTypeScriptModule(
+        path.join(repoRoot, "src", "resourceKinds.ts"),
+        {},
+      ),
+      "./instructionManager": { updateInstructionFile: async () => undefined },
+      "./skillInvocation": {},
+      "./skillInvocationMode": {},
+      "./skillInstaller": { stripSkillMetaLocalPaths: (value) => value },
+      "./customizationPaths": {},
+      "./logger": { logger: { info() {}, warn() {}, error() {} } },
+    },
+  );
+  const skill = (name, directory, kind = "skill") => ({
+    kind,
+    name,
+    fullPath: `C:\\ws\\${directory.replace(/\//g, "\\")}\\SKILL.md`,
+    isRegistered: false,
+  });
+  const outer = skill("outer", "skills/outer");
+  const inner = skill("inner", "skills/outer/assets/inner");
+  const other = skill("other", "skills/other");
+  const agent = {
+    kind: "agent",
+    name: "outer.agent",
+    fullPath: "C:\\ws\\skills\\outer\\outer.agent.md",
+    isRegistered: false,
+  };
+  markContainedSkills([outer, inner, other, agent]);
+  assert.strictEqual(inner.isContainedSkill, true);
+  assert.strictEqual(inner.isRegistered, true, "a contained skill is never unregistered");
+  assert.strictEqual(outer.isContainedSkill, undefined);
+  assert.strictEqual(outer.isRegistered, false);
+  assert.strictEqual(other.isContainedSkill, undefined);
+  assert.strictEqual(agent.isContainedSkill, undefined, "other kinds are not skills");
+});
+
 test("workspace fallback is automatic only when configured roots are empty", () => {
   const { shouldUseWorkspaceFallback } = requireTypeScriptModule(
     path.join(repoRoot, "src", "localSkillScanner.ts"),

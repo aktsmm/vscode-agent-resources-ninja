@@ -244,6 +244,20 @@ async function main() {
   );
 
   await asyncTest(
+    "a skill folder inside another skill is flagged as contained",
+    async () => {
+      const resources = await scanUserResources(undefined, false);
+      const flagged = (suffix) =>
+        resources.find(
+          (resource) =>
+            resource.fullPath.replace(/\\/g, "/").endsWith(suffix),
+        )?.isContainedSkill;
+      assert.strictEqual(flagged(".copilot/skills/alpha/backup/SKILL.md"), true);
+      assert.notStrictEqual(flagged(".copilot/skills/alpha/SKILL.md"), true);
+    },
+  );
+
+  await asyncTest(
     "other homes are opt-in and keep the selected-home callers unchanged",
     async () => {
       const resources = await scanUserResources(undefined, false, {});

@@ -722,6 +722,62 @@ test("the Installed view filters skills only and recomputes without a rescan", a
   }
 });
 
+test("the Installed view shows a skill inside another skill under its parent", async () => {
+  const { treeModule } = createTreeProviders();
+  const provider = new treeModule.WorkspaceSkillsProvider({ fsPath: "C:\\ws" });
+  const skill = (name, directory, invocation) => ({
+    kind: "skill",
+    name,
+    description: "",
+    relativePath: directory,
+    fullPath: `C:\\ws\\${directory.replace(/\//g, "\\")}\\SKILL.md`,
+    isInstalled: true,
+    isRegistered: true,
+    invocation,
+  });
+  provider.workspaceSkills = [
+    skill("deploy-model", ".github/skills/deploy-model", "auto"),
+    skill("capacity", ".github/skills/deploy-model/capacity", "explicitOnly"),
+    skill("plain", ".github/skills/plain", "auto"),
+  ];
+  provider.hasLoaded = true;
+  const names = (items) =>
+    items.map((item) => item.label.replace(/^\S+ /, "")).sort();
+  const skillGroup = async () =>
+    (await provider.getChildren()).find((item) => item.resourceKind === "skill");
+
+  try {
+    const group = await skillGroup();
+    const top = await provider.getChildren(group);
+    assert.deepStrictEqual(names(top), ["deploy-model", "plain"]);
+    const parent = top.find((item) => item.skill.name === "deploy-model");
+    assert.strictEqual(parent.collapsibleState, 1, "the parent expands");
+    assert.strictEqual(
+      top.find((item) => item.skill.name === "plain").collapsibleState,
+      0,
+    );
+    const children = await provider.getChildren(parent);
+    assert.deepStrictEqual(names(children), ["capacity"]);
+    assert.strictEqual(
+      provider.getParent(children[0]),
+      parent,
+      "reveal walks from the contained skill to its parent",
+    );
+
+    optionsModule.setSkillViewOptions("local", {
+      filter: "explicitOnly",
+      sort: "default",
+    });
+    assert.deepStrictEqual(
+      names(await provider.getChildren(await skillGroup())),
+      ["capacity"],
+      "a contained skill stays visible at the top level when its parent is filtered out",
+    );
+  } finally {
+    optionsModule.setSkillViewOptions("local", { filter: "all", sort: "default" });
+  }
+});
+
 async function main() {
   let failed = 0;
   for (const [name, fn] of tests) {

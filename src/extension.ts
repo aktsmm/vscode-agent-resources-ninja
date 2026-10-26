@@ -6397,21 +6397,33 @@ export async function activate(
       browseProvider.refresh();
       userResourcesProvider.refresh();
 
-      const rootItems = await workspaceProvider.getChildren();
-      let installedItem: SkillTreeItem | undefined;
-      for (const rootItem of rootItems) {
-        if (rootItem.skill?.name === skill.name) {
-          installedItem = rootItem;
-          break;
+      // 親スキルの子として表示されるスキルも探すため、展開できる行を深さ 4 まで辿る
+      const findInstalledItem = async (
+        items: SkillTreeItem[],
+        depth: number,
+      ): Promise<SkillTreeItem | undefined> => {
+        const match = items.find((item) => item.skill?.name === skill.name);
+        if (match || depth === 0) {
+          return match;
         }
-        const childItems = await workspaceProvider.getChildren(rootItem);
-        installedItem = childItems.find(
-          (item) => item.skill?.name === skill.name,
-        );
-        if (installedItem) {
-          break;
+        for (const item of items) {
+          if (item.collapsibleState === vscode.TreeItemCollapsibleState.None) {
+            continue;
+          }
+          const found = await findInstalledItem(
+            await workspaceProvider.getChildren(item),
+            depth - 1,
+          );
+          if (found) {
+            return found;
+          }
         }
-      }
+        return undefined;
+      };
+      const installedItem = await findInstalledItem(
+        await workspaceProvider.getChildren(),
+        4,
+      );
       if (installedItem) {
         // reveal の失敗はインストール失敗として扱わず、警告ログのみ
         try {
