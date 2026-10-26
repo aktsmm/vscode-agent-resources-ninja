@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Preview Before a Batch Failure Draft Opens / 一括失敗の下書きを開く前にプレビュー** - Choosing Report Bug on a batch reinstall failure now first shows the exact issue title and body in a confirmation dialog, and the GitHub draft opens only after you choose Open GitHub Draft. The diagnostics also count the failed resources by a fixed kind list and the failed stages by a fixed stage list; anything outside the lists is counted as `other`, so resource names, paths and raw errors still never reach the draft / 一括再インストールの失敗通知で「バグ報告」を選ぶと、まず Issue のタイトルと本文を確認ダイアログに表示し、「GitHub の下書きを開く」を選んだ場合だけ下書きを開きます。診断には、失敗したリソースを固定のリソース種別リスト、失敗した段階を固定の段階リストで数えた件数が加わります。リスト外の値は `other` として数えるため、リソース名・パス・生のエラーが下書きに入ることはありません。
+- **Release Gates for the Built VSIX / 生成済み VSIX のリリース gate** - `npm run verify:vsix` installs the built VSIX into a temporary profile with the VS Code CLI, reads it back, and compares the installed compiled entrypoint, both NLS files and the resource index with the VSIX bytes; `npm run test:locales` runs the Extension Host smoke test in English and Japanese, each in its own isolated directories; the release hygiene test rejects a development bundle that still points at a sourcemap. Negative tests prove a changed, missing or development asset is reported / `npm run verify:vsix` は生成済み VSIX を一時プロファイルへインストールして読み戻し、インストールされたコンパイル済みエントリポイント、NLS 2 ファイル、リソースインデックスを VSIX のバイト列と比較します。`npm run test:locales` は Extension Host の smoke test を英語と日本語で、それぞれ隔離したディレクトリで実行します。リリース衛生テストは、sourcemap を参照する開発用バンドルを拒否します。変更・欠落・開発用の資産が検出されることを否定テストで確認しています。
+
+### Fixed
+
+- **Japanese Extension Host Smoke Passes / 日本語の Extension Host smoke が通る** - Two smoke assertions only accepted the English tool messages, so the Japanese run failed although the product answered correctly in Japanese. They accept both languages now / 2 件の smoke の検証が英語のツール応答しか受け付けず、製品が日本語で正しく応答していても日本語の実行が失敗していました。両方の言語を受け付けるようにしました。
+
 ## [0.2.66] - 2026-10-26
 
 ### Added

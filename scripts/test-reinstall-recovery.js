@@ -471,7 +471,7 @@ async function main() {
       messages: { actionReportBug: () => "Report Bug" },
       isJapanese: () => false,
       buildReinstallBatchReport: () => ({ title: "safe", body: "safe" }),
-      openBugReport: async (...args) => reports.push(args),
+      previewAndOpenBugReport: async (...args) => reports.push(args),
       logger: { warn: () => undefined },
     });
     const failed = [{ result: { success: false, failureKind: "not-found" } }];
@@ -480,7 +480,7 @@ async function main() {
     assert.deepStrictEqual(reports, []);
     choose("Report Bug");
     await new Promise(setImmediate);
-    assert.deepStrictEqual(reports, [["safe", "safe"]]);
+    assert.deepStrictEqual(reports, [[{ title: "safe", body: "safe" }, false]]);
 
     showFailure("cancelled", [
       { result: { success: false, failureKind: "cancelled" } },

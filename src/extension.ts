@@ -134,7 +134,11 @@ import {
   observeGitignoreSynchronization,
   reconcileSkillGitignores,
 } from "./gitignoreManager";
-import { buildReinstallBatchReport, openBugReport } from "./bugReport";
+import {
+  buildReinstallBatchReport,
+  openBugReport,
+  previewAndOpenBugReport,
+} from "./bugReport";
 import {
   AgentNinjaExtensionApi,
   clearBeacon,
@@ -2257,7 +2261,7 @@ export async function activate(
     )
       .then((choice) => {
         if (choice === reportAction) {
-          return openBugReport(report.title, report.body);
+          return previewAndOpenBugReport(report, isJapanese());
         }
       })
       .catch((error: unknown) => {
@@ -2991,6 +2995,7 @@ export async function activate(
       // that was never created.
       const task: ReinstallTask<InstallSkillResult> = {
         name: resource.name,
+        resourceKind: resource.kind,
         remove: () =>
           deleteInstalledResourceByPath(
             resource.kind,
@@ -6881,6 +6886,7 @@ export async function activate(
             if (skill) {
               const task: ReinstallTask<InstallSkillResult> = {
                 name: meta.name,
+                resourceKind: "skill",
                 remove: async () => {
                   await uninstallSkill(meta.name, wsFolder.uri);
                 },
@@ -7186,6 +7192,7 @@ export async function activate(
         | undefined;
       const task: ReinstallTask<InstallSkillResult> = {
         name: skill.name,
+        resourceKind,
         remove: async () => {
           uninstallResult = relativePath
             ? await uninstallSkillByPath(relativePath, wsFolder.uri)
@@ -8205,6 +8212,7 @@ export async function activate(
             if (skill) {
               const task: ReinstallTask<InstallSkillResult> = {
                 name: item.meta.name,
+                resourceKind: "skill",
                 remove: async () => {
                   await uninstallSkill(item.meta.name, wsFolder.uri);
                 },

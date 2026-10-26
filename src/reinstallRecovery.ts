@@ -1,3 +1,5 @@
+import type { ResourceKind } from "./skillIndex";
+
 export type IndexRefreshRecoveryDecision = "skipped" | "refresh" | "declined";
 
 export type ReinstallFailureKind =
@@ -14,6 +16,8 @@ export type ReinstallFailureKind =
 
 export interface ReinstallTask<T> {
   name: string;
+  /** Fixed enum only; the bug report counts it and never carries the name. */
+  resourceKind?: ResourceKind;
   remove: () => Promise<void>;
   install: () => Promise<T>;
 }

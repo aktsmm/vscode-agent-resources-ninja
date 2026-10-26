@@ -1885,6 +1885,8 @@
     "test:resources": "node scripts/run-resource-tests.js",
     "test:upstream": "node scripts/run-resource-tests.js --include-network",
     "test": "node scripts/run-vscode-smoke.js",
+    "test:locales": "node scripts/run-vscode-smoke.js --locales en,ja",
+    "verify:vsix": "node scripts/verify-vsix-install.js",
     "audit:runtime": "npm audit --omit=dev --audit-level=moderate",
     "release:vsce": "pwsh -NoProfile -File ./scripts/Invoke-VsceWithPat.ps1"
   },

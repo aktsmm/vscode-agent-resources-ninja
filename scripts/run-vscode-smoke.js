@@ -54,21 +54,44 @@ if (mutexState.held) {
   process.exit(2);
 }
 
-const result = spawnSync(process.execPath, [vscodeTestCliPath], {
-  cwd: repoRoot,
-  stdio: "inherit",
-  env: process.env,
-});
-
-if (result.error) {
-  process.stderr.write(
-    `Failed to launch vscode-test: ${result.error.message}\n`,
-  );
+const localesArg = process.argv.indexOf("--locales");
+const locales =
+  localesArg === -1
+    ? [undefined]
+    : String(process.argv[localesArg + 1] || "")
+        .split(",")
+        .filter(Boolean);
+if (locales.length === 0) {
+  process.stderr.write("--locales needs a list such as en,ja\n");
   process.exit(1);
 }
 
-if (typeof result.status === "number") {
-  process.exit(result.status);
+let exitCode = 0;
+for (const locale of locales) {
+  const env = locale
+    ? { ...process.env, RESOURCE_NINJA_TEST_LOCALE: locale }
+    : process.env;
+  if (locale) {
+    process.stdout.write(`\n=== Extension Host smoke (${locale}) ===\n`);
+  }
+  const result = spawnSync(process.execPath, [vscodeTestCliPath], {
+    cwd: repoRoot,
+    stdio: "inherit",
+    env,
+  });
+
+  if (result.error) {
+    process.stderr.write(
+      `Failed to launch vscode-test: ${result.error.message}\n`,
+    );
+    process.exit(1);
+  }
+
+  const status = typeof result.status === "number" ? result.status : 1;
+  if (status !== 0) {
+    exitCode = status;
+    process.stderr.write(`Smoke test failed for locale ${locale || "default"}\n`);
+  }
 }
 
-process.exit(1);
+process.exit(exitCode);

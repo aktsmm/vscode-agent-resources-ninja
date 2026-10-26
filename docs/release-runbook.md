@@ -21,11 +21,12 @@ npm run compile
 npm run test:resources
 npm run test:upstream
 npm test
+npm run test:locales
 npm run audit:runtime
 npm audit --audit-level=moderate
 ```
 
-All gates must pass before packaging. Network-backed upstream checks are release-only requirements and must not be replaced by the offline suite.
+All gates must pass before packaging. Network-backed upstream checks are release-only requirements and must not be replaced by the offline suite. `npm run test:locales` runs the Extension Host smoke test twice, in English and Japanese, each in its own isolated user-data directory and workspace.
 
 ## 3. Synchronize Release Metadata
 
@@ -48,9 +49,12 @@ Any change to a packaged input after packaging invalidates the existing VSIX. Re
 npm run package
 npx --yes @vscode/vsce package --out .\artifacts\vsix\agent-resources-ninja-X.Y.Z.vsix
 node scripts/test-release-hygiene.js
+npm run verify:vsix
 Get-Item -LiteralPath .\artifacts\vsix\agent-resources-ninja-X.Y.Z.vsix | Select-Object Name,Length,LastWriteTime
 Get-FileHash -Algorithm SHA256 -LiteralPath .\artifacts\vsix\agent-resources-ninja-X.Y.Z.vsix
 ```
+
+`npm run verify:vsix` installs the built VSIX into a temporary extensions directory and user-data directory with the VS Code CLI, reads the installation back with `--list-extensions --show-versions`, and compares the installed compiled entrypoint, both NLS files and the resource index with the VSIX bytes. It never touches the real profile. The release hygiene test also rejects a runtime entrypoint that still points at a sourcemap (a development bundle).
 
 Treat the file's existence, size, timestamp, and hash as the build result. Confirm the package excludes source maps, tests, `.github`, `.vscode`, and local artifacts while retaining `dist/extension.js`.
 The release hygiene test checks a published-version VSIX against its immutable Git tag (ignoring text line-ending differences), so later Unreleased edits do not invalidate the preserved artifact. Before the next version is tagged, it still compares the newly built VSIX against current worktree bytes, including binary assets.
@@ -95,5 +99,6 @@ A release is complete only when version, commit, tag, push, Marketplace publish,
 - 生成済み VSIX の publish は `-VsceArgs` 配列形式だけを使用します。
 - `npm run release:vsce -- publish -i <path>` は使いません。
 - release 前は offline test に加えて `npm run test:upstream` が必須です。
+- 英日それぞれの隔離 Extension Host smoke は `npm run test:locales`、生成済み VSIX の隔離インストールと読み戻しは `npm run verify:vsix` で確認します。
 - Marketplace と GitHub Release の成果物は、ローカル VSIX とサイズ・SHA256 を照合します。
 - PAT、秘密情報、個人環境の絶対パスを成果物やログへ残しません。

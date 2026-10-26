@@ -5,7 +5,6 @@ const { spawnSync } = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
-const zlib = require("zlib");
 
 const repoRoot = path.resolve(__dirname, "..");
 const gitignore = fs.readFileSync(path.join(repoRoot, ".gitignore"), "utf8");
@@ -66,57 +65,7 @@ function listRootFiles() {
     .sort();
 }
 
-function readZipContents(filePath) {
-  const buffer = fs.readFileSync(filePath);
-  const entries = new Map();
-  let offset = 0;
-  const localHeader = 0x04034b50;
-  while (
-    offset + 30 <= buffer.length &&
-    buffer.readUInt32LE(offset) === localHeader
-  ) {
-    const flags = buffer.readUInt16LE(offset + 6);
-    const method = buffer.readUInt16LE(offset + 8);
-    const compressedSize = buffer.readUInt32LE(offset + 18);
-    const fileNameLength = buffer.readUInt16LE(offset + 26);
-    const extraLength = buffer.readUInt16LE(offset + 28);
-    const nameStart = offset + 30;
-    const nameEnd = nameStart + fileNameLength;
-    const name = buffer.toString("utf8", nameStart, nameEnd);
-    const dataStart = nameEnd + extraLength;
-    let compressedDataEnd = dataStart + compressedSize;
-    let dataEnd = compressedDataEnd;
-
-    if (flags & 0x08) {
-      const descriptorSignature = 0x08074b50;
-      const descriptorOffset = buffer.indexOf(
-        Buffer.from([0x50, 0x4b, 0x07, 0x08]),
-        dataStart,
-      );
-      assert.ok(
-        descriptorOffset !== -1,
-        `Missing ZIP data descriptor for ${name}`,
-      );
-      compressedDataEnd = descriptorOffset;
-      dataEnd = descriptorOffset + 16;
-      assert.strictEqual(
-        buffer.readUInt32LE(descriptorOffset),
-        descriptorSignature,
-      );
-    } else if (method !== 0 && method !== 8) {
-      throw new Error(`Unsupported ZIP method ${method} for ${name}`);
-    }
-
-    const compressed = buffer.subarray(dataStart, compressedDataEnd);
-    entries.set(
-      name,
-      method === 8 ? zlib.inflateRawSync(compressed) : Buffer.from(compressed),
-    );
-
-    offset = dataEnd;
-  }
-  return entries;
-}
+const { findDevBuildMarkers, readZipContents } = require("./vsix-tools");
 
 function readZipEntries(filePath) {
   return [...readZipContents(filePath).keys()].sort();
@@ -406,6 +355,23 @@ test("existing release VSIX matches deterministic packaged inputs", () => {
     ),
     "Release VSIX is stale for the current changelog section",
   );
+});
+
+test("existing VSIX carries a production build of the runtime entrypoint", () => {
+  const vsixPath = path.join(
+    repoRoot,
+    "artifacts",
+    "vsix",
+    `agent-resources-ninja-${packageJson.version}.vsix`,
+  );
+  if (!fs.existsSync(vsixPath)) {
+    console.log("SKIP runtime entrypoint build check (VSIX not generated yet)");
+    return;
+  }
+  const mainEntry = `extension/${String(packageJson.main).replace(/^\.\//, "")}`;
+  const entrypoint = readZipContents(vsixPath).get(mainEntry);
+  assert.ok(entrypoint && entrypoint.length > 0, `Empty or missing ${mainEntry}`);
+  assert.deepStrictEqual(findDevBuildMarkers(entrypoint), []);
 });
 
 test("existing dev VSIX payload stays release-minimal", () => {

@@ -552,7 +552,7 @@ suite("Agent Resources Ninja smoke test", () => {
         resourceName: "skill",
         kind: "skills",
       }),
-      /Unknown kind/,
+      /Unknown kind|不明な kind/,
     );
     assert.match(
       await invoke("resourceNinja_localize", {
@@ -560,7 +560,7 @@ suite("Agent Resources Ninja smoke test", () => {
         kind: "skills",
         description_ja: "x",
       }),
-      /Unknown kind/,
+      /Unknown kind|不明な kind/,
     );
     // 部分一致だけの名前は対象にならない（インストールされない）
     assert.match(
@@ -693,7 +693,10 @@ suite("Agent Resources Ninja smoke test", () => {
         .join("\n");
     try {
       const ambiguous = await invoke({ resourceName: "smoke-dup" });
-      assert.match(ambiguous, /Multiple workspace resources match/);
+      assert.match(
+        ambiguous,
+        /Multiple workspace resources match|に複数候補があります/,
+      );
       for (const dir of dirs) {
         assert.ok(
           await exists(file(root, dir, "SKILL.md")),
@@ -705,7 +708,10 @@ suite("Agent Resources Ninja smoke test", () => {
         resourceName: "smoke-dup",
         path: "smoke-skills/dup-b",
       });
-      assert.match(removed, /Uninstalled \*\*smoke-dup\*\*/);
+      assert.match(
+        removed,
+        /Uninstalled \*\*smoke-dup\*\*|\*\*smoke-dup\*\* をアンインストールし/,
+      );
       assert.ok(
         await exists(file(root, "dup-a", "SKILL.md")),
         "the skill that was not selected must remain",

@@ -33,12 +33,31 @@ function requireTypeScriptModule(filePath, stubs = {}) {
   return loadedModule.exports;
 }
 
+const opened = [];
+const previews = [];
+let nextChoice = () => undefined;
+
 const {
   BUG_REPORT_URL_MAX_LENGTH,
   buildBugReportUrl,
   buildReinstallBatchReport,
+  previewAndOpenBugReport,
 } = requireTypeScriptModule(path.join(__dirname, "..", "src", "bugReport.ts"), {
-  vscode: { env: {}, Uri: { parse: (value) => value } },
+  vscode: {
+    env: {
+      openExternal: async (uri) => {
+        opened.push(uri);
+        return true;
+      },
+    },
+    Uri: { parse: (value) => value },
+    window: {
+      showInformationMessage: async (...args) => {
+        previews.push(args);
+        return nextChoice(args);
+      },
+    },
+  },
 });
 
 const shortUrl = new URL(buildBugReportUrl("Short title", "Short body"));
@@ -67,7 +86,7 @@ assert.ok(!truncatedEmojiBody.includes("\uFFFD"));
 
 const records = [
   {
-    task: { name: "customer/secret-skill" },
+    task: { name: "customer/secret-skill", resourceKind: "skill" },
     result: {
       success: false,
       removed: true,
@@ -78,7 +97,7 @@ const records = [
     },
   },
   {
-    task: { name: "another-private-resource" },
+    task: { name: "another-private-resource", resourceKind: "token ghp_secret" },
     result: {
       success: false,
       removed: false,
@@ -88,11 +107,11 @@ const records = [
     },
   },
   {
-    task: { name: "installed-private-resource" },
+    task: { name: "installed-private-resource", resourceKind: "agent" },
     result: { success: true, removed: true, attempts: 1, stage: "complete" },
   },
   {
-    task: { name: "cancelled-private-resource" },
+    task: { name: "cancelled-private-resource", resourceKind: "agent" },
     result: {
       success: false,
       removed: false,
@@ -101,17 +120,64 @@ const records = [
       failureKind: "cancelled",
     },
   },
+  {
+    task: { name: "user-global-agent", resourceKind: "agent" },
+    result: {
+      success: false,
+      removed: false,
+      attempts: 1,
+      stage: "C:/private/stage",
+      failureKind: "not-found",
+    },
+  },
 ];
 const report = buildReinstallBatchReport(records, false);
 assert.strictEqual(report.title, "[Bug] Batch reinstall failure");
 assert.match(report.body, /Succeeded: 1/);
-assert.match(report.body, /Failed: 2/);
+assert.match(report.body, /Failed: 3/);
 assert.match(report.body, /Cancelled: 1/);
 assert.match(report.body, /Not started: 2/);
 assert.match(report.body, /auth-required: 1/);
 assert.match(report.body, /other: 1/);
+assert.match(
+  report.body,
+  /Failed resource kinds: skill: 1, agent: 1, other: 1/,
+  "failed resources are counted by a fixed kind list; free text falls into other",
+);
+assert.match(
+  report.body,
+  /Failed stages: not-started: 1, install: 1, other: 1/,
+  "failed stages are counted by a fixed stage list",
+);
 const reportUrl = buildBugReportUrl(report.title, report.body);
 assert.doesNotMatch(reportUrl, /ghp_secret|private|customer|C%3A|path/i);
 assert.match(buildReinstallBatchReport(records, true).body, /成功: 1/);
+assert.match(
+  buildReinstallBatchReport(records, true).body,
+  /失敗したリソース種別: skill: 1, agent: 1, other: 1/,
+);
 
-console.log("RESULT=PASS");
+(async () => {
+  // The draft is previewed first; declining must not open anything.
+  nextChoice = () => undefined;
+  assert.strictEqual(await previewAndOpenBugReport(report, false), false);
+  assert.strictEqual(opened.length, 0, "no draft opens without a confirmation");
+  const [message, options, openLabel] = previews[0];
+  assert.strictEqual(options.modal, true);
+  assert.ok(options.detail.includes(report.body), "the preview shows the exact body");
+  assert.match(message, /Nothing is posted automatically/);
+
+  nextChoice = (args) => args[2];
+  assert.strictEqual(await previewAndOpenBugReport(report, false), true);
+  assert.strictEqual(opened.length, 1);
+  assert.strictEqual(
+    new URL(opened[0]).searchParams.get("body"),
+    report.body,
+    "the draft equals what was previewed",
+  );
+  assert.strictEqual(openLabel, "Open GitHub Draft");
+  console.log("RESULT=PASS");
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
