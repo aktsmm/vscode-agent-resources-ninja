@@ -41,6 +41,8 @@ const {
   getResourceInstallPath,
   getResourceMetadataPath,
   getSkillRootDirectoriesFromPaths,
+  excludeContainedSkills,
+  mapContainedSkillParents,
   toPluginRootIdentityKey,
   isBuiltInResourcePath,
   isNestedResourcePathUnderSkillRoot,
@@ -964,6 +966,48 @@ test("bundled index does not contain display-equivalent duplicate resources", ()
     );
     seen.set(key, resource.path);
   }
+});
+
+test("contained skills map to their nearest enclosing skill", () => {
+  const entries = [
+    "C:\\Users\\Demo\\skills\\deploy-model\\SKILL.md",
+    "c:/users/demo/skills/deploy-model/capacity/SKILL.md",
+    "C:\\Users\\Demo\\skills\\deploy-model\\capacity\\deep\\SKILL.md",
+    "C:\\Users\\Demo\\skills\\deploy-model-extra\\SKILL.md",
+    "C:\\Users\\Demo\\skills\\deploy-model\\notes\\README.md",
+    "C:\\Users\\Demo\\skills\\plain\\SKILL.md",
+  ];
+  const parents = mapContainedSkillParents(entries, (entry) => entry);
+  assert.deepStrictEqual(
+    [...parents].map(([child, parent]) => [child, parent]),
+    [
+      [entries[1], entries[0]],
+      [entries[2], entries[1]],
+    ],
+    "the nearest enclosing skill wins, Windows case and separators do not matter, and a sibling prefix is not a parent",
+  );
+  assert.deepStrictEqual(
+    excludeContainedSkills(entries, (entry) => entry),
+    [entries[0], entries[3], entries[4], entries[5]],
+    "non-skill entries are kept and contained skills are dropped",
+  );
+  assert.strictEqual(
+    mapContainedSkillParents(
+      ["SKILL.md", "skills/a/SKILL.md"],
+      (entry) => entry,
+    ).size,
+    0,
+    "a SKILL.md at the root must not swallow every skill",
+  );
+  const visibleOnly = mapContainedSkillParents(
+    [entries[1], entries[5]],
+    (entry) => entry,
+  );
+  assert.strictEqual(
+    visibleOnly.size,
+    0,
+    "a contained skill is a top-level entry when its parent is not in the list",
+  );
 });
 
 console.log("Resource kind tests passed");

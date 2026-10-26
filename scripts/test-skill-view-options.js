@@ -47,6 +47,9 @@ const optionsModule = requireTypeScriptModule(
   path.join(repoRoot, "src", "skillListOptions.ts"),
   { "./skillInvocationMode": modeModule },
 );
+const resourceKindsModule = requireTypeScriptModule(
+  path.join(repoRoot, "src", "resourceKinds.ts"),
+);
 
 const tests = [];
 function test(name, fn) {
@@ -333,6 +336,7 @@ function createUserProvider() {
         getPluginIdFromPath: () => undefined,
         getResourceIdentityKeys: () => [],
         isHookConfigFilePath: () => false,
+        mapContainedSkillParents: resourceKindsModule.mapContainedSkillParents,
       },
       "./mcpConfigManager": {
         formatMcpLifecycleLabel: () => "",
@@ -527,6 +531,7 @@ function createTreeProviders() {
         getPluginPackageLabel: () => undefined,
         getResourceIdentityKeys: () => [],
         isHookConfigFilePath: () => false,
+        mapContainedSkillParents: resourceKindsModule.mapContainedSkillParents,
       },
       "./customizationPaths": {},
       "./skillInvocationMode": modeModule,

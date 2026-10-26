@@ -39,6 +39,7 @@ import {
   getPluginPackageLabel,
   getResourceIdentityKeys,
   isHookConfigFilePath,
+  mapContainedSkillParents,
   PluginPackageInfo,
 } from "./resourceKinds";
 import {
@@ -401,8 +402,9 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
     }
 
     if (element.contextValue === "workspacePlugin" && element.pluginId) {
-      return this.getWorkspacePluginResources(element.pluginId).map((skill) =>
-        this.createWorkspaceResourceItem(skill, element),
+      return this.createArrangedWorkspaceItems(
+        this.getWorkspacePluginResources(element.pluginId),
+        element,
       );
     }
 
@@ -410,16 +412,50 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
       element.contextValue === "workspaceResourceType" &&
       element.resourceKind
     ) {
-      return this.getVisibleSkills()
-        .filter(
+      return this.createArrangedWorkspaceItems(
+        this.getVisibleSkills().filter(
           (skill) =>
             !skill.isBuiltIn &&
             (skill.kind || "skill") === element.resourceKind,
-        )
-        .map((skill) => this.createWorkspaceResourceItem(skill, element));
+        ),
+        element,
+      );
+    }
+
+    const itemSkill = element.skill as Partial<LocalSkill> | undefined;
+    if (itemSkill?.kind === "skill" && itemSkill.fullPath) {
+      const parentPath = itemSkill.fullPath;
+      const parents = this.getContainedSkillParents();
+      return [...parents]
+        .filter(([, parent]) => parent.fullPath === parentPath)
+        .map(([child]) =>
+          this.createWorkspaceResourceItem(child, element, parents),
+        );
     }
 
     return [];
+  }
+
+  /** 別スキルのフォルダー内にあるスキルと、その親スキル。表示中の一覧から求めるので、絞り込みで親が消えた子は最上位に出る。 */
+  private getContainedSkillParents(): Map<WorkspaceSkill, WorkspaceSkill> {
+    return mapContainedSkillParents(
+      this.getVisibleSkills().filter(
+        (skill) => !skill.isBuiltIn && (skill.kind || "skill") === "skill",
+      ),
+      (skill) => skill.fullPath,
+    );
+  }
+
+  private createArrangedWorkspaceItems(
+    skills: WorkspaceSkill[],
+    parent: SkillTreeItem,
+  ): SkillTreeItem[] {
+    const parents = this.getContainedSkillParents();
+    return skills
+      .filter((skill) => !parents.has(skill))
+      .map((skill) =>
+        this.createWorkspaceResourceItem(skill, parent, parents),
+      );
   }
 
   private getPresentWorkspaceResourceKinds(): ResourceKind[] {
@@ -487,7 +523,9 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
   private createWorkspaceResourceItem(
     skill: WorkspaceSkill,
     parent?: SkillTreeItem,
+    containedParents: Map<WorkspaceSkill, WorkspaceSkill> = new Map(),
   ): SkillTreeItem {
+    const hasContainedSkills = [...containedParents.values()].includes(skill);
     let statusIcon: string;
     let iconId: string;
     let iconColor: vscode.ThemeColor;
@@ -582,7 +620,9 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
       [invocationBadge, itemDescription]
         .filter((part): part is string => !!part)
         .join(" · "),
-      vscode.TreeItemCollapsibleState.None,
+      hasContainedSkills
+        ? vscode.TreeItemCollapsibleState.Collapsed
+        : vscode.TreeItemCollapsibleState.None,
       contextValue,
       {
         name: skill.name,

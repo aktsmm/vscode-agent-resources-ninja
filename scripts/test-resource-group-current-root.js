@@ -72,6 +72,10 @@ const skillListOptionsModule = requireTypeScriptModule(
   path.join(repoRoot, "src", "skillListOptions.ts"),
   { "./skillInvocationMode": skillInvocationModeModule },
 );
+const resourceKindsModule = requireTypeScriptModule(
+  path.join(repoRoot, "src", "resourceKinds.ts"),
+  {},
+);
 
 const providerModule = requireTypeScriptModule(providerPath, {
   vscode: vscodeStub,
@@ -87,6 +91,7 @@ const providerModule = requireTypeScriptModule(providerPath, {
     getPluginIdFromPath: (value) => value?.match(/plugins[\\/]([^\\/]+)/i)?.[1],
     getResourceIdentityKeys: () => [],
     isHookConfigFilePath: () => false,
+    mapContainedSkillParents: resourceKindsModule.mapContainedSkillParents,
   },
   "./mcpConfigManager": {
     formatMcpLifecycleLabel: () => "",
@@ -205,6 +210,44 @@ async function main() {
     treeProviderSource,
     /if \(!this\.hasLoaded\) \{\s*await this\.loadWorkspaceSkills\(\);\s*this\.hasLoaded = true;\s*\}/,
     "workspace child access must load current resources even before the root row is read",
+  );
+
+  // A skill folder inside another skill folder is shown under its parent, not beside it.
+  const copilotRoot = "C:\\Users\\Demo\\.copilot";
+  const skillAt = (...segments) =>
+    resource(copilotRoot, {
+      name: segments[segments.length - 1],
+      fullPath: path.join(copilotRoot, "skills", ...segments, "SKILL.md"),
+      relativePath: `skills/${segments.join("/")}/SKILL.md`,
+    });
+  const outer = skillAt("deploy-model");
+  const inner = skillAt("deploy-model", "assets", "preset");
+  const sibling = skillAt("plain");
+  provider.resources = [outer, inner, sibling];
+  const nestedTop = await provider.getChildren(currentKind);
+  assert.deepStrictEqual(
+    nestedTop.map((item) => item.resource.name).sort(),
+    ["deploy-model", "plain"],
+    "a contained skill must not be listed beside its parent",
+  );
+  const outerItem = nestedTop.find((item) => item.resource === outer);
+  assert.strictEqual(outerItem.collapsibleState, 1, "the parent expands");
+  assert.strictEqual(
+    nestedTop.find((item) => item.resource === sibling).collapsibleState,
+    0,
+    "a skill without contained skills stays a leaf",
+  );
+  assert.deepStrictEqual(
+    (await provider.getChildren(outerItem)).map((item) => item.resource.name),
+    ["preset"],
+  );
+  provider.resources = [inner, sibling];
+  assert.deepStrictEqual(
+    (await provider.getChildren(currentKind))
+      .map((item) => item.resource.name)
+      .sort(),
+    ["plain", "preset"],
+    "a contained skill whose parent is not listed stays visible at the top level",
   );
 
   // Other global homes are read-only, so their groups must not offer

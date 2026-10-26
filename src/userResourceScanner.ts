@@ -21,6 +21,7 @@ import {
   isIncompleteSkillContent,
   isPluginManifestPath,
   isPluginMarkerDirectoryName,
+  mapContainedSkillParents,
   selectPreferredPluginManifest,
   shouldReplaceBuiltInResourcePath,
 } from "./resourceKinds";
@@ -80,6 +81,8 @@ export interface UserResource {
   isBuiltIn?: boolean;
   isReadOnly?: boolean;
   isAlternateGlobalHome?: boolean;
+  /** A skill folder inside another skill folder; it belongs to that parent skill. */
+  isContainedSkill?: boolean;
   incomplete?: boolean;
   reinstallDisabled?: boolean;
   reinstallDisabledReason?: string;
@@ -974,7 +977,16 @@ export async function scanUserResources(
     }
   }
 
-  return Array.from(resources.values()).sort((a, b) => {
+  const scanned = Array.from(resources.values());
+  const contained = mapContainedSkillParents(
+    scanned.filter((resource) => resource.kind === "skill"),
+    (resource) => resource.fullPath,
+  );
+  for (const child of contained.keys()) {
+    child.isContainedSkill = true;
+  }
+
+  return scanned.sort((a, b) => {
     const scopeOrderCompare =
       getUserResourceScopeOrder(a.scope) - getUserResourceScopeOrder(b.scope);
     if (scopeOrderCompare !== 0) return scopeOrderCompare;

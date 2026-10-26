@@ -304,6 +304,40 @@ async function main() {
     );
     assert(baseline.equals(fs.readFileSync(ignore)));
     fs.writeFileSync(metadataPath, metadata);
+    const readdir = nativeFs.readdir;
+    for (const [code, reason] of [
+      ["ENOENT", "changed"],
+      ["EBUSY", "io-failure"],
+      ["EPERM", "io-failure"],
+    ]) {
+      nativeFs.readdir = async (target, ...rest) => {
+        if (String(target).endsWith(`${path.sep}remote`)) {
+          throw Object.assign(new Error("injected"), { code });
+        }
+        return readdir(target, ...rest);
+      };
+      try {
+        const raced = await manager.synchronizeSkillGitignore(root, workspace);
+        assert.strictEqual(raced.status, "failed");
+        assert.strictEqual(
+          raced.reason,
+          reason,
+          `${code} while scanning must not be reported as invalid-metadata`,
+        );
+        assert(baseline.equals(fs.readFileSync(ignore)));
+      } finally {
+        nativeFs.readdir = readdir;
+      }
+    }
+    fs.writeFileSync(
+      metadataPath,
+      JSON.stringify({ name: "remote", source: 1 }),
+    );
+    assert.strictEqual(
+      (await manager.synchronizeSkillGitignore(root, workspace)).reason,
+      "invalid-metadata",
+    );
+    fs.writeFileSync(metadataPath, metadata);
     workspace.isTrusted = false;
     assert.strictEqual(
       (await manager.synchronizeSkillGitignore(root, workspace)).reason,

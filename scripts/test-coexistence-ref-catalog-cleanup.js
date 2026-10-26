@@ -221,6 +221,23 @@ async function main() {
             },
             {
               kind: "skill",
+              name: "nested-inner",
+              description: "Skill folder inside another skill",
+              source: "local",
+              relativePath: ".github/skills/fresh-review/assets/nested-inner",
+              fullPath: path.join(
+                workspaceRoot,
+                ".github",
+                "skills",
+                "fresh-review",
+                "assets",
+                "nested-inner",
+                "SKILL.md",
+              ),
+              isContainedSkill: true,
+            },
+            {
+              kind: "skill",
               name: "manual-only",
               description: "Called by name only",
               source: "local",
@@ -261,6 +278,9 @@ async function main() {
         ),
         "./serialQueue": requireTypeScriptModule(
           path.join(repoRoot, "src", "serialQueue.ts"),
+        ),
+        "./resourceKinds": requireTypeScriptModule(
+          path.join(repoRoot, "src", "resourceKinds.ts"),
         ),
         "./skillInvocation": requireTypeScriptModule(
           path.join(repoRoot, "src", "skillInvocation.ts"),
@@ -356,6 +376,11 @@ async function main() {
   assert.match(updatedCatalog, /<!-- resource-ninja-catalog: skill -->/);
   assert.match(updatedCatalog, /# Agent Skills \(Compressed Index\)/);
   assert.match(updatedCatalog, /fresh-review/);
+  assert.doesNotMatch(
+    updatedCatalog,
+    /nested-inner/,
+    "a skill inside another skill belongs to its parent and is not listed",
+  );
   assert.ok(
     directories.some((entry) => entry.endsWith(path.join(".github", "skills"))),
     "Expected catalog directory creation",

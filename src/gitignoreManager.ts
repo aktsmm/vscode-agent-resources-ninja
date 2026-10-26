@@ -53,8 +53,8 @@ const FAILURE_TEXT: Record<
     en: ".gitignore has unsaved changes. Save or discard them",
   },
   changed: {
-    ja: "同期中に .gitignore が変更されました",
-    en: ".gitignore changed during synchronization",
+    ja: "同期中に .gitignore またはスキルのフォルダーが変更されました",
+    en: ".gitignore or a skill folder changed during synchronization",
   },
   "unsafe-path": {
     ja: "リソースフォルダーが symlink / junction か、ワークスペース外を指しています",
@@ -122,7 +122,9 @@ function describeFailure(
   if (code === "EEXIST") {
     return "busy";
   }
-  const message = error instanceof Error ? error.message : "";
+  // Duck-typed so errors created in another realm (vm) are still recognised.
+  const rawMessage = (error as { message?: unknown } | undefined)?.message;
+  const message = typeof rawMessage === "string" ? rawMessage : "";
   if (message === "Ignore file has unsaved changes") {
     return "dirty";
   }
@@ -141,7 +143,25 @@ function describeFailure(
   ) {
     return "unsafe-path";
   }
-  return phase === "scan" ? "invalid-metadata" : "io-failure";
+  if (phase !== "scan") {
+    return "io-failure";
+  }
+  // A file or folder replaced while scanning is a race, not corrupt metadata.
+  if (code === "ENOENT" || code === "ENOTDIR") {
+    return "changed";
+  }
+  if (typeof code === "string") {
+    return "io-failure";
+  }
+  const name = (error as { name?: unknown } | undefined)?.name;
+  if (
+    name === "SyntaxError" ||
+    message === "Invalid skill metadata" ||
+    message === "Invalid skill identity"
+  ) {
+    return "invalid-metadata";
+  }
+  return "io-failure";
 }
 
 export interface IgnoreEntry {

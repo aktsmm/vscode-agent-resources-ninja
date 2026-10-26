@@ -9,6 +9,7 @@ import {
   SkillMeta,
 } from "./skillInstaller";
 import { scanLocalSkills, LocalSkill } from "./localSkillScanner";
+import { excludeContainedSkills } from "./resourceKinds";
 import { scanUserResources, UserResource } from "./userResourceScanner";
 import {
   OutputFormat,
@@ -870,9 +871,9 @@ async function collectWorkspaceResourcesForInstruction(
     workspaceFallback: includeLocalResources ? "always" : "none",
   });
   return sortSyncResources(
-    resources.map((resource) =>
-      toSyncResourceFromLocal(resource, instructionUri),
-    ),
+    resources
+      .filter((resource) => !resource.isContainedSkill)
+      .map((resource) => toSyncResourceFromLocal(resource, instructionUri)),
   );
 }
 
@@ -883,7 +884,10 @@ async function collectGlobalResourcesForInstruction(
   const resources = await scanUserResources(workspaceUri, false);
   return sortSyncResources(
     resources
-      .filter((resource) => resource.scope === "globalHome")
+      .filter(
+        (resource) =>
+          resource.scope === "globalHome" && !resource.isContainedSkill,
+      )
       .map((resource) => toSyncResourceFromUser(resource, instructionUri)),
   );
 }
@@ -1505,15 +1509,17 @@ async function performInstructionFileUpdate(
     const workspaceRelativeSkillsDir =
       getRelativeSkillsPathForWorkspace(resourcesDirectory);
 
-    localSkills = workspaceRelativeSkillsDir
-      ? allLocalSkills.filter(
-          (ls) =>
-            !isSameOrChildWorkspacePath(
-              ls.relativePath,
-              workspaceRelativeSkillsDir,
-            ),
-        )
-      : allLocalSkills;
+    localSkills = (
+      workspaceRelativeSkillsDir
+        ? allLocalSkills.filter(
+            (ls) =>
+              !isSameOrChildWorkspacePath(
+                ls.relativePath,
+                workspaceRelativeSkillsDir,
+              ),
+          )
+        : allLocalSkills
+    ).filter((ls) => !ls.isContainedSkill);
     logger.info(`[Resource Ninja] Found ${localSkills.length} local skills`);
   }
 
@@ -1533,7 +1539,9 @@ async function performInstructionFileUpdate(
   const includeExplicitOnlySkills =
     getConfiguredIncludeExplicitOnlySkills(config);
   const listedInstalledSkills = await excludeExplicitOnlySkills(
-    installedSkills,
+    excludeContainedSkills(installedSkills, (skill) =>
+      getInstalledSkillFilePath(skill, skillsUri),
+    ),
     (skill) => getInstalledSkillFilePath(skill, skillsUri),
     includeExplicitOnlySkills,
   );

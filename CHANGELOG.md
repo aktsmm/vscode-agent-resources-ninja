@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Skills Inside Skills Are Grouped Under Their Parent / スキル内のスキルを親の下にまとめる** - A skill folder that sits inside another skill folder (for example `deploy-model/capacity`) is now shown as a child of that parent in the Installed and User-Global views instead of a separate entry with a long relative path. A contained skill is not counted as unregistered and is left out of the generated skill lists, so the tree and the instruction block share one rule. When a filter hides the parent, the child stays visible at the top level / SKILL.md を持つフォルダーの中にさらに SKILL.md を持つフォルダー（例: `deploy-model/capacity`）がある場合、Installed / User-Global ビューで長い相対パスの別項目として並べず、親スキルの子として表示します。内包スキルは未登録として数えず、生成するスキル一覧にも載せないため、ツリーと instruction block が同じ規則を使います。絞り込みで親が非表示になった場合、子は最上位に表示されます。
+
+### Fixed
+
+- **Gitignore Scan Races No Longer Read as Corrupt Metadata / Gitignore 走査中の競合を「メタデータ不正」と表示しない** - A skill folder replaced or locked while the Gitignore synchronizer was scanning (`ENOENT`, `EBUSY`, `EPERM`) was reported as `.skill-meta.json is corrupt`, which pointed users at the wrong cause. Only unparsable or incomplete metadata is reported that way now; a folder that changed during the scan and file access failures get their own wording, and the cause is detected without relying on `instanceof Error` / Gitignore 同期の走査中にスキルフォルダーが入れ替わったりロックされたりした場合（`ENOENT`、`EBUSY`、`EPERM`）も「`.skill-meta.json` が壊れている」と表示され、原因が逆に伝わっていました。この表示は解析できない・不完全なメタデータに限り、走査中のフォルダー変更とファイルアクセスの失敗は別の文言で表示します。原因の判定は `instanceof Error` に依存しません。
+
 ## [0.2.65] - 2026-10-26
 
 ### Added

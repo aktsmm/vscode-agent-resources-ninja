@@ -15,6 +15,7 @@ import {
   getPluginIdFromPath,
   getResourceIdentityKeys,
   isHookConfigFilePath,
+  mapContainedSkillParents,
 } from "./resourceKinds";
 import {
   formatMcpLifecycleLabel,
@@ -225,6 +226,8 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
       this.hasLoaded = true;
     }
 
+    const contained = this.getContainedSkillParents();
+
     if (!element) {
       const regularResources = this.getRegularResources();
       const builtInResources = this.getBuiltInResources();
@@ -399,7 +402,8 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
             isResourceInTreeRoot(resource, element) &&
             this.getPluginId(resource) === element.pluginId,
         )
-        .map((resource) => this.createResourceItem(resource));
+        .filter((resource) => !contained.has(resource))
+        .map((resource) => this.createResourceItem(resource, contained));
     }
 
     if (element.nodeType === "builtInScope") {
@@ -443,7 +447,8 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
             isResourceInTreeRoot(resource, element) &&
             resource.kind === element.kind,
         )
-        .map((resource) => this.createResourceItem(resource));
+        .filter((resource) => !contained.has(resource))
+        .map((resource) => this.createResourceItem(resource, contained));
     }
 
     if (element.nodeType === "builtInKind" && element.kind) {
@@ -453,7 +458,8 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
             resource.kind === element.kind &&
             (!element.scopeLabel || resource.tool === element.scopeLabel),
         )
-        .map((resource) => this.createResourceItem(resource));
+        .filter((resource) => !contained.has(resource))
+        .map((resource) => this.createResourceItem(resource, contained));
     }
 
     if (
@@ -468,10 +474,31 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
             resource.tool === element.scopeLabel &&
             resource.kind === element.kind,
         )
-        .map((resource) => this.createResourceItem(resource));
+        .filter((resource) => !contained.has(resource))
+        .map((resource) => this.createResourceItem(resource, contained));
+    }
+
+    if (
+      element.resource?.kind === "skill" &&
+      (element.nodeType === "resource" || element.nodeType === "remoteResource")
+    ) {
+      const parentPath = element.resource.fullPath;
+      return [...contained]
+        .filter(([, parent]) => parent.fullPath === parentPath)
+        .map(([child]) => this.createResourceItem(child, contained));
     }
 
     return [];
+  }
+
+  /** 別スキルのフォルダー内にあるスキルと、その親スキル。表示中の一覧から求めるので、絞り込みで親が消えた子は最上位に出る。 */
+  private getContainedSkillParents(): Map<UserResource, UserResource> {
+    return mapContainedSkillParents(
+      [...this.getRegularResources(), ...this.getBuiltInResources()].filter(
+        (resource) => resource.kind === "skill",
+      ),
+      (resource) => resource.fullPath,
+    );
   }
 
   private shouldShowBuiltInResources(): boolean {
@@ -692,7 +719,13 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
     }
   }
 
-  private createResourceItem(resource: UserResource): UserResourceTreeItem {
+  private createResourceItem(
+    resource: UserResource,
+    containedParents: Map<UserResource, UserResource>,
+  ): UserResourceTreeItem {
+    const hasContainedSkills = [...containedParents.values()].includes(
+      resource,
+    );
     const isRecent = getResourceIdentityKeys(resource).some((key) =>
       this.recentlyInstalled?.has(key),
     );
@@ -758,7 +791,9 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
         : [getInvocationLabelText(invocation, isJapanese()), description]
             .filter(Boolean)
             .join(" · "),
-      vscode.TreeItemCollapsibleState.None,
+      hasContainedSkills
+        ? vscode.TreeItemCollapsibleState.Collapsed
+        : vscode.TreeItemCollapsibleState.None,
       this.isRemoteInstalled(resource) ? "remoteResource" : "resource",
       resource,
       resource.scope,

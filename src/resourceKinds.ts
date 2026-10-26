@@ -865,6 +865,61 @@ export function getSkillRootDirectoriesFromPaths(
   return rootDirectories;
 }
 
+/**
+ * A skill folder that sits inside another skill folder belongs to that skill.
+ * This is the single rule behind the tree grouping and the generated skill
+ * lists, so the two cannot disagree about which skills are contained.
+ * Returns each contained item mapped to its nearest enclosing skill's item;
+ * items that are not SKILL.md files, and the workspace-root SKILL.md, are ignored.
+ */
+export function mapContainedSkillParents<T>(
+  items: readonly T[],
+  getSkillFilePath: (item: T) => string | undefined,
+): Map<T, T> {
+  const itemsByDirectory = new Map<string, T>();
+  const directories = new Map<T, string>();
+  for (const item of items) {
+    const filePath = getSkillFilePath(item);
+    const directory =
+      filePath === undefined
+        ? undefined
+        : getSkillRootDirectoryFromPath(filePath);
+    if (!directory) {
+      continue;
+    }
+    directories.set(item, directory);
+    if (!itemsByDirectory.has(directory)) {
+      itemsByDirectory.set(directory, item);
+    }
+  }
+  const parents = new Map<T, T>();
+  for (const [item, directory] of directories) {
+    let ancestor = directory;
+    for (
+      let slashIndex = ancestor.lastIndexOf("/");
+      slashIndex > 0;
+      slashIndex = ancestor.lastIndexOf("/")
+    ) {
+      ancestor = ancestor.slice(0, slashIndex);
+      const parent = itemsByDirectory.get(ancestor);
+      if (parent !== undefined) {
+        parents.set(item, parent);
+        break;
+      }
+    }
+  }
+  return parents;
+}
+
+/** Returns the items that are not contained in another skill, in their original order. */
+export function excludeContainedSkills<T>(
+  items: readonly T[],
+  getSkillFilePath: (item: T) => string | undefined,
+): T[] {
+  const contained = mapContainedSkillParents(items, getSkillFilePath);
+  return items.filter((item) => !contained.has(item));
+}
+
 export function isNestedResourcePathUnderSkillRoot(
   resourcePath: string,
   kind: ResourceKind,

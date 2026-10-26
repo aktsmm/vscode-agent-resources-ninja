@@ -14,6 +14,7 @@ import {
   getResourceMetadataPath,
   isBuiltInResourcePath,
   isIncompleteSkillContent,
+  mapContainedSkillParents,
 } from "./resourceKinds";
 import {
   isInstructionFileUpdateFailure,
@@ -342,6 +343,22 @@ export interface LocalSkill extends Skill {
   reinstallDisabledAt?: string;
   metadataStatus?: "unreadable" | "invalid";
   registrationFile?: string; // 登録されているファイル (AGENTS.md など)
+  isContainedSkill?: boolean; // 別スキルのフォルダー内にあるスキル。親スキルの一部として扱う
+}
+
+/**
+ * 別スキルのフォルダー内にあるスキルを印付けする。親が一覧と登録の単位になるため、
+ * 子は未登録として数えず、生成する一覧にも載せない。
+ */
+export function markContainedSkills(skills: LocalSkill[]): void {
+  const parents = mapContainedSkillParents(
+    skills.filter((skill) => skill.kind === "skill"),
+    (skill) => skill.fullPath,
+  );
+  for (const child of parents.keys()) {
+    child.isContainedSkill = true;
+    child.isRegistered = true;
+  }
 }
 
 /**
@@ -594,6 +611,7 @@ export async function scanLocalSkills(
 
   // AGENTS.md の登録状態をチェック
   await checkRegistrationStatus(skills, workspaceUri);
+  markContainedSkills(skills);
 
   return skills;
 }
