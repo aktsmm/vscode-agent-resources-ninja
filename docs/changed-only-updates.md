@@ -27,6 +27,7 @@ The recorded baseline is the `sourceRevision` field of `.skill-meta.json` (`owne
 - **Failure and cancellation** use the existing reinstall behavior (bounded retry of transient failures, removed copies recoverable from the trash, a failure summary that keeps resources outside the retry set, cancelled resources counted as not started). A revision check that is still waiting is aborted on cancel.
 - **Packages and groups.** Plugin children are not updated individually; a plugin is replaced as a whole by an explicit reinstall. Standalone resources are checked once each.
 - **API cost.** Installs within 30 seconds share one resolver, so a batch from one repository costs one commit and one tree request instead of two per skill; the changed-only check itself always uses a fresh snapshot so it never compares against stale upstream data.
+- **Local-only skills** (no recorded source and no remote path, `isLocalInstalledSkillMeta`) are classified before counting: they are left untouched, counted separately and never reported as a failure. The check runs after the index lookup, so a legacy skill with an unknown source that still matches an indexed name is reinstalled as before. The reinstall picker does not offer local-only skills.
 - **Forced reinstall remains** as the first button in the same dialog and as the default for automatic callers.
 
 ## Not covered yet
