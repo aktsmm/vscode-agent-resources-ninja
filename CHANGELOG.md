@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Local-only skills no longer count as reinstall failures / 配布元のないローカルスキルを再インストールの失敗として数えない** - "Reinstall All Workspace Skills" (including Update Changed Only) treated skills you created yourself, which have no recorded upstream, as "not found" failures. They are now left untouched, counted separately and never trigger the failure warning / 「ワークスペースのスキルを一括再インストール」（変更分だけ更新を含む）が、自作などで配布元の記録がないスキルを「見つからない」失敗として扱っていました。これらは変更せず別カウントにし、失敗の警告を出しません。
+
 ## [0.2.68] - 2026-10-26
 
 ### Added

@@ -2396,6 +2396,13 @@ export function normalizeSkillMetaSource(
   return (source && RETIRED_SOURCE_ALIASES[source]) || source || "unknown";
 }
 
+/** A skill the user created in place: no recorded upstream, so nothing to update. */
+export function isLocalInstalledSkillMeta(
+  meta: Pick<Partial<SkillMeta>, "source" | "remotePath">,
+): boolean {
+  return normalizeSkillMetaSource(meta) === "local" && !meta.remotePath?.trim();
+}
+
 /**
  * ディレクトリ内のスキルを再帰的にスキャン
  * SKILL.md を持つフォルダをスキルとして検出

@@ -403,6 +403,25 @@ async function main() {
     "only skills have a folder baseline in this release",
   );
 
+  // A skill with no recorded upstream is local-only, never a failure candidate.
+  assert.strictEqual(moduleExports.isLocalInstalledSkillMeta({}), true);
+  assert.strictEqual(moduleExports.isLocalInstalledSkillMeta({ source: "local" }), true);
+  assert.strictEqual(moduleExports.isLocalInstalledSkillMeta({ source: "unknown" }), true);
+  assert.strictEqual(
+    moduleExports.isLocalInstalledSkillMeta({ source: "unknown", remotePath: "skills/a" }),
+    false,
+    "a recorded remote path keeps the skill eligible",
+  );
+  assert.strictEqual(
+    moduleExports.isLocalInstalledSkillMeta({ source: "octo-demo", remotePath: "skills/a" }),
+    false,
+  );
+  assert.strictEqual(
+    moduleExports.isLocalInstalledSkillMeta({ source: "octo-demo" }),
+    false,
+    "a named source without a path is deferred, not local",
+  );
+
   console.log("RESULT=PASS");
 }
 

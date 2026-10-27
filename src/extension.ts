@@ -52,6 +52,7 @@ import {
   unregisterPluginLocations,
   getInstalledSkills,
   getInstalledSkillsWithMeta,
+  isLocalInstalledSkillMeta,
   normalizeSkillMetaSource,
   refreshSkillMetadata,
   refreshSingleSkillMetadata,
@@ -6872,6 +6873,7 @@ export async function activate(
       let success = 0;
       let completed = 0;
       let upToDate = 0;
+      let localOnly = 0;
       let cancelled = false;
       const records: ReinstallBatchRecord<InstallSkillResult>[] = [];
 
@@ -6905,6 +6907,12 @@ export async function activate(
             // スキル情報を取得
             const skill = findIndexedSkillForInstalledMeta(index, meta);
 
+            // No upstream recorded and no index match: nothing to reinstall, not a failure.
+            if (!skill && isLocalInstalledSkillMeta(meta)) {
+              localOnly++;
+              completed++;
+              continue;
+            }
             if (skill && checkRevision) {
               // Anything but a proven "unchanged" (no baseline, a different source,
               // a failed read) is updated, so the check can only ever skip safely.
@@ -6971,6 +6979,7 @@ export async function activate(
         records.push(
           ...installedMeta
             .slice(completed)
+            .filter((meta) => !isLocalInstalledSkillMeta(meta))
             .map((meta) =>
               createUnstartedReinstallRecord<InstallSkillResult>(
                 meta.name,
@@ -7003,7 +7012,9 @@ export async function activate(
       browseProvider.refresh();
       if (failedSkills.length > 0 || cancelled) {
         const total =
-          (cancelled ? completed : installedMeta.length) - upToDate;
+          (cancelled ? completed : installedMeta.length) -
+          upToDate -
+          localOnly;
         showReinstallBatchFailure(
           `${getBatchFailureMessage(
             isJapanese() ? "スキル再インストール" : "Skill reinstall",
@@ -7015,14 +7026,16 @@ export async function activate(
         );
         return false;
       } else if (!options.suppressSuccessMessage) {
+        const localNoteJa = localOnly > 0 ? `。配布元のない ${localOnly} 個はそのまま` : "";
+        const localNoteEn = localOnly > 0 ? `; ${localOnly} local-only left as is` : "";
         vscode.window.showInformationMessage(
           onlyChanged
             ? isJapanese()
-              ? `${success} 個のスキルを更新しました（${upToDate} 個は最新のためそのまま）`
-              : `Updated ${success} skills (${upToDate} already up to date)`
+              ? `${success} 個のスキルを更新しました（${upToDate} 個は最新のためそのまま）${localNoteJa}`
+              : `Updated ${success} skills (${upToDate} already up to date)${localNoteEn}`
             : isJapanese()
-              ? `${success} 個のスキルを再インストールしました`
-              : `Reinstalled ${success} skills`,
+              ? `${success} 個のスキルを再インストールしました${localNoteJa}`
+              : `Reinstalled ${success} skills${localNoteEn}`,
         );
       }
       return true;
