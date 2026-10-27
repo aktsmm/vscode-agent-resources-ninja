@@ -8214,8 +8214,24 @@ export async function activate(
         return;
       }
 
+      const index = await loadSkillIndex(context);
+      // A skill with no upstream cannot be reinstalled, so it is not offered.
+      const reinstallableMeta = installedMeta.filter(
+        (meta) =>
+          !isLocalInstalledSkillMeta(meta) ||
+          findIndexedSkillForInstalledMeta(index, meta),
+      );
+      if (reinstallableMeta.length === 0) {
+        vscode.window.showInformationMessage(
+          isJapanese()
+            ? "再インストール可能なスキルはありません。配布元のないローカルスキルは対象外です。"
+            : "No skills are eligible for reinstall. Local-only skills have no upstream.",
+        );
+        return;
+      }
+
       const selected = await vscode.window.showQuickPick(
-        installedMeta.map((meta) => ({
+        reinstallableMeta.map((meta) => ({
           label: meta.incomplete ? `$(warning) ${meta.name}` : meta.name,
           description: meta.incomplete
             ? `${meta.source} · ${isJapanese() ? "不完全" : "Incomplete"}`
@@ -8235,7 +8251,6 @@ export async function activate(
         return;
       }
 
-      const index = await loadSkillIndex(context);
       let success = 0;
       let completed = 0;
       let cancelled = false;

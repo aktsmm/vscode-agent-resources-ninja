@@ -44,6 +44,19 @@ function test(name, fn) {
   }
 }
 
+test("batch skill reinstall never reports local-only skills as not-found", () => {
+  const uses = extensionSource.match(/isLocalInstalledSkillMeta\(/g) || [];
+  assert.ok(
+    uses.length >= 3,
+    "update-all skip, cancel filter and QuickPick filter must all classify local-only skills",
+  );
+  assert.match(
+    extensionSource,
+    /if \(!skill && isLocalInstalledSkillMeta\(meta\)\)/,
+    "the index lookup must run before a skill is treated as local-only",
+  );
+});
+
 test("SkillMeta exposes the shared coexistence metadata contracts", () => {
   assert.match(
     skillInstallerSource,
