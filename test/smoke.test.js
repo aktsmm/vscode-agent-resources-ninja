@@ -116,6 +116,15 @@ suite("Agent Resources Ninja smoke test", () => {
         },
       );
       assert.strictEqual(result, false);
+      // The palette/menu entry point must also leave unverified and dirty files alone.
+      assert.ok(
+        (await vscode.commands.getCommands(true)).includes(
+          "resourceNinja.checkWorkspaceSkillUpdates",
+        ),
+      );
+      await vscode.commands.executeCommand(
+        "resourceNinja.checkWorkspaceSkillUpdates",
+      );
       assert.strictEqual(await read(skillUri), original);
       assert.strictEqual(await read(metaUri), originalMeta);
       assert(document.isDirty);
@@ -444,10 +453,10 @@ suite("Agent Resources Ninja smoke test", () => {
     // 高負荷ではピッカーの表示が遅れてキー入力を取りこぼすため、開く待ちとキー間隔に余裕を持たせる。
     const drive = async (commandId, keys) => {
       const pending = vscode.commands.executeCommand(commandId);
-      await pause(2000);
+      await pause(3000);
       for (const key of keys) {
         await vscode.commands.executeCommand(pickerKeys[key]);
-        await pause(400);
+        await pause(700);
       }
       await vscode.commands.executeCommand("workbench.action.closeQuickOpen");
       return pending;
