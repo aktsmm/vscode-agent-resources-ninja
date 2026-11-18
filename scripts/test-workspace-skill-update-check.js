@@ -23,7 +23,7 @@ require.extensions[".ts"] = (module_, filename) => {
     fileName: filename,
   }).outputText, filename);
 };
-const { findChangedWorkspaceSkills } = require(path.join(repo, "src", "workspaceSkillUpdateCheck.ts"));
+const { findChangedWorkspaceSkills, isDocumentInsideDirectory } = require(path.join(repo, "src", "workspaceSkillUpdateCheck.ts"));
 const { RevisionPathMissingError } = require(path.join(repo, "src", "resourceRevision.ts"));
 const { GitHubResponseError } = require(path.join(repo, "src", "githubResponse.ts"));
 Module._load = originalLoad;
@@ -123,6 +123,16 @@ async function main() {
     const summary = await findChangedWorkspaceSkills([workspace], deps);
     assert.equal(summary.complete, false);
     assert.equal(requests.length, 0);
+  }
+  {
+    const dir = path.join("C:", "ws", ".github", "skills", "sample");
+    assert.equal(isDocumentInsideDirectory(dir, path.join(dir, "SKILL.md")), true);
+    assert.equal(isDocumentInsideDirectory(dir, path.join(dir, "..notes.md")), true);
+    assert.equal(isDocumentInsideDirectory(dir, path.join(dir, "sub", "a.md")), true);
+    assert.equal(isDocumentInsideDirectory(dir, dir), true);
+    assert.equal(isDocumentInsideDirectory(dir, path.join(dir, "..", "other", "SKILL.md")), false);
+    assert.equal(isDocumentInsideDirectory(dir, `${dir}-2${path.sep}SKILL.md`), false);
+    assert.equal(isDocumentInsideDirectory(dir, path.join(dir, "..")), false);
   }
   console.log("PASS workspace skill update check");
 }

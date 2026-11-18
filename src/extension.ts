@@ -264,7 +264,7 @@ import {
   type DirtyDocumentGuard,
 } from "./workspaceSkillUpdate";
 import { createWorkspaceSkillUpdateAdapter } from "./workspaceSkillUpdateAdapter";
-import { findChangedWorkspaceSkills, type WorkspaceUpdateCheckSummary } from "./workspaceSkillUpdateCheck";
+import { findChangedWorkspaceSkills, isDocumentInsideDirectory, type WorkspaceUpdateCheckSummary } from "./workspaceSkillUpdateCheck";
 import { createWorkspaceUpdateSchedule } from "./workspaceUpdateSchedule";
 import {
   getGitHubEffectiveFailureKind,
@@ -6827,20 +6827,11 @@ export async function activate(
     (error.kind === "rate-limit" || error.rootCauseKind === "rate-limit");
   const workspaceUpdateGuard: DirtyDocumentGuard = async (target) => {
     try {
-      const normalize = (value: string): string =>
-        process.platform === "win32" ? value.toLowerCase() : value;
-      const root = normalize(path.resolve(target.fsPath));
       for (const document of vscode.workspace.textDocuments) {
-        if (document.uri.scheme !== "file" || !document.isDirty) {
-          continue;
-        }
-        const relative = path.relative(
-          root,
-          normalize(path.resolve(document.uri.fsPath)),
-        );
         if (
-          relative === "" ||
-          (!relative.startsWith("..") && !path.isAbsolute(relative))
+          document.uri.scheme === "file" &&
+          document.isDirty &&
+          isDocumentInsideDirectory(target.fsPath, document.uri.fsPath)
         ) {
           return "dirty";
         }
@@ -6896,6 +6887,7 @@ export async function activate(
       isCancelled: () => false,
     }));
   let workspaceUpdateCheckSignal: AbortSignal | undefined;
+  let workspaceUpdatePresenting = false;
   const workspaceUpdateSchedule = createWorkspaceUpdateSchedule<WorkspaceUpdateCheckSummary>({
     getLastSuccess: () =>
       context.workspaceState.get<unknown>(WORKSPACE_UPDATE_LAST_SUCCESS_KEY),
@@ -6965,9 +6957,25 @@ export async function activate(
     }
     const summary = result.value;
     if (summary.targets.length > 0) {
-      const outcomes = await getWorkspaceUpdateAdapter().present(
-        summary.targets,
-      );
+      if (workspaceUpdatePresenting) {
+        if (interactive) {
+          void vscode.window.showInformationMessage(
+            ja
+              ? "更新の通知がすでに表示されています。先にそちらを操作してください。"
+              : "An update notification is already open. Use it first.",
+          );
+        }
+        return;
+      }
+      workspaceUpdatePresenting = true;
+      let outcomes: Awaited<
+        ReturnType<ReturnType<typeof getWorkspaceUpdateAdapter>["present"]>
+      >;
+      try {
+        outcomes = await getWorkspaceUpdateAdapter().present(summary.targets);
+      } finally {
+        workspaceUpdatePresenting = false;
+      }
       if (outcomes.some((outcome) => outcome.status !== "unchanged")) {
         installedProvider.refresh();
         browseProvider.refresh();

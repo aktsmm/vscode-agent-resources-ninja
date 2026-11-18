@@ -10,6 +10,28 @@ import {
 import type { InstalledSkillScanResult } from "./skillInstaller";
 import type { WorkspaceUpdateTarget } from "./workspaceSkillUpdateUi";
 
+/**
+ * True when a document lives at or below the skill folder. Only a real parent
+ * segment counts as leaving it, so a file named `..notes` inside it stays inside.
+ */
+export function isDocumentInsideDirectory(
+  directoryFsPath: string,
+  documentFsPath: string,
+): boolean {
+  const normalize = (value: string): string =>
+    process.platform === "win32" ? value.toLowerCase() : value;
+  const relative = path.relative(
+    normalize(path.resolve(directoryFsPath)),
+    normalize(path.resolve(documentFsPath)),
+  );
+  return (
+    relative === "" ||
+    (relative !== ".." &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative))
+  );
+}
+
 export interface WorkspaceUpdateCheckDependencies {
   scan(workspace: vscode.Uri): Promise<InstalledSkillScanResult>;
   resolve(target: RevisionTarget): Promise<SourceRevision>;
