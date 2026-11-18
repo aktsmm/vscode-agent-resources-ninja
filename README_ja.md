@@ -331,6 +331,21 @@ view のツールバーと empty state のリンクは現在の view 文脈を�
 
 `plugin` リソースはパッケージ一式としてインストールされます。Workspace は `.github/plugins/<name>/`、User Profile と Global Resource Home は `<Global Resource Home>/plugins/<name>/`、Custom は `<選択したフォルダー>/<name>/` に配置します。
 
+### 参照メモ（必要なときだけ読む、自動では読み込まない）
+
+参照メモは、タスクで必要になったときだけエージェントが読むファイルで、インストラクションとして自動読み込みさせないものです。リポジトリの作者が明示的に指定し、本文の文章、`.instructions.md` という接尾辞、`syncToGlobal` などの公開用メタデータからは推測しません。
+
+| ソース側の指定 | 結果 |
+| --- | --- |
+| `.github/references/` 直下の `*.md` | 参照メモ（kind は `reference`、表示は **参照メモ**） |
+| `.github/references/references.json` に載せたリポジトリ相対パス。例: `{ "references": [".github/instructions/core/terminal-notes.instructions.md"] }` | インストラクションに見えるパスや接尾辞でも参照メモ |
+
+`references.json` の規則: `references` が配列の JSON オブジェクトで、`.md` で終わるリポジトリ相対の POSIX パスを最大 200 件まで書けます（`..`、絶対パス、バックスラッシュは不可）。不正な項目やスキャンしたツリーにないファイルはログに警告を出して無視し、形式が違うファイルは何も指定しなかったものとして扱います。`references.json` 自体はリソースではありません。`.github/references/` の下位フォルダーのファイルは、列挙しない限り参照メモになりません。通常の `*.instructions.md` はインストラクションのままです。
+
+参照メモのインストール先は Global Resource Home だけで、`<Global Resource Home>/references/<元のファイル名>`（既定は `~/.copilot/references/`）になります。ファイル名は `.instructions.md` の接尾辞も含めてそのまま保ち、取得元は `<ファイル名>.resource-ninja.json` に記録します。Workspace、User Profile、Custom は選択肢に出ず、ワークスペースへのインストールは instructions フォルダーへ振り替えず拒否します。生成されるインストラクションブロックやカタログに参照メモは載りません。保存先に別のファイル（別のソース由来、または自分で書いたメモ）がある場合は上書きしません。同じソースからの再インストールは更新として動きます。
+
+以前に同じメモをインストラクションとして入れている場合（例: `~/.copilot/instructions/<name>.instructions.md`）、拡張はそのコピーを移動も削除もしません。内容を確認して不要なら自分で削除してください。残すと、そのメモは引き続きインストラクションとして読み込まれます。ローカルだけのメモがエクスポートされることはありません。
+
 ### Agent Plugin のインストール
 
 VS Code がローカルの Agent Plugin を読み込むのは `chat.pluginLocations` 設定に登録されたフォルダーだけなので、ファイルをコピーしただけでは読み込まれません。plugin のインストール完了後に、この拡張がフォルダーの登録を提案します。

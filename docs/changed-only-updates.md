@@ -10,6 +10,7 @@ A remote-backed resource is compared by the **Git object id of the unit that was
 | --- | --- | --- |
 | skill | Tree id of the skill folder (`remotePath`), or blob for a single-file skill | Local workspace: **Check Workspace Skill Updates** and the 14-day check, then **Update All** or **Details** |
 | agent, prompt, instruction, cursor-rule | Blob id of the single file | Installs record verified baselines; update checks are not yet available |
+| reference | Blob id of the single file | Out of scope: installed only to the global home, so no changed-only update check; reinstalling from the same source refreshes it |
 | hook | Blob id of the hook config file; tree id of the parent folder when scripts are copied with it | Installs record verified baselines; update checks are not yet available |
 | mcp | Blob id of the config file | Installs record verified baselines; update checks and review are not yet available |
 | plugin | Tree id of the plugin root | Excluded. A plugin is a managed copy that can include executable assets, so only an explicit forced reinstall replaces it |

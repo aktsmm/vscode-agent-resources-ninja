@@ -364,6 +364,7 @@ test("language model resource actions are kind-aware and ambiguity-safe", () => 
     "mcp",
     "plugin",
     "cursor-rule",
+    "reference",
     "all",
   ]);
   assert.deepStrictEqual(installTool?.inputSchema?.properties?.kind?.enum, [
@@ -375,6 +376,7 @@ test("language model resource actions are kind-aware and ambiguity-safe", () => 
     "mcp",
     "plugin",
     "cursor-rule",
+    "reference",
   ]);
   assert.deepStrictEqual(uninstallTool?.inputSchema?.properties?.kind?.enum, [
     "skill",
@@ -385,6 +387,7 @@ test("language model resource actions are kind-aware and ambiguity-safe", () => 
     "mcp",
     "plugin",
     "cursor-rule",
+    "reference",
   ]);
 
   assert.match(mcpToolsSource, /normalizeKindFilter/);

@@ -71,6 +71,7 @@ const RESOURCE_KIND_ORDER: ResourceKind[] = [
   "mcp",
   "plugin",
   "cursor-rule",
+  "reference",
 ];
 
 type RemoteResourceViewMode = "repositoryFirst" | "resourceTypeFirst";
@@ -117,6 +118,8 @@ function formatResourceKindCountSummary(
         return count === 1 ? "plugin" : "plugins";
       case "cursor-rule":
         return count === 1 ? "Cursor rule" : "Cursor rules";
+      case "reference":
+        return count === 1 ? "reference" : "references";
       default:
         return kind;
     }

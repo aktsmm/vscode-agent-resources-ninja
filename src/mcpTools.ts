@@ -207,6 +207,7 @@ const RESOURCE_KINDS: readonly string[] = [
   "mcp",
   "plugin",
   "cursor-rule",
+  "reference",
 ];
 
 function normalizeKindFilter(kind?: string): ResourceKind | undefined {
@@ -642,6 +643,17 @@ class SkillInstallTool implements vscode.LanguageModelTool<InstallToolInput> {
     }
 
     const context = requireExtContext();
+
+    if (getResourceKind(skill) === "reference") {
+      return new vscode.LanguageModelToolResult([
+        new vscode.LanguageModelTextPart(
+          localizeMcpText(
+            `⚠️ "${skill.name}" is a reference note and can only be installed to the Global Resource Home. This tool installs into the workspace, so nothing was changed. Ask the user to run the Install Resource command and choose Global Resource Home.`,
+            `⚠️ 「${skill.name}」は参照メモで、グローバル リソースにだけインストールできます。このツールはワークスペースへインストールするため、何も変更していません。ユーザーに Install Resource コマンドでグローバル リソースを選んでもらってください。`,
+          ),
+        ),
+      ]);
+    }
 
     // 既存の配置先は、ローカルで編集した内容を含む可能性があるので確認なしに上書きしない。
     const existingTarget = getResourceTargetUri(

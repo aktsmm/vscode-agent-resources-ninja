@@ -18,6 +18,7 @@ import {
   getFallbackResourceName,
   getResourceMetadataPath,
   isBuiltInResourcePath,
+  isGlobalHomeReferencePath,
   isIncompleteSkillContent,
   isPluginManifestPath,
   isPluginMarkerDirectoryName,
@@ -138,6 +139,7 @@ const RESOURCE_DIRECTORY_NAMES = new Set([
   "mcp",
   "plugins",
   "prompts",
+  "references",
   "rules",
   "skills",
 ]);
@@ -830,7 +832,16 @@ async function parseResourceFile(
   const detectionPath = root.relativeBase
     ? `${root.relativeBase}/${relativePath}`
     : relativePath;
-  const kind = detectResourceKindFromPath(detectionPath);
+  // `references/` in the selected global home is where reference notes are installed,
+  // so the directory decides the kind and the suffix of the file name never does.
+  const kind =
+    root.scope === "globalHome" &&
+    !root.builtInOnly &&
+    !root.alternateHome &&
+    !root.relativeBase &&
+    isGlobalHomeReferencePath(relativePath)
+      ? "reference"
+      : detectResourceKindFromPath(detectionPath);
   if (!kind) {
     return undefined;
   }

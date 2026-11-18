@@ -1009,6 +1009,45 @@ test("invocation fields survive the shared index round trip", async () => {
   fs.rmSync(sharedIndexPath, { force: true });
 });
 
+// Reference notes ride the shared index so a reload keeps them, but a file that
+// holds none must stay readable by an extension that predates the kind.
+test("reference notes survive the shared index and leave no trace when absent", async () => {
+  const reference = {
+    name: "terminal-notes",
+    source: "src",
+    path: ".github/references/terminal-notes.md",
+    kind: "reference",
+    description: "notes",
+  };
+  const withReference = sharedManifest.createEmptySharedResourceIndex("test.extension");
+  withReference.byKind.reference = [reference];
+  fs.mkdirSync(sharedDir, { recursive: true });
+  assert.deepStrictEqual(await store.writeSharedResourceIndex(withReference), {
+    status: "written",
+  });
+  const read = await store.readSharedResourceIndexResult();
+  assert.strictEqual(read.status, "valid");
+  const applied = store.applySharedResourceIndexToSkillIndex(
+    { version: "1", lastUpdated: "2026-01-01", sources: [], skills: [], categories: [] },
+    read.index,
+  );
+  assert.deepStrictEqual(
+    applied.skills.map((resource) => [resource.name, resource.kind]),
+    [["terminal-notes", "reference"]],
+  );
+
+  await store.writeSharedResourceIndex(
+    sharedManifest.createEmptySharedResourceIndex("test.extension"),
+  );
+  const onDisk = JSON.parse(fs.readFileSync(sharedIndexPath, "utf8"));
+  assert.strictEqual(
+    Object.prototype.hasOwnProperty.call(onDisk.byKind, "reference"),
+    false,
+    "an index without reference notes must not gain a new key",
+  );
+  fs.rmSync(sharedIndexPath, { force: true });
+});
+
 async function main() {
   let failed = 0;
   for (const [name, fn] of tests) {

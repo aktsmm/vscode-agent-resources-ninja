@@ -32,6 +32,7 @@ const REINSTALL_RESOURCE_KINDS: readonly string[] = [
   "mcp",
   "plugin",
   "cursor-rule",
+  "reference",
 ];
 const REINSTALL_STAGES: readonly string[] = [
   "not-started",

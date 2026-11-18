@@ -119,6 +119,7 @@ export function createEmptySharedResourceBuckets(): Record<
     mcp: [],
     plugin: [],
     "cursor-rule": [],
+    reference: [],
   };
 }
 

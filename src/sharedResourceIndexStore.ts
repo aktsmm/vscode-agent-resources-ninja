@@ -49,6 +49,15 @@ export type SharedResourceIndexReadResult =
   | { status: "valid"; index: SharedResourceIndex };
 
 /**
+ * Every kind the shared index carries. Reference notes are indexed here so they
+ * survive a reload from the shared file, but they are not part of the coexistence
+ * beacon's kind list, which the sibling extension validates and must not change.
+ */
+function getSharedIndexKinds(): ResourceKind[] {
+  return [...RESOURCE_NINJA_KINDS, "reference"];
+}
+
+/**
  * Set once this extension's own sources have reached `sources.json`. Before that,
  * the shared file cannot be read as a statement about sources it never saw.
  */
@@ -212,7 +221,7 @@ export function isUsableSharedResourceEntry(
     (candidate.remotePath === undefined ||
       isSafeResourcePath(candidate.remotePath)) &&
     (candidate.kind === undefined ||
-      RESOURCE_NINJA_KINDS.includes(candidate.kind as ResourceKind)) &&
+      getSharedIndexKinds().includes(candidate.kind as ResourceKind)) &&
     isSafeResourceUrl(candidate.url) &&
     isSafeResourceUrl(candidate.rawUrl)
   );
@@ -224,7 +233,7 @@ function countSharedResourceEntries(raw: unknown): number | undefined {
   }
   const candidate = raw as Partial<SharedResourceIndex>;
   let entryCount = 0;
-  for (const kind of RESOURCE_NINJA_KINDS) {
+  for (const kind of getSharedIndexKinds()) {
     const entries = candidate.byKind?.[kind];
     if (Array.isArray(entries)) {
       entryCount += entries.length;
@@ -349,7 +358,7 @@ function normalizeSharedResourceIndex(
   }
 
   const normalizedByKind = createEmptySharedResourceBuckets();
-  for (const kind of RESOURCE_NINJA_KINDS) {
+  for (const kind of getSharedIndexKinds()) {
     const entries = candidate.byKind?.[kind];
     normalizedByKind[kind] = Array.isArray(entries)
       ? entries.filter(isUsableSharedResourceEntry)
@@ -376,7 +385,7 @@ function normalizeSharedResourceIndex(
 
 function flattenSharedResources(index: SharedResourceIndex): Skill[] {
   const resources: Skill[] = [];
-  for (const kind of RESOURCE_NINJA_KINDS) {
+  for (const kind of getSharedIndexKinds()) {
     for (const resource of index.byKind[kind]) {
       resources.push({ ...resource, kind: resource.kind || kind });
     }
@@ -572,7 +581,15 @@ export async function writeSharedResourceIndex(
 
   // Serialized once: a second stringify would let the checked text and the written
   // text drift apart.
-  const payload = JSON.stringify(normalizedIndex, null, 2);
+  // An index without reference notes stays byte-compatible with readers that predate them.
+  const { reference: referenceEntries, ...otherKinds } = normalizedIndex.byKind;
+  const payload = JSON.stringify(
+    referenceEntries.length > 0
+      ? normalizedIndex
+      : { ...normalizedIndex, byKind: otherKinds },
+    null,
+    2,
+  );
   const oversized = describeOversizedSharedResourceIndex(
     new TextEncoder().encode(payload).length,
   );

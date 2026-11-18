@@ -35,6 +35,8 @@ import {
   getSkillRootDirectoriesFromPaths,
   isNestedResourcePathUnderSkillRoot,
   isHookConfigFilePath,
+  isReferenceManifestPath,
+  parseReferenceManifest,
 } from "./resourceKinds";
 export {
   AGENT_PLUGINS_MANIFEST_SCHEMA,
@@ -933,8 +935,9 @@ function getRelativePathFromPluginRoot(
 function detectResourceKindWithPluginRoots(
   filePath: string,
   pluginRoots: string[],
+  explicitReferencePaths?: ReadonlySet<string>,
 ): ResourceKind | undefined {
-  const kind = detectResourceKindFromPath(filePath);
+  const kind = detectResourceKindFromPath(filePath, { explicitReferencePaths });
   if (kind) {
     return kind;
   }
@@ -951,6 +954,65 @@ function detectResourceKindWithPluginRoots(
   }
 
   return undefined;
+}
+
+/**
+ * Reads `.github/references/references.json` when the tree holds one and returns the
+ * repository paths it opts in. A listed path only counts if it is a file in the
+ * scanned tree, so the manifest can neither invent resources nor reach outside the
+ * source's include/exclude paths.
+ */
+async function readExplicitReferencePaths(
+  tree: Array<{ path: string; type: string }>,
+  allowedBlobFiles: Array<{ path: string; type: string }>,
+  owner: string,
+  repoName: string,
+  branch: string,
+  token?: string,
+): Promise<Set<string>> {
+  const manifest = tree.find(
+    (item) => item.type === "blob" && isReferenceManifestPath(item.path),
+  );
+  if (!manifest) {
+    return new Set();
+  }
+  const content = await fetchGitHubTextContent(
+    owner,
+    repoName,
+    branch,
+    manifest.path,
+    token,
+  );
+  if (content === undefined) {
+    logger.warn(
+      `[Resource Ninja] ${owner}/${repoName}: ${manifest.path} could not be read; no explicit references were applied.`,
+    );
+    return new Set();
+  }
+  const parsed = parseReferenceManifest(content);
+  if (parsed.error) {
+    logger.warn(
+      `[Resource Ninja] ${owner}/${repoName}: ${manifest.path} ignored (${parsed.error}).`,
+    );
+    return new Set();
+  }
+  if (parsed.rejected.length > 0) {
+    logger.warn(
+      `[Resource Ninja] ${owner}/${repoName}: ${manifest.path} has ${parsed.rejected.length} invalid entr${parsed.rejected.length === 1 ? "y" : "ies"} that were ignored.`,
+    );
+  }
+  const blobPaths = new Set(allowedBlobFiles.map((item) => item.path));
+  const explicitPaths = new Set<string>();
+  for (const listedPath of parsed.paths) {
+    if (blobPaths.has(listedPath)) {
+      explicitPaths.add(listedPath);
+    } else {
+      logger.warn(
+        `[Resource Ninja] ${owner}/${repoName}: ${manifest.path} lists ${listedPath}, which is not a scanned file; ignored.`,
+      );
+    }
+  }
+  return explicitPaths;
 }
 
 /**
@@ -978,8 +1040,20 @@ async function processTreeResponse(
   const pluginRoots = Array.from(pluginManifestInfoByRoot.keys()).sort(
     (a, b) => b.length - a.length,
   );
+  const explicitReferencePaths = await readExplicitReferencePaths(
+    data.tree,
+    allowedBlobFiles,
+    owner,
+    repoName,
+    branch,
+    token,
+  );
   const resourceFiles = allowedBlobFiles.filter((item) => {
-    const kind = detectResourceKindWithPluginRoots(item.path, pluginRoots);
+    const kind = detectResourceKindWithPluginRoots(
+      item.path,
+      pluginRoots,
+      explicitReferencePaths,
+    );
     return (
       !!kind &&
       !isNestedResourcePathUnderSkillRoot(item.path, kind, skillRootDirectories)
@@ -1080,7 +1154,11 @@ async function processTreeResponse(
     FETCH_CONCURRENCY,
     async (file): Promise<Skill | undefined> => {
       try {
-        const kind = detectResourceKindWithPluginRoots(file.path, pluginRoots);
+        const kind = detectResourceKindWithPluginRoots(
+          file.path,
+          pluginRoots,
+          explicitReferencePaths,
+        );
         if (!kind) {
           return undefined;
         }

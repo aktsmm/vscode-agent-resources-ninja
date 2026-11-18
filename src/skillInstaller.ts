@@ -665,6 +665,37 @@ async function deleteResourceInstallMetadata(
   }
 }
 
+/**
+ * A reference note may be refreshed from the source that installed it. A file with
+ * the same name from anywhere else (another source, a hand-written note, a file whose
+ * sidecar is unreadable) is the user's to review, so it is never overwritten.
+ */
+async function assertReferenceTargetAvailable(
+  targetUri: vscode.Uri,
+  skill: Skill,
+): Promise<void> {
+  if (!(await uriExists(targetUri))) {
+    return;
+  }
+  const metadata = await readJsonObject<Partial<ResourceInstallMeta>>(
+    getResourceMetadataUri(targetUri, "reference"),
+  );
+  if (
+    metadata.status === "loaded" &&
+    metadata.value.kind === "reference" &&
+    metadata.value.source ===
+      normalizeSkillMetaSource({
+        source: skill.source,
+        remotePath: skill.path,
+      })
+  ) {
+    return;
+  }
+  throw new Error(
+    messages.referenceInstallConflict(skill.name, targetUri.fsPath),
+  );
+}
+
 export async function removeOwnedLegacyPluginResource(
   targetUri: vscode.Uri,
   skill: Skill,
@@ -793,6 +824,35 @@ export function getResourceTargetUri(
       ".github",
       "plugins",
       pluginFolderName,
+    );
+  }
+
+  if (kind === "reference") {
+    // Reference notes are read on demand from the global home, so no other scope
+    // may stand in for it, and in particular never an instructions directory.
+    const homeDirectory = getConfiguredGlobalHomeDirectory(config);
+    if (targetScope !== "globalHome" && targetScope !== "userData") {
+      throw new Error(
+        messages.referenceScopeUnsupported(
+          skill.name,
+          `${homeDirectory}/references`,
+        ),
+      );
+    }
+    if (
+      !fileName.toLowerCase().endsWith(".md") ||
+      !isSafePathSegment(fileName)
+    ) {
+      throw new Error(`Unsafe reference file name: ${fileName}`);
+    }
+    return vscode.Uri.joinPath(
+      resolveConfiguredUri(
+        workspaceUri,
+        homeDirectory,
+        DEFAULT_GLOBAL_HOME_DIRECTORY,
+      ),
+      "references",
+      fileName,
     );
   }
 
@@ -1663,6 +1723,10 @@ export async function installSkill(
   const resourceKind = getResourceKind(skill);
   const skillPath = getResourceTargetUri(workspaceUri, config, skill, options);
   const installRootUri = getResourceInstallRootUri(skillPath);
+
+  if (resourceKind === "reference") {
+    await assertReferenceTargetAvailable(skillPath, skill);
+  }
 
   assertRealPathStrictlyInside(
     skillPath,

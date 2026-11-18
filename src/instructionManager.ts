@@ -244,6 +244,12 @@ const REF_CATALOG_DESCRIPTORS: Record<ResourceKind, RefCatalogDescriptor> = {
     sectionTitle: "Cursor Rules",
     catalogTitle: "Cursor Rules",
   },
+  // Reference notes are read on demand and never listed in generated output;
+  // RESOURCE_KIND_ORDER omits them, so this entry only completes the record.
+  reference: {
+    sectionTitle: "References",
+    catalogTitle: "References",
+  },
 };
 
 /**
@@ -537,6 +543,7 @@ function getLegacyRefCatalogFileUri(
     mcp: "mcp.md",
     plugin: "plugins.md",
     "cursor-rule": "cursor-rules.md",
+    reference: "references.md",
   };
 
   return vscode.Uri.joinPath(catalogRootUri, fileNameMap[kind]);

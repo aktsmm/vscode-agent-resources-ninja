@@ -23,7 +23,8 @@ export type ResourceKind =
   | "hook"
   | "mcp"
   | "plugin"
-  | "cursor-rule";
+  | "cursor-rule"
+  | "reference";
 
 export function getResourceKind(resource: Pick<Skill, "kind">): ResourceKind {
   return resource.kind || "skill";
@@ -48,6 +49,8 @@ export function getResourceKindLabel(
       return isJa ? "プラグイン" : "Plugin";
     case "cursor-rule":
       return isJa ? "Cursor ルール" : "Cursor Rule";
+    case "reference":
+      return isJa ? "参照メモ" : "Reference";
     case "skill":
     default:
       return isJa ? "スキル" : "Skill";
@@ -70,6 +73,8 @@ export function getResourceKindIcon(kind: ResourceKind): string {
       return "extensions";
     case "cursor-rule":
       return "settings";
+    case "reference":
+      return "book";
     case "skill":
     default:
       return "package";
@@ -290,6 +295,7 @@ const INDEX_RESOURCE_KINDS: readonly string[] = [
   "mcp",
   "plugin",
   "cursor-rule",
+  "reference",
 ];
 const INDEX_DESCRIPTION_MAX_LENGTH = 4_000;
 const INDEX_CATEGORY_MAX_LENGTH = 64;

@@ -4074,6 +4074,23 @@ export async function activate(
       return targetUri.fsPath;
     };
 
+    // Reference notes install only to the Copilot global home; no other scope is offered.
+    if (getResourceKind(skill) === "reference") {
+      const referenceTarget = await vscode.window.showQuickPick(
+        [
+          {
+            label: `$(home) ${messages.installTargetCopilotHomeLabel()}`,
+            description: messages.installTargetCopilotHomeDescription(
+              previewTargetPath(skill, "globalHome"),
+            ),
+            targetScope: "globalHome" as InstallTargetScope,
+          },
+        ],
+        { placeHolder: messages.installTargetPlaceholder(skill.name) },
+      );
+      return referenceTarget ? { targetScope: "globalHome" } : undefined;
+    }
+
     const userDataPreview = previewTargetPath(skill, "userData");
     const globalHomePreview = previewTargetPath(skill, "globalHome");
 
@@ -4176,7 +4193,7 @@ export async function activate(
     | undefined
   > {
     const defaultTarget = getDefaultInstallTarget();
-    if (defaultTarget === "ask") {
+    if (defaultTarget === "ask" || getResourceKind(skill) === "reference") {
       return pickInstallTarget(skill);
     }
     if (defaultTarget === "userData" && hasUserDataGlobalHomeAlias(skill)) {
@@ -6532,6 +6549,7 @@ export async function activate(
         "mcp",
         "plugin",
         "cursor-rule",
+        "reference",
       ];
       let kindFilter: ResourceKind | undefined;
 

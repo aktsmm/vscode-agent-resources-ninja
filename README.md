@@ -336,6 +336,21 @@ The install picker shows a destination preview for the selected resource kind be
 
 A `plugin` resource is installed as a whole package: Workspace puts it in `.github/plugins/<name>/`, User Profile and Global Resource Home put it in `<Global Resource Home>/plugins/<name>/`, and Custom puts it in `<chosen folder>/<name>/`.
 
+### Reference Notes (on-demand, not auto-loaded)
+
+A reference note is a file that agents read only when a task needs it, so it must not be loaded as an instruction. Repository authors mark these files explicitly; the extension never guesses from prose, a `.instructions.md` suffix, or publication metadata such as `syncToGlobal`.
+
+| Source convention                                                                                                                                          | Result                                                           |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| A top-level `*.md` file in `.github/references/`                                                                                                           | Reference note (kind `reference`, shown as **Reference**)        |
+| A repository-relative path listed in `.github/references/references.json`, for example `{ "references": [".github/instructions/core/terminal-notes.instructions.md"] }` | Reference note, even when the path or suffix looks like an instruction |
+
+`references.json` rules: a JSON object whose `references` is an array of up to 200 repository-relative POSIX paths ending in `.md` (no `..`, absolute or backslash paths). Entries that are invalid or not files in the scanned tree are ignored with a log warning, and a malformed file opts nothing in. `references.json` itself is not a resource. Files in nested folders of `.github/references/` are not references unless listed. Ordinary `*.instructions.md` files stay instructions.
+
+Reference notes install only to the Global Resource Home, as `<Global Resource Home>/references/<exact file name>` (`~/.copilot/references/` by default). The file name is kept as-is, including a `.instructions.md` suffix, and a `<file>.resource-ninja.json` sidecar records the source. Workspace, User Profile and Custom targets are not offered; a workspace install is refused instead of falling back to an instructions folder. Generated instruction blocks and catalogs never list references. A different file already at the destination (another source, or a note you wrote) is not overwritten; reinstalling from the same source refreshes it.
+
+If you installed the same note earlier as an instruction (for example `~/.copilot/instructions/<name>.instructions.md`), the extension does not move or delete that copy. Review it and remove it yourself if it is no longer wanted, otherwise the note keeps loading as an instruction. Local-only notes are never exported.
+
 ### Installing an Agent Plugin
 
 VS Code loads a local Agent Plugin only from a folder listed in its `chat.pluginLocations` setting, so copying the files is not enough on its own. After a plugin finishes installing, this extension offers to add that folder for you.

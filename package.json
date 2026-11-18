@@ -113,6 +113,7 @@
                 "mcp",
                 "plugin",
                 "cursor-rule",
+                "reference",
                 "all"
               ],
               "description": "Optional resource kind filter. Use 'all' or omit to search all resource kinds."
@@ -156,7 +157,8 @@
                 "hook",
                 "mcp",
                 "plugin",
-                "cursor-rule"
+                "cursor-rule",
+                "reference"
               ],
               "description": "Optional resource kind filter used to disambiguate resources with similar names."
             },
@@ -254,7 +256,8 @@
                 "hook",
                 "mcp",
                 "plugin",
-                "cursor-rule"
+                "cursor-rule",
+                "reference"
               ],
               "description": "Optional installed resource kind filter used to disambiguate resources with similar names."
             },
@@ -416,7 +419,8 @@
                 "hook",
                 "mcp",
                 "plugin",
-                "cursor-rule"
+                "cursor-rule",
+                "reference"
               ],
               "description": "Optional resource kind filter used to disambiguate resources with the same name."
             },

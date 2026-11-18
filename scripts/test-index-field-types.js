@@ -156,6 +156,7 @@ async function test(name, fn) {
       assert.strictEqual(sanitizeIndexResource(bad), undefined, JSON.stringify(bad));
     }
     assert.strictEqual(sanitizeIndexResource({ ...good, kind: "agent" }).kind, "agent");
+    assert.strictEqual(sanitizeIndexResource({ ...good, kind: "reference" }).kind, "reference");
   });
 
   await test("sanitizing twice changes nothing (read and write agree)", () => {

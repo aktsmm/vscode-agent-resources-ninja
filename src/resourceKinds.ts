@@ -67,12 +67,115 @@ export function detectPluginChildResourceKind(
   return undefined;
 }
 
+/** Directory whose top-level `*.md` files are on-demand reference notes. */
+export const REFERENCES_DIRECTORY = ".github/references";
+/** Opt-in list for reference notes that live at paths outside that directory. */
+export const REFERENCE_MANIFEST_PATH = `${REFERENCES_DIRECTORY}/references.json`;
+export const MAX_REFERENCE_MANIFEST_ENTRIES = 200;
+
+const REFERENCE_DIRECTORY_FILE_PATTERN = /^\.github\/references\/[^/]+\.md$/;
+const GLOBAL_HOME_REFERENCE_PATH_PATTERN = /^references\/[^/]+\.md$/;
+
+export function isReferenceManifestPath(resourcePath: string): boolean {
+  return (
+    resourcePath.replace(/\\/g, "/").toLowerCase() ===
+    REFERENCE_MANIFEST_PATH
+  );
+}
+
+/**
+ * A file in the global home's `references/` directory is a reference note, whatever
+ * its suffix says. Only the directory decides; the path is relative to that home.
+ */
+export function isGlobalHomeReferencePath(relativePath: string): boolean {
+  const lowerPath = relativePath.toLowerCase().replace(/\\/g, "/");
+  return (
+    GLOBAL_HOME_REFERENCE_PATH_PATTERN.test(lowerPath) &&
+    !isResourceMetadataSidecarPath(lowerPath)
+  );
+}
+
+function isValidReferenceManifestPath(value: string): boolean {
+  return (
+    value.length > 0 &&
+    value.length <= 500 &&
+    value.toLowerCase().endsWith(".md") &&
+    !value.startsWith("/") &&
+    !/^[a-zA-Z]:/.test(value) &&
+    !value.includes("\\") &&
+    // eslint-disable-next-line no-control-regex
+    !/[\u0000-\u001f\u007f]/.test(value) &&
+    value
+      .split("/")
+      .every((segment) => segment !== "" && segment !== "." && segment !== "..")
+  );
+}
+
+/**
+ * Parses `.github/references/references.json`: `{ "references": ["<repo path>.md"] }`.
+ * Anything that is not a clean repository-relative `.md` path is rejected, and a
+ * manifest that is not shaped as documented yields no references at all, so a
+ * malformed file can never opt a file in by accident.
+ */
+export function parseReferenceManifest(content: string): {
+  paths: string[];
+  rejected: string[];
+  error?: string;
+} {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content.replace(/^\uFEFF/, ""));
+  } catch {
+    return { paths: [], rejected: [], error: "not valid JSON" };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { paths: [], rejected: [], error: "not a JSON object" };
+  }
+  const entries = (parsed as Record<string, unknown>).references;
+  if (!Array.isArray(entries)) {
+    return { paths: [], rejected: [], error: '"references" is not an array' };
+  }
+  if (entries.length > MAX_REFERENCE_MANIFEST_ENTRIES) {
+    return {
+      paths: [],
+      rejected: [],
+      error: `more than ${MAX_REFERENCE_MANIFEST_ENTRIES} entries`,
+    };
+  }
+  const paths: string[] = [];
+  const rejected: string[] = [];
+  for (const entry of entries) {
+    if (typeof entry === "string" && isValidReferenceManifestPath(entry)) {
+      if (!paths.includes(entry)) {
+        paths.push(entry);
+      }
+    } else {
+      rejected.push(typeof entry === "string" ? entry : String(entry));
+    }
+  }
+  return { paths, rejected };
+}
+
+export interface ResourceKindDetectionOptions {
+  /** Repository paths a `references.json` explicitly marked as reference notes. */
+  explicitReferencePaths?: ReadonlySet<string>;
+}
+
 export function detectResourceKindFromPath(
   resourcePath: string,
+  options: ResourceKindDetectionOptions = {},
 ): ResourceKind | undefined {
   const lowerPath = resourcePath.toLowerCase().replace(/\\/g, "/");
   if (isResourceMetadataSidecarPath(lowerPath)) {
     return undefined;
+  }
+  // Only an explicit marker makes a reference; this must stay ahead of every
+  // suffix rule below so a `.instructions.md` name never decides the kind.
+  if (
+    REFERENCE_DIRECTORY_FILE_PATTERN.test(lowerPath) ||
+    options.explicitReferencePaths?.has(resourcePath.replace(/\\/g, "/"))
+  ) {
+    return "reference";
   }
   if (isPluginManifestPath(lowerPath)) {
     return "plugin";
@@ -1422,6 +1525,9 @@ export function getFallbackResourceName(
   }
 
   const fileName = pathParts[pathParts.length - 1] || "Unknown";
+  if (kind === "reference") {
+    return fileName.replace(/\.instructions\.md$/i, "").replace(/\.md$/i, "");
+  }
   return fileName
     .replace(/\.(agent|instructions|prompt)\.md$/i, "")
     .replace(/\.mdc$/i, "")
@@ -1445,6 +1551,8 @@ export function getDefaultResourceCategories(kind: ResourceKind): string[] {
       return ["plugins"];
     case "cursor-rule":
       return ["cursor-rules"];
+    case "reference":
+      return ["references"];
     case "skill":
     default:
       return [];
