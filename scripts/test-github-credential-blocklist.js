@@ -496,6 +496,26 @@ async function runEscalationTests() {
 }
 
 async function runAttributionTests() {
+  await test("a rate-limited response never walks to another credential", async () => {
+    let fallbackCalls = 0;
+    resolveFallback = async () => {
+      fallbackCalls++;
+      return { token: "second-token", source: "gh-cli" };
+    };
+    const { request, calls } = createRecordingRequest([
+      () => rateLimitResponse(),
+      () => rateLimitResponse(),
+    ]);
+    const response = await githubFetch.fetchGitHubWithOptionalAuthRetry(API_URL, {
+      accept: "application/json",
+      token: "first-token",
+      request,
+    });
+    assert.strictEqual(response.status, 403);
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(fallbackCalls, 0);
+  });
+
   await test("a rate-limited finish keeps its kind but reports the SSO root cause", async () => {
     resolveFallback = async () => ({ token: "second-token", source: "gh-cli" });
     const { request } = createRecordingRequest([

@@ -17,7 +17,9 @@ const repoRoot = path.resolve(__dirname, "..");
 // the reason must be recorded here.
 const MIRROR_DEBT_BUDGET = {
   "audit-resource-installability.js": 3,
-  "test-microsoft-install-e2e.js": 1,
+  // The existing e2e copy became visible when downloadDirectory was exported for
+  // the staged updater; no new copy was introduced.
+  "test-microsoft-install-e2e.js": 2,
   "test-whenToUse.js": 1,
   // Raised from 2 to 4 on 2026-08-24: the detector moved from a `function`-only
   // regex to an AST walk, so the arrow-form copies of getDefaultBranch and

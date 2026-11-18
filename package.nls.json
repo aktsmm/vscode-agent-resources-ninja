@@ -21,6 +21,7 @@
   "command.uninstall": "Uninstall Resource",
   "command.showInstalled": "Show Workspace Resources",
   "command.refresh": "Refresh View",
+  "command.checkWorkspaceSkillUpdates": "Check Workspace Skill Updates",
   "command.reinstallAll": "Reinstall All Workspace Skills",
   "command.reinstall": "Reinstall Resource",
   "command.reinstallResourceGroup": "Reinstall Resource Group",

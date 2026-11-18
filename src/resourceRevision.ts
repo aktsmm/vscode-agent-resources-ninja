@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { fetchGitHubWithOptionalAuthRetry } from "./githubFetch";
 import {
   createGitHubResponseError,
@@ -29,11 +30,36 @@ export interface RevisionTarget {
   remotePath: string;
 }
 
+export interface RevisionFile {
+  path: string;
+  sha: string;
+  mode: "100644" | "100755";
+}
+
+export interface RevisionResolver {
+  (target: RevisionTarget): Promise<SourceRevision>;
+  listFiles(revision: SourceRevision): Promise<RevisionFile[]>;
+}
+
 export type RevisionStatus =
   | "unchanged"
   | "changed"
   | "no-baseline"
   | "different-source";
+
+/** Git hashes the object header and the exact bytes, not the decoded text. */
+export function matchesGitBlob(
+  bytes: Uint8Array,
+  expectedSha: string,
+): boolean {
+  return (
+    sha(expectedSha) &&
+    createHash("sha1")
+      .update(`blob ${bytes.byteLength}\0`)
+      .update(bytes)
+      .digest("hex") === expectedSha.toLowerCase()
+  );
+}
 
 export class RevisionPathMissingError extends Error {
   constructor() {
@@ -168,12 +194,17 @@ interface TreeEntry {
   path: string;
   sha: string;
   type: "tree" | "blob" | "commit";
+  mode: string;
 }
 
 interface Tree {
   entries: TreeEntry[];
   truncated: boolean;
 }
+
+const MAX_REVISION_FILES = 10_000;
+const MAX_REVISION_DIRECTORIES = 10_000;
+const MAX_REVISION_DEPTH = 64;
 
 function parseTree(
   value: unknown,
@@ -215,6 +246,7 @@ function parseTree(
       path: entry.path,
       sha: entry.sha.toLowerCase(),
       type: entry.type as TreeEntry["type"],
+      mode: entry.mode as string,
     };
   });
   return { entries, truncated: value.truncated };
@@ -229,7 +261,7 @@ export function createRevisionResolver(
   token?: string,
   signal?: AbortSignal,
   request: typeof fetchGitHubWithOptionalAuthRetry = fetchGitHubWithOptionalAuthRetry,
-): (target: RevisionTarget) => Promise<SourceRevision> {
+): RevisionResolver {
   const snapshots = new Map<
     string,
     Promise<{ commitSha: string; rootSha: string; tree: Tree }>
@@ -267,7 +299,7 @@ export function createRevisionResolver(
     return pending;
   }
 
-  return async (target) => {
+  const resolve = async (target: RevisionTarget): Promise<SourceRevision> => {
     try {
       assertActive(signal);
       if (
@@ -309,7 +341,7 @@ export function createRevisionResolver(
       assertActive(signal);
       let selected: TreeEntry | undefined =
         target.remotePath === ""
-          ? { path: "", sha: current.rootSha, type: "tree" }
+          ? { path: "", sha: current.rootSha, type: "tree", mode: "040000" }
           : undefined;
       if (target.remotePath && current.tree.truncated) {
         // A truncated listing cannot be searched, so walk the path one level at a time.
@@ -338,7 +370,10 @@ export function createRevisionResolver(
       if (!selected) {
         throw new RevisionPathMissingError();
       }
-      if (selected.type !== "tree" && selected.type !== "blob") {
+      if (
+        (selected.type !== "tree" && selected.type !== "blob") ||
+        selected.mode === "120000"
+      ) {
         throw failure();
       }
       return {
@@ -365,4 +400,98 @@ export function createRevisionResolver(
       throw failure();
     }
   };
+
+  resolve.listFiles = async (revision: SourceRevision): Promise<RevisionFile[]> => {
+    const parsed = parseSourceRevision(revision);
+    if (!parsed || parsed.kind !== "tree") {
+      throw failure();
+    }
+    const selected = await resolve({
+      owner: parsed.owner,
+      repo: parsed.repo,
+      branch: parsed.ref,
+      remotePath: parsed.remotePath,
+    });
+    if (
+      selected.commitSha !== parsed.commitSha ||
+      selected.contentSha !== parsed.contentSha ||
+      selected.kind !== "tree"
+    ) {
+      throw failure();
+    }
+
+    const base = `https://api.github.com/repos/${parsed.owner.toLowerCase()}/${parsed.repo.toLowerCase()}`;
+    const key = `${base}/commits/${encodeURIComponent(parsed.ref)}`;
+    const snapshot = await snapshots.get(key);
+    if (!snapshot) {
+      throw failure();
+    }
+    const files: RevisionFile[] = [];
+    const addFile = (entry: TreeEntry, relativePath: string): void => {
+      if (entry.type === "tree") {
+        return;
+      }
+      if (
+        entry.type !== "blob" ||
+        entry.mode === "120000" ||
+        relativePath.split("/").length > MAX_REVISION_DEPTH ||
+        files.length >= MAX_REVISION_FILES
+      ) {
+        throw failure();
+      }
+      files.push({
+        path: relativePath,
+        sha: entry.sha,
+        mode: entry.mode as RevisionFile["mode"],
+      });
+    };
+
+    if (!snapshot.tree.truncated) {
+      const prefix = parsed.remotePath ? `${parsed.remotePath}/` : "";
+      for (const entry of snapshot.tree.entries) {
+        if (entry.path.startsWith(prefix) && entry.path !== parsed.remotePath) {
+          addFile(entry, entry.path.slice(prefix.length));
+        }
+      }
+    } else {
+      let directoryCount = 0;
+      const visit = async (
+        treeSha: string,
+        prefix: string,
+        depth: number,
+        ancestors: ReadonlySet<string>,
+      ): Promise<void> => {
+        directoryCount++;
+        if (
+          directoryCount > MAX_REVISION_DIRECTORIES ||
+          depth > MAX_REVISION_DEPTH ||
+          ancestors.has(treeSha)
+        ) {
+          throw failure();
+        }
+        const listing = await tree(base, treeSha, false);
+        if (listing.truncated) {
+          throw failure();
+        }
+        for (const entry of listing.entries) {
+          const relativePath = `${prefix}${entry.path}`;
+          if (entry.type === "tree") {
+            await visit(
+              entry.sha,
+              `${relativePath}/`,
+              depth + 1,
+              new Set([...ancestors, treeSha]),
+            );
+          } else {
+            addFile(entry, relativePath);
+          }
+        }
+      };
+      await visit(parsed.contentSha, "", 0, new Set());
+    }
+    assertActive(signal);
+    return files;
+  };
+
+  return resolve;
 }

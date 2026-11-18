@@ -280,6 +280,21 @@ async function main() {
     assert.strictEqual(installCount, 1);
   });
 
+  await test("a surfaced rate limit stops the batch even with an older SSO cause", async () => {
+    const result = await runReinstallTask({
+      name: "limited",
+      remove: async () => undefined,
+      install: async () => {
+        throw Object.assign(new Error("limited"), {
+          kind: "rate-limit",
+          rootCauseKind: "sso-required",
+        });
+      },
+    });
+    assert.strictEqual(result.failureKind, "rate-limit");
+    assert.strictEqual(result.attempts, 1);
+  });
+
   await test("manual retry adds one install attempt and never removes again", async () => {
     let removeCount = 0;
     let installCount = 0;
@@ -345,6 +360,88 @@ async function main() {
       assert.strictEqual(record.result.failureKind, "cancelled");
       assert.strictEqual(record.result.attempts, 0);
     }
+  });
+
+  await test("a rate-limited batch does not remove or start later resources", async () => {
+    const calls = [];
+    const tasks = ["one", "two", "three"].map((name) => ({
+      name,
+      remove: async () => calls.push(`remove:${name}`),
+      install: async () => {
+        calls.push(`install:${name}`);
+        if (name === "two") {
+          throw new ReinstallAttemptError("rate-limit", "limited");
+        }
+        return name;
+      },
+    }));
+    const records = await runReinstallBatch(tasks);
+    assert.deepStrictEqual(calls, [
+      "remove:one",
+      "install:one",
+      "remove:two",
+      "install:two",
+    ]);
+    assert.strictEqual(records[1].result.failureKind, "rate-limit");
+    assert.deepStrictEqual(records[2].result, {
+      success: false,
+      attempts: 0,
+      removed: false,
+      stage: "not-started",
+      failureKind: "rate-limit",
+    });
+  });
+
+  await test("a rate limit suppresses retries without discarding earlier records", async () => {
+    let attempts = 0;
+    const transient = {
+      name: "transient",
+      remove: async () => undefined,
+      install: async () => {
+        attempts++;
+        throw new ReinstallAttemptError("server-error", "offline");
+      },
+    };
+    const limited = {
+      name: "limited",
+      remove: async () => undefined,
+      install: async () => {
+        throw new ReinstallAttemptError("rate-limit", "limited");
+      },
+    };
+    const original = await runReinstallBatch([transient, limited]);
+    assert.strictEqual(attempts, 2);
+    const retried = await retryReinstallBatch(original);
+    assert.strictEqual(attempts, 2);
+    assert.deepStrictEqual(retried, original);
+  });
+
+  await test("a rate limit during manual retry stops further retry requests", async () => {
+    let firstAttempts = 0;
+    let secondAttempts = 0;
+    const makeTask = (name, action) => ({
+      name,
+      remove: async () => undefined,
+      install: action,
+    });
+    const records = await runReinstallBatch([
+      makeTask("one", async () => {
+        firstAttempts++;
+        throw new ReinstallAttemptError(
+          firstAttempts > 2 ? "rate-limit" : "transport",
+          "failed",
+        );
+      }),
+      makeTask("two", async () => {
+        secondAttempts++;
+        throw new ReinstallAttemptError("transport", "failed");
+      }),
+    ]);
+    const retried = await retryReinstallBatch(records);
+    assert.strictEqual(firstAttempts, 3);
+    assert.strictEqual(secondAttempts, 2);
+    assert.strictEqual(retried[0].result.failureKind, "rate-limit");
+    assert.strictEqual(retried[1].result.attempts, records[1].result.attempts);
   });
 
   await test("a suppressed caller never reaches the prompt", async () => {
@@ -491,6 +588,86 @@ async function main() {
       5,
       "all four batch reinstall entry points must share the report action",
     );
+  });
+
+  await test("update-changed-only delegates to the staged update flow and never reinstalls", async () => {
+    const parsed = ts.createSourceFile(
+      extensionPath,
+      extensionSource,
+      ts.ScriptTarget.ES2020,
+      true,
+    );
+    const declarations = new Map();
+    let handler;
+    const visit = (node) => {
+      if (ts.isFunctionDeclaration(node) && node.name) {
+        declarations.set(node.name.text, node.getText(parsed));
+      }
+      if (
+        ts.isCallExpression(node) &&
+        node.expression.getText(parsed).endsWith("registerCommand") &&
+        node.arguments[0]?.getText(parsed) === '"resourceNinja.reinstallAll"'
+      ) {
+        handler = node.arguments[1];
+      }
+      node.forEachChild(visit);
+    };
+    visit(parsed);
+    assert.ok(handler, "workspace reinstall handler not found");
+    const code = ts.transpileModule(
+      [
+        declarations.get("normalizeInstalledRemotePath"),
+        declarations.get("isRemoteInstalledSkillMeta"),
+        declarations.get("findIndexedSkillForInstalledMeta"),
+        declarations.get("createUnstartedReinstallRecord"),
+        `(${handler.getText(parsed)});`,
+      ].join("\n"),
+      { compilerOptions: { target: ts.ScriptTarget.ES2020 } },
+    ).outputText;
+
+    const calls = [];
+    let writes = 0;
+    const provider = { refresh() {} };
+    const meta = [{ name: "changed", source: "repo", remotePath: "skills/changed" }];
+    const handlerFn = vm.runInNewContext(code, {
+      AbortController,
+      context: {},
+      vscode: {
+        workspace: {
+          workspaceFolders: [{ uri: {} }],
+          getConfiguration: () => ({ get: () => true }),
+        },
+        window: {
+          showWarningMessage: async (_message, _options, _forced, changed) => {
+            calls.push("confirm");
+            return changed;
+          },
+          showInformationMessage() {},
+        },
+      },
+      getInstalledSkillsWithMeta: async () => meta,
+      runWorkspaceSkillUpdateCheck: async (interactive) => calls.push(["check", interactive]),
+      updateInstructionFile: async () => { writes++; },
+      uninstallSkill: async () => { writes++; },
+      installSkill: async () => { writes++; },
+      runReinstallTask: async () => { throw new Error("unsafe reinstall reached"); },
+      loadSkillIndex: async () => { throw new Error("index must not load"); },
+      installedProvider: provider,
+      browseProvider: provider,
+      isJapanese: () => false,
+      logger: { warn() {}, error() {} },
+    });
+    assert.strictEqual(await handlerFn({}), false);
+    assert.deepStrictEqual(calls, ["confirm", ["check", true]]);
+    assert.strictEqual(writes, 0);
+
+    calls.length = 0;
+    assert.strictEqual(
+      await handlerFn({ skipConfirmation: true, onlyChanged: true }),
+      false,
+    );
+    assert.deepStrictEqual(calls, [["check", true]]);
+    assert.strictEqual(writes, 0);
   });
 
   await test("manual retry is gated before showing a notification", () => {

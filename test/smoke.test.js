@@ -36,6 +36,8 @@ async function createRemote(root) {
       name: "remote",
       source: "fixture",
       remotePath: "skills/remote",
+      description: "smoke fixture",
+      whenToUse: "",
     }),
   );
 }
@@ -86,6 +88,48 @@ suite("Agent Resources Ninja smoke test", () => {
       "resourceNinja.showGitHubAuthStatus",
     ]) {
       assert.ok(commands.includes(command), `Missing command: ${command}`);
+    }
+  });
+
+  test("changed-only check preserves dirty installed files", async () => {
+    const folder = vscode.workspace.workspaceFolders[0];
+    const root = file(folder.uri, "smoke-skills");
+    await createRemote(root);
+    const skillUri = file(root, "remote", "SKILL.md");
+    const metaUri = file(root, "remote", ".skill-meta.json");
+    const original = await read(skillUri);
+    const originalMeta = await read(metaUri);
+    const document = await vscode.workspace.openTextDocument(skillUri);
+    const marker = "unsaved smoke edit\n";
+    const edit = new vscode.WorkspaceEdit();
+    edit.insert(skillUri, new vscode.Position(0, 0), marker);
+    assert(await vscode.workspace.applyEdit(edit));
+    try {
+      assert(document.isDirty);
+      const result = await vscode.commands.executeCommand(
+        "resourceNinja.reinstallAll",
+        {
+          skipConfirmation: true,
+          onlyChanged: true,
+          suppressRecoveryPrompt: true,
+          suppressSuccessMessage: true,
+        },
+      );
+      assert.strictEqual(result, false);
+      assert.strictEqual(await read(skillUri), original);
+      assert.strictEqual(await read(metaUri), originalMeta);
+      assert(document.isDirty);
+      assert(document.getText().startsWith(marker));
+    } finally {
+      if (document.isDirty && document.getText().startsWith(marker)) {
+        const undo = new vscode.WorkspaceEdit();
+        undo.delete(
+          skillUri,
+          new vscode.Range(new vscode.Position(0, 0), new vscode.Position(1, 0)),
+        );
+        assert(await vscode.workspace.applyEdit(undo));
+        assert(await document.save());
+      }
     }
   });
 

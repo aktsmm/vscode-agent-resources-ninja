@@ -87,6 +87,7 @@ function fakeGitHub(options = {}) {
             { path: "skills/alpha", sha: SKILL_TREE, type: "tree", mode: "040000" },
             { path: "agents", sha: sha("f"), type: "tree", mode: "040000" },
             { path: "agents/helper.agent.md", sha: FILE_BLOB, type: "blob", mode: "100644" },
+            ...(options.skillFiles || []),
           ];
       return respond({
         sha: ROOT,
@@ -99,6 +100,13 @@ function fakeGitHub(options = {}) {
         sha: sha("e"),
         truncated: false,
         tree: [{ path: "alpha", sha: SKILL_TREE, type: "tree", mode: "040000" }],
+      });
+    }
+    if (url.includes(`/git/trees/${SKILL_TREE}`)) {
+      return respond({
+        sha: SKILL_TREE,
+        truncated: false,
+        tree: options.skillTree || [],
       });
     }
     return respond({}, 404);
@@ -117,6 +125,15 @@ const tests = [];
 function test(name, fn) {
   tests.push([name, fn]);
 }
+
+test("blob verification preserves binary bytes and line endings", () => {
+  const { createHash } = require("node:crypto");
+  const exact = Buffer.from([0xff, 13, 10, 0x00]);
+  const hash = createHash("sha1").update("blob 4\0").update(exact).digest("hex");
+  assert.ok(revision.matchesGitBlob(exact, hash));
+  assert.ok(!revision.matchesGitBlob(Buffer.from([0xff, 10, 0x00]), hash));
+  assert.ok(!revision.matchesGitBlob(Buffer.from([0xfe, 13, 10, 0x00]), hash));
+});
 
 test("a skill folder resolves to its tree id at the branch commit", async () => {
   const { request } = fakeGitHub();
@@ -152,6 +169,57 @@ test("a batch over one branch shares one commit and tree snapshot", async () => 
     resolve(target("skills")),
   ]);
   assert.strictEqual(calls.length, 2, "one commit request and one tree request");
+});
+
+test("the complete folder manifest comes from the same shared snapshot", async () => {
+  const { request, calls } = fakeGitHub({
+    skillFiles: [
+      { path: "skills/alpha/SKILL.md", sha: FILE_BLOB, type: "blob", mode: "100644" },
+      { path: "skills/alpha/scripts", sha: sha("1"), type: "tree", mode: "040000" },
+      { path: "skills/alpha/scripts/run.sh", sha: sha("2"), type: "blob", mode: "100755" },
+      { path: "skills/other.md", sha: sha("3"), type: "blob", mode: "100644" },
+    ],
+  });
+  const resolve = revision.createRevisionResolver(undefined, undefined, request);
+  const selected = await resolve(target("skills/alpha"));
+  assert.deepStrictEqual(await resolve.listFiles(selected), [
+    { path: "SKILL.md", sha: FILE_BLOB, mode: "100644" },
+    { path: "scripts/run.sh", sha: sha("2"), mode: "100755" },
+  ]);
+  assert.strictEqual(calls.length, 2, "manifest uses the existing root tree");
+  await assert.rejects(() =>
+    resolve.listFiles({ ...selected, commitSha: sha("9") }),
+  );
+});
+
+test("a truncated root is enumerated without trusting its partial entries", async () => {
+  const { request } = fakeGitHub({
+    truncated: true,
+    skillTree: [
+      { path: "SKILL.md", sha: FILE_BLOB, type: "blob", mode: "100644" },
+    ],
+  });
+  const resolve = revision.createRevisionResolver(undefined, undefined, request);
+  assert.deepStrictEqual(
+    await resolve.listFiles(await resolve(target("skills/alpha"))),
+    [{ path: "SKILL.md", sha: FILE_BLOB, mode: "100644" }],
+  );
+});
+
+test("symlinks and submodules cannot produce a complete folder manifest", async () => {
+  for (const unsafe of [
+    { type: "blob", mode: "120000" },
+    { type: "commit", mode: "160000" },
+  ]) {
+    const { request } = fakeGitHub({
+      skillFiles: [
+        { path: "skills/alpha/link", sha: sha("1"), ...unsafe },
+      ],
+    });
+    const resolve = revision.createRevisionResolver(undefined, undefined, request);
+    const selected = await resolve(target("skills/alpha"));
+    await assert.rejects(() => resolve.listFiles(selected));
+  }
 });
 
 test("a truncated listing is walked one level at a time", async () => {

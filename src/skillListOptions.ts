@@ -6,6 +6,7 @@ import {
   normalizeSkillInvocation,
   type SkillInvocation,
 } from "./skillInvocationMode";
+import type { Memento } from "vscode";
 
 /** 呼び出しモードで絞る。`all` は絞り込みなし。 */
 export type SkillInvocationFilter = "all" | SkillInvocation;
@@ -77,6 +78,29 @@ export function normalizeSortMode(
   return allowed.includes(value as SkillSortMode)
     ? (value as SkillSortMode)
     : "default";
+}
+
+export async function restoreSkillViewOptions(
+  scope: SkillViewScope,
+  key: string,
+  profile: Pick<Memento, "get" | "update">,
+  workspace: Pick<Memento, "get">,
+): Promise<SkillViewOptions> {
+  const saved = profile.get<unknown>(key);
+  const legacy = saved === undefined ? workspace.get<unknown>(key) : undefined;
+  const raw = saved === undefined ? legacy : saved;
+  const value =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Partial<SkillViewOptions>)
+      : undefined;
+  const restored = {
+    filter: normalizeInvocationFilter(value?.filter),
+    sort: normalizeSortMode(value?.sort, getSortModes(scope)),
+  };
+  if (saved === undefined && legacy !== undefined) {
+    await profile.update(key, restored);
+  }
+  return restored;
 }
 
 /** 既定から外れているか。ビュータイトルのアイコン切り替えに使う。 */

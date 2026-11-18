@@ -11,6 +11,7 @@ import {
   classifyGitHubFailure,
   classifyGitHubResponse,
   classifyGitHubTransportFailure,
+  createGitHubResponseError,
   extractSsoAuthorizationUrl,
   GitHubFailureKind,
   GitHubRootCause,
@@ -219,6 +220,7 @@ export interface GitHubRequestOptions {
   extraHeaders?: Record<string, string>;
   maxAttempts?: number;
   operationTimeoutMs?: number;
+  stopOnRateLimit?: boolean;
   request?: (url: string, init?: RequestInit) => Promise<Response>;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
@@ -335,7 +337,11 @@ async function sendGitHubRequestWithRetry(
       continue;
     }
 
-    if (attempt >= maxAttempts || !isRetryableGitHubStatus(response.status)) {
+    if (
+      attempt >= maxAttempts ||
+      !isRetryableGitHubStatus(response.status) ||
+      (await classifyGitHubResponse(response)) === "rate-limit"
+    ) {
       return response;
     }
     const delay = getGitHubRetryDelayMs(response, attempt, now(), random());
@@ -522,6 +528,12 @@ export async function fetchGitHubWithOptionalAuthRetry(
       attempt < GITHUB_TOKEN_FALLBACK_MAX_ATTEMPTS;
       attempt++
     ) {
+      if (
+        response.status === 403 &&
+        (await classifyGitHubResponse(response)) === "rate-limit"
+      ) {
+        break;
+      }
       const fallback = await resolveWithinGitHubOperation(
         resolveGitHubTokenAfterFailure(walkToken, triedTokens),
         budget,
@@ -552,6 +564,25 @@ export async function fetchGitHubWithOptionalAuthRetry(
     // Annotate only 401/403 so a 404 keeps the meaning branch fallback relies on.
     if (rootCause && (response.status === 401 || response.status === 403)) {
       annotateGitHubRootCause(response, rootCause);
+    }
+
+    if (
+      options.stopOnRateLimit &&
+      !response.ok &&
+      (response.status === 403 ||
+        response.status === 429 ||
+        response.status >= 500) &&
+      (await classifyGitHubResponse(response)) === "rate-limit"
+    ) {
+      const body = await response
+        .clone()
+        .text()
+        .catch(() => "");
+      throw createGitHubResponseError(
+        response,
+        body,
+        `GitHub request for ${describeGitHubRequest(requestUrl)}`,
+      );
     }
 
     return response;

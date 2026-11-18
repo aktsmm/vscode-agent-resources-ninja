@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const assert = require("assert");
+const { createHash } = require("node:crypto");
 const fs = require("fs");
 const Module = require("module");
 const path = require("path");
@@ -71,6 +72,7 @@ async function main() {
   const writes = [];
   const directories = [];
   const deleted = [];
+  const extraEntries = new Map();
   const workspaceRoot = path.join("D:", "tmp", "workspace");
   const uriApi = {
     file: (fsPath) => ({ fsPath }),
@@ -80,11 +82,12 @@ async function main() {
   };
   const vscodeStub = {
     Uri: uriApi,
+    FileType: { File: 1, Directory: 2, SymbolicLink: 64 },
     workspace: {
       getConfiguration: () => ({ get: () => undefined }),
       fs: {
         readFile: async (uri) => {
-          const written = writes.find((entry) => entry.path === uri.fsPath);
+          const written = writes.findLast((entry) => entry.path === uri.fsPath);
           if (!written) {
             throw Object.assign(new Error(`ENOENT ${uri.fsPath}`), {
               code: "ENOENT",
@@ -104,14 +107,31 @@ async function main() {
         delete: async (uri) => {
           deleted.push(uri.fsPath);
         },
+        readDirectory: async (uri) => {
+          const entries = new Map();
+          for (const directory of directories) {
+            if (path.dirname(directory) === uri.fsPath) {
+              entries.set(path.basename(directory), 2);
+            }
+          }
+          for (const written of writes) {
+            if (path.dirname(written.path) === uri.fsPath) {
+              entries.set(path.basename(written.path), 1);
+            }
+          }
+          for (const [name, type] of extraEntries.get(uri.fsPath) || []) {
+            entries.set(name, type);
+          }
+          return [...entries];
+        },
         stat: async (uri) => {
-          const written = writes.find((entry) => entry.path === uri.fsPath);
+          const written = writes.findLast((entry) => entry.path === uri.fsPath);
           if (!written) {
             throw Object.assign(new Error(`ENOENT ${uri.fsPath}`), {
               code: "ENOENT",
             });
           }
-          return { size: Buffer.byteLength(written.content, "utf8") };
+          return { size: Buffer.byteLength(written.content, "utf8"), type: 1 };
         },
       },
     },
@@ -126,13 +146,26 @@ async function main() {
 
   const skillContent =
     "---\nname: temp-skill\ndescription: temp\n---\n# temp\n";
+  const agentContent = "---\ndescription: helper\n---\nAgent instructions\n";
   const directoryApiUrl =
     "https://api.github.com/repos/octo/demo/contents/skills/temp-skill?ref=main";
   const rawUrl =
     "https://raw.githubusercontent.com/octo/demo/main/skills/temp-skill/SKILL.md";
+  const commitSha = "a".repeat(40);
+  const pinnedDirectoryUrl = directoryApiUrl.replace("ref=main", `ref=${commitSha}`);
+  const pinnedRawUrl = rawUrl.replace("/main/", `/${commitSha}/`);
+  const fetchCalls = [];
+  let limitedUrl;
 
   global.fetch = async (url) => {
-    if (url === directoryApiUrl) {
+    fetchCalls.push(url);
+    if (url === limitedUrl) {
+      return new Response("rate limit exceeded", {
+        status: 429,
+        headers: { "x-ratelimit-remaining": "0" },
+      });
+    }
+    if (url === directoryApiUrl || url === pinnedDirectoryUrl) {
       return {
         ok: true,
         status: 200,
@@ -146,13 +179,27 @@ async function main() {
       };
     }
 
-    if (url === rawUrl) {
+    if (url === rawUrl || url === pinnedRawUrl) {
       return {
         ok: true,
         status: 200,
         text: async () => skillContent,
         arrayBuffer: async () => {
           const bytes = Buffer.from(skillContent, "utf-8");
+          return bytes.buffer.slice(
+            bytes.byteOffset,
+            bytes.byteOffset + bytes.byteLength,
+          );
+        },
+      };
+    }
+
+    if (url === `https://raw.githubusercontent.com/octo/demo/${commitSha}/agents/helper.agent.md`) {
+      return {
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => {
+          const bytes = Buffer.from(agentContent, "utf8");
           return bytes.buffer.slice(
             bytes.byteOffset,
             bytes.byteOffset + bytes.byteLength,
@@ -169,11 +216,19 @@ async function main() {
     repo: "demo",
     ref: "main",
     remotePath: "skills/temp-skill",
-    commitSha: "a".repeat(40),
+    commitSha,
     contentSha: "b".repeat(40),
     kind: "tree",
   };
+  const skillBytes = Buffer.from(skillContent);
+  const skillBlobSha = createHash("sha1")
+    .update(`blob ${skillBytes.length}\0`)
+    .update(skillBytes)
+    .digest("hex");
+  let manifest = [{ path: "SKILL.md", sha: skillBlobSha, mode: "100644" }];
+  let selectedRevision = baselineRevision;
   let revisionFails = false;
+  let revisionError;
   let resolverCreations = 0;
   const moduleExports = requireTypeScriptModule(
     path.join(__dirname, "..", "src", "skillInstaller.ts"),
@@ -245,7 +300,6 @@ async function main() {
         ),
         detectResourceKindFromPath: () => "skill",
         getPluginRootFromManifestPath: () => undefined,
-        getResourceMetadataPath: () => path.join(workspaceRoot, "meta.json"),
         isHookConfigFilePath: () => false,
       },
       "./userDataPaths": {
@@ -278,12 +332,17 @@ async function main() {
         ),
         createRevisionResolver: () => {
           resolverCreations++;
-          return async () => {
+          const resolver = async () => {
+            if (revisionError) {
+              throw revisionError;
+            }
             if (revisionFails) {
               throw new Error("offline");
             }
-            return baselineRevision;
+            return selectedRevision;
           };
+          resolver.listFiles = async () => manifest;
+          return resolver;
         },
       },
       "./gitignoreManager": {
@@ -339,9 +398,54 @@ async function main() {
     baselineRevision,
     "a complete install records the revision it was read at",
   );
+  assert.deepStrictEqual(
+    fetchCalls,
+    [pinnedDirectoryUrl, pinnedRawUrl],
+    "ignore a mutable download URL advertised by a pinned directory listing",
+  );
+
+  const installTarget = result.destinationUri.fsPath;
+  const installAgain = () => moduleExports.installSkill(
+    {
+      name: "temp-skill",
+      source: "octo/demo",
+      path: "skills/temp-skill",
+      categories: [],
+      description: "temp",
+      url: "https://github.com/octo/demo/tree/main/skills/temp-skill",
+      rawUrl,
+    },
+    uriApi.file(workspaceRoot),
+    { globalStorageUri: uriApi.file(path.join(workspaceRoot, ".storage")) },
+    { suppressRecoveryPrompt: true },
+  );
+  const hasBaseline = () =>
+    "sourceRevision" in JSON.parse(metaWrites().at(-1).content);
+
+  manifest = [
+    { path: "SKILL.md", sha: skillBlobSha, mode: "100644" },
+    { path: "omitted.txt", sha: "c".repeat(40), mode: "100644" },
+  ];
+  await installAgain();
+  assert.ok(!hasBaseline(), "an omitted remote file cannot produce a baseline");
+
+  manifest = [{ path: "SKILL.md", sha: "c".repeat(40), mode: "100644" }];
+  await installAgain();
+  assert.ok(!hasBaseline(), "mismatched downloaded bytes cannot produce a baseline");
+
+  manifest = [{ path: "SKILL.md", sha: skillBlobSha, mode: "100755" }];
+  await installAgain();
+  assert.ok(hasBaseline(), "an executable-mode file with verified bytes keeps its baseline");
+
+  manifest = [{ path: "SKILL.md", sha: skillBlobSha, mode: "100644" }];
+  extraEntries.set(installTarget, [["local-link", 64]]);
+  await installAgain();
+  assert.ok(!hasBaseline(), "an existing symlink cannot produce a baseline");
+  extraEntries.delete(installTarget);
 
   // Failing to read a revision never fails the install; it just leaves no baseline.
   revisionFails = true;
+  fetchCalls.length = 0;
   await moduleExports.installSkill(
     {
       name: "temp-skill",
@@ -360,11 +464,85 @@ async function main() {
     !("sourceRevision" in JSON.parse(metaWrites().at(-1).content)),
     "an unreadable revision leaves no stale baseline behind",
   );
+  assert.deepStrictEqual(fetchCalls, [directoryApiUrl, rawUrl]);
   assert.strictEqual(
     resolverCreations,
     1,
     "installs in a short window share one resolver and its repository snapshot",
   );
+
+  revisionFails = false;
+  const agentBytes = Buffer.from(agentContent);
+  const agentBlobSha = createHash("sha1")
+    .update(`blob ${agentBytes.length}\0`)
+    .update(agentBytes)
+    .digest("hex");
+  selectedRevision = {
+    ...baselineRevision,
+    remotePath: "agents/helper.agent.md",
+    contentSha: agentBlobSha,
+    kind: "blob",
+  };
+  fetchCalls.length = 0;
+  const agent = {
+    kind: "agent",
+    name: "helper",
+    source: "octo/demo",
+    path: "agents/helper.agent.md",
+    categories: [],
+    description: "helper",
+    url: "https://github.com/octo/demo/blob/main/agents/helper.agent.md",
+  };
+  await moduleExports.installSkill(
+    agent,
+    uriApi.file(workspaceRoot),
+    { globalStorageUri: uriApi.file(path.join(workspaceRoot, ".storage")) },
+    { suppressRecoveryPrompt: true },
+  );
+  const agentMetadata = () =>
+    JSON.parse(
+      writes.findLast((entry) =>
+        entry.path.endsWith("helper.agent.md.resource-ninja.json"),
+      ).content,
+    );
+  assert.deepStrictEqual(agentMetadata().sourceRevision, selectedRevision);
+  assert.deepStrictEqual(fetchCalls, [
+    `https://raw.githubusercontent.com/octo/demo/${commitSha}/agents/helper.agent.md`,
+  ]);
+  selectedRevision = { ...selectedRevision, contentSha: "c".repeat(40) };
+  await moduleExports.installSkill(
+    agent,
+    uriApi.file(workspaceRoot),
+    { globalStorageUri: uriApi.file(path.join(workspaceRoot, ".storage")) },
+    { suppressRecoveryPrompt: true },
+  );
+  assert.ok(
+    !("sourceRevision" in agentMetadata()),
+    "a mismatched standalone file cannot inherit a previous baseline",
+  );
+  selectedRevision = baselineRevision;
+
+  revisionError = new githubResponseModule.GitHubResponseError(
+    "rate-limit",
+    429,
+    "limited",
+  );
+  fetchCalls.length = 0;
+  const beforeRevisionLimit = writes.length;
+  await assert.rejects(() => installAgain(), (error) => error.kind === "rate-limit");
+  assert.deepStrictEqual(fetchCalls, [], "a revision rate limit must not fall back to a branch request");
+  assert.strictEqual(writes.length, beforeRevisionLimit);
+  revisionError = undefined;
+
+  for (const blockedUrl of [pinnedDirectoryUrl, pinnedRawUrl]) {
+    limitedUrl = blockedUrl;
+    fetchCalls.length = 0;
+    const metaCount = metaWrites().length;
+    await assert.rejects(() => installAgain(), (error) => error.kind === "rate-limit");
+    assert.strictEqual(metaWrites().length, metaCount, "a rate-limited install must not write new metadata");
+    assert.strictEqual(fetchCalls.at(-1), blockedUrl, "no recovery request follows a rate limit");
+  }
+  limitedUrl = undefined;
 
   // A changed-only update skips a skill only when the baseline provably equals upstream.
   const skillForCheck = {
@@ -396,6 +574,13 @@ async function main() {
     }),
     "unknown",
     "a failed read is never taken as unchanged",
+  );
+  await assert.rejects(
+    () => status(baselineRevision, async () => {
+      throw new githubResponseModule.GitHubResponseError("rate-limit", 429, "limited");
+    }),
+    (error) => error.kind === "rate-limit",
+    "a revision rate limit must reach the batch controller",
   );
   assert.strictEqual(
     await status(baselineRevision, upstream, { ...skillForCheck, kind: "agent" }),

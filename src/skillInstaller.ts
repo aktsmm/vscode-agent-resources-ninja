@@ -21,6 +21,8 @@ import { fetchGitHubWithOptionalAuthRetry } from "./githubFetch";
 import {
   classifyRevision,
   createRevisionResolver,
+  matchesGitBlob,
+  type RevisionResolver,
   type RevisionStatus,
   type RevisionTarget,
   type SourceRevision,
@@ -587,6 +589,7 @@ interface ResourceInstallMeta extends Record<string, unknown> {
   categories?: string[];
   remotePath: string;
   installedAt: string;
+  sourceRevision?: SourceRevision;
   incomplete?: boolean;
   reinstallDisabled?: boolean;
   reinstallDisabledReason?: string;
@@ -608,6 +611,7 @@ function getResourceMetadataUri(
 async function writeResourceInstallMetadata(
   resourceUri: vscode.Uri,
   skill: Skill,
+  sourceRevision?: SourceRevision,
 ): Promise<void> {
   const kind = getResourceKind(skill);
   if (kind === "skill") {
@@ -639,6 +643,7 @@ async function writeResourceInstallMetadata(
     categories: skill.categories,
     remotePath: skill.path,
     installedAt: new Date().toISOString(),
+    sourceRevision,
     pluginRoot: skill.pluginRoot,
     pluginManifestPath: skill.pluginManifestPath,
     pluginManifestKind: skill.pluginManifestKind,
@@ -1172,7 +1177,7 @@ interface DownloadDirectoryResult {
  * ファイルをディレクトリより先にダウンロードし、
  * サブディレクトリのエラーは個別にキャッチして全体のクラッシュを防止
  */
-async function downloadDirectory(
+export async function downloadDirectory(
   owner: string,
   repo: string,
   remotePath: string,
@@ -1181,6 +1186,8 @@ async function downloadDirectory(
   token?: string,
   depth: number = 0,
   downloadRootPath: vscode.Uri = localPath,
+  pinFileUrls = false,
+  stopOnRateLimit = false,
 ): Promise<DownloadDirectoryResult> {
   const errors: string[] = [];
   // A rejected entry means the resource is missing a file the repository ships,
@@ -1246,10 +1253,14 @@ async function downloadDirectory(
     const contentPath = [remotePath === "." ? "" : remotePath, entry.name]
       .filter(Boolean)
       .join("/");
+    const rawUrl = pinFileUrls
+      ? `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}/${encodeGitHubPathForUrl(contentPath)}`
+      : entry.download_url;
     const content = await fetchFileBytes(
-      entry.download_url,
+      rawUrl,
       token,
       buildGitHubContentsApiUrl(owner, repo, branch, contentPath),
+      stopOnRateLimit,
     );
     assertRealPathStrictlyInside(
       localFilePath,
@@ -1276,12 +1287,25 @@ async function downloadDirectory(
   // （SKILL.md などの重要ファイルを確実に取得するため）
   const { files, directoriesToTraverse } =
     partitionGitHubDirectoryEntries(entries);
+  if (pinFileUrls) {
+    // Never record a baseline for a partial copy when the contents API
+    // omits the download URL of a file (for example a large blob).
+    for (const entry of entries) {
+      if (
+        (entry.type === "file" && !entry.download_url) ||
+        !["file", "dir", "symlink"].includes(entry.type)
+      ) {
+        errors.push(`No downloadable content for ${entry.name}`);
+      }
+    }
+  }
 
   // 1. ファイルを先にダウンロード
   for (const entry of files) {
     try {
       await downloadFileEntry(entry);
     } catch (error) {
+      throwIfRateLimited(error, stopOnRateLimit);
       const msg = `Failed to download file ${entry.name}: ${error instanceof Error ? error.message : String(error)}`;
       logger.error(`[Resource Ninja] ${msg}`);
       errors.push(msg);
@@ -1324,10 +1348,13 @@ async function downloadDirectory(
         token,
         depth + 1,
         downloadRootPath,
+        pinFileUrls,
+        stopOnRateLimit,
       );
       errors.push(...subResult.errors);
       rejectedEntries.push(...subResult.rejectedEntries);
     } catch (error) {
+      throwIfRateLimited(error, stopOnRateLimit);
       const msg = `Failed to download directory ${entry.name}: ${error instanceof Error ? error.message : String(error)}`;
       logger.error(`[Resource Ninja] ${msg}`);
       errors.push(msg);
@@ -1378,26 +1405,35 @@ function deriveRepositoryRef(
   return { source, rawUrlRef, githubUrlRef, repositoryRef };
 }
 
+function throwIfRateLimited(error: unknown, stopOnRateLimit: boolean): void {
+  if (!stopOnRateLimit || !error || typeof error !== "object") {
+    return;
+  }
+  const failure = error as { kind?: unknown; rootCauseKind?: unknown };
+  if (failure.kind === "rate-limit" || failure.rootCauseKind === "rate-limit") {
+    throw error;
+  }
+}
+
 /**
  * Installs in a batch come from the same few repositories, so they share one
  * resolver (one commit and tree snapshot per branch) for a short window instead
- * of asking GitHub again for every skill. A snapshot older than the download is
- * safe: the recorded baseline can only be older than the copied files, which
- * costs one extra update later and never a skipped one.
+ * of asking GitHub again for every skill. When a snapshot supplies the
+ * baseline, its commit also supplies the installed files.
  */
 const SHARED_REVISION_RESOLVER_TTL_MS = 30_000;
 let sharedRevisionResolver:
   | {
       token: string | undefined;
       createdAt: number;
-      resolve: (target: RevisionTarget) => Promise<SourceRevision>;
+      resolve: RevisionResolver;
     }
   | undefined;
 
 function getSharedRevisionResolver(
   token: string | undefined,
   now: number = Date.now(),
-): (target: RevisionTarget) => Promise<SourceRevision> {
+): RevisionResolver {
   if (
     !sharedRevisionResolver ||
     sharedRevisionResolver.token !== token ||
@@ -1412,6 +1448,140 @@ function getSharedRevisionResolver(
   return sharedRevisionResolver.resolve;
 }
 
+const MAX_BASELINE_FILE_BYTES = 20 * 1024 * 1024;
+const MAX_BASELINE_TOTAL_BYTES = 100 * 1024 * 1024;
+const MAX_BASELINE_FILES = 10_000;
+
+async function fileMatchesRevision(
+  fileUri: vscode.Uri,
+  revision: SourceRevision,
+): Promise<boolean> {
+  const stat = await vscode.workspace.fs.stat(fileUri);
+  if (
+    revision.kind !== "blob" ||
+    stat.type !== vscode.FileType.File ||
+    stat.size > MAX_BASELINE_FILE_BYTES
+  ) {
+    return false;
+  }
+  return matchesGitBlob(
+    await vscode.workspace.fs.readFile(fileUri),
+    revision.contentSha,
+  );
+}
+
+export async function directoryMatchesRevision(
+  resourcePath: vscode.Uri,
+  revision: SourceRevision,
+  resolver: RevisionResolver,
+  ownMetadataName: string,
+): Promise<boolean> {
+  if (revision.kind !== "tree") {
+    return false;
+  }
+  const expectedFiles = await resolver.listFiles(revision);
+  if (expectedFiles.length > MAX_BASELINE_FILES) {
+    return false;
+  }
+  const expected = new Map<string, string>();
+  const expectedDirectories = new Set<string>();
+  for (const file of expectedFiles) {
+    const parts = file.path.split("/");
+    if (
+      parts.some((part) => !isSafePathSegment(part)) ||
+      parts.some(isOwnMetadataSidecarFileName) ||
+      (file.mode !== "100644" && file.mode !== "100755") ||
+      expected.has(file.path)
+    ) {
+      return false;
+    }
+    expected.set(file.path, file.sha);
+    for (let index = 1; index < parts.length; index++) {
+      expectedDirectories.add(parts.slice(0, index).join("/"));
+    }
+  }
+
+  let totalBytes = 0;
+  let matchedFiles = 0;
+  const visit = async (directory: vscode.Uri, prefix: string): Promise<boolean> => {
+    const entries = await vscode.workspace.fs.readDirectory(directory);
+    for (const [name, type] of entries) {
+      if (!prefix && name === ownMetadataName && type === vscode.FileType.File) {
+        continue;
+      }
+      if (!isSafePathSegment(name)) {
+        return false;
+      }
+      const relativePath = prefix ? `${prefix}/${name}` : name;
+      const entryUri = vscode.Uri.joinPath(directory, name);
+      if (type === vscode.FileType.Directory) {
+        if (
+          !expectedDirectories.has(relativePath) ||
+          !(await visit(entryUri, relativePath))
+        ) {
+          return false;
+        }
+      } else if (type === vscode.FileType.File) {
+        const expectedSha = expected.get(relativePath);
+        if (!expectedSha) {
+          return false;
+        }
+        const stat = await vscode.workspace.fs.stat(entryUri);
+        totalBytes += stat.size;
+        if (
+          stat.type !== vscode.FileType.File ||
+          stat.size > MAX_BASELINE_FILE_BYTES ||
+          totalBytes > MAX_BASELINE_TOTAL_BYTES ||
+          !matchesGitBlob(await vscode.workspace.fs.readFile(entryUri), expectedSha)
+        ) {
+          return false;
+        }
+        matchedFiles++;
+      } else {
+        return false;
+      }
+    }
+    return true;
+  };
+  return (await visit(resourcePath, "")) && matchedFiles === expected.size;
+}
+
+async function verifiedInstallRevision(
+  resourcePath: vscode.Uri,
+  revision: SourceRevision | undefined,
+  token: string | undefined,
+  ownMetadataName: string,
+  stopOnRateLimit: boolean,
+): Promise<SourceRevision | undefined> {
+  if (!revision) {
+    return undefined;
+  }
+  try {
+    const matches =
+      revision.kind === "blob"
+        ? await fileMatchesRevision(resourcePath, revision)
+        : await directoryMatchesRevision(
+            resourcePath,
+            revision,
+            getSharedRevisionResolver(token),
+            ownMetadataName,
+          );
+    if (matches) {
+      return revision;
+    }
+    logger.warn(
+      "[Resource Ninja] Installed resource does not match the complete selected Git object; no comparison baseline was recorded.",
+    );
+  } catch (error) {
+    throwIfRateLimited(error, stopOnRateLimit);
+    logger.warn(
+      "[Resource Ninja] Could not verify the installed resource against the selected Git object; no comparison baseline was recorded.",
+      error,
+    );
+  }
+  return undefined;
+}
+
 /** Reads the revision a skill would be installed from now, or undefined when it cannot be read. */
 async function tryResolveSourceRevision(
   target: RevisionTarget,
@@ -1419,10 +1589,12 @@ async function tryResolveSourceRevision(
   resolver: (target: RevisionTarget) => Promise<SourceRevision> = getSharedRevisionResolver(
     token,
   ),
+  stopOnRateLimit = false,
 ): Promise<SourceRevision | undefined> {
   try {
     return await resolver(target);
   } catch (error) {
+    throwIfRateLimited(error, stopOnRateLimit);
     // A baseline is an optimization: failing to read one never fails an install.
     logger.info(
       `[Resource Ninja] Source revision unavailable for ${target.owner}/${target.repo}:${target.remotePath}: ${error instanceof Error ? error.message : "unknown"}`,
@@ -1464,6 +1636,7 @@ export async function checkSkillRevisionStatus(
         ),
       token,
       skill.path,
+      true,
     ));
   const current = await tryResolveSourceRevision(
     {
@@ -1474,20 +1647,9 @@ export async function checkSkillRevisionStatus(
     },
     token,
     resolver ?? createRevisionResolver(token),
+    true,
   );
   return current ? classifyRevision(baseline, current) : "unknown";
-}
-
-/** One resolver for a whole batch, so skills from the same repository share a single snapshot. */
-export async function createSkillRevisionChecker(
-  context: vscode.ExtensionContext,
-  signal?: AbortSignal,
-): Promise<
-  (skill: Skill, baseline: unknown) => Promise<RevisionStatus | "unknown">
-> {
-  const resolver = createRevisionResolver(await getGitHubToken(), signal);
-  return (skill, baseline) =>
-    checkSkillRevisionStatus(skill, baseline, context, resolver);
 }
 
 export async function installSkill(
@@ -1520,9 +1682,7 @@ export async function installSkill(
   // GitHub Token を取得
   const token = await getGitHubToken();
 
-  // Pinned before the download. If upstream moves meanwhile, the recorded
-  // revision is older than the copied content, which can only cause one extra
-  // update later, never a skipped one.
+  // The baseline and the download must refer to the same commit.
   let baselineRevision: SourceRevision | undefined;
 
   // テンプレートで代替した時点を記録する。後段で frontmatter から再推定しない。
@@ -1557,6 +1717,7 @@ export async function installSkill(
         resourceKind === "plugin"
           ? skill.pluginManifestPath || skill.path
           : skill.path,
+        options.suppressRecoveryPrompt === true,
       ));
     const remotePath =
       resourceKind === "plugin"
@@ -1567,12 +1728,34 @@ export async function installSkill(
           skill.path
         : skill.path;
 
-    if (resourceKind === "skill") {
+    const isHookFolder =
+      resourceKind === "hook" && !isHookConfigFilePath(remotePath);
+    if (resourceKind !== "plugin") {
+      const hookParent = path.posix.dirname(remotePath.replace(/\\/g, "/"));
+      const revisionPath = isHookFolder
+        ? hookParent === "."
+          ? ""
+          : hookParent
+        : remotePath;
       baselineRevision = await tryResolveSourceRevision(
-        { owner, repo, branch, remotePath },
+        { owner, repo, branch, remotePath: revisionPath },
         token,
+        undefined,
+        options.suppressRecoveryPrompt === true,
       );
+      const expectedKind =
+        isHookFolder ||
+        (resourceKind === "skill" && !remotePath.endsWith(".md"))
+          ? "tree"
+          : "blob";
+      if (baselineRevision && baselineRevision.kind !== expectedKind) {
+        logger.warn(
+          "[Resource Ninja] Source revision does not match the copied resource unit; no comparison baseline was recorded.",
+        );
+        baselineRevision = undefined;
+      }
     }
+    const skillDownloadRef = baselineRevision?.commitSha ?? branch;
     logger.info(`[Resource Ninja] Installing ${resourceKind}: ${skill.name}`);
     logger.info(
       `[Resource Ninja] Owner: ${owner}, Repo: ${repo}, Branch: ${branch}`,
@@ -1599,6 +1782,10 @@ export async function installSkill(
           skillPath,
           branch,
           token,
+          0,
+          skillPath,
+          false,
+          options.suppressRecoveryPrompt === true,
         );
         await writeResourceInstallMetadata(skillPath, skill);
       } catch (error) {
@@ -1646,16 +1833,21 @@ export async function installSkill(
             repo,
             remoteDir,
             resourceParentUri,
-            branch,
+            skillDownloadRef,
             token,
+            0,
+            resourceParentUri,
+            baselineRevision !== undefined,
+            options.suppressRecoveryPrompt === true,
           );
           downloadErrors = result.errors;
         } else {
-          const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}/${encodeGitHubPathForUrl(remotePath)}`;
+          const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(skillDownloadRef)}/${encodeGitHubPathForUrl(remotePath)}`;
           const content = await fetchFileBytes(
             rawUrl,
             token,
-            buildGitHubContentsApiUrl(owner, repo, branch, remotePath),
+            buildGitHubContentsApiUrl(owner, repo, skillDownloadRef, remotePath),
+            options.suppressRecoveryPrompt === true,
           );
           assertRealPathStrictlyInside(
             skillPath,
@@ -1664,7 +1856,17 @@ export async function installSkill(
           );
           await vscode.workspace.fs.writeFile(skillPath, content);
         }
-        await writeResourceInstallMetadata(skillPath, skill);
+        const verifiedRevision =
+          downloadErrors.length === 0
+            ? await verifiedInstallRevision(
+                isHookFolder ? resourceParentUri : skillPath,
+                baselineRevision,
+                token,
+                ".resource-ninja.json",
+                options.suppressRecoveryPrompt === true,
+              )
+            : undefined;
+        await writeResourceInstallMetadata(skillPath, skill, verifiedRevision);
         await removeOwnedLegacyPluginResource(skillPath, skill);
       } catch (error) {
         if (!resourcePathExisted) {
@@ -1724,14 +1926,25 @@ export async function installSkill(
 
     // パスが .md で終わる場合は単独ファイル
     if (remotePath.endsWith(".md")) {
-      const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}/${encodeGitHubPathForUrl(remotePath)}`;
+      const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(skillDownloadRef)}/${encodeGitHubPathForUrl(remotePath)}`;
       logger.info(`[Resource Ninja] Downloading single file: ${rawUrl}`);
       try {
         const content = await fetchFileBytes(
           rawUrl,
           token,
-          buildGitHubContentsApiUrl(owner, repo, branch, remotePath),
+          buildGitHubContentsApiUrl(owner, repo, skillDownloadRef, remotePath),
+          options.suppressRecoveryPrompt === true,
         );
+        if (
+          baselineRevision &&
+          (baselineRevision.kind !== "blob" ||
+            !matchesGitBlob(content, baselineRevision.contentSha))
+        ) {
+          logger.warn(
+            "[Resource Ninja] Downloaded skill did not match the selected Git blob; no comparison baseline was recorded.",
+          );
+          baselineRevision = undefined;
+        }
         logger.info(`[Resource Ninja] Downloaded ${content.length} bytes`);
 
         // SKILL.md として保存（メインファイル）
@@ -1739,6 +1952,7 @@ export async function installSkill(
         await vscode.workspace.fs.writeFile(skillMdPath, content);
         logger.info(`[Resource Ninja] Saved as SKILL.md`);
       } catch (error) {
+        throwIfRateLimited(error, options.suppressRecoveryPrompt === true);
         logger.error(`[Resource Ninja] Failed to download ${rawUrl}:`, error);
         const errorMsg = error instanceof Error ? error.message : String(error);
 
@@ -1774,8 +1988,12 @@ export async function installSkill(
           repo,
           remotePath,
           skillPath,
-          branch,
+          skillDownloadRef,
           token,
+          0,
+          skillPath,
+          baselineRevision !== undefined,
+          options.suppressRecoveryPrompt === true,
         );
         rejectedRemoteEntries.push(...result.rejectedEntries);
         missingRemoteEntries = result.errors.length > 0;
@@ -1792,9 +2010,10 @@ export async function installSkill(
             skillPath,
             owner,
             repo,
-            branch,
+            skillDownloadRef,
             remotePath,
             token,
+            options.suppressRecoveryPrompt === true,
           );
           if (!recovered) {
             await createFallbackSkillMd(skillPath, skill);
@@ -1826,6 +2045,8 @@ export async function installSkill(
           }
         }
       } catch (error) {
+        throwIfRateLimited(error, options.suppressRecoveryPrompt === true);
+        missingRemoteEntries = true;
         logger.error(`[Resource Ninja] Failed to download directory:`, error);
         const errorMsg = error instanceof Error ? error.message : String(error);
 
@@ -1860,9 +2081,10 @@ export async function installSkill(
             skillPath,
             owner,
             repo,
-            branch,
+            skillDownloadRef,
             remotePath,
             token,
+            options.suppressRecoveryPrompt === true,
           );
           if (!recovered) {
             await createFallbackSkillMd(skillPath, skill);
@@ -1907,6 +2129,16 @@ export async function installSkill(
     rejectedRemoteEntries.length > 0 ||
     missingRemoteEntries ||
     (await isSkillContentIncomplete(skillMdPath));
+
+  baselineRevision = !incomplete
+    ? await verifiedInstallRevision(
+        baselineRevision?.kind === "blob" ? skillMdPath : skillPath,
+        baselineRevision,
+        token,
+        ".skill-meta.json",
+        options.suppressRecoveryPrompt === true,
+      )
+    : undefined;
 
   const metaPath = vscode.Uri.joinPath(skillPath, ".skill-meta.json");
   const existingMeta = await readSkillMetaIfExists(metaPath);
@@ -2381,6 +2613,35 @@ export interface SkillMeta {
   [key: string]: unknown;
 }
 
+export type InstalledSkillScanError =
+  | "root-stat"
+  | "directory-stat"
+  | "directory-read"
+  | "skill-stat"
+  | "metadata-read"
+  | "metadata-invalid"
+  | "skill-read"
+  | "depth-limit"
+  | "scan-failed";
+
+/** Errors are fixed codes, capped at 32; errorCount includes omitted entries. */
+export interface InstalledSkillScanResult {
+  metas: SkillMeta[];
+  complete: boolean;
+  errors: InstalledSkillScanError[];
+  errorCount: number;
+}
+
+type ScanDiagnostic = (error: InstalledSkillScanError) => void;
+
+function isScanFileNotFoundError(error: unknown): boolean {
+  const code = (error as { code?: unknown } | undefined)?.code;
+  if (typeof code === "string" && code !== "ENOENT" && code !== "FileNotFound") {
+    return false;
+  }
+  return isFileNotFoundError(error);
+}
+
 export function normalizeSkillMetaSource(
   meta: Pick<Partial<SkillMeta>, "source" | "remotePath">,
 ): string {
@@ -2419,14 +2680,19 @@ async function scanSkillsRecursively(
     skillMdPath: vscode.Uri;
   }>,
   depth: number = 0,
+  diagnose?: ScanDiagnostic,
 ): Promise<void> {
   // 最大深度を制限（無限ループ防止）
-  if (depth > 3) return;
+  if (depth > 3) {
+    diagnose?.("depth-limit");
+    return;
+  }
 
   try {
     try {
       await vscode.workspace.fs.stat(currentPath);
     } catch {
+      diagnose?.("directory-stat");
       return;
     }
 
@@ -2451,7 +2717,10 @@ async function scanSkillsRecursively(
       try {
         await vscode.workspace.fs.stat(skillMdPath);
         hasSkillMd = true;
-      } catch {
+      } catch (error) {
+        if (diagnose && !isScanFileNotFoundError(error)) {
+          diagnose?.("skill-stat");
+        }
         // SKILL.md がない
       }
 
@@ -2472,9 +2741,11 @@ async function scanSkillsRecursively(
         subRelativePath,
         results,
         depth + 1,
+        diagnose,
       );
     }
   } catch {
+    diagnose?.("directory-read");
     // ディレクトリ読み取りエラー
   }
 }
@@ -2669,10 +2940,43 @@ export async function getInstalledSkillsWithMeta(
 export async function getInstalledSkillsWithMetaFromRoot(
   skillsPath: vscode.Uri,
 ): Promise<SkillMeta[]> {
+  return scanInstalledSkillsWithMetaFromRoot(skillsPath);
+}
+
+export async function getInstalledSkillsWithMetaResult(
+  workspaceUri: vscode.Uri,
+): Promise<InstalledSkillScanResult> {
+  try {
+    const config = vscode.workspace.getConfiguration("resourceNinja");
+    return await getInstalledSkillsWithMetaResultFromRoot(
+      resolveSkillsDirectoryUri(workspaceUri, config),
+    );
+  } catch {
+    return { metas: [], complete: false, errors: ["scan-failed"], errorCount: 1 };
+  }
+}
+
+export async function getInstalledSkillsWithMetaResultFromRoot(
+  skillsPath: vscode.Uri,
+): Promise<InstalledSkillScanResult> {
+  const errors: InstalledSkillScanError[] = [];
+  let errorCount = 0;
+  const metas = await scanInstalledSkillsWithMetaFromRoot(skillsPath, (error) => {
+    errorCount++;
+    if (errors.length < 32) errors.push(error);
+  });
+  return { metas, complete: errorCount === 0, errors, errorCount };
+}
+
+async function scanInstalledSkillsWithMetaFromRoot(
+  skillsPath: vscode.Uri,
+  diagnose?: ScanDiagnostic,
+): Promise<SkillMeta[]> {
   try {
     try {
       await vscode.workspace.fs.stat(skillsPath);
-    } catch {
+    } catch (error) {
+      if (diagnose && !isScanFileNotFoundError(error)) diagnose("root-stat");
       return [];
     }
 
@@ -2683,12 +2987,21 @@ export async function getInstalledSkillsWithMetaFromRoot(
       metaPath: vscode.Uri;
       skillMdPath: vscode.Uri;
     }> = [];
-    await scanSkillsRecursively(skillsPath, skillsPath, "", skillEntries);
+    await scanSkillsRecursively(
+      skillsPath,
+      skillsPath,
+      "",
+      skillEntries,
+      0,
+      diagnose,
+    );
 
     const metas: SkillMeta[] = [];
     for (const entry of skillEntries) {
+      let metadataRead = false;
       try {
         const content = await vscode.workspace.fs.readFile(entry.metaPath);
+        metadataRead = true;
         const meta = JSON.parse(Buffer.from(content).toString("utf-8"));
         meta.source = normalizeSkillMetaSource(meta);
         // The sidecar can arrive from a third-party repository, so its path
@@ -2697,12 +3010,24 @@ export async function getInstalledSkillsWithMetaFromRoot(
         meta.relativePath = entry.relativePath;
         meta.skillFilePath = entry.skillMdPath.fsPath;
         metas.push(meta);
-      } catch {
+      } catch (error) {
+        if (metadataRead) {
+          diagnose?.("metadata-invalid");
+        } else if (diagnose && !isScanFileNotFoundError(error)) {
+          diagnose("metadata-read");
+        }
         // メタデータがない場合は SKILL.md から name と description を読み取る
         const { name, description, license, author, version } =
-          await extractMetadataFromSkillMd(entry.skillMdPath, entry.folderName);
+          await extractMetadataFromSkillMd(
+            entry.skillMdPath,
+            entry.folderName,
+            diagnose,
+          );
         // When to Use セクションも抽出
-        const whenToUse = await extractWhenToUseFromSkillMd(entry.skillMdPath);
+        const whenToUse = await extractWhenToUseFromSkillMd(
+          entry.skillMdPath,
+          diagnose,
+        );
         metas.push({
           name,
           source: normalizeSkillMetaSource({}),
@@ -2720,6 +3045,7 @@ export async function getInstalledSkillsWithMetaFromRoot(
     }
     return metas;
   } catch {
+    diagnose?.("scan-failed");
     return [];
   }
 }
@@ -2790,6 +3116,7 @@ async function extractNameAndDescriptionFromSkillMd(
 async function extractMetadataFromSkillMd(
   skillMdUri: vscode.Uri,
   fallbackName: string,
+  diagnose?: ScanDiagnostic,
 ): Promise<{
   name: string;
   description: string;
@@ -2845,6 +3172,7 @@ async function extractMetadataFromSkillMd(
 
     return { name: fallbackName, description: "" };
   } catch {
+    diagnose?.("skill-read");
     return { name: fallbackName, description: "" };
   }
 }
@@ -2937,12 +3265,14 @@ async function extractDescriptionFromSkillMd(
  */
 async function extractWhenToUseFromSkillMd(
   skillMdUri: vscode.Uri,
+  diagnose?: ScanDiagnostic,
 ): Promise<string> {
   try {
     const content = await vscode.workspace.fs.readFile(skillMdUri);
     const text = Buffer.from(content).toString("utf-8");
     return parseWhenToUseFromText(text);
   } catch {
+    diagnose?.("skill-read");
     return "";
   }
 }
@@ -3176,6 +3506,7 @@ export async function recoverPrimarySkillMdFromRaw(
   branch: string,
   remotePath: string,
   token?: string,
+  stopOnRateLimit = false,
 ): Promise<boolean> {
   const cleanPath = (remotePath || "").replace(/^\/+|\/+$/g, "");
   const rawBase = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(branch)}`;
@@ -3188,6 +3519,7 @@ export async function recoverPrimarySkillMdFromRaw(
       rawUrl,
       token,
       buildGitHubContentsApiUrl(owner, repo, branch, contentPath),
+      stopOnRateLimit,
     );
     if (Buffer.from(content).toString("utf-8").trim().length <= 100) {
       return false;
@@ -3199,6 +3531,7 @@ export async function recoverPrimarySkillMdFromRaw(
     );
     return true;
   } catch (rawError) {
+    throwIfRateLimited(rawError, stopOnRateLimit);
     logger.warn(
       `Raw SKILL.md recovery failed (${rawUrl}): ${
         rawError instanceof Error ? rawError.message : String(rawError)
@@ -3265,17 +3598,33 @@ function buildGitHubContentsApiUrl(
 
 // バイナリ（.pptx / .tar.gz など）や UTF-8 BOM を壊さないよう、文字列を経由せず
 // バイト列のまま取得して書き込む。
-async function fetchFileBytes(
+export async function fetchFileBytes(
   url: string,
   token?: string,
   authenticatedUrl?: string,
+  stopOnRateLimit = false,
 ): Promise<Uint8Array> {
   const response = await fetchGitHubWithOptionalAuthRetry(url, {
     accept: "text/plain",
     token,
     authenticatedUrl,
+    stopOnRateLimit,
   });
   if (!response.ok) {
+    if (response.status === 403 || response.status === 429) {
+      const bodyText = await response
+        .clone()
+        .text()
+        .catch(() => "");
+      const failure = createGitHubResponseError(
+        response,
+        bodyText,
+        `HTTP ${response.status}`,
+      );
+      if (failure.kind === "rate-limit" || failure.rootCauseKind === "rate-limit") {
+        throw failure;
+      }
+    }
     throw new Error(
       `HTTP ${response.status}: ${response.statusText} (URL: ${url})`,
     );

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Update Changed Workspace Skills / 変更分のワークスペース skill を更新** - About every 14 days (when the extension activates in a workspace) or on **Check Workspace Skill Updates**, skills whose upstream changed are detected without writing anything. The notification offers **Update All** (changed skills without local edits) and **Details** (per-skill diff and individual update; overwriting saved local edits asks first). Closing it changes nothing. The new version is verified before the switch and the old one is restored on failure, or kept with its location shown. Shared, synchronized, network and linked locations are excluded / 約 14 日ごと（ワークスペースで拡張機能が有効化されたとき）または **ワークスペース skill の更新を確認** で、配布元が変わったスキルを何も書き込まずに検出します。通知から **まとめて更新**（ローカル編集のない変更分）と **詳細**（差分表示と 1 件ずつの更新。保存済みのローカル編集の上書きは先に確認）を選べ、閉じても何も変更しません。新版を検証してから入れ替え、失敗時は旧版を復元するか、保管先を示して残します。共有先・同期先・ネットワーク・リンク経由の場所は対象外です。
+
+### Fixed
+
+- **Remember View Options per Profile / ビューの絞り込みをプロファイルに保存** - Filter and sort choices now follow the VS Code profile across workspaces. Existing workspace choices are imported only when no profile choice exists, and explicit resets remain saved; the choices are not registered for Settings Sync / 絞り込みと並べ替えの選択を VS Code プロファイル単位で保存します。既存のワークスペース設定はプロファイルに選択がない場合だけ引き継ぎ、明示的な初期化も保存します。Settings Sync には登録しません。
+- **Install Baselines Match Their Downloads / インストールの比較基準と取得内容を一致** - When a baseline is available, supported resource installs use its exact commit and record it only if the installed bytes match the complete Git object. Symlinks, submodules and incomplete or unverified copies have no baseline / 対応リソースのインストールで比較基準を取得できた場合は、そのコミットから取得し、実際の内容が Git object 全体と一致した場合だけ記録します。シンボリックリンク、サブモジュール、不完全・未検証のコピーには記録しません。
+- **Batch Reinstalls Stop at GitHub Rate Limits / 一括再インストールは GitHub のレート制限で停止** - A rate limit stops further batch requests and retries, preserving the results of attempted and unstarted resources / レート制限を受けた場合は、そのバッチの追加取得と再試行を止め、処理済みと未着手の結果を保持します。
+
 ## [0.2.69] - 2026-10-28
 
 ### Fixed

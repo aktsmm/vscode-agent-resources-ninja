@@ -1080,13 +1080,24 @@ function getCachedBranch(repoUrl: string, now: number): string | undefined {
   return cached.branch;
 }
 
-/**
- * URL が存在するか HEAD リクエストで確認
- */
+function throwOnBranchRateLimit(error: unknown, enabled: boolean): void {
+  if (
+    enabled &&
+    error &&
+    typeof error === "object" &&
+    "kind" in error &&
+    error.kind === "rate-limit"
+  ) {
+    throw error;
+  }
+}
+
+/** URL が存在するか HEAD リクエストで確認 */
 async function checkUrlExists(
   url: string,
   token?: string,
   authenticatedUrl?: string,
+  stopOnRateLimit = false,
 ): Promise<boolean> {
   try {
     const response = await fetchGitHubWithOptionalAuthRetry(url, {
@@ -1094,9 +1105,11 @@ async function checkUrlExists(
       token,
       method: "HEAD",
       authenticatedUrl,
+      stopOnRateLimit,
     });
     return response.ok;
-  } catch {
+  } catch (error) {
+    throwOnBranchRateLimit(error, stopOnRateLimit);
     return false;
   }
 }
@@ -1171,6 +1184,7 @@ export async function getDefaultBranch(
   token?: string,
   testPath?: string, // 存在確認用のパス（例: "skills/xxx/SKILL.md"）
   now: () => number = Date.now,
+  stopOnRateLimit = false,
 ): Promise<string> {
   // キャッシュチェック
   const cachedBranch = getCachedBranch(repoUrl, now());
@@ -1193,7 +1207,7 @@ export async function getDefaultBranch(
     const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${encodeGitHubPathForUrl(testFile)}`;
     const authenticatedUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeGitHubPathForUrl(testFile)}?ref=${encodeURIComponent(branch)}`;
 
-    if (await checkUrlExists(rawUrl, token, authenticatedUrl)) {
+    if (await checkUrlExists(rawUrl, token, authenticatedUrl, stopOnRateLimit)) {
       branchCache.set(repoUrl, { branch });
       return branch;
     }
@@ -1205,6 +1219,7 @@ export async function getDefaultBranch(
     const response = await fetchGitHubWithOptionalAuthRetry(apiUrl, {
       accept: "application/vnd.github.v3+json",
       token,
+      stopOnRateLimit,
     });
     if (response.ok) {
       const data = (await response.json()) as { default_branch?: string };
@@ -1214,7 +1229,8 @@ export async function getDefaultBranch(
         return branch;
       }
     }
-  } catch {
+  } catch (error) {
+    throwOnBranchRateLimit(error, stopOnRateLimit);
     // API エラー時はフォールバック
   }
 
@@ -1233,6 +1249,7 @@ export async function getSourceBranch(
   source: Source,
   token?: string,
   skillPath?: string, // 存在確認用のスキルパス
+  stopOnRateLimit = false,
 ): Promise<string> {
   // skill-index.json に明示的に設定されていればそれを使用
   if (source.branch) {
@@ -1244,7 +1261,13 @@ export async function getSourceBranch(
   if (skillPath) {
     testPath = getResourceContentPath({ path: skillPath });
   }
-  return await getDefaultBranch(source.url, token, testPath);
+  return await getDefaultBranch(
+    source.url,
+    token,
+    testPath,
+    Date.now,
+    stopOnRateLimit,
+  );
 }
 
 export function isResourceFilePath(resourcePath: string): boolean {

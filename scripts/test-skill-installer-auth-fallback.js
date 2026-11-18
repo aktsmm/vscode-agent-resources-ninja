@@ -461,6 +461,64 @@ async function main() {
       },
     },
     {
+      name: "batch branch discovery stops at a rate limit without probing alternatives",
+      run: async () => {
+        const skillIndexModule = requireTypeScriptModule(
+          path.join(__dirname, "..", "src", "skillIndex.ts"),
+          {
+            vscode: {},
+            "./gitHubRefSafety": requireTypeScriptModule(
+              path.join(__dirname, "..", "src", "gitHubRefSafety.ts"),
+            ),
+            "./githubFetch": githubFetchModule,
+            "./logger": { logger: { info() {}, warn() {}, error() {} } },
+            "./retiredSources": requireTypeScriptModule(
+              path.join(__dirname, "..", "src", "retiredSources.ts"),
+            ),
+            "./sharedResourceIndexStore": {},
+          },
+        );
+        const calls = [];
+        global.fetch = async (url, options = {}) => {
+          calls.push({ url, method: options.method || "GET" });
+          return new Response(null, {
+            status: 429,
+            headers: { "x-ratelimit-remaining": "0" },
+          });
+        };
+        await assert.rejects(
+          () => skillIndexModule.getDefaultBranch(
+            "https://github.com/example/rate-limited-head",
+            undefined,
+            "skills/example/SKILL.md",
+            Date.now,
+            true,
+          ),
+          (error) => error.kind === "rate-limit",
+        );
+        assert.strictEqual(calls.length, 1, "no master or API probe follows 429");
+
+        calls.length = 0;
+        global.fetch = async (url, options = {}) => {
+          calls.push({ url, method: options.method || "GET" });
+          return options.method === "HEAD"
+            ? new Response(null, { status: 404 })
+            : new Response("rate limit exceeded", { status: 429 });
+        };
+        await assert.rejects(
+          () => skillIndexModule.getDefaultBranch(
+            "https://github.com/example/rate-limited-api",
+            undefined,
+            "skills/example/SKILL.md",
+            Date.now,
+            true,
+          ),
+          (error) => error.kind === "rate-limit",
+        );
+        assert.deepStrictEqual(calls.map((call) => call.method), ["HEAD", "HEAD", "GET"]);
+      },
+    },
+    {
       name: "getDefaultBranch expires only an unverified fallback",
       run: async () => {
         let now = 1_000;

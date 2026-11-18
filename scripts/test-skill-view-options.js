@@ -58,6 +58,68 @@ function test(name, fn) {
 
 const wrap = (...lines) => `---\nname: a\n${lines.join("\n")}\n---\n\n# A\n`;
 
+test("view options migrate once per profile and preserve explicit resets", async () => {
+  const createState = (initial = {}) => {
+    const values = new Map(Object.entries(initial));
+    const writes = [];
+    return {
+      values,
+      writes,
+      get: (key) => values.get(key),
+      update: async (key, value) => {
+        writes.push(key);
+        values.set(key, value);
+      },
+    };
+  };
+  const profile = createState();
+  const firstWorkspace = createState({
+    local: { filter: "explicitOnly", sort: "invocation" },
+  });
+  const secondWorkspace = createState({
+    local: { filter: "modelOnly", sort: "name" },
+    browse: { filter: "auto", sort: "stars" },
+  });
+  const restore = optionsModule.restoreSkillViewOptions;
+  assert.deepStrictEqual(await restore("local", "local", profile, firstWorkspace), {
+    filter: "explicitOnly",
+    sort: "invocation",
+  });
+  assert.deepStrictEqual(await restore("local", "local", profile, secondWorkspace), {
+    filter: "explicitOnly",
+    sort: "invocation",
+  });
+  assert.deepStrictEqual(await restore("browse", "browse", profile, secondWorkspace), {
+    filter: "auto",
+    sort: "stars",
+  });
+  await profile.update("local", { filter: "all", sort: "default" });
+  assert.deepStrictEqual(await restore("local", "local", profile, secondWorkspace), {
+    filter: "all",
+    sort: "default",
+  });
+  const separateProfile = createState();
+  const emptyWorkspace = createState();
+  assert.deepStrictEqual(await restore("local", "local", separateProfile, emptyWorkspace), {
+    filter: "all",
+    sort: "default",
+  });
+  assert.deepStrictEqual(separateProfile.writes, []);
+  const invalidWorkspace = createState({ local: { filter: "bogus", sort: "stars" } });
+  assert.deepStrictEqual(await restore("local", "local", separateProfile, invalidWorkspace), {
+    filter: "all",
+    sort: "default",
+  });
+  const failingProfile = createState();
+  failingProfile.update = async () => { throw new Error("storage unavailable"); };
+  await assert.rejects(
+    restore("local", "local", failingProfile, firstWorkspace),
+    /storage unavailable/,
+  );
+  const source = fs.readFileSync(path.join(repoRoot, "src", "extension.ts"), "utf8");
+  assert.match(source, /context\.globalState\.update\(\s*VIEW_OPTIONS_STATE_KEYS\[scope\],\s*next,/);
+});
+
 test("each frontmatter key maps to its own invocation mode", () => {
   const read = modeModule.readSkillInvocationFromText;
   assert.strictEqual(read(wrap()), "auto");

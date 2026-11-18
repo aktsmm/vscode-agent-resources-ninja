@@ -553,6 +553,12 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "resourceNinja.checkWorkspaceSkillUpdates",
+        "title": "%command.checkWorkspaceSkillUpdates%",
+        "category": "Agent Resources Ninja",
+        "icon": "$(cloud-download)"
+      },
+      {
         "command": "resourceNinja.reinstallAll",
         "title": "%command.reinstallAll%",
         "category": "Agent Resources Ninja",
@@ -1128,6 +1134,11 @@
           "command": "resourceNinja.reinstallMultiple",
           "when": "view == resourceNinja.installedView && resourceNinja.hasInstalledSkills",
           "group": "actions@3"
+        },
+        {
+          "command": "resourceNinja.checkWorkspaceSkillUpdates",
+          "when": "view == resourceNinja.installedView && resourceNinja.hasInstalledSkills",
+          "group": "actions@4"
         },
         {
           "command": "resourceNinja.refresh",

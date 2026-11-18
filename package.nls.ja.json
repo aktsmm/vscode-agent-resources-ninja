@@ -21,6 +21,7 @@
   "command.uninstall": "リソースをアンインストール",
   "command.showInstalled": "ワークスペースリソースを表示",
   "command.refresh": "ビューを更新",
+  "command.checkWorkspaceSkillUpdates": "ワークスペース skill の更新を確認",
   "command.reinstallAll": "ワークスペース skill をすべて再インストール",
   "command.reinstall": "リソースを再インストール",
   "command.reinstallResourceGroup": "リソースグループを再インストール",

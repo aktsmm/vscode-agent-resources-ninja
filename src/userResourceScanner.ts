@@ -914,6 +914,13 @@ async function parseResourceFile(
   };
 }
 
+/** Every user-level root the scanner reads, so writers can keep their staging outside them. */
+export function getUserResourceRootUris(
+  workspaceUri?: vscode.Uri,
+): vscode.Uri[] {
+  return getKnownRoots(workspaceUri, false, true).map((root) => root.uri);
+}
+
 export async function scanUserResources(
   workspaceUri?: vscode.Uri,
   includeBuiltInResources: boolean = false,

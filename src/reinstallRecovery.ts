@@ -59,6 +59,9 @@ export function classifyReinstallFailure(error: unknown): ReinstallFailureKind {
   const candidate = error as
     | { kind?: unknown; rootCauseKind?: unknown }
     | undefined;
+  if (candidate?.kind === "rate-limit") {
+    return "rate-limit";
+  }
   const kind = candidate?.rootCauseKind ?? candidate?.kind;
   return typeof kind === "string" &&
     [
@@ -160,7 +163,23 @@ export async function runReinstallBatch<T>(
       break;
     }
     options.onProgress?.(task, index);
-    records.push({ task, result: await runReinstallTask(task) });
+    const result = await runReinstallTask(task);
+    records.push({ task, result });
+    if (result.failureKind === "rate-limit") {
+      records.push(
+        ...tasks.slice(index + 1).map((unstartedTask) => ({
+          task: unstartedTask,
+          result: {
+            success: false,
+            attempts: 0,
+            removed: false,
+            stage: "not-started" as const,
+            failureKind: "rate-limit" as const,
+          },
+        })),
+      );
+      break;
+    }
   }
   return records;
 }
@@ -168,24 +187,28 @@ export async function runReinstallBatch<T>(
 export async function retryReinstallBatch<T>(
   records: readonly ReinstallBatchRecord<T>[],
 ): Promise<ReinstallBatchRecord<T>[]> {
+  if (records.some((record) => record.result.failureKind === "rate-limit")) {
+    return [...records];
+  }
   const retried: ReinstallBatchRecord<T>[] = [];
+  let rateLimited = false;
   for (const record of records) {
     if (
+      rateLimited ||
       record.result.stage !== "install" ||
       !isReinstallRetryable(record.result.failureKind)
     ) {
       retried.push(record);
       continue;
     }
-    retried.push({
-      task: record.task,
-      result: await runReinstallTask(record.task, {
-        skipRemoval: true,
-        alreadyRemoved: record.result.removed,
-        initialAttempts: record.result.attempts,
-        automaticRetries: 0,
-      }),
+    const result = await runReinstallTask(record.task, {
+      skipRemoval: true,
+      alreadyRemoved: record.result.removed,
+      initialAttempts: record.result.attempts,
+      automaticRetries: 0,
     });
+    retried.push({ task: record.task, result });
+    rateLimited = result.failureKind === "rate-limit";
   }
   return retried;
 }
