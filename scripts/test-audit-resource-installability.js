@@ -155,7 +155,6 @@ const GRANDFATHERED_INSTALL_COLLISIONS = {
     "github-awesome-copilot",
     "microsoft-azure-skills",
   ],
-  "skill:deploy": ["aws-agent-plugins", "microsoft-azure-skills"],
   "skill:finetuning": ["aws-agent-plugins", "microsoft-azure-skills"],
   "skill:frontend-design": ["anthropic-claude-code", "anthropics-skills"],
   "skill:webapp-testing": ["anthropics-skills", "github-awesome-copilot"],

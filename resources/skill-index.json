@@ -1,6 +1,6 @@
 {
-  "version": "1.32.0",
-  "lastUpdated": "2026-10-21",
+  "version": "1.33.0",
+  "lastUpdated": "2026-11-19",
   "retiredSources": [
     {
       "id": "openai-codex"
@@ -383,17 +383,14 @@
         "azure-validate",
         "capacity",
         "customize",
-        "deploy",
         "deploy-model",
         "discover-azure-skills",
         "entra-agent-id",
         "entra-app-registration",
         "finetuning",
         "microsoft-foundry",
-        "prepare",
         "preset",
-        "python-appservice-deploy",
-        "scaffold"
+        "python-appservice-deploy"
       ],
       "installOrder": [
         "airunway-aks-setup",
@@ -424,17 +421,14 @@
         "azure-validate",
         "capacity",
         "customize",
-        "deploy",
         "deploy-model",
         "discover-azure-skills",
         "entra-agent-id",
         "entra-app-registration",
         "finetuning",
         "microsoft-foundry",
-        "prepare",
         "preset",
-        "python-appservice-deploy",
-        "scaffold"
+        "python-appservice-deploy"
       ]
     },
     {
@@ -3263,10 +3257,10 @@
       "description_ja": "",
       "license": "MIT",
       "author": "Microsoft <https://www.microsoft.com>",
-      "version": "1.2.87",
+      "version": "1.2.130",
       "pluginRoot": ".",
       "pluginManifestPath": "plugin.json",
-      "pluginManifestKind": "plugin"
+      "pluginManifestKind": "agent-plugins"
     },
     {
       "kind": "mcp",
@@ -3435,7 +3429,7 @@
       "path": "skills/azure-ai",
       "invocation": "auto",
       "categories": [],
-      "description": "Use for Azure AI: Search, Speech, OpenAI, Document Intelligence. Helps with search, vector/hybrid search, speech-to-text, text-to-speech, transcription, OCR. WHEN: AI Search, query search, vector search, hybrid search, semantic search, speech-to-text, text-to-speech, transcribe, OCR, convert text to speech.",
+      "description": "Build and troubleshoot Azure AI Search, Speech, Document Intelligence, Translator, Content Safety, and OpenAI apps. WHEN: AI Search, vector search, hybrid search, semantic search, indexer, speech-to-text, text-to-speech, transcribe, fast or batch transcription, Speech SDK logs, session ID, result ID, OCR, document translation, glossary.",
       "description_ja": "",
       "license": "MIT",
       "author": "Microsoft",
@@ -4543,7 +4537,7 @@
       "path": "skills/azure-diagnostics",
       "invocation": "auto",
       "categories": [],
-      "description": "Debug Azure production issues on Azure using AppLens, Azure Monitor, resource health, and safe triage. WHEN: debug production issues, troubleshoot app service, app service high CPU, app service deployment failure, troubleshoot container apps, container app 503 or target port mismatch, troubleshoot functions, function telemetry missing or stopped after a config/connection-string change, troubleshoot AKS, VM RDP, Linux SSH, VM black screen, can't connect to VM, reset VM password, NSG or firewall blocking, kubectl cannot connect, kube-system/CoreDNS failures, pod pending, crashloop, node not ready, upgrade failures, analyze logs, KQL, insights, image pull failures, cold start issues, health probe failures, resource health, root cause of errors, troubleshoot event hubs, troubleshoot service bus, messaging SDK error, AMQP connection failure, message lock lost, lock renewal during long-running processing, service bus dead letter.",
+      "description": "Debug Azure production issues using AppLens, Azure Monitor, resource health, and safe triage, including evidence-only diagnosis without live access. WHEN: debug production issues, troubleshoot app service, app service high CPU, app service deployment failure, troubleshoot container apps, container app 503 or target port mismatch, troubleshoot functions, function telemetry missing or stopped after a config/connection-string change, troubleshoot AKS, VM RDP, Linux SSH, VM black screen, can't connect to VM, reset VM password, NSG or firewall blocking, kubectl cannot connect, kube-system/CoreDNS failures, pod pending, crashloop, node not ready, upgrade failures, analyze logs, KQL, insights, image pull failures, cold start issues, health probe failures, resource health, root cause of errors, troubleshoot event hubs, troubleshoot service bus, messaging SDK error, AMQP connection failure, message lock lost, lock renewal during long-running processing, service bus dead letter.",
       "description_ja": "",
       "license": "MIT",
       "author": "Microsoft",
@@ -11986,19 +11980,6 @@
       "pluginRoot": ".",
       "pluginManifestPath": ".github/plugin/marketplace.json",
       "pluginManifestKind": "marketplace"
-    },
-    {
-      "kind": "skill",
-      "name": "deploy",
-      "source": "microsoft-azure-skills",
-      "path": "skills/azure-app-onboard/deploy",
-      "invocation": "auto",
-      "categories": [],
-      "description": "| Property | Value |",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": "plugin.json",
-      "pluginManifestKind": "plugin"
     },
     {
       "kind": "skill",
@@ -20338,7 +20319,7 @@
       "path": "skills/microsoft-foundry",
       "invocation": "auto",
       "categories": [],
-      "description": "Build, deploy, evaluate, optimize, fine-tune, and manage Microsoft Foundry agents, models, and resources end to end. USE FOR: foundry, azd ai agent, azd provision/deploy, hosted agent scaffold/develop/run/deploy/troubleshoot, prompt agent create, create agent, update agent, add tool to agent, invoke agent, agent.yaml, agent insights, pull agent insights, evaluate agent, batch eval, continuous eval, continuous monitoring, agent CI/CD, optimize prompt, improve prompt, prompt optimizer, optimize agent instructions, Agent Optimizer scaffold, dataset curation from traces, deploy model, model fine-tuning (SFT/DPO/RFT), Foundry project, RBAC, role assignment, permissions, quota, capacity, region, deployment failure, AI Services, create Foundry resource, knowledge index, customize deployment, onboard, availability, training-data, grader, distillation, large file upload. DO NOT USE FOR: Azure Functions, App Service, general Azure deploy (use azure-deploy), general Azure prep (use azure-prepare).",
+      "description": "Build, deploy, evaluate, optimize, fine-tune, and manage Microsoft Foundry agents, models, and resources end to end. USE FOR: foundry, azd ai agent, azd provision/deploy, hosted agent scaffold/develop/run/deploy/troubleshoot, prompt agent, managed harness agent, Copilot harness, voice agent, create/update/invoke/evaluate agent, add tool to agent, agent insights, batch/continuous eval, continuous monitoring, agent CI/CD, optimize/improve prompt, optimize agent instructions, Agent Optimizer, dataset curation from traces, deploy model, model fine-tuning (SFT/DPO/RFT), Foundry project, RBAC, role assignment, permissions, quota, capacity, region, deployment failure, AI Services, create Foundry resource, knowledge index, customize deployment, onboard, availability, training-data, grader, distillation, large file upload. DO NOT USE FOR: Azure Functions, App Service, general Azure deploy (use azure-deploy), general Azure prep (use azure-prepare).",
       "description_ja": "",
       "license": "MIT",
       "author": "Microsoft",
@@ -23797,19 +23778,6 @@
       "pluginManifestKind": "marketplace"
     },
     {
-      "kind": "skill",
-      "name": "prepare",
-      "source": "microsoft-azure-skills",
-      "path": "skills/azure-app-onboard/prepare",
-      "invocation": "auto",
-      "categories": [],
-      "description": "| Property | Value |",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": "plugin.json",
-      "pluginManifestKind": "plugin"
-    },
-    {
       "name": "prerender-automation",
       "source": "composio-awesome",
       "path": "composio-skills/prerender-automation",
@@ -27152,19 +27120,6 @@
       "categories": [],
       "description": "Automate Satismeter tasks via Rube MCP (Composio). Always search tools first for current schemas.",
       "description_ja": ""
-    },
-    {
-      "kind": "skill",
-      "name": "scaffold",
-      "source": "microsoft-azure-skills",
-      "path": "skills/azure-app-onboard/scaffold",
-      "invocation": "auto",
-      "categories": [],
-      "description": "Generate deployment-ready infrastructure code from an architecture plan, verify it with adversarial self-review, and bridge to validation — all without deploying.",
-      "description_ja": "",
-      "pluginRoot": ".",
-      "pluginManifestPath": "plugin.json",
-      "pluginManifestKind": "plugin"
     },
     {
       "kind": "skill",

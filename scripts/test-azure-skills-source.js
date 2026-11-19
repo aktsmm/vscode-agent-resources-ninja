@@ -79,7 +79,8 @@ async function main() {
   assert.strictEqual(pluginResources[0].path, ".");
   assert.strictEqual(pluginResources[0].pluginRoot, ".");
   assert.strictEqual(pluginResources[0].pluginManifestPath, "plugin.json");
-  assert.strictEqual(pluginResources[0].pluginManifestKind, "plugin");
+  // The upstream manifest now declares the Agent Plugins 1.0.0 schema.
+  assert.strictEqual(pluginResources[0].pluginManifestKind, "agent-plugins");
 
   assert.ok(
     skillResources.every((resource) => resource.path.startsWith("skills/")),
