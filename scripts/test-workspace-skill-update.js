@@ -35,6 +35,9 @@ const oldRevision = {
   owner: "octo", repo: "demo", ref: "main", remotePath,
   commitSha: oldCommit, contentSha: oldTree, kind: "tree",
 };
+const initialRevision = {
+  ...oldRevision, commitSha: newCommit, contentSha: newTree,
+};
 let corruptDownload = false;
 let failDownload = false;
 let unchangedRemote = false;
@@ -176,6 +179,7 @@ Module._load = function (name, parent, isMain) {
   if (name === "vscode") { return vscode; }
   if (name === "./githubFetch") { return { fetchGitHubWithOptionalAuthRetry: request }; }
   if (name === "./logger") { return { logger: { info() {}, warn() {}, error() {} } }; }
+  if (name === "./skillIndex") { return { RETIRED_SOURCE_ALIASES: {} }; }
   if (unused.has(name)) { return {}; }
   return originalLoad.call(this, name, parent, isMain);
 };
@@ -213,9 +217,10 @@ async function reset() {
   executableBlob = false;
 }
 let roots = () => [Uri.file(skills)];
-const prepare = () => update.prepareWorkspaceSkillUpdate({
+const prepare = (options = {}) => update.prepareWorkspaceSkillUpdate({
   workspace: Uri.file(workspace), target: Uri.file(target),
   getSkillsRoots: async () => roots(),
+  ...options,
 });
 const approve = (candidate, options = {}) => ({
   candidateId: candidate.id, mode: "single", ...options,
@@ -223,6 +228,52 @@ const approve = (candidate, options = {}) => ({
 const bytesAt = (name) => fsp.readFile(path.join(target, name));
 
 async function main() {
+  await reset();
+  {
+    const transaction = path.join(fixture, ".resource-ninja-update-recovery");
+    const backup = path.join(transaction, "backup");
+    await fsp.mkdir(transaction);
+    await fsp.rename(target, backup);
+    const identity = process.platform === "win32" ? target.toLowerCase() : target;
+    const record = path.join(fixture, `.resource-ninja-recovery-${createHash("sha256").update(identity).digest("hex")}.json`);
+    const value = { version: 1, workspace, target, transaction, backup };
+    await fsp.writeFile(record, JSON.stringify(value));
+    const discovered = await update.findWorkspaceRecoveryRecords(Uri.file(workspace));
+    assert.ok(discovered.records.some((entry) => entry.record === record && entry.backup === backup), JSON.stringify(discovered));
+    assert.equal(fs.existsSync(target), false);
+    assert.equal(fs.existsSync(backup), true);
+    assert.equal(JSON.parse(await fsp.readFile(record, "utf8")).target, target);
+
+    await fsp.writeFile(record, JSON.stringify({ ...value, backup: path.join(fixture, "foreign") }));
+    const rejected = await update.findWorkspaceRecoveryRecords(Uri.file(workspace));
+    assert.ok(!rejected.records.some((entry) => entry.record === record));
+    assert.equal(rejected.incomplete, true);
+    assert.equal(fs.existsSync(backup), true);
+
+    await fsp.writeFile(record, JSON.stringify({ ...value, workspace: path.join(fixture, "other") }));
+    const otherWorkspace = await update.findWorkspaceRecoveryRecords(Uri.file(workspace));
+    assert.ok(!otherWorkspace.records.some((entry) => entry.record === record));
+
+    for (const invalid of ["{", "x".repeat(64 * 1024 + 1), JSON.stringify({ ...value, workspace: "." })]) {
+      await fsp.writeFile(record, invalid);
+      const unreadable = await update.findWorkspaceRecoveryRecords(Uri.file(workspace));
+      assert.equal(unreadable.incomplete, true);
+      assert.ok(!unreadable.records.some((entry) => entry.record === record));
+      assert.equal(fs.existsSync(backup), true);
+    }
+
+    await fsp.writeFile(record, JSON.stringify(value));
+    const originalOpen = fsp.open;
+    fsp.open = async (location, ...args) => {
+      if (location === record) { throw new Error("injected-record-read-failure"); }
+      return originalOpen(location, ...args);
+    };
+    try {
+      const unreadable = await update.findWorkspaceRecoveryRecords(Uri.file(workspace));
+      assert.equal(unreadable.incomplete, true);
+      assert.ok(!unreadable.records.some((entry) => entry.record === record));
+    } finally { fsp.open = originalOpen; }
+  }
   await reset();
   vscode.env.remoteName = "ssh-remote";
   let hostResult = await prepare();
@@ -269,6 +320,137 @@ async function main() {
   assert.deepEqual((await fsp.readdir(skills)), ["sample"]);
   assert.equal((await update.applyWorkspaceSkillUpdate(candidate, approve(candidate))).status, "blocked");
   await assert.rejects(update.listWorkspaceSkillUpdateFiles(candidate));
+
+  await reset();
+  const legacyMeta = { ...meta() };
+  delete legacyMeta.sourceRevision;
+  await fsp.writeFile(path.join(target, ".skill-meta.json"), JSON.stringify(legacyMeta));
+  result = await prepare();
+  assert.equal(result.status, "blocked");
+  assert.equal(result.reason, "invalid-or-local-baseline");
+  assert.deepEqual(await bytesAt("SKILL.md"), oldFiles["SKILL.md"]);
+
+  await reset();
+  await fsp.writeFile(path.join(target, "SKILL.md"), newFiles["SKILL.md"]);
+  await fsp.writeFile(path.join(target, "data.bin"), newFiles["data.bin"]);
+  await fsp.writeFile(path.join(target, ".skill-meta.json"), JSON.stringify(legacyMeta));
+  result = await prepare({
+    initialRevision,
+    sourceId: "octo/demo",
+  });
+  assert.equal(result.status, "ready", result.reason);
+  candidate = result.candidate;
+  assert.deepEqual(candidate.localChanges, []);
+  const firstSync = await update.applyWorkspaceSkillUpdate(
+    candidate,
+    approve(candidate, { mode: "bulk" }),
+  );
+  assert.equal(firstSync.status, "updated", firstSync.reason);
+  assert.equal(JSON.parse(await bytesAt(".skill-meta.json")).sourceRevision.commitSha, newCommit);
+  assert.deepEqual(await bytesAt("SKILL.md"), newFiles["SKILL.md"]);
+
+  await reset();
+  const previousSkill = newFiles["SKILL.md"];
+  try {
+    newFiles["SKILL.md"] = Buffer.from(
+      "---\nname: sample\ndescription: Updated description\n---\n\n# Sample\n\n## When to Use\nUse for updated tasks.\n",
+    );
+    await fsp.writeFile(path.join(target, "SKILL.md"), newFiles["SKILL.md"]);
+    await fsp.writeFile(path.join(target, "data.bin"), newFiles["data.bin"]);
+    await fsp.writeFile(path.join(target, ".skill-meta.json"), JSON.stringify({
+      ...legacyMeta,
+      customWhenToUse: "Keep my custom text",
+    }));
+    result = await prepare({ initialRevision, sourceId: "octo/demo" });
+    assert.equal(result.status, "ready", result.reason);
+    const synced = await update.applyWorkspaceSkillUpdate(
+      result.candidate,
+      approve(result.candidate, { mode: "bulk" }),
+    );
+    assert.equal(synced.status, "updated", synced.reason);
+    const syncedMeta = JSON.parse(await bytesAt(".skill-meta.json"));
+    assert.equal(syncedMeta.description, "Updated description");
+    assert.equal(syncedMeta.whenToUse, "Use for updated tasks.");
+    assert.equal(syncedMeta.customWhenToUse, "Keep my custom text");
+  } finally {
+    newFiles["SKILL.md"] = previousSkill;
+  }
+
+  await reset();
+  const originalReadFile = vscode.workspace.fs.readFile;
+  vscode.workspace.fs.readFile = async (uri) => {
+    if (uri.fsPath.includes(`${path.sep}candidate${path.sep}SKILL.md`)) {
+      throw new Error("injected-staged-metadata-read-failure");
+    }
+    return originalReadFile(uri);
+  };
+  try {
+    result = await prepare();
+    assert.notEqual(result.status, "ready");
+    assert.deepEqual(await bytesAt("SKILL.md"), oldFiles["SKILL.md"]);
+    assert.equal(JSON.parse(await bytesAt(".skill-meta.json")).description, "kept");
+  } finally {
+    vscode.workspace.fs.readFile = originalReadFile;
+  }
+
+  await reset();
+  await fsp.writeFile(path.join(target, ".skill-meta.json"), JSON.stringify(legacyMeta));
+  result = await prepare({
+    initialRevision,
+    sourceId: "octo/demo",
+  });
+  assert.equal(result.status, "ready", result.reason);
+  assert.deepEqual(
+    result.candidate.localChanges.map((item) => `${item.path}:${item.kind}`).sort(),
+    ["SKILL.md:modified", "data.bin:modified"].sort(),
+  );
+  candidate = result.candidate;
+  assert.equal(candidate.firstSync, true);
+  assert.equal((await update.applyWorkspaceSkillUpdate(candidate, approve(candidate, { mode: "bulk" }))).status, "blocked");
+  const firstSyncEdited = await update.applyWorkspaceSkillUpdate(candidate, approve(candidate, { overwriteLocalChanges: true }));
+  assert.equal(firstSyncEdited.status, "updated");
+  assert.equal(firstSyncEdited.backup, undefined);
+  assert.deepEqual(await bytesAt("SKILL.md"), newFiles["SKILL.md"]);
+  assert.deepEqual(await fsp.readdir(fixture), ["workspace"]);
+
+  await reset();
+  await fsp.writeFile(path.join(target, ".skill-meta.json"), JSON.stringify(legacyMeta));
+  result = await prepare({ initialRevision, sourceId: "octo/demo" });
+  candidate = result.candidate;
+  {
+    const original = fsp.copyFile;
+    let attempts = 0;
+    fsp.copyFile = async (...args) => {
+      if (++attempts === 2) { throw new Error("injected-copy-once"); }
+      return original(...args);
+    };
+    try {
+      const rolledBack = await update.applyWorkspaceSkillUpdate(candidate, approve(candidate, { overwriteLocalChanges: true }));
+      assert.equal(rolledBack.status, "rolled-back");
+      assert.equal(rolledBack.backup, undefined);
+      assert.deepEqual(await bytesAt("SKILL.md"), oldFiles["SKILL.md"]);
+      assert.deepEqual(await fsp.readdir(fixture), ["workspace"]);
+    } finally { fsp.copyFile = original; }
+  }
+
+  await reset();
+  await fsp.writeFile(path.join(target, ".skill-meta.json"), JSON.stringify(legacyMeta));
+  result = await prepare({ initialRevision, sourceId: "octo/demo" });
+  candidate = result.candidate;
+  {
+    const original = fsp.rmdir;
+    fsp.rmdir = async (location, ...args) => {
+      if (path.basename(location) === "candidate") { throw new Error("injected-cleanup-failure"); }
+      return original(location, ...args);
+    };
+    try {
+      const retained = await update.applyWorkspaceSkillUpdate(candidate, approve(candidate, { overwriteLocalChanges: true }));
+      assert.equal(retained.status, "updated");
+      assert.equal(retained.backup.fsPath, candidate.recoveryDirectory.fsPath);
+      assert.deepEqual(await bytesAt("SKILL.md"), newFiles["SKILL.md"]);
+      assert.deepEqual(await fsp.readFile(path.join(retained.backup.fsPath, "backup", "SKILL.md")), oldFiles["SKILL.md"]);
+    } finally { fsp.rmdir = original; }
+  }
 
   await reset();
   result = await prepare();

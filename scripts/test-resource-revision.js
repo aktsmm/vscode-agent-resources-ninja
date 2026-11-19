@@ -160,6 +160,81 @@ test("a single file resolves to its blob id", async () => {
   assert.strictEqual(resolved.contentSha, FILE_BLOB);
 });
 
+test("startup resolvers share only concurrent reads and keep credentials separate", async () => {
+  const { request, calls } = fakeGitHub();
+  const reader = revision.createSharedRevisionJsonReader(request);
+  const first = revision.createRevisionResolver("token-a", undefined, request, reader);
+  const second = revision.createRevisionResolver("token-a", undefined, request, reader);
+  await Promise.all([first(target("skills/alpha")), second(target("agents/helper.agent.md"))]);
+  assert.strictEqual(calls.filter((url) => url.endsWith("/commits/main")).length, 1);
+  assert.strictEqual(calls.filter((url) => url.includes("/git/trees/")).length, 1);
+  await revision.createRevisionResolver("token-a", undefined, request, reader)(target("skills/alpha"));
+  assert.strictEqual(calls.filter((url) => url.endsWith("/commits/main")).length, 2);
+
+  const a = revision.createRevisionResolver("token-a", undefined, request, reader);
+  const b = revision.createRevisionResolver("token-b", undefined, request, reader);
+  await Promise.all([a(target("skills/alpha")), b(target("skills/alpha"))]);
+  assert.strictEqual(calls.filter((url) => url.endsWith("/commits/main")).length, 4);
+});
+
+test("shared startup reads cancel independently and abort after the last caller", async () => {
+  let requests = 0;
+  let release;
+  let underlyingSignal;
+  const request = async (_url, options) => {
+    requests++;
+    underlyingSignal = options.signal;
+    await new Promise((resolve, reject) => {
+      release = resolve;
+      options.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+    });
+    return { ok: true, json: async () => ({ value: requests }) };
+  };
+  const reader = revision.createSharedRevisionJsonReader(request);
+  const first = new AbortController();
+  const second = new AbortController();
+  const a = reader("url", "token", first.signal);
+  const b = reader("url", "token", second.signal);
+  first.abort();
+  await assert.rejects(a, { name: "AbortError" });
+  assert.strictEqual(underlyingSignal.aborted, false);
+  release();
+  assert.deepStrictEqual(await b, { value: 1 });
+  assert.strictEqual(requests, 1);
+
+  const third = new AbortController();
+  const fourth = new AbortController();
+  const c = reader("url", "token", third.signal);
+  const d = reader("url", "token", fourth.signal);
+  third.abort();
+  fourth.abort();
+  await Promise.all([
+    assert.rejects(c, { name: "AbortError" }),
+    assert.rejects(d, { name: "AbortError" }),
+  ]);
+  assert.strictEqual(underlyingSignal.aborted, true);
+
+  const retry = reader("url", "token");
+  assert.strictEqual(requests, 3);
+  release();
+  assert.deepStrictEqual(await retry, { value: 3 });
+});
+
+test("a failed shared startup read is not cached", async () => {
+  let attempts = 0;
+  const reader = revision.createSharedRevisionJsonReader(async () => {
+    attempts++;
+    if (attempts === 1) { throw new Error("failed"); }
+    return { ok: true, json: async () => ({ recovered: true }) };
+  });
+  await Promise.all([
+    assert.rejects(reader("url"), /failed/),
+    assert.rejects(reader("url"), /failed/),
+  ]);
+  assert.deepStrictEqual(await reader("url"), { recovered: true });
+  assert.strictEqual(attempts, 2);
+});
+
 test("a batch over one branch shares one commit and tree snapshot", async () => {
   const { request, calls } = fakeGitHub();
   const resolve = revision.createRevisionResolver(undefined, undefined, request);

@@ -35,6 +35,9 @@ export function isDocumentInsideDirectory(
 export interface WorkspaceUpdateCheckDependencies {
   scan(workspace: vscode.Uri): Promise<InstalledSkillScanResult>;
   resolve(target: RevisionTarget): Promise<SourceRevision>;
+  resolveMissingBaseline?(
+    meta: InstalledSkillScanResult["metas"][number],
+  ): Promise<SourceRevision | undefined>;
   isRateLimit(error: unknown): boolean;
   isCancelled(): boolean;
   log(message: string, error?: unknown): void;
@@ -58,6 +61,7 @@ export interface WorkspaceUpdateCheckSummary {
 export async function findChangedWorkspaceSkills(
   workspaces: readonly vscode.Uri[],
   deps: WorkspaceUpdateCheckDependencies,
+  includeMissingBaseline = false,
 ): Promise<WorkspaceUpdateCheckSummary> {
   const summary: WorkspaceUpdateCheckSummary = {
     targets: [],
@@ -74,6 +78,10 @@ export async function findChangedWorkspaceSkills(
       break;
     }
     const scan = await deps.scan(workspace);
+    if (deps.isCancelled()) {
+      summary.complete = false;
+      break;
+    }
     if (!scan.complete) {
       summary.complete = false;
       deps.log("[Workspace update] Installed skill scan was incomplete");
@@ -85,19 +93,30 @@ export async function findChangedWorkspaceSkills(
         break;
       }
       const baseline = parseSourceRevision(meta.sourceRevision);
+      const hasNoRecordedBaseline =
+        meta.sourceRevision === undefined || meta.sourceRevision === null;
       const skillFile = typeof meta.skillFilePath === "string" ? meta.skillFilePath : "";
       const remotePath = typeof meta.remotePath === "string"
         ? meta.remotePath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
         : undefined;
       if (
-        !baseline ||
         !skillFile ||
         meta.reinstallDisabled === true ||
         meta.incomplete === true ||
         !meta.source ||
         meta.source === "local" ||
         meta.source === "unknown" ||
-        remotePath !== baseline.remotePath
+        !remotePath ||
+        (baseline && remotePath !== baseline.remotePath)
+      ) {
+        summary.unverified++;
+        continue;
+      }
+      if (
+        !baseline &&
+        (!includeMissingBaseline ||
+          !hasNoRecordedBaseline ||
+          !deps.resolveMissingBaseline)
       ) {
         summary.unverified++;
         continue;
@@ -111,18 +130,31 @@ export async function findChangedWorkspaceSkills(
       seen.add(key);
 
       try {
-        const current = await deps.resolve({
-          owner: baseline.owner,
-          repo: baseline.repo,
-          branch: baseline.ref,
-          remotePath: baseline.remotePath,
-        });
-        const status = classifyRevision(baseline, current);
+        const current = baseline
+          ? await deps.resolve({
+              owner: baseline.owner,
+              repo: baseline.repo,
+              branch: baseline.ref,
+              remotePath: baseline.remotePath,
+            })
+          : await deps.resolveMissingBaseline?.(meta);
+        if (deps.isCancelled()) {
+          summary.complete = false;
+          break;
+        }
+        if (!current) {
+          summary.unverified++;
+          continue;
+        }
+        const status = baseline ? classifyRevision(baseline, current) : "changed";
         if (status === "changed") {
           summary.targets.push({
             workspace,
             target: vscode.Uri.file(target),
             label: typeof meta.name === "string" && meta.name ? meta.name : path.basename(target),
+            ...(baseline
+              ? {}
+              : { initialRevision: current, sourceId: meta.source }),
           });
         } else if (status === "unchanged") {
           summary.upToDate++;
@@ -130,6 +162,10 @@ export async function findChangedWorkspaceSkills(
           summary.unverified++;
         }
       } catch (error) {
+        if (deps.isCancelled()) {
+          summary.complete = false;
+          break;
+        }
         if (error instanceof RevisionPathMissingError) {
           summary.unverified++;
         } else if (deps.isRateLimit(error)) {

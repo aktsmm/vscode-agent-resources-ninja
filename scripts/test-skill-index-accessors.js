@@ -113,6 +113,44 @@ const skillIndex = requireTypeScriptModule(
 );
 
 async function main() {
+  await test("read-only index loading never writes and rejects corrupt local data", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "resource-index-readonly-"));
+    const extensionRoot = path.join(root, "extension");
+    const globalRoot = path.join(root, "global");
+    fs.mkdirSync(path.join(extensionRoot, "resources"), { recursive: true });
+    const bundled = { version: "1", lastUpdated: "2026-01-01", sources: [], skills: [], categories: [] };
+    fs.writeFileSync(path.join(extensionRoot, "resources", "skill-index.json"), JSON.stringify(bundled));
+    const vscode = makeVscodeStub();
+    vscode.workspace.fs.writeFile = async () => { throw new Error("unexpected write"); };
+    vscode.workspace.fs.createDirectory = async () => { throw new Error("unexpected mkdir"); };
+    const moduleWithFs = requireTypeScriptModule(path.join(repoRoot, "src", "skillIndex.ts"), {
+      vscode,
+      "./gitHubRefSafety": requireTypeScriptModule(path.join(repoRoot, "src", "gitHubRefSafety.ts")),
+      "./githubFetch": { createGitHubHeaders: () => ({}), fetchGitHubWithOptionalAuthRetry: async () => ({ ok: false }) },
+      "./logger": { logger: { info: () => {}, warn: () => {}, error: () => {} } },
+      "./retiredSources": requireTypeScriptModule(path.join(repoRoot, "src", "retiredSources.ts")),
+      "./sharedResourceIndexStore": {
+        loadSharedStoresIntoSkillIndex: async (_context, index, options) => {
+          assert.strictEqual(options.readOnly, true);
+          return index;
+        },
+        syncSharedStoresFromSkillIndex: async () => { throw new Error("unexpected shared write"); },
+      },
+    });
+    const context = { extensionUri: makeUri(extensionRoot), globalStorageUri: makeUri(globalRoot) };
+    try {
+      const loaded = await moduleWithFs.loadSkillIndex(context, { readOnly: true });
+      assert.deepStrictEqual(loaded.skills, []);
+      assert.strictEqual(fs.existsSync(globalRoot), false);
+      fs.mkdirSync(globalRoot);
+      fs.writeFileSync(path.join(globalRoot, "skill-index.json"), "{");
+      await assert.rejects(moduleWithFs.loadSkillIndex(context, { readOnly: true }), SyntaxError);
+      assert.strictEqual(fs.readFileSync(path.join(globalRoot, "skill-index.json"), "utf8"), "{");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   await test("safe index accessors return empty arrays for missing index", () => {
     assert.deepStrictEqual(skillIndex.getIndexResources(undefined), []);
     assert.deepStrictEqual(skillIndex.getIndexSources(undefined), []);

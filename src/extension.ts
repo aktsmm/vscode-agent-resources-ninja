@@ -195,6 +195,7 @@ import {
   formatBatchFailureMessage,
 } from "./batchProgress";
 import {
+  createUnstartedReinstallRecord,
   decideIndexRefreshRecovery,
   isReinstallRetryable,
   ReinstallAttemptError,
@@ -254,16 +255,17 @@ import {
   collectStaleSources,
   selectStaleSourcesForStartup,
 } from "./sourceFreshness";
-import { createRevisionResolver } from "./resourceRevision";
+import { createRevisionResolver, createSharedRevisionJsonReader } from "./resourceRevision";
 import {
   applyWorkspaceSkillUpdate,
   discardWorkspaceSkillUpdate,
+  findWorkspaceRecoveryRecords,
   listWorkspaceSkillUpdateFiles,
   prepareWorkspaceSkillUpdate,
   readWorkspaceSkillUpdateFile,
   type DirtyDocumentGuard,
 } from "./workspaceSkillUpdate";
-import { createWorkspaceSkillUpdateAdapter } from "./workspaceSkillUpdateAdapter";
+import { createWorkspaceSkillUpdateAdapter, sanitizeWorkspaceUpdateDisplayText } from "./workspaceSkillUpdateAdapter";
 import { findChangedWorkspaceSkills, isDocumentInsideDirectory, type WorkspaceUpdateCheckSummary } from "./workspaceSkillUpdateCheck";
 import { createWorkspaceUpdateSchedule } from "./workspaceUpdateSchedule";
 import {
@@ -1332,9 +1334,6 @@ export async function activate(
     }),
   );
 
-  // バージョンアップ時のメタデータ再抽出
-  checkVersionAndRefreshMetadata(context, workspaceFolder?.uri, formatMigrated);
-
   // 統合ワークスペーススキルビュー
   const workspaceProvider = new WorkspaceSkillsProvider(
     workspaceFolder?.uri,
@@ -2146,6 +2145,7 @@ export async function activate(
   type ReinstallCommandOptions = {
     suppressSuccessMessage?: boolean;
     suppressRecoveryPrompt?: boolean;
+    beforeRemove?: () => Promise<void>;
   };
 
   type ReinstallAllCommandOptions = {
@@ -2217,29 +2217,6 @@ export async function activate(
       retryLabel,
     );
     return choice === retryLabel ? retryReinstallBatch(records) : [...records];
-  }
-
-  function createUnstartedReinstallRecord<T>(
-    name: string,
-    failureKind: "cancelled" | "not-found" | "rate-limit",
-  ): ReinstallBatchRecord<T> {
-    const task: ReinstallTask<T> = {
-      name,
-      remove: async () => undefined,
-      install: async () => {
-        throw new ReinstallAttemptError(failureKind, "Not started");
-      },
-    };
-    return {
-      task,
-      result: {
-        success: false,
-        attempts: 0,
-        removed: false,
-        stage: "not-started",
-        failureKind,
-      },
-    };
   }
 
   function getBatchFailureMessage(
@@ -2411,7 +2388,10 @@ export async function activate(
   // ダブルクリック検出用コマンド
   const doubleClickCmd = vscode.commands.registerCommand(
     "resourceNinja.onSkillClick",
-    async (skill: Skill) => {
+    async (
+      skill: Skill,
+      referenceTarget?: Pick<UserResource, "rootFsPath" | "fullPath">,
+    ) => {
       if (!skill) return;
 
       const now = Date.now();
@@ -2420,12 +2400,19 @@ export async function activate(
 
       // 同じアイテムを500ms以内にクリック → ダブルクリック
       if (lastClickedItem === itemId && now - lastClickTime < 500) {
-        await vscode.commands.executeCommand(
-          isInstalled
-            ? "resourceNinja.reinstall"
-            : "resourceNinja.installDefault",
-          skill,
-        );
+        if (
+          getResourceKind(skill) === "reference" &&
+          (isInstalled || referenceTarget)
+        ) {
+          await reinstallBrowseGlobalHomeReference(skill, referenceTarget);
+        } else {
+          await vscode.commands.executeCommand(
+            isInstalled
+              ? "resourceNinja.reinstall"
+              : "resourceNinja.installDefault",
+            skill,
+          );
+        }
         lastClickTime = 0;
         lastClickedItem = undefined;
       } else {
@@ -2914,7 +2901,7 @@ export async function activate(
     item: UserResourceTreeItem,
     optionsOrSuppressSuccessMessage?: boolean | ReinstallCommandOptions,
   ): Promise<ReinstallBatchRecord<InstallSkillResult> | undefined> => {
-    const { suppressSuccessMessage = false, suppressRecoveryPrompt = false } =
+    const { suppressSuccessMessage = false, suppressRecoveryPrompt = false, beforeRemove } =
       normalizeReinstallCommandOptions(optionsOrSuppressSuccessMessage);
     const resource = item?.resource;
     if (!resource || resource.isBuiltIn || resource.isReadOnly) {
@@ -2929,7 +2916,11 @@ export async function activate(
           ),
         );
       }
-      return undefined;
+      return createUnstartedReinstallRecord(
+        resource.name,
+        "other",
+        resource.kind,
+      );
     }
     if (!isRemoteInstalledUserResource(resource)) {
       if (!suppressSuccessMessage) {
@@ -2939,13 +2930,21 @@ export async function activate(
             : `${resource.name} cannot be reinstalled because remote install metadata is missing`,
         );
       }
-      return undefined;
+      return createUnstartedReinstallRecord(
+        resource.name,
+        "other",
+        resource.kind,
+      );
     }
 
     const wsFolder = vscode.workspace.workspaceFolders?.[0];
     if (!wsFolder) {
       vscode.window.showErrorMessage(messages.noWorkspace());
-      return undefined;
+      return createUnstartedReinstallRecord(
+        resource.name,
+        "other",
+        resource.kind,
+      );
     }
 
     const targetScope: InstallTargetScope =
@@ -3002,11 +3001,21 @@ export async function activate(
               : `${resource.name} not found in index. Please check source repositories.`,
           );
         }
-        return undefined;
+        return createUnstartedReinstallRecord(
+          resource.name,
+          "not-found",
+          resource.kind,
+        );
       }
     }
 
-    const installOptions = { targetScope, suppressRecoveryPrompt };
+    const installOptions: InstallSkillOptions = {
+      targetScope,
+      suppressRecoveryPrompt,
+      ...(resource.kind === "reference"
+        ? { expectedReferenceTarget: vscode.Uri.file(resource.fullPath) }
+        : {}),
+    };
     let record: ReinstallBatchRecord<InstallSkillResult> | undefined;
     try {
       // A plugin always installs into the fixed Global Home `plugins`
@@ -3018,12 +3027,28 @@ export async function activate(
       const task: ReinstallTask<InstallSkillResult> = {
         name: resource.name,
         resourceKind: resource.kind,
-        remove: () =>
-          deleteInstalledResourceByPath(
+        remove: async () => {
+          await beforeRemove?.();
+          if (installOptions.expectedReferenceTarget) {
+            const currentTarget = getResourceTargetUri(
+              wsFolder.uri,
+              vscode.workspace.getConfiguration("resourceNinja"),
+              fullSkill,
+              installOptions,
+            );
+            if (
+              normalizeResourceRootIdentity(currentTarget.fsPath) !==
+              normalizeResourceRootIdentity(installOptions.expectedReferenceTarget.fsPath)
+            ) {
+              throw new Error("Reference destination changed after confirmation");
+            }
+          }
+          await deleteInstalledResourceByPath(
             resource.kind,
             resource.fullPath,
             resource.rootFsPath,
-          ),
+          );
+        },
         install: async () => {
           const installResult = await installSkill(
             fullSkill,
@@ -3149,6 +3174,100 @@ export async function activate(
     reinstallUserResource,
   );
 
+  async function reinstallBrowseGlobalHomeReference(
+    skill: Skill,
+    expected?: Pick<UserResource, "rootFsPath" | "fullPath">,
+  ): Promise<ReinstallBatchRecord<InstallSkillResult> | undefined> {
+    const previous = browseProvider.getGlobalHomeReference(skill);
+    const wsFolder = vscode.workspace.workspaceFolders?.[0];
+    if (
+      !previous ||
+      !expected ||
+      !wsFolder ||
+      normalizeResourceRootIdentity(previous.rootFsPath) !==
+        normalizeResourceRootIdentity(expected.rootFsPath) ||
+      normalizeResourceRootIdentity(previous.fullPath) !==
+        normalizeResourceRootIdentity(expected.fullPath)
+    ) {
+      if (!wsFolder) {
+        vscode.window.showErrorMessage(messages.noWorkspace());
+      } else {
+        showStaleResourceGroupMessage();
+      }
+      return undefined;
+    }
+
+    const confirm = isJapanese() ? "再インストール" : "Reinstall";
+    const selection = await vscode.window.showWarningMessage(
+      isJapanese()
+        ? `${skill.name} の Global Home ファイルを再インストールします。元のファイルはごみ箱に移動され、変更内容は置き換えられます。`
+        : `Reinstall the Global Home file for ${skill.name}? The original will be moved to the trash and local changes replaced.`,
+      { modal: true },
+      confirm,
+    );
+    if (selection !== confirm) {
+      return undefined;
+    }
+
+    const revalidate = async (): Promise<UserResource> => {
+      const resources = await scanUserResources(wsFolder.uri, false);
+      const remotePath = normalizeInstalledRemotePath(skill.path);
+      const matches = resources.filter(
+        (resource) =>
+          resource.kind === "reference" &&
+          resource.scope === "globalHome" &&
+          !resource.isReadOnly &&
+          !resource.isAlternateGlobalHome &&
+          resource.source === skill.source &&
+          normalizeInstalledRemotePath(resource.remotePath) === remotePath,
+      );
+      const current = matches.length === 1 ? matches[0] : undefined;
+      const target = getResourceTargetUri(
+        wsFolder.uri,
+        vscode.workspace.getConfiguration("resourceNinja"),
+        skill,
+        { targetScope: "globalHome" },
+      );
+      if (
+        !current ||
+        !isRemoteInstalledUserResource(current) ||
+        normalizeResourceRootIdentity(current.rootFsPath) !==
+          normalizeResourceRootIdentity(expected.rootFsPath) ||
+        normalizeResourceRootIdentity(current.fullPath) !==
+          normalizeResourceRootIdentity(expected.fullPath) ||
+        normalizeResourceRootIdentity(target.fsPath) !==
+          normalizeResourceRootIdentity(expected.fullPath)
+      ) {
+        throw new Error("stale-global-home-reference");
+      }
+      return current;
+    };
+    let current: UserResource;
+    try {
+      current = await revalidate();
+    } catch (error) {
+      logger.warn("[Resource Ninja] Failed to revalidate Global Home reference:", error);
+      showStaleResourceGroupMessage();
+      return undefined;
+    }
+    return reinstallUserResource(
+      new UserResourceTreeItem(
+        current.name,
+        current.description,
+        vscode.TreeItemCollapsibleState.None,
+        "remoteResource",
+        current,
+        current.scope,
+        current.kind,
+        current.scopeLabel,
+        undefined,
+        undefined,
+        current.rootFsPath,
+      ),
+      { beforeRemove: async () => { await revalidate(); } },
+    );
+  }
+
   const reinstallUserResourceGroupCmd = vscode.commands.registerCommand(
     "resourceNinja.reinstallUserResourceGroup",
     async (item?: UserResourceTreeItem) => {
@@ -3236,7 +3355,8 @@ export async function activate(
               records.push(
                 createUnstartedReinstallRecord<InstallSkillResult>(
                   resource.name,
-                  "not-found",
+                  "other",
+                  resource.kind,
                 ),
               );
             }
@@ -6852,6 +6972,10 @@ export async function activate(
           target: target.target,
           getSkillsRoots: async () => getUserResourceRootUris(target.workspace),
           token: await getGitHubToken(),
+          initialRevision: target.initialRevision
+            ? { ...target.initialRevision }
+            : undefined,
+          sourceId: target.sourceId,
         }),
       apply: applyWorkspaceSkillUpdate,
       discard: discardWorkspaceSkillUpdate,
@@ -6886,31 +7010,126 @@ export async function activate(
       isRateLimit: isRateLimitError,
       isCancelled: () => false,
     }));
-  let workspaceUpdateCheckSignal: AbortSignal | undefined;
-  let workspaceUpdatePresenting = false;
+  let workspaceUpdatePresentationTail: Promise<void> = Promise.resolve();
+  const workspaceUpdateReservedTargets = new Set<string>();
+  const presentWorkspaceUpdates = (
+    targets: WorkspaceUpdateCheckSummary["targets"],
+    mode?: "always",
+  ) => {
+    const key = (target: WorkspaceUpdateCheckSummary["targets"][number]) =>
+      `${target.workspace.toString()}\0${target.target.toString()}`;
+    const unique = targets.filter((target) => {
+      const identity = key(target);
+      if (workspaceUpdateReservedTargets.has(identity)) {
+        return false;
+      }
+      workspaceUpdateReservedTargets.add(identity);
+      return true;
+    });
+    if (!unique.length) {
+      return Promise.resolve(undefined);
+    }
+    const result = workspaceUpdatePresentationTail.then(async () => {
+      try {
+        if (mode === "always" && !(await promptForSkillUpdate(unique.length))) {
+          return [];
+        }
+        return await getWorkspaceUpdateAdapter().present(
+          unique,
+          mode === "always" ? "bulk" : undefined,
+        );
+      } finally {
+        unique.forEach((target) => workspaceUpdateReservedTargets.delete(key(target)));
+      }
+    });
+    workspaceUpdatePresentationTail = result.then(() => undefined, () => undefined);
+    return result;
+  };
+  const sharedStartupRevisionReader = createSharedRevisionJsonReader();
+  const findWorkspaceSkillUpdates = async (
+    workspaces: readonly vscode.Uri[],
+    signal?: AbortSignal,
+    includeMissingBaseline = false,
+    shareStartupReads = false,
+  ): Promise<WorkspaceUpdateCheckSummary> => {
+    const token = await getGitHubToken();
+    const resolver = createRevisionResolver(
+      token,
+      signal,
+      undefined,
+      shareStartupReads ? sharedStartupRevisionReader : undefined,
+    );
+    let legacyIndex: Promise<SkillIndex> | undefined;
+    return findChangedWorkspaceSkills(workspaces, {
+      scan: getInstalledSkillsWithMetaResult,
+      resolve: resolver,
+      resolveMissingBaseline: async (meta) => {
+        if (
+          !meta.source ||
+          typeof meta.remotePath !== "string" ||
+          !meta.remotePath
+        ) {
+          return undefined;
+        }
+        legacyIndex ??= loadSkillIndex(context, { readOnly: true });
+        const index = await legacyIndex;
+        const sources = getIndexSources(index).filter(
+          (entry) => entry.id === meta.source,
+        );
+        const remotePath = normalizeInstalledRemotePath(meta.remotePath);
+        const skills = getIndexResources(index).filter(
+          (entry: Skill) =>
+            getResourceKind(entry) === "skill" &&
+            entry.source === meta.source &&
+            normalizeInstalledRemotePath(entry.path) === remotePath,
+        );
+        if (sources.length !== 1 || skills.length !== 1) {
+          return undefined;
+        }
+        const [source] = sources;
+        const [skill] = skills;
+        const ownerRepo = source && getGitHubOwnerRepo(source);
+        const [owner, repo] = ownerRepo?.split("/") ?? [];
+        if (!source || !skill || !remotePath || !owner || !repo) {
+          return undefined;
+        }
+        const branch = await getSourceBranch(source, token, skill.path, true, signal);
+        return resolver({
+          owner,
+          repo,
+          branch,
+          remotePath,
+        });
+      },
+      isRateLimit: isRateLimitError,
+      isCancelled: () => signal?.aborted === true,
+      log: (message, error) =>
+        logger.warn(message, error instanceof Error ? error.name : ""),
+    }, includeMissingBaseline);
+  };
   const workspaceUpdateSchedule = createWorkspaceUpdateSchedule<WorkspaceUpdateCheckSummary>({
     getLastSuccess: () =>
       context.workspaceState.get<unknown>(WORKSPACE_UPDATE_LAST_SUCCESS_KEY),
     saveLastSuccess: (time) =>
       context.workspaceState.update(WORKSPACE_UPDATE_LAST_SUCCESS_KEY, time),
     now: () => Date.now(),
-    check: async () => {
-      const signal = workspaceUpdateCheckSignal;
-      const resolver = createRevisionResolver(await getGitHubToken(), signal);
-      const summary = await findChangedWorkspaceSkills(
-        (vscode.workspace.workspaceFolders ?? [])
-          .filter((folder) => folder.uri.scheme === "file")
-          .map((folder) => folder.uri),
-        {
-          scan: getInstalledSkillsWithMetaResult,
-          resolve: resolver,
-          isRateLimit: isRateLimitError,
-          isCancelled: () => signal?.aborted === true,
-          log: (message, error) =>
-            logger.warn(message, error instanceof Error ? error.name : ""),
-        },
+    check: async (includeMissingBaseline, signal) => {
+      const workspaces = (vscode.workspace.workspaceFolders ?? [])
+        .filter((folder) => folder.uri.scheme === "file")
+        .map((folder) => folder.uri);
+      const summary = await findWorkspaceSkillUpdates(
+        workspaces,
+        signal,
+        includeMissingBaseline,
+        !includeMissingBaseline,
       );
-      return { complete: summary.complete, value: summary };
+      if (workspaces.length !== (vscode.workspace.workspaceFolders ?? []).length) {
+        summary.complete = false;
+      }
+      return {
+        complete: summary.complete,
+        value: summary,
+      };
     },
   });
   const runWorkspaceSkillUpdateCheck = async (
@@ -6944,20 +7163,23 @@ export async function activate(
       async (_progress, token) => {
         const abort = new AbortController();
         token.onCancellationRequested(() => abort.abort());
-        workspaceUpdateCheckSignal = abort.signal;
-        try {
-          return await workspaceUpdateSchedule.run(interactive);
-        } finally {
-          workspaceUpdateCheckSignal = undefined;
-        }
+        return workspaceUpdateSchedule.run(interactive, interactive, abort.signal);
       },
     );
-    if (result.status === "not-due") {
+    if (result.status === "not-due" || result.status === "cancelled") {
       return;
     }
     const summary = result.value;
     if (summary.targets.length > 0) {
-      if (workspaceUpdatePresenting) {
+      if (!summary.complete || summary.rateLimited || summary.unverified > 0) {
+        void vscode.window.showWarningMessage(
+          ja
+            ? `一部の skill は確認できませんでした（確認不能 ${summary.unverified} 件）。確認済み候補のみを表示します。後で手動で再確認してください。`
+            : `Some skills could not be checked (${summary.unverified} not checkable). Only checked candidates are shown; retry manually later.`,
+        );
+      }
+      const outcomes = await presentWorkspaceUpdates(summary.targets);
+      if (!outcomes) {
         if (interactive) {
           void vscode.window.showInformationMessage(
             ja
@@ -6966,15 +7188,6 @@ export async function activate(
           );
         }
         return;
-      }
-      workspaceUpdatePresenting = true;
-      let outcomes: Awaited<
-        ReturnType<ReturnType<typeof getWorkspaceUpdateAdapter>["present"]>
-      >;
-      try {
-        outcomes = await getWorkspaceUpdateAdapter().present(summary.targets);
-      } finally {
-        workspaceUpdatePresenting = false;
       }
       if (outcomes.some((outcome) => outcome.status !== "unchanged")) {
         installedProvider.refresh();
@@ -7034,6 +7247,113 @@ export async function activate(
       );
     }
   };
+  const runWorkspaceSkillUpgradeCheck = async (
+    workspace: vscode.Uri,
+    mode: "prompt" | "always",
+  ): Promise<boolean> => {
+    if (vscode.env.remoteName !== undefined || workspace.scheme !== "file") {
+      return false;
+    }
+    let summary: WorkspaceUpdateCheckSummary;
+    try {
+      summary = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Window,
+          title: isJapanese()
+            ? "拡張機能アップデート後の skill 変更を確認中..."
+            : "Checking skill changes after extension upgrade...",
+          cancellable: false,
+        },
+        () => findWorkspaceSkillUpdates([workspace], undefined, false, true),
+      );
+    } catch (error) {
+      logger.warn(
+        "[Workspace update] Upgrade check failed",
+        error instanceof Error ? error.name : "",
+      );
+      void vscode.window.showWarningMessage(
+        isJapanese()
+          ? "拡張機能アップデート後の skill 確認に失敗しました。手動で再確認してください。"
+          : "The skill update check after extension upgrade failed. Retry it manually.",
+      );
+      return false;
+    }
+    if (summary.targets.length === 0) {
+      const ja = isJapanese();
+      if (!summary.complete || summary.unverified > 0) {
+        void vscode.window.showWarningMessage(
+          ja
+            ? `アップデートを確認できない skill があります。変更なし ${summary.upToDate} 件、確認不能 ${summary.unverified} 件。再確認するには「ワークスペース skill の更新を確認」を実行してください。`
+            : `Some skills could not be checked for updates. ${summary.upToDate} unchanged, ${summary.unverified} not checkable. Run "Check Workspace Skill Updates" to retry.`,
+        );
+      } else {
+        void vscode.window.showInformationMessage(
+          ja
+            ? "拡張機能アップデート後の変更はありません。"
+            : "No skill changes were found after the extension upgrade.",
+        );
+      }
+      return summary.complete;
+    }
+    if (!summary.complete || summary.rateLimited) {
+      void vscode.window.showWarningMessage(
+        isJapanese()
+          ? `skill の変更確認が完了していません。変更候補 ${summary.targets.length} 件は更新しませんでした。時間をおいて手動で再確認してください。`
+          : `The skill update check was incomplete. No candidates were updated. Retry the check manually later.`,
+      );
+      return false;
+    }
+
+    if (summary.unverified > 0) {
+      void vscode.window.showWarningMessage(
+        isJapanese()
+          ? `確認できない skill が ${summary.unverified} 件あります。比較基準のない項目は手動で初回同期できます。`
+          : `${summary.unverified} skill(s) could not be checked. Items without a baseline can be synced manually.`,
+      );
+    }
+    const outcomes = await presentWorkspaceUpdates(
+      summary.targets,
+      mode === "always" ? "always" : undefined,
+    );
+    if (!outcomes) {
+      void vscode.window.showInformationMessage(
+        isJapanese()
+          ? "更新の通知がすでに表示されています。先にそちらを操作してください。"
+          : "An update notification is already open. Use it first.",
+      );
+      return summary.complete;
+    }
+    if (outcomes.some((outcome) => outcome.status === "updated")) {
+      try {
+        await refreshSkillMetadata(workspace);
+      } catch (error) {
+        logger.warn(
+          "[Workspace update] Metadata was not refreshed after the upgrade check",
+          error instanceof Error ? error.name : "",
+        );
+      }
+    }
+    if (outcomes.some((outcome) => outcome.status !== "unchanged")) {
+      installedProvider.refresh();
+      browseProvider.refresh();
+    }
+    if (
+      outcomes.some((outcome) => outcome.status === "updated") &&
+      vscode.workspace
+        .getConfiguration("resourceNinja")
+        .get<boolean>("autoUpdateInstruction")
+    ) {
+      try {
+        await updateInstructionFile(workspace, context);
+      } catch (error) {
+        logger.warn(
+          "[Workspace update] Instruction output was not regenerated after the upgrade check",
+          error instanceof Error ? error.name : "",
+        );
+      }
+    }
+    return summary.complete;
+  };
   const checkWorkspaceSkillUpdatesCmd = vscode.commands.registerCommand(
     "resourceNinja.checkWorkspaceSkillUpdates",
     () =>
@@ -7049,13 +7369,6 @@ export async function activate(
         );
       }),
   );
-  void runWorkspaceSkillUpdateCheck(false).catch((error) =>
-    logger.warn(
-      "[Workspace update] The scheduled check failed",
-      error instanceof Error ? error.name : "",
-    ),
-  );
-
   const reinstallAllCmd = vscode.commands.registerCommand(
     "resourceNinja.reinstallAll",
     async (options: ReinstallAllCommandOptions = {}) => {
@@ -7320,6 +7633,16 @@ export async function activate(
   ): Promise<ReinstallBatchRecord<InstallSkillResult> | undefined> => {
     const { suppressSuccessMessage = false, suppressRecoveryPrompt = false } =
       normalizeReinstallCommandOptions(optionsOrSuppressSuccessMessage);
+    if (
+      item?.contextValue === "installedRemoteResource" &&
+      item.skill &&
+      getResourceKind(item.skill) === "reference"
+    ) {
+      return reinstallBrowseGlobalHomeReference(
+        item.skill,
+        item.globalHomeReferenceTarget,
+      );
+    }
     const wsFolder = vscode.workspace.workspaceFolders?.[0];
     if (!wsFolder) {
       vscode.window.showErrorMessage(messages.noWorkspace());
@@ -7758,7 +8081,8 @@ export async function activate(
               records.push(
                 createUnstartedReinstallRecord<InstallSkillResult>(
                   String(child.skill?.name || child.label),
-                  "not-found",
+                  "other",
+                  child.skill?.kind,
                 ),
               );
             }
@@ -11063,20 +11387,83 @@ ${fileUri.fsPath}`,
       pendingUpdates.clear();
     }),
   );
+  void checkVersionAndRefreshMetadata(
+    context,
+    workspaceFolder?.uri,
+    formatMigrated,
+    runWorkspaceSkillUpgradeCheck,
+  )
+    .catch((error) =>
+      logger.error(
+        "[Resource Ninja] Startup version maintenance failed:",
+        error,
+      ),
+    );
+  if (vscode.env.remoteName === undefined) {
+    void Promise.all(
+      (vscode.workspace.workspaceFolders ?? [])
+        .filter((folder) => folder.uri.scheme === "file")
+        .map((folder) => findWorkspaceRecoveryRecords(folder.uri)),
+    ).then(async (results) => {
+      const records = results.flatMap((result) => result.records);
+      if (results.some((result) => result.incomplete)) {
+        logger.warn("[Workspace update] Recovery record inspection was incomplete");
+        void vscode.window.showWarningMessage(
+          isJapanese()
+            ? "復旧記録の確認が完了しませんでした。ファイルは変更していません。出力ログと保存先を確認してください。"
+            : "Recovery record inspection was incomplete. No files were changed; inspect the storage locations and output log.",
+        );
+      }
+      if (!records.length) { return; }
+      const details = isJapanese() ? "詳細" : "Details";
+      const action = await vscode.window.showWarningMessage(
+        isJapanese()
+          ? `中断された skill 更新の復旧記録が ${records.length} 件見つかりました。処理中の別ウィンドウがある可能性もあります。ファイルは変更していません。`
+          : `${records.length} interrupted skill update recovery record(s) were found. Another window may still be updating. No files were changed.`,
+        details,
+      );
+      if (action !== details) { return; }
+      const safe = (value: string) => sanitizeWorkspaceUpdateDisplayText(value, 32767);
+      await vscode.window.showQuickPick(records.map((record) => ({
+        label: safe(record.target),
+        description: safe(record.backup),
+        detail: safe(record.record),
+      })), {
+        title: isJapanese() ? "復旧記録（対象・バックアップ・記録）" : "Recovery records (target, backup, record)",
+        placeHolder: isJapanese()
+          ? "状態を確認するまで復元や削除をしないでください"
+          : "Do not restore or delete files until their state is verified",
+        matchOnDescription: true,
+        matchOnDetail: true,
+      });
+    }).catch((error) => {
+      logger.warn("[Workspace update] Recovery record inspection failed", error instanceof Error ? error.name : "");
+      void vscode.window.showWarningMessage(
+        isJapanese() ? "復旧記録を確認できませんでした。ファイルは変更していません。" : "Recovery records could not be inspected. No files were changed.",
+      );
+    });
+  }
+  void runWorkspaceSkillUpdateCheck(false).catch((error) =>
+    logger.error("[Resource Ninja] Scheduled workspace update check failed:", error),
+  );
   return {
     getAgentNinjaBeacon: () => getPublishedSelfBeacon(context),
   };
 }
 
 /**
- * バージョンアップ時にメタデータを再抽出 & スキル自動更新
+ * バージョンアップ時にメタデータを再抽出し、スキルの差分を確認
  * 拡張機能のバージョンが変わった場合、インストール済みスキルの whenToUse を再抽出
- * オプションでスキルを自動再インストール
+ * 設定に応じて差分を確認し、置換前に承認を求める
  */
 async function checkVersionAndRefreshMetadata(
   context: vscode.ExtensionContext,
   workspaceUri: vscode.Uri | undefined,
   formatMigrated: boolean = false,
+  checkChangedSkills?: (
+    workspace: vscode.Uri,
+    mode: "prompt" | "always",
+  ) => Promise<boolean>,
 ): Promise<void> {
   if (!workspaceUri) return;
 
@@ -11131,32 +11518,7 @@ async function checkVersionAndRefreshMetadata(
   const config = vscode.workspace.getConfiguration("resourceNinja");
   const autoUpdateSkills = getConfiguredAutoUpdateResourcesOnUpgrade(config);
 
-  if (remoteSkillCount > 0 && autoUpdateSkills !== "never") {
-    const shouldUpdate =
-      autoUpdateSkills === "always" ||
-      (await promptForSkillUpdate(remoteSkillCount));
-
-    if (shouldUpdate) {
-      try {
-        // 全スキルを再インストール
-        const reinstalled = await vscode.commands.executeCommand<boolean>(
-          "resourceNinja.reinstallAll",
-          {
-            skipConfirmation: true,
-            suppressSuccessMessage: true,
-            suppressRecoveryPrompt: true,
-          },
-        );
-        if (reinstalled) {
-          return; // 再インストールしたのでメタデータ更新はスキップ
-        }
-      } catch (error) {
-        logger.error("[Resource Ninja] Failed to reinstall skills:", error);
-      }
-    }
-  }
-
-  // メタデータを再抽出（再インストールしなかった場合）
+  // 差分の確認画面を待たずにメタデータを再抽出する。
   try {
     const updatedCount = await refreshSkillMetadata(workspaceUri);
 
@@ -11183,6 +11545,17 @@ async function checkVersionAndRefreshMetadata(
   } catch (error) {
     logger.error("[Resource Ninja] Failed to refresh metadata:", error);
   }
+
+  if (remoteSkillCount > 0 && autoUpdateSkills !== "never") {
+    try {
+      await checkChangedSkills?.(
+        workspaceUri,
+        autoUpdateSkills === "always" ? "always" : "prompt",
+      );
+    } catch (error) {
+      logger.error("[Resource Ninja] Failed to check changed skills:", error);
+    }
+  }
 }
 
 /**
@@ -11190,8 +11563,8 @@ async function checkVersionAndRefreshMetadata(
  */
 async function promptForSkillUpdate(skillCount: number): Promise<boolean> {
   const message = isJapanese()
-    ? `🥷 拡張機能がアップデートされました。${skillCount} 個のリモートスキルを最新版に更新しますか？`
-    : `🥷 Extension updated. Update ${skillCount} remote skill(s) to latest version?`;
+    ? `🥷 配布元に変更のある ${skillCount} 個のリモート skill があります。変更分だけ更新しますか？保存済みのローカル編集や未保存の項目はスキップします。共有・同期の検出は完全ではありません。`
+    : `🥷 ${skillCount} remote skill(s) have upstream changes. Update only the changed skills? Saved local edits and unsaved files are skipped. Sharing and synchronization detection is incomplete.`;
 
   const result = await vscode.window.showInformationMessage(
     message,

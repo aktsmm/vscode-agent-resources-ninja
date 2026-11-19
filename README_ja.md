@@ -74,6 +74,7 @@
 - ワンクリックの default install は skill だけでなく agents、instructions、prompts、hooks、MCP config、plugin manifest、Cursor rules を含むすべての resource kind に適用されます。クリック / ダブルクリックインストールは **Default Install Target** を使い、コンテキストメニューの **Install Resource** は毎回インストール先を選択でき、Custom も選べます。
 - **User Profile** と **Global Resource Home** が同じ保存先になるリソース種別では、既定のインストール時に実際の Global Resource Home への導入を通知します。異なる種別を含むセットではコピー前の確認文に保存先の違いを示します。
 - **Remote Resources** では、ダブルクリックの動作は行の inline action に合わせています。未インストール行は install、インストール済みの remote 行は記録済み source metadata を使って reinstall、local-only 行には remote install/reinstall action を出しません。
+- インストール済みの参照メモは Browse で **Global Home** と表示します。再インストール前にローカル変更の置換を確認し、保存先が曖昧または古い場合は中止します。ワークスペースを開いている必要があります。
 - 再インストールでは、記録済み source metadata（`remotePath`、plugin sidecar の項目、`.skill-meta.json` に保持済みの coexistence フラグ）を維持し、name だけの曖昧一致に落とさず同じ upstream resource へ再接続します。
 - MCP config リソースのクリック / ダブルクリックインストールは Workspace MCP Directory へレビュー用にコピーするのみで、`.vscode/mcp.json` は変更しません。互換 server を `.vscode/mcp.json` にマージしたい場合は、コンテキストメニューの **Install Resource** を使って merge オプションを選択してください。既存 server key の上書きは必ず確認します。
 - `.vscode/mcp.json` にマージ済みの MCP config をアンインストールすると、対応する server entry も削除するか確認する明示モーダルを表示し、削除前に backup を作成します。
@@ -88,7 +89,7 @@
 - **ワークスペース skill の一括再インストール** - インストール済み skill をソースメタデータから一括再インストール。インデックス項目が見つからない場合は、可能なら該当 source だけを更新し、source を特定できない場合だけ全体更新へフォールバックします。自動実行される再インストールと、グループ再インストールの各項目では、この更新確認を出しません。未検出の resource は summary に報告され、応答されない通知でバッチが止まりません。一括失敗時の「バグ報告」は件数と既知の失敗種別だけを含む下書きを開きます。投稿前に内容を確認してください。
 - **リソースグループの再インストール** - Workspace Resources の Skills や Agents などの種別グループを右クリックし、そのグループ内のリモートソースからインストールされたリソースを一括再インストール
 - **変更分のスキルを更新** - インストール時に配布元の revision を記録します。約 2 週間ごとに、Workspace で拡張機能が有効化されたとき、**ローカル Workspace** のスキルの配布元の変更を（読み取りのみで）確認して通知します。**ワークスペース skill の更新を確認**（または「ワークスペースのスキルを一括再インストール」→ **変更分だけ更新**）ですぐ確認できます。**まとめて更新** はローカル編集のない変更分をまとめて更新し、**詳細** では差分を見ながら 1 件ずつ更新できます（保存済みのローカル編集の上書きは確認します）。通知を閉じても何も変更しません。新版を先に検証し、失敗したら旧版を復元します。共有先・同期先・ネットワーク・リンク経由の場所は更新せず、別アプリの同時保存は完全には検出できません。再インストールは修復用として残ります。詳細は [docs/changed-only-updates.md](docs/changed-only-updates.md) を参照してください
-- **User / Global 側の再インストール** - ユーザー / グローバル リソース view でも、リモート由来の個別行の再インストールと、種別グループ・プラグイングループ単位の再インストールを行えます
+- **User / Global 側の再インストール** - ユーザー / グローバル リソース view でも、リモート由来の個別行の再インストールと、種別グループ・プラグイングループ単位の再インストールを行えます。インストール済みリソースのスキャンと更新には、ワークスペースフォルダーを開いている必要があります。
 - **スキル内のスキル** - SKILL.md を持つフォルダーの中にさらに SKILL.md を持つフォルダー（例: `deploy-model/capacity`）がある場合、Workspace と ユーザー / グローバル の view では親スキルの子として表示します。内包スキルは未登録として数えず、生成するスキル一覧にも載せません（一覧の単位は親スキルです）。絞り込みで親が非表示になった場合、子は最上位に表示されます
 - **インストール通知** - NEW バッジ、ステータスバー表示、ツリービューで自動選択
 - **フォルダを開く** - インストール済みリソースのフォルダにクイックアクセス
@@ -342,7 +343,7 @@ view のツールバーと empty state のリンクは現在の view 文脈を�
 
 `references.json` の規則: `references` が配列の JSON オブジェクトで、`.md` で終わるリポジトリ相対の POSIX パスを最大 200 件まで書けます（`..`、絶対パス、バックスラッシュは不可）。不正な項目やスキャンしたツリーにないファイルはログに警告を出して無視し、形式が違うファイルは何も指定しなかったものとして扱います。`references.json` 自体はリソースではありません。`.github/references/` の下位フォルダーのファイルは、列挙しない限り参照メモになりません。通常の `*.instructions.md` はインストラクションのままです。
 
-参照メモのインストール先は Global Resource Home だけで、`<Global Resource Home>/references/<元のファイル名>`（既定は `~/.copilot/references/`）になります。ファイル名は `.instructions.md` の接尾辞も含めてそのまま保ち、取得元は `<ファイル名>.resource-ninja.json` に記録します。Workspace、User Profile、Custom は選択肢に出ず、ワークスペースへのインストールは instructions フォルダーへ振り替えず拒否します。生成されるインストラクションブロックやカタログに参照メモは載りません。保存先に別のファイル（別のソース由来、または自分で書いたメモ）がある場合は上書きしません。同じソースからの再インストールは更新として動きます。
+参照メモのインストール先は Global Resource Home だけで、`<Global Resource Home>/references/<元のファイル名>`（既定は `~/.copilot/references/`）になります。ファイル名は `.instructions.md` の接尾辞も含めてそのまま保ち、取得元は `<ファイル名>.resource-ninja.json` に記録します。Workspace、User Profile、Custom は選択肢に出ず、ワークスペースへのインストールは instructions フォルダーへ振り替えず拒否します。生成されるインストラクションブロックやカタログに参照メモは載りません。保存先にファイルまたは管理情報がある場合、同じソース由来でもインストールでは上書きしません。インストール済みの参照メモは再インストール操作から置換を確認してください。メモの作成後に管理情報の保存が失敗した場合、メモは残り、確認を促すエラーが表示されます。
 
 以前に同じメモをインストラクションとして入れている場合（例: `~/.copilot/instructions/<name>.instructions.md`）、拡張はそのコピーを移動も削除もしません。内容を確認して不要なら自分で削除してください。残すと、そのメモは引き続きインストラクションとして読み込まれます。ローカルだけのメモがエクスポートされることはありません。
 
@@ -535,7 +536,7 @@ workspace skill を主 Workspace Skill Directory 以外に置く場合は、`add
 |  17  | `resourceNinja.instructionFile`                                 | `AGENTS.md`            | 生成 instruction block の同期先 _(要: Auto Update)_                                                                           |
 |  18  | `resourceNinja.customInstructionPath`                           | `""`                   | カスタム生成 instruction block パス _(instructionFile が 'custom' の時のみ)_                                                  |
 |  19  | `resourceNinja.includeLocalResources`                           | `false`                | workspace-wide fallback で検出した `SKILL.md` を生成 instruction block に含める                                               |
-|  20  | `resourceNinja.autoUpdateResourcesOnUpgrade`                    | `prompt`               | 拡張機能アップグレード時にインストール済みリソースを更新                                                                      |
+|  20  | `resourceNinja.autoUpdateResourcesOnUpgrade`                    | `prompt`               | 拡張機能アップグレード時に配布元の変更を確認し、置換前に確認                                                                |
 |  21  | `resourceNinja.coexistenceMode`                                 | `auto`                 | 共有 marker の ownership mode (`auto` / `independent`)                                                                        |
 |  22  | `resourceNinja.kindsExcluded`                                   | `[]`                   | shared instruction block 用の旧 standalone 互換 exclusion                                                                     |
 |  23  | `resourceNinja.useSharedSourcesManifest`                        | `false`                | skill-only sibling extension と source 一覧を共有する `sources.json` SSOT を有効化                                            |

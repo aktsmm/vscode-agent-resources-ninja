@@ -560,6 +560,7 @@ async function loadBundledSkillIndex(
 
 export async function loadSkillIndex(
   context: vscode.ExtensionContext,
+  options?: { readOnly?: boolean },
 ): Promise<SkillIndex> {
   const localIndexPath = vscode.Uri.joinPath(
     context.globalStorageUri,
@@ -600,6 +601,16 @@ export async function loadSkillIndex(
       effectiveIndex = localIndex;
     }
   } catch (error) {
+    const code = error && typeof error === "object" && "code" in error
+      ? error.code
+      : undefined;
+    if (
+      options?.readOnly &&
+      code !== "FileNotFound" &&
+      code !== "ENOENT"
+    ) {
+      throw error;
+    }
     logger.warn(
       `[Resource Ninja] Failed to load local skill index from ${localIndexPath.toString(true)}; using bundled fallback when available.`,
       error,
@@ -607,13 +618,18 @@ export async function loadSkillIndex(
     // ローカルにない場合はバンドルされたインデックスを使用
     if (bundledIndex) {
       // ローカルにコピー
-      await vscode.workspace.fs.createDirectory(context.globalStorageUri);
-      await vscode.workspace.fs.writeFile(
-        localIndexPath,
-        Buffer.from(JSON.stringify(bundledIndex, null, 2), "utf-8"),
-      );
+      if (!options?.readOnly) {
+        await vscode.workspace.fs.createDirectory(context.globalStorageUri);
+        await vscode.workspace.fs.writeFile(
+          localIndexPath,
+          Buffer.from(JSON.stringify(bundledIndex, null, 2), "utf-8"),
+        );
+      }
       effectiveIndex = bundledIndex;
     } else {
+      if (options?.readOnly) {
+        throw new Error("skill-index-unavailable");
+      }
       logger.warn(
         "[Resource Ninja] No skill index found; using empty index fallback. Run Resource Ninja: Update Index to rebuild it.",
       );
@@ -630,6 +646,7 @@ export async function loadSkillIndex(
   const loadedSharedIndex = await loadSharedStoresIntoSkillIndex(
     context,
     effectiveIndex,
+    options,
   );
   // Entries copied in from a sibling's shared index never passed the local read.
   const sharedMergedIndex =
@@ -665,11 +682,11 @@ export async function loadSkillIndex(
         }
       : sharedMergedIndex;
 
-  if (sourcesToPublish.length > 0) {
+  if (!options?.readOnly && sourcesToPublish.length > 0) {
     // Shared state has now been read and merged, so publishing cannot overwrite
     // a sibling's newer fields with stale local cache data.
     await saveSkillIndex(context, finalIndex);
-  } else if (shouldPersistMergedIndex(effectiveIndex, finalIndex)) {
+  } else if (!options?.readOnly && shouldPersistMergedIndex(effectiveIndex, finalIndex)) {
     await persistLocalSkillIndex(context, finalIndex);
   }
 
@@ -1104,6 +1121,7 @@ async function checkUrlExists(
   token?: string,
   authenticatedUrl?: string,
   stopOnRateLimit = false,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   try {
     const response = await fetchGitHubWithOptionalAuthRetry(url, {
@@ -1112,9 +1130,13 @@ async function checkUrlExists(
       method: "HEAD",
       authenticatedUrl,
       stopOnRateLimit,
+      signal,
     });
     return response.ok;
   } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
     throwOnBranchRateLimit(error, stopOnRateLimit);
     return false;
   }
@@ -1191,7 +1213,9 @@ export async function getDefaultBranch(
   testPath?: string, // 存在確認用のパス（例: "skills/xxx/SKILL.md"）
   now: () => number = Date.now,
   stopOnRateLimit = false,
+  signal?: AbortSignal,
 ): Promise<string> {
+  signal?.throwIfAborted();
   // キャッシュチェック
   const cachedBranch = getCachedBranch(repoUrl, now());
   if (cachedBranch) {
@@ -1213,7 +1237,8 @@ export async function getDefaultBranch(
     const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${encodeGitHubPathForUrl(testFile)}`;
     const authenticatedUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeGitHubPathForUrl(testFile)}?ref=${encodeURIComponent(branch)}`;
 
-    if (await checkUrlExists(rawUrl, token, authenticatedUrl, stopOnRateLimit)) {
+    if (await checkUrlExists(rawUrl, token, authenticatedUrl, stopOnRateLimit, signal)) {
+      signal?.throwIfAborted();
       branchCache.set(repoUrl, { branch });
       return branch;
     }
@@ -1226,6 +1251,7 @@ export async function getDefaultBranch(
       accept: "application/vnd.github.v3+json",
       token,
       stopOnRateLimit,
+      signal,
     });
     if (response.ok) {
       const data = (await response.json()) as { default_branch?: string };
@@ -1236,11 +1262,15 @@ export async function getDefaultBranch(
       }
     }
   } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
     throwOnBranchRateLimit(error, stopOnRateLimit);
     // API エラー時はフォールバック
   }
 
   // フォールバック
+  signal?.throwIfAborted();
   branchCache.set(repoUrl, {
     branch: "main",
     expiresAt: now() + DEFAULT_BRANCH_NEGATIVE_CACHE_TTL_MS,
@@ -1256,7 +1286,9 @@ export async function getSourceBranch(
   token?: string,
   skillPath?: string, // 存在確認用のスキルパス
   stopOnRateLimit = false,
+  signal?: AbortSignal,
 ): Promise<string> {
+  signal?.throwIfAborted();
   // skill-index.json に明示的に設定されていればそれを使用
   if (source.branch) {
     return source.branch;
@@ -1273,6 +1305,7 @@ export async function getSourceBranch(
     testPath,
     Date.now,
     stopOnRateLimit,
+    signal,
   );
 }
 

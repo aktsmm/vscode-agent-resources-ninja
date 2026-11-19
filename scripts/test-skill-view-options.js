@@ -557,7 +557,7 @@ function createTreeProviders() {
       getConfiguration: () => ({ get: (_key, fallback) => fallback }),
     },
   };
-  const state = { index: undefined };
+  const state = { index: undefined, userResources: [] };
   const treeModule = requireTypeScriptModule(
     path.join(repoRoot, "src", "treeProvider.ts"),
     {
@@ -573,6 +573,7 @@ function createTreeProviders() {
         getIndexSources: (index) => index?.sources || [],
       },
       "./skillInstaller": { getInstalledSkillsWithMeta: async () => [] },
+      "./userResourceScanner": { scanUserResources: async () => state.userResources },
       "./localSkillScanner": { scanLocalSkills: async () => [] },
       "./i18n": {
         isJapanese: () => globalThis.__testJapaneseUi === true,
@@ -591,7 +592,7 @@ function createTreeProviders() {
         getPluginPackageCandidates: () => [],
         getPluginPackageId: () => undefined,
         getPluginPackageLabel: () => undefined,
-        getResourceIdentityKeys: () => [],
+        getResourceIdentityKeys: resourceKindsModule.getResourceIdentityKeys,
         isHookConfigFilePath: () => false,
         mapContainedSkillParents: resourceKindsModule.mapContainedSkillParents,
       },
@@ -642,6 +643,56 @@ async function openSkillRows(provider, source) {
   const skillKind = kinds.find((item) => item.resourceKind === "skill");
   return skillKind ? provider.getChildren(skillKind) : [];
 }
+
+test("Browse matches Global Home references by exact source and path and rejects ambiguous targets", async () => {
+  const { treeModule, context, state } = createTreeProviders();
+  const reference = { name: "notes", source: "src", path: "references/notes.md", kind: "reference" };
+  const resource = {
+    name: "notes",
+    source: "src",
+    remotePath: "references/notes.md",
+    kind: "reference",
+    scope: "globalHome",
+    rootFsPath: "C:\\home\\.copilot",
+    fullPath: "C:\\home\\.copilot\\references\\notes.md",
+    description: "",
+  };
+  state.index = { ...browseIndex(true), skills: [reference] };
+  state.userResources = [
+    { ...resource, source: "other" },
+    { ...resource, remotePath: "references/other.md" },
+    { ...resource, remotePath: "references/Notes.md" },
+    { ...resource, isReadOnly: true },
+    { ...resource, scope: "userData" },
+  ];
+  const provider = new treeModule.BrowseSkillsProvider(context);
+  let { source } = await openSource(provider);
+  assert.strictEqual(provider.isSkillInstalled(reference), false);
+  assert.strictEqual(provider.getGlobalHomeReference(reference), undefined);
+
+  state.userResources.push(resource);
+  provider.refresh();
+  ({ source } = await openSource(provider));
+  const kind = (await provider.getChildren(source)).find((item) => item.resourceKind === "reference");
+  let row = (await provider.getChildren(kind))[0];
+  assert.strictEqual(row.contextValue, "installedRemoteResource");
+  assert.match(row.description, /Installed \(Global Home\)/);
+  assert.deepStrictEqual(row.globalHomeReferenceTarget, {
+    rootFsPath: resource.rootFsPath,
+    fullPath: resource.fullPath,
+  });
+  assert.deepStrictEqual(row.command.arguments[1], row.globalHomeReferenceTarget);
+
+  state.userResources.push({ ...resource, fullPath: "C:\\another\\notes.md" });
+  provider.refresh();
+  ({ source } = await openSource(provider));
+  const duplicateKind = (await provider.getChildren(source)).find((item) => item.resourceKind === "reference");
+  row = (await provider.getChildren(duplicateKind))[0];
+  assert.strictEqual(provider.getGlobalHomeReference(reference), undefined);
+  assert.strictEqual(row.contextValue, "installedResource");
+  assert.match(row.description, /Multiple matching targets/);
+  assert.strictEqual(row.command.command, "resourceNinja.preview");
+});
 
 test("Browse filters skills, keeps other kinds, and sorts only when asked", async () => {
   const { treeModule, context, state } = createTreeProviders();

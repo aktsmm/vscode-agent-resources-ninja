@@ -476,6 +476,13 @@ function createInstaller(files) {
         writeFile: async (uri, content) => {
           files.set(fileKey(uri), Buffer.from(content).toString("utf-8"));
         },
+        rename: async (from, to, options) => {
+          if (!options?.overwrite && files.has(fileKey(to))) {
+            throw Object.assign(new Error("destination exists"), { code: "FileExists" });
+          }
+          files.set(fileKey(to), files.get(fileKey(from)));
+          files.delete(fileKey(from));
+        },
         readFile: async (uri) => {
           if (!files.has(fileKey(uri))) {
             throw Object.assign(new Error("not found"), { code: "ENOENT" });
@@ -772,7 +779,7 @@ test("the Japanese refusal is localized", () => {
   );
 });
 
-test("a same-name file from elsewhere is never overwritten, a same-source one is refreshed", async () => {
+test("an existing reference is never silently overwritten, including one from the same source", async () => {
   const sidecarPath = `${REFERENCE_TARGET}.resource-ninja.json`;
   const attempt = async (seed) => {
     const files = new Map(seed);
@@ -812,8 +819,98 @@ test("a same-name file from elsewhere is never overwritten, a same-source one is
     [REFERENCE_TARGET, "older copy"],
     [sidecarPath, JSON.stringify({ kind: "reference", source: "octo/notes" })],
   ]);
-  assert.strictEqual(sameSource.error, undefined);
-  assert.strictEqual(sameSource.files.get(REFERENCE_TARGET), REFERENCE_BODY);
+  assert.match(sameSource.error?.message ?? "", /already holds a file/);
+  assert.strictEqual(sameSource.files.get(REFERENCE_TARGET), "older copy");
+});
+
+test("an orphaned reference sidecar is not overwritten", async () => {
+  const sidecar = `${REFERENCE_TARGET}.resource-ninja.json`;
+  const files = new Map([[sidecar, "other metadata"]]);
+  const { installer } = createInstaller(files);
+  const requested = stubRawDownload(REFERENCE_BODY);
+  await assert.rejects(
+    installer.installSkill(referenceSkill(), WORKSPACE, {}, { targetScope: "globalHome" }),
+  );
+  assert.strictEqual(files.get(sidecar), "other metadata");
+  assert.strictEqual(files.has(REFERENCE_TARGET), false);
+  assert.strictEqual(requested.length, 0);
+});
+
+test("a sidecar created during download is preserved and the partial install is reported", async () => {
+  const sidecar = `${REFERENCE_TARGET}.resource-ninja.json`;
+  const files = new Map();
+  const { installer } = createInstaller(files);
+  stubRawDownload(REFERENCE_BODY);
+  const fetchDownload = global.fetch;
+  global.fetch = async (...args) => {
+    const response = await fetchDownload(...args);
+    files.set(sidecar, "other metadata");
+    return response;
+  };
+  await assert.rejects(
+    installer.installSkill(referenceSkill(), WORKSPACE, {}, { targetScope: "globalHome" }),
+    /could not be saved/,
+  );
+  assert.strictEqual(files.get(sidecar), "other metadata");
+  assert.strictEqual(files.get(REFERENCE_TARGET), REFERENCE_BODY);
+  assert.ok([...files.keys()].every((key) => !key.endsWith(".tmp")));
+});
+
+test("a sidecar created at final rename is preserved and the partial install is reported", async () => {
+  const sidecar = `${REFERENCE_TARGET}.resource-ninja.json`;
+  const files = new Map();
+  const { installer, vscodeStub } = createInstaller(files);
+  const rename = vscodeStub.workspace.fs.rename;
+  vscodeStub.workspace.fs.rename = async (from, to, options) => {
+    if (fileKey(to) === sidecar) {
+      assert.strictEqual(options.overwrite, false);
+      files.set(sidecar, "concurrent metadata");
+    }
+    return rename(from, to, options);
+  };
+  stubRawDownload(REFERENCE_BODY);
+  await assert.rejects(
+    installer.installSkill(referenceSkill(), WORKSPACE, {}, { targetScope: "globalHome" }),
+    /could not be saved/,
+  );
+  assert.strictEqual(files.get(sidecar), "concurrent metadata");
+  assert.strictEqual(files.get(REFERENCE_TARGET), REFERENCE_BODY);
+  assert.ok([...files.keys()].every((key) => !key.endsWith(".tmp")));
+});
+
+test("a reference that appears during download is preserved", async () => {
+  const files = new Map();
+  const { installer } = createInstaller(files);
+  stubRawDownload(REFERENCE_BODY);
+  const fetch = global.fetch;
+  global.fetch = async (...args) => {
+    const result = await fetch(...args);
+    files.set(REFERENCE_TARGET, "concurrent edit");
+    return result;
+  };
+  await assert.rejects(
+    installer.installSkill(referenceSkill(), WORKSPACE, {}, {
+      targetScope: "globalHome",
+      suppressRecoveryPrompt: true,
+    }),
+  );
+  assert.strictEqual(files.get(REFERENCE_TARGET), "concurrent edit");
+  assert.deepStrictEqual([...files.keys()], [REFERENCE_TARGET]);
+});
+
+test("reference reinstall refuses a different resolved destination", async () => {
+  const files = new Map();
+  const { installer } = createInstaller(files);
+  stubRawDownload(REFERENCE_BODY);
+  await assert.rejects(
+    installer.installSkill(referenceSkill(), WORKSPACE, {}, {
+      targetScope: "globalHome",
+      expectedReferenceTarget: makeUri("/other/references/terminal-operations-notes.instructions.md"),
+      suppressRecoveryPrompt: true,
+    }),
+    /destination changed/,
+  );
+  assert.strictEqual(files.size, 0);
 });
 
 test("an earlier instruction copy is neither moved nor removed", async () => {

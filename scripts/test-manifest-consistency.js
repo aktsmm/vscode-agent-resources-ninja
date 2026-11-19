@@ -1848,10 +1848,30 @@ test("resource actions avoid silent no-ops and false success", () => {
     extensionSource,
     /installResult && !installWasClean\(installResult\)/,
   );
-  assert.match(
-    extensionSource,
-    /executeCommand<boolean>\(\s*"resourceNinja\.reinstallAll"/,
+});
+
+test("extension-upgrade checks only changed skills instead of reinstalling all", () => {
+  const start = extensionSource.indexOf(
+    "async function checkVersionAndRefreshMetadata",
   );
+  assert.notStrictEqual(start, -1);
+  const upgradeFlow = extensionSource.slice(start);
+  assert.match(
+    upgradeFlow,
+    /checkChangedSkills\?\.\(\s*workspaceUri,\s*autoUpdateSkills === "always" \? "always" : "prompt"/,
+  );
+  const metadataRefresh = upgradeFlow.indexOf("await refreshSkillMetadata(workspaceUri)");
+  const upgradeCheck = upgradeFlow.indexOf("await checkChangedSkills?.(");
+  assert.ok(
+    metadataRefresh !== -1 && upgradeCheck !== -1 && metadataRefresh < upgradeCheck,
+    "Metadata refresh must not wait for an upgrade confirmation to be dismissed",
+  );
+  const presenterStart = extensionSource.indexOf("const runWorkspaceSkillUpgradeCheck =");
+  const presenterEnd = extensionSource.indexOf("const checkWorkspaceSkillUpdatesCmd =", presenterStart);
+  assert.ok(presenterStart !== -1 && presenterEnd > presenterStart);
+  const presenter = extensionSource.slice(presenterStart, presenterEnd);
+  assert.match(presenter, /outcomes\.some\(\(outcome\) => outcome\.status === "updated"\)[\s\S]*?await refreshSkillMetadata\(workspace\)/);
+  assert.doesNotMatch(upgradeFlow, /resourceNinja\.reinstallAll/);
 });
 
 test("destructive resource actions explain recovery and require confirmation", () => {

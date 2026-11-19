@@ -76,11 +76,107 @@ async function main() {
     now: () => now,
   });
   const auto = concurrent.run();
-  const manual = concurrent.run(true);
+  const secondAuto = concurrent.run();
   resolveCheck({ complete: true, value: "ok" });
-  assert.deepStrictEqual(await auto, await manual);
+  assert.deepStrictEqual(await auto, await secondAuto);
   assert.strictEqual(concurrentCalls, 1);
   assert.strictEqual(saved, 1);
+
+  let releasePassive;
+  const scopes = [];
+  let overlapSaved = 0;
+  const overlapping = createWorkspaceUpdateSchedule({
+    getLastSuccess: () => undefined,
+    saveLastSuccess: async () => { overlapSaved++; },
+    check: async (includeMissingBaseline, signal) => {
+      scopes.push({ includeMissingBaseline, signal });
+      if (!includeMissingBaseline) {
+        await new Promise((resolve) => { releasePassive = resolve; });
+      }
+      return { complete: true, value: includeMissingBaseline };
+    },
+    now: () => now,
+  });
+  const passive = overlapping.run();
+  const controller = new AbortController();
+  const manual = overlapping.run(true, true, controller.signal);
+  releasePassive();
+  assert.strictEqual((await passive).value, false);
+  assert.strictEqual((await manual).value, true);
+  assert.deepStrictEqual(scopes.map((entry) => entry.includeMissingBaseline), [false, true]);
+  assert.strictEqual(scopes[1].signal, controller.signal);
+  assert.strictEqual(overlapSaved, 2);
+
+  let releasePendingCheck;
+  let queuedManualCalls = 0;
+  let queuedManualSaved = 0;
+  const queuedManualSchedule = createWorkspaceUpdateSchedule({
+    getLastSuccess: () => undefined,
+    saveLastSuccess: async () => { queuedManualSaved++; },
+    check: async (includeMissingBaseline) => {
+      queuedManualCalls++;
+      if (!includeMissingBaseline) {
+        await new Promise((resolve) => { releasePendingCheck = resolve; });
+      }
+      return { complete: true, value: includeMissingBaseline };
+    },
+    now: () => now,
+  });
+  const pendingPassive = queuedManualSchedule.run();
+  const cancelledManualController = new AbortController();
+  const cancelledManual = queuedManualSchedule.run(
+    true,
+    true,
+    cancelledManualController.signal,
+  );
+  cancelledManualController.abort();
+  let timeout;
+  try {
+    assert.deepStrictEqual(
+      await Promise.race([
+        cancelledManual,
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(new Error("queued cancellation did not settle")), 1000);
+        }),
+      ]),
+      { status: "cancelled" },
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+  assert.strictEqual(queuedManualCalls, 1);
+  assert.strictEqual(queuedManualSaved, 0);
+  releasePendingCheck();
+  assert.strictEqual((await pendingPassive).status, "checked");
+  assert.strictEqual(queuedManualSaved, 1);
+
+  let releaseSave;
+  const savingController = new AbortController();
+  const savingSchedule = createWorkspaceUpdateSchedule({
+    getLastSuccess: () => undefined,
+    saveLastSuccess: () => new Promise((resolve) => { releaseSave = resolve; }),
+    check: async () => ({ complete: true, value: "ignored" }),
+    now: () => now,
+  });
+  const saving = savingSchedule.run(true, true, savingController.signal);
+  await Promise.resolve();
+  savingController.abort();
+  releaseSave();
+  assert.deepStrictEqual(await saving, { status: "cancelled" });
+
+  const cancelled = new AbortController();
+  let cancelledSave = 0;
+  const cancelledSchedule = createWorkspaceUpdateSchedule({
+    getLastSuccess: () => undefined,
+    saveLastSuccess: async () => { cancelledSave++; },
+    check: async () => {
+      cancelled.abort();
+      return { complete: true, value: "ignored" };
+    },
+    now: () => now,
+  });
+  assert.deepStrictEqual(await cancelledSchedule.run(true, true, cancelled.signal), { status: "cancelled" });
+  assert.strictEqual(cancelledSave, 0);
 
   let attempts = 0;
   const failing = createWorkspaceUpdateSchedule({
@@ -97,6 +193,26 @@ async function main() {
   await assert.rejects(failing.run(), /network failure/);
   await assert.rejects(failing.run(), /network failure/);
   assert.strictEqual(attempts, 2);
+
+  const manualSync = createWorkspaceUpdateSchedule({
+    getLastSuccess: () => undefined,
+    saveLastSuccess: async () => {},
+    check: async (includeMissingBaseline) => ({
+      complete: true,
+      value: includeMissingBaseline,
+    }),
+    now: () => now,
+  });
+  assert.deepStrictEqual(await manualSync.run(), {
+    status: "checked",
+    complete: true,
+    value: false,
+  });
+  assert.deepStrictEqual(await manualSync.run(true, true), {
+    status: "checked",
+    complete: true,
+    value: true,
+  });
 
   let invalidCalls = 0;
   const invalidTimestamp = createWorkspaceUpdateSchedule({

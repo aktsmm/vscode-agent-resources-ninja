@@ -2,6 +2,7 @@
 // GitHub からスキルをダウンロードしてワークスペースに配置
 
 import * as path from "path";
+import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import {
   Skill,
@@ -101,6 +102,7 @@ export type InstallTargetScope =
 export interface InstallSkillOptions {
   targetScope?: InstallTargetScope;
   customTargetUri?: vscode.Uri;
+  expectedReferenceTarget?: vscode.Uri;
   suppressRecoveryPrompt?: boolean;
   mcpInstallMode?: "copyOnly" | "mergeIntoWorkspace";
   confirmMcpServerOverwrite?: (
@@ -608,6 +610,21 @@ function getResourceMetadataUri(
   );
 }
 
+async function writeNewReferenceFile(uri: vscode.Uri, content: Uint8Array): Promise<void> {
+  const staged = vscode.Uri.joinPath(uri, "..", `.resource-ninja-${randomUUID()}.tmp`);
+  let stagedExists = false;
+  try {
+    await vscode.workspace.fs.writeFile(staged, content);
+    stagedExists = true;
+    await vscode.workspace.fs.rename(staged, uri, { overwrite: false });
+    stagedExists = false;
+  } finally {
+    if (stagedExists) {
+      await vscode.workspace.fs.delete(staged);
+    }
+  }
+}
+
 async function writeResourceInstallMetadata(
   resourceUri: vscode.Uri,
   skill: Skill,
@@ -619,6 +636,9 @@ async function writeResourceInstallMetadata(
   }
 
   const metadataUri = getResourceMetadataUri(resourceUri, kind);
+  if (kind === "reference") {
+    await assertReferenceTargetAvailable(metadataUri, skill);
+  }
   const existingResult =
     await readJsonObject<Partial<ResourceInstallMeta>>(metadataUri);
   if (
@@ -648,10 +668,12 @@ async function writeResourceInstallMetadata(
     pluginManifestPath: skill.pluginManifestPath,
     pluginManifestKind: skill.pluginManifestKind,
   };
-  await vscode.workspace.fs.writeFile(
-    metadataUri,
-    Buffer.from(JSON.stringify(meta, null, 2), "utf-8"),
-  );
+  const content = Buffer.from(JSON.stringify(meta, null, 2), "utf-8");
+  if (kind === "reference") {
+    await writeNewReferenceFile(metadataUri, content);
+  } else {
+    await vscode.workspace.fs.writeFile(metadataUri, content);
+  }
 }
 
 async function deleteResourceInstallMetadata(
@@ -665,30 +687,11 @@ async function deleteResourceInstallMetadata(
   }
 }
 
-/**
- * A reference note may be refreshed from the source that installed it. A file with
- * the same name from anywhere else (another source, a hand-written note, a file whose
- * sidecar is unreadable) is the user's to review, so it is never overwritten.
- */
 async function assertReferenceTargetAvailable(
   targetUri: vscode.Uri,
   skill: Skill,
 ): Promise<void> {
   if (!(await uriExists(targetUri))) {
-    return;
-  }
-  const metadata = await readJsonObject<Partial<ResourceInstallMeta>>(
-    getResourceMetadataUri(targetUri, "reference"),
-  );
-  if (
-    metadata.status === "loaded" &&
-    metadata.value.kind === "reference" &&
-    metadata.value.source ===
-      normalizeSkillMetaSource({
-        source: skill.source,
-        remotePath: skill.path,
-      })
-  ) {
     return;
   }
   throw new Error(
@@ -1725,7 +1728,23 @@ export async function installSkill(
   const installRootUri = getResourceInstallRootUri(skillPath);
 
   if (resourceKind === "reference") {
+    if (options.expectedReferenceTarget) {
+      const normalize = (uri: vscode.Uri) => {
+        const value = path.resolve(uri.fsPath);
+        return process.platform === "win32" ? value.toLowerCase() : value;
+      };
+      if (
+        skillPath.scheme !== options.expectedReferenceTarget.scheme ||
+        normalize(skillPath) !== normalize(options.expectedReferenceTarget)
+      ) {
+        throw new Error("Reference destination changed after confirmation");
+      }
+    }
     await assertReferenceTargetAvailable(skillPath, skill);
+    await assertReferenceTargetAvailable(
+      getResourceMetadataUri(skillPath, "reference"),
+      skill,
+    );
   }
 
   assertRealPathStrictlyInside(
@@ -1918,7 +1937,11 @@ export async function installSkill(
             installRootUri,
             "resource write",
           );
-          await vscode.workspace.fs.writeFile(skillPath, content);
+          if (resourceKind === "reference") {
+            await writeNewReferenceFile(skillPath, content);
+          } else {
+            await vscode.workspace.fs.writeFile(skillPath, content);
+          }
         }
         const verifiedRevision =
           downloadErrors.length === 0
@@ -1930,18 +1953,28 @@ export async function installSkill(
                 options.suppressRecoveryPrompt === true,
               )
             : undefined;
-        await writeResourceInstallMetadata(skillPath, skill, verifiedRevision);
+        try {
+          await writeResourceInstallMetadata(skillPath, skill, verifiedRevision);
+        } catch (error) {
+          if (resourceKind === "reference") {
+            logger.warn("[Resource Ninja] Reference metadata could not be saved", error instanceof Error ? error.name : "");
+            throw new Error(messages.referenceInstallIncomplete(skill.name, skillPath.fsPath));
+          }
+          throw error;
+        }
         await removeOwnedLegacyPluginResource(skillPath, skill);
       } catch (error) {
-        if (!resourcePathExisted) {
+        if (!resourcePathExisted && resourceKind !== "reference") {
           await deleteResourceInstallMetadata(skillPath, resourceKind);
         }
-        await deleteUriIfCreated(
-          skillPath,
-          resourcePathExisted,
-          false,
-          resourceParentUri,
-        );
+        if (resourceKind !== "reference") {
+          await deleteUriIfCreated(
+            skillPath,
+            resourcePathExisted,
+            false,
+            resourceParentUri,
+          );
+        }
         await deleteDirectoryIfCreatedAndEmpty(
           resourceParentUri,
           resourceParentExisted,
@@ -2934,6 +2967,7 @@ export async function refreshSkillMetadata(
  */
 export async function refreshSingleSkillMetadata(
   skillMdUri: vscode.Uri,
+  strict = false,
 ): Promise<boolean> {
   // SKILL.md の親ディレクトリ（スキルフォルダ）を取得
   const skillPath = vscode.Uri.joinPath(skillMdUri, "..");
@@ -2949,8 +2983,8 @@ export async function refreshSingleSkillMetadata(
     let updated = stripSkillMetaLocalPaths(meta);
 
     // SKILL.md から description と whenToUse を再抽出
-    const newDescription = await extractDescriptionFromSkillMd(skillMdUri);
-    const newWhenToUse = await extractWhenToUseFromSkillMd(skillMdUri);
+    const newDescription = await extractDescriptionFromSkillMd(skillMdUri, strict);
+    const newWhenToUse = await extractWhenToUseFromSkillMd(skillMdUri, undefined, strict);
     const normalizedSource = normalizeSkillMetaSource(meta);
 
     // description が変更された場合
@@ -2982,7 +3016,8 @@ export async function refreshSingleSkillMetadata(
     }
 
     return false;
-  } catch {
+  } catch (error) {
+    if (strict) { throw error; }
     // メタデータがない場合は何もしない（インストールされていないスキル）
     return false;
   }
@@ -3300,6 +3335,7 @@ function extractDescriptionFromFrontmatter(frontmatter: string): string {
  */
 async function extractDescriptionFromSkillMd(
   skillMdUri: vscode.Uri,
+  strict = false,
 ): Promise<string> {
   try {
     const content = await vscode.workspace.fs.readFile(skillMdUri);
@@ -3313,7 +3349,8 @@ async function extractDescriptionFromSkillMd(
     }
 
     return extractDescriptionFromFrontmatter(frontmatterMatch[1]);
-  } catch {
+  } catch (error) {
+    if (strict) { throw error; }
     return "";
   }
 }
@@ -3330,12 +3367,14 @@ async function extractDescriptionFromSkillMd(
 async function extractWhenToUseFromSkillMd(
   skillMdUri: vscode.Uri,
   diagnose?: ScanDiagnostic,
+  strict = false,
 ): Promise<string> {
   try {
     const content = await vscode.workspace.fs.readFile(skillMdUri);
     const text = Buffer.from(content).toString("utf-8");
     return parseWhenToUseFromText(text);
-  } catch {
+  } catch (error) {
+    if (strict) { throw error; }
     diagnose?.("skill-read");
     return "";
   }

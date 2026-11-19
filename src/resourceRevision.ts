@@ -190,6 +190,105 @@ function assertActive(signal?: AbortSignal): void {
   }
 }
 
+type RevisionJsonReader = (
+  url: string,
+  token?: string,
+  signal?: AbortSignal,
+) => Promise<unknown>;
+
+async function readRevisionJson(
+  url: string,
+  token: string | undefined,
+  signal: AbortSignal | undefined,
+  request: typeof fetchGitHubWithOptionalAuthRetry,
+): Promise<unknown> {
+  assertActive(signal);
+  const response = await request(url, {
+    accept: "application/vnd.github.v3+json",
+    token,
+    signal,
+  });
+  assertActive(signal);
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw createGitHubResponseError(response, body, "Revision check");
+  }
+  const value: unknown = await response.json();
+  assertActive(signal);
+  return value;
+}
+
+/** Shares only in-flight startup reads; each caller retains its own cancellation. */
+export function createSharedRevisionJsonReader(
+  request: typeof fetchGitHubWithOptionalAuthRetry = fetchGitHubWithOptionalAuthRetry,
+): RevisionJsonReader {
+  interface PendingRead {
+    controller: AbortController;
+    promise: Promise<unknown>;
+    subscribers: number;
+    completed: boolean;
+  }
+  const byToken = new Map<string | undefined, Map<string, PendingRead>>();
+  return (url, token, signal) => {
+    assertActive(signal);
+    let reads = byToken.get(token);
+    if (!reads) {
+      reads = new Map();
+      byToken.set(token, reads);
+    }
+    let entry = reads.get(url);
+    if (!entry) {
+      const controller = new AbortController();
+      const ownerReads = reads;
+      const created: PendingRead = {
+        controller,
+        subscribers: 0,
+        completed: false,
+        promise: readRevisionJson(url, token, controller.signal, request).finally(() => {
+          created.completed = true;
+          if (ownerReads.get(url) === created) {
+            ownerReads.delete(url);
+            if (ownerReads.size === 0) { byToken.delete(token); }
+          }
+        }),
+      };
+      ownerReads.set(url, created);
+      entry = created;
+    }
+    const current = entry;
+    const ownerReads = reads;
+    current.subscribers++;
+    return new Promise<unknown>((resolve, reject) => {
+      let finished = false;
+      const finish = (action: () => void): void => {
+        if (finished) { return; }
+        finished = true;
+        signal?.removeEventListener("abort", onAbort);
+        current.subscribers--;
+        if (current.subscribers === 0 && !current.completed) {
+          if (ownerReads.get(url) === current) {
+            ownerReads.delete(url);
+            if (ownerReads.size === 0) { byToken.delete(token); }
+          }
+          current.controller.abort();
+        }
+        action();
+      };
+      const onAbort = (): void => {
+        finish(() => {
+          try { assertActive(signal); } catch (error) { reject(error); }
+        });
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) { onAbort(); }
+      current.promise.then(
+        (value) => finish(() => resolve(value)),
+        (error: unknown) => finish(() => reject(error)),
+      );
+    });
+  };
+}
+
 interface TreeEntry {
   path: string;
   sha: string;
@@ -261,6 +360,7 @@ export function createRevisionResolver(
   token?: string,
   signal?: AbortSignal,
   request: typeof fetchGitHubWithOptionalAuthRetry = fetchGitHubWithOptionalAuthRetry,
+  sharedJsonReader?: RevisionJsonReader,
 ): RevisionResolver {
   const snapshots = new Map<
     string,
@@ -269,20 +369,9 @@ export function createRevisionResolver(
   const trees = new Map<string, Promise<Tree>>();
 
   async function json(url: string): Promise<unknown> {
-    assertActive(signal);
-    const response = await request(url, {
-      accept: "application/vnd.github.v3+json",
-      token,
-      signal,
-    });
-    assertActive(signal);
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      throw createGitHubResponseError(response, body, "Revision check");
-    }
-    const value: unknown = await response.json();
-    assertActive(signal);
-    return value;
+    return sharedJsonReader
+      ? sharedJsonReader(url, token, signal)
+      : readRevisionJson(url, token, signal, request);
   }
 
   function tree(

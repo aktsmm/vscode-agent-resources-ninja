@@ -6,11 +6,14 @@ import type {
   WorkspaceSkillCandidate,
   WorkspaceSkillPrepareResult,
 } from "./workspaceSkillUpdate";
+import type { SourceRevision } from "./resourceRevision";
 
 export interface WorkspaceUpdateTarget {
   readonly workspace: vscode.Uri;
   readonly target: vscode.Uri;
   readonly label: string;
+  readonly initialRevision?: Readonly<SourceRevision>;
+  readonly sourceId?: string;
 }
 
 /** Bytes must be verified against the candidate's saved and staged snapshots. */
@@ -167,7 +170,10 @@ export async function presentWorkspaceSkillUpdates(
         return;
       }
       if (mode === "bulk" && candidate.localChanges.length) {
-        outcomes.push({ target, status: "skipped", reason: "local-changes" });
+        outcomes.push({
+          target, status: "skipped",
+          reason: candidate.firstSync ? "first-sync-differs" : "local-changes",
+        });
         return;
       }
       if (mode === "single") {

@@ -643,6 +643,41 @@ test("a rejected sources bootstrap never marks reconciliation complete", async (
   }
 });
 
+test("read-only loading does not bootstrap missing shared stores and rejects unreadable stores", async () => {
+  const stubs = storeStubs();
+  let bootstrapCalls = 0;
+  stubs["./sharedSourcesManifestStore"].bootstrapSharedSourcesManifest = async () => {
+    bootstrapCalls++;
+    throw new Error("unexpected bootstrap");
+  };
+  const readOnlyStore = requireTypeScriptModule(
+    path.join(srcDir, "sharedResourceIndexStore.ts"),
+    stubs,
+  );
+  const context = makeContext();
+  const index = {
+    version: "1.0.0",
+    lastUpdated: "2026-08-18",
+    sources: [makeSource("local")],
+    skills: [],
+    categories: [],
+  };
+  useSharedResourceIndex = false;
+  try {
+    await readOnlyStore.loadSharedStoresIntoSkillIndex(context, index, { readOnly: true });
+    assert.strictEqual(bootstrapCalls, 0);
+    assert.strictEqual(context.globalState.get(readOnlyStore.SHARED_SOURCES_MANIFEST_RECONCILED_KEY), undefined);
+    stubs["./sharedSourcesManifestStore"].readSharedSourcesManifest = async () => ({ status: "rejected", reason: "invalid" });
+    await assert.rejects(
+      readOnlyStore.loadSharedStoresIntoSkillIndex(context, index, { readOnly: true }),
+      /shared-sources-unreadable/,
+    );
+    assert.strictEqual(bootstrapCalls, 0);
+  } finally {
+    useSharedResourceIndex = true;
+  }
+});
+
 test("a foreign resource already loaded into our index is not written twice", () => {
   // A previous load copies the sibling's resources into our runtime index, so a
   // rebuild that emits everything and then carries the foreign ones over would

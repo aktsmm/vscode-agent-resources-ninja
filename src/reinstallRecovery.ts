@@ -37,6 +37,31 @@ export interface ReinstallBatchRecord<T> {
   result: ReinstallTaskResult<T>;
 }
 
+export function createUnstartedReinstallRecord<T>(
+  name: string,
+  failureKind: ReinstallFailureKind,
+  resourceKind?: ResourceKind,
+): ReinstallBatchRecord<T> {
+  const task: ReinstallTask<T> = {
+    name,
+    resourceKind,
+    remove: async () => undefined,
+    install: async () => {
+      throw new ReinstallAttemptError(failureKind, "Not started");
+    },
+  };
+  return {
+    task,
+    result: {
+      success: false,
+      attempts: 0,
+      removed: false,
+      stage: "not-started",
+      failureKind,
+    },
+  };
+}
+
 export class ReinstallAttemptError extends Error {
   constructor(
     public readonly kind: ReinstallFailureKind,

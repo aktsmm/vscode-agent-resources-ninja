@@ -920,13 +920,13 @@ test("a plugin reinstall unregisters where it was and registers where it lands",
       "reinstallUserResource",
       "const reinstallUserResource = async (",
       "const reinstallUserResourceCmd = vscode.commands.registerCommand(",
-      "const installOptions = { targetScope, suppressRecoveryPrompt };",
+      /const installOptions:\s*InstallSkillOptions\s*=\s*\{\s*targetScope,\s*suppressRecoveryPrompt,/,
     ],
     [
       "reinstallResource",
       "const reinstallResource = async (",
       "const reinstallCmd = vscode.commands.registerCommand(",
-      "const installOptions = { suppressRecoveryPrompt };",
+      /const installOptions = \{ suppressRecoveryPrompt \};/,
     ],
   ];
 
@@ -942,8 +942,9 @@ test("a plugin reinstall unregisters where it was and registers where it lands",
       start,
       extensionSource.indexOf(endMarker, start),
     );
-    assert.ok(
-      body.includes(optionsDeclaration),
+    assert.match(
+      body,
+      optionsDeclaration,
       `${label} must pin one install options object`,
     );
     // The registration target is whatever the install reported writing to. A
@@ -960,10 +961,24 @@ test("a plugin reinstall unregisters where it was and registers where it lands",
       /record\.result\.success &&\s*record\.result\.value\s*\)\s*\{\s*await offerPluginLocationRegistration\(\[\s*record\.result\.value\.destinationUri,?\s*\]\)/,
       `${label} must re-register the destination the install reported, through the normal install path`,
     );
-    assert.ok(
-      !/getResourceTargetUri\(/.test(body),
-      `${label} must not register a destination it computed itself`,
-    );
+    if (label === "reinstallUserResource") {
+      const workspaceGuard = body.indexOf("if (!wsFolder)");
+      const removeOperation = body.indexOf("deleteInstalledResourceByPath(");
+      assert.ok(
+        workspaceGuard !== -1 && workspaceGuard < removeOperation,
+        "user/global reinstall must stop before removing files when no workspace is open",
+      );
+      assert.match(
+        body,
+        /if \(installOptions\.expectedReferenceTarget\) \{[\s\S]*?getResourceTargetUri\([\s\S]*?normalizeResourceRootIdentity\(currentTarget\.fsPath\)[\s\S]*?normalizeResourceRootIdentity\(installOptions\.expectedReferenceTarget\.fsPath\)[\s\S]*?throw new Error\("Reference destination changed after confirmation"\)[\s\S]*?deleteInstalledResourceByPath\(/,
+        "reference destination revalidation must precede removal",
+      );
+    } else {
+      assert.ok(
+        !/getResourceTargetUri\(/.test(body),
+        `${label} must not register a destination it computed itself`,
+      );
+    }
     // A thrown install leaves the task result without a value, so registration
     // remains reachable only after a successful result.
     assert.match(

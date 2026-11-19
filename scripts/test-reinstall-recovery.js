@@ -26,6 +26,7 @@ function requireTypeScriptModule(filePath) {
 }
 
 const {
+  createUnstartedReinstallRecord,
   decideIndexRefreshRecovery,
   ReinstallAttemptError,
   retryReinstallBatch,
@@ -58,7 +59,7 @@ function createPromptRecorder(answer) {
   };
 }
 
-function isVsCodeWindowShowCall(node) {
+function isVsCodeWindowNotificationCall(node) {
   if (!ts.isCallExpression(node)) {
     return false;
   }
@@ -66,7 +67,13 @@ function isVsCodeWindowShowCall(node) {
   if (!ts.isPropertyAccessExpression(callee)) {
     return false;
   }
-  if (!callee.name.text.startsWith("show")) {
+  if (
+    ![
+      "showErrorMessage",
+      "showInformationMessage",
+      "showWarningMessage",
+    ].includes(callee.name.text)
+  ) {
     return false;
   }
   const target = callee.expression;
@@ -104,24 +111,10 @@ function inspectReinstallCommands(sourceText, fileName) {
   );
   const blocking = [];
   const modal = [];
-  const awaitedCommands = new Set();
-
-  const collectCallers = (node) => {
-    if (
-      ts.isCallExpression(node) &&
-      node.expression.getText(sourceFile).includes("executeCommand")
-    ) {
-      const [nameArgument] = node.arguments;
-      if (nameArgument && ts.isStringLiteral(nameArgument)) {
-        awaitedCommands.add(nameArgument.text);
-      }
-    }
-    node.forEachChild(collectCallers);
-  };
-  collectCallers(sourceFile);
+  const registeredCommands = new Set();
 
   const visitHandler = (commandName, node) => {
-    if (ts.isAwaitExpression(node) && isVsCodeWindowShowCall(node.expression)) {
+    if (ts.isAwaitExpression(node) && isVsCodeWindowNotificationCall(node.expression)) {
       const call = node.expression;
       const label = `${commandName}:${call.expression.name.text}`;
       if (isModalCall(call)) {
@@ -143,9 +136,9 @@ function inspectReinstallCommands(sourceText, fileName) {
         nameArgument &&
         ts.isStringLiteral(nameArgument) &&
         nameArgument.text.startsWith("resourceNinja.reinstall") &&
-        awaitedCommands.has(nameArgument.text) &&
         handler
       ) {
+        registeredCommands.add(nameArgument.text);
         visitHandler(nameArgument.text, handler);
       }
     }
@@ -153,7 +146,7 @@ function inspectReinstallCommands(sourceText, fileName) {
   };
 
   visit(sourceFile);
-  return { blocking, modal, checked: awaitedCommands };
+  return { blocking, modal, checked: registeredCommands };
 }
 
 /**
@@ -238,6 +231,17 @@ function inspectReinstallCallers(sourceText, fileName) {
 const extensionSource = fs.readFileSync(extensionPath, "utf8");
 
 async function main() {
+  {
+    const record = createUnstartedReinstallRecord(
+      "Reference note",
+      "other",
+      "reference",
+    );
+    assert.strictEqual(record.result.failureKind, "other");
+    assert.strictEqual(record.result.stage, "not-started");
+    assert.strictEqual(record.task.resourceKind, "reference");
+  }
+
   await test("transient reinstall retries once without removing twice", async () => {
     let removeCount = 0;
     let installCount = 0;
@@ -499,13 +503,6 @@ async function main() {
       extensionSource,
       extensionPath,
     );
-    const reinstallCommands = Array.from(checked).filter((name) =>
-      name.startsWith("resourceNinja.reinstall"),
-    );
-    assert.ok(
-      reinstallCommands.length >= 1,
-      `Expected the automatic reinstall command caller: ${reinstallCommands.join(", ")}`,
-    );
     assert.deepStrictEqual(
       blocking,
       [],
@@ -514,6 +511,10 @@ async function main() {
     assert.ok(
       modal.length >= 1,
       "Expected the reinstall confirmations to still be awaited modal dialogs",
+    );
+    assert.ok(
+      checked.size >= 1,
+      "Expected reinstall commands to be registered for direct typed handlers",
     );
     assert.doesNotMatch(
       extensionSource,
@@ -670,6 +671,81 @@ async function main() {
     assert.strictEqual(writes, 0);
   });
 
+  await test("Browse Global Home reinstall revalidates the confirmed target before removal", async () => {
+    const parsed = ts.createSourceFile(extensionPath, extensionSource, ts.ScriptTarget.ES2020, true);
+    const declarations = new Map();
+    const visit = (node) => {
+      if (ts.isFunctionDeclaration(node) && node.name) {
+        declarations.set(node.name.text, node.getText(parsed));
+      }
+      node.forEachChild(visit);
+    };
+    visit(parsed);
+    const code = ts.transpileModule(
+      [
+        declarations.get("normalizeInstalledRemotePath"),
+        declarations.get("isRemoteInstalledUserResource"),
+        declarations.get("reinstallBrowseGlobalHomeReference"),
+        "reinstallBrowseGlobalHomeReference;",
+      ].join("\n"),
+      { compilerOptions: { target: ts.ScriptTarget.ES2020 } },
+    ).outputText;
+    const skill = { name: "notes", source: "repo", path: "references/notes.md", kind: "reference" };
+    const resource = {
+      name: "notes", description: "", source: "repo", remotePath: skill.path,
+      kind: "reference", scope: "globalHome", rootFsPath: "C:\\home",
+      fullPath: "C:\\home\\references\\notes.md",
+    };
+    const expected = { rootFsPath: resource.rootFsPath, fullPath: resource.fullPath };
+    let resources = [resource];
+    let targetPath = resource.fullPath;
+    let confirm = true;
+    let removes = 0;
+    let stale = 0;
+    const handler = vm.runInNewContext(code, {
+      vscode: {
+        workspace: { workspaceFolders: [{ uri: {} }], getConfiguration: () => ({}) },
+        window: { showWarningMessage: async () => confirm ? "Reinstall" : undefined, showErrorMessage() {} },
+        TreeItemCollapsibleState: { None: 0 },
+      },
+      browseProvider: { getGlobalHomeReference: () => resource },
+      UserResourceTreeItem: class { constructor(_a, _b, _c, _d, value) { this.resource = value; } },
+      scanUserResources: async () => resources,
+      getResourceTargetUri: () => ({ fsPath: targetPath }),
+      normalizeResourceRootIdentity: (value) => value.toLowerCase(),
+      isJapanese: () => false,
+      showStaleResourceGroupMessage: () => { stale++; },
+      messages: { noWorkspace: () => "no workspace" },
+      logger: { warn() {} },
+      reinstallUserResource: async (_item, options) => {
+        await options.beforeRemove();
+        removes++;
+      },
+    });
+
+    confirm = false;
+    await handler(skill, expected);
+    assert.strictEqual(removes, 0);
+    confirm = true;
+    resources = [{ ...resource, source: "other" }];
+    await handler(skill, expected);
+    resources = [resource, { ...resource, fullPath: "C:\\other\\notes.md" }];
+    await handler(skill, expected);
+    resources = [resource];
+    targetPath = "C:\\other\\notes.md";
+    await handler(skill, expected);
+    assert.strictEqual(stale, 3);
+    assert.strictEqual(removes, 0);
+    targetPath = resource.fullPath;
+    await handler(skill, expected);
+    assert.strictEqual(removes, 1);
+    await handler(skill, { ...expected, rootFsPath: "C:\\old" });
+    assert.strictEqual(removes, 1);
+    assert.match(extensionSource, /reinstallBrowseGlobalHomeReference\(skill,\s*referenceTarget\)/);
+    assert.match(extensionSource, /reinstallBrowseGlobalHomeReference\(\s*item\.skill,\s*item\.globalHomeReferenceTarget/);
+    assert.match(extensionSource, /await beforeRemove\?\.\(\);[\s\S]*?await deleteInstalledResourceByPath\(/);
+  });
+
   await test("manual retry is gated before showing a notification", () => {
     assert.match(
       extensionSource,
@@ -681,16 +757,17 @@ async function main() {
     );
   });
 
-  await test("every awaited or automatic reinstall caller suppresses the prompt", () => {
+  await test("every awaited reinstall caller suppresses the prompt", () => {
     const { awaitedInProgress, automatic, violations } =
       inspectReinstallCallers(extensionSource, extensionPath);
     assert.ok(
       awaitedInProgress.length >= 2,
       `Expected the group reinstall loops to be found: ${JSON.stringify(awaitedInProgress)}`,
     );
-    assert.ok(
-      automatic.length >= 1,
-      `Expected the post-upgrade reinstall caller to be found: ${JSON.stringify(automatic)}`,
+    assert.deepStrictEqual(
+      automatic,
+      [],
+      "extension upgrades must not call the forced-reinstall command",
     );
     assert.deepStrictEqual(
       violations,
@@ -699,7 +776,7 @@ async function main() {
     );
   });
 
-  await test("the caller check catches both ways the stall returns", () => {
+  await test("the caller check catches a missing recovery-prompt suppression", () => {
     const anchor = /(\r?\n\s*)suppressRecoveryPrompt: true,/g;
     assert.ok(
       anchor.test(extensionSource),
@@ -717,7 +794,7 @@ async function main() {
       violations.length,
       awaitedInProgress.length + automatic.length,
     );
-    assert.ok(violations.length >= 3, violations.join(", "));
+    assert.equal(violations.length, awaitedInProgress.length, violations.join(", "));
   });
 
   if (failures.length > 0) {

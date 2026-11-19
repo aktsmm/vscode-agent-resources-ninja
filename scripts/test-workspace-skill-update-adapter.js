@@ -151,6 +151,32 @@ async function main() {
   japanese = false;
   {
     const { item, calls, context, operations } = fixture();
+    const legacy = { ...item, label: "legacy", initialRevision: {} };
+    const adapter = createWorkspaceSkillUpdateAdapter(context, operations);
+    await adapter.present([item, legacy]);
+    assert.match(messages[0].message, /1 changed and 1 first-sync/);
+    assert.match(messages[0].message, /First sync can replace local content/);
+    assert.deepEqual(calls, []);
+    adapter.dispose();
+  }
+  reset();
+  japanese = false;
+  {
+    const { item, candidate, calls, context, operations } = fixture();
+    candidate.localChanges = [];
+    const adapter = createWorkspaceSkillUpdateAdapter(context, operations);
+    const result = await adapter.present([item], "bulk");
+    assert.deepEqual(result.map((entry) => entry.status), ["updated"]);
+    assert.ok(calls.includes("prepare"));
+    assert.ok(calls.some((call) => call.approval?.mode === "bulk"));
+    assert.equal(messages.length, 1);
+    assert.match(messages[0].message, /Updated 1/);
+    adapter.dispose();
+  }
+  reset();
+  japanese = false;
+  {
+    const { item, calls, context, operations } = fixture();
     const adapter = createWorkspaceSkillUpdateAdapter(context, operations);
     assert.deepEqual(await adapter.present([item]), []);
     assert.deepEqual(calls, []);

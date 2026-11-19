@@ -90,6 +90,27 @@ async function main() {
     assert.deepEqual(requests.sort(), ["skills/changed", "skills/foreign", "skills/gone", "skills/same"]);
   }
   {
+    let legacyCalls = 0;
+    const { deps } = dependencies([
+      skill("legacy", "1", { sourceRevision: undefined }),
+    ], {
+      resolveMissingBaseline: async (meta) => {
+        legacyCalls++;
+        return revision("legacy", meta.name === "legacy" ? "2" : "3");
+      },
+    });
+    const passive = await findChangedWorkspaceSkills([workspace], deps);
+    assert.equal(passive.targets.length, 0);
+    assert.equal(passive.unverified, 1);
+    assert.equal(legacyCalls, 0);
+
+    const manual = await findChangedWorkspaceSkills([workspace], deps, true);
+    assert.equal(manual.targets.length, 1);
+    assert.equal(manual.targets[0].sourceId, "octo/demo");
+    assert.equal(manual.targets[0].initialRevision.contentSha, sha("2"));
+    assert.equal(legacyCalls, 1);
+  }
+  {
     const { deps } = dependencies([skill("broken", "1"), skill("changed", "9")]);
     const summary = await findChangedWorkspaceSkills([workspace], deps);
     assert.equal(summary.complete, false);

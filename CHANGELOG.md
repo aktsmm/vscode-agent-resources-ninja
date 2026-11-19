@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.71] - 2026-11-19
+
+### Added
+
+- **Interrupted Update Notice / 中断された更新の通知** - When the extension activates, it checks for recovery records associated with open local workspaces and shows their locations without modifying files. Restoration and cleanup remain manual / 拡張機能の有効化時、開いているローカル workspace の復旧記録を確認し、ファイルを変更せず保存先を表示します。復元と整理は手動で行います。
+
+### Changed
+
+- **Upgrade Checks Update Changed Skills Only / アップグレード時は変更された skill だけを確認・更新** - After an extension version change, the configured check compares the first local workspace's installed remote skills with their recorded upstream revisions. Only changed skills are offered, and replacing them requires confirmation; installs without a baseline remain untouched by automatic checks. An explicitly started manual check can offer a confirmed first sync for eligible legacy installs. The separate periodic check keeps its existing scope / 拡張機能のバージョン変更後、最初のローカル workspace の remote skill を記録済み revision と比較します。変更が確認された skill だけを候補にし、置換前に確認します。比較基準のないインストールは自動確認では変更しません。手動で確認を開始した場合に限り、対象条件を満たす旧インストールを初回同期できます。別の定期確認の対象範囲は従来どおりです。
+
+### Fixed
+
+- **Safer Reference Installation / 参照メモの安全なインストール** - Installation no longer overwrites an existing reference, even from the same source. Reinstall also rejects a destination that changed after confirmation / 同じソースの参照メモでも、インストール時に既存ファイルを上書きしません。再インストール時は、確認後に保存先が変わった場合も拒否します。
+- **Updated Skill Metadata / 更新した skill のメタデータ** - Changed skill updates and manual first synchronization refresh the staged metadata from the downloaded skill before replacement / 変更分の更新と手動の初回同期では、置換前に取得した skill からメタデータを更新します。
+- **Browse Reference Targets / Browse の参照メモの操作先** - Global Home reference notes are identified by source and path, and both Browse reinstall actions confirm and revalidate the destination. Ambiguous or stale targets are not replaced / Global Home の参照メモを取得元とパスで識別し、Browse の両再インストール操作で保存先を確認・再検証します。曖昧または古い対象は置換しません。
+- **Reinstall Batch Failures Keep Their Actual Outcome / 再インストール一括処理の未着手結果を正しく分類** - Items that did not start or returned without a typed result are no longer reported as missing from the index. They retain a generic failure classification instead of inflating the `not found` count / 未着手、または型付き結果を返さなかった項目を、インデックス未検出として報告しないようにしました。`not found` 件数を誤って増やさず、汎用の失敗として記録します。
+
 ## [0.2.70] - 2026-11-19
 
 ### Added

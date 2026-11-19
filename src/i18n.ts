@@ -256,7 +256,9 @@ const jaMessages = {
   referenceScopeUnsupported:
     "参照メモ「{0}」はグローバル リソース（{1}）にだけインストールできます。ワークスペースやカスタム フォルダーには対応していないため、何もインストールしていません。",
   referenceInstallConflict:
-    "参照メモ「{0}」の保存先 {1} には、別のソースから入れたファイルまたは手元のファイルが既にあります。上書きしないため、何もインストールしていません。内容を確認し、不要なら手動で削除してから再実行してください。",
+    "参照メモ「{0}」の保存先 {1} にはファイルが既にあります。上書きしないため、何もインストールしていません。インストール済みの項目は再インストール操作から確認してください。",
+  referenceInstallIncomplete:
+    "参照メモ「{0}」の管理情報を保存できませんでした。ファイル {1} は残っています。内容と管理情報を確認してください。",
 } as const;
 
 type MessageKey = keyof typeof jaMessages;
@@ -513,7 +515,9 @@ const enMessages: MessageDictionary = {
   referenceScopeUnsupported:
     'Reference note "{0}" can only be installed to the Global Resource Home ({1}). Workspace and custom folders are not supported, so nothing was installed.',
   referenceInstallConflict:
-    'The destination {1} for reference note "{0}" already holds a file from another source or a local file. It was not overwritten and nothing was installed. Review it, remove it manually if it is not needed, and retry.',
+    'The destination {1} for reference note "{0}" already holds a file. It was not overwritten and nothing was installed. Use the reinstall action to review an installed item.',
+  referenceInstallIncomplete:
+    'Metadata for reference note "{0}" could not be saved. The file at {1} remains; review it and its metadata.',
 };
 
 /**
@@ -881,6 +885,8 @@ export const messages = {
     localize("referenceScopeUnsupported", name, home),
   referenceInstallConflict: (name: string, target: string) =>
     localize("referenceInstallConflict", name, target),
+  referenceInstallIncomplete: (name: string, target: string) =>
+    localize("referenceInstallIncomplete", name, target),
 };
 
 export default messages;

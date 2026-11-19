@@ -39,10 +39,14 @@ function text(value: unknown, limit = 180): string {
   }).join("").replace(/\$\(/g, "$ (");
 }
 
+export { text as sanitizeWorkspaceUpdateDisplayText };
+
 function reasonText(reason: string | undefined, ja: boolean): string {
   switch (reason) {
     case "local-changes":
       return ja ? "保存済みのローカル編集があります" : "Saved local edits exist";
+    case "first-sync-differs":
+      return ja ? "ローカルの内容が配布元と異なります" : "Local content differs from upstream";
     case "dirty-or-unknown":
     case "dirty-or-unknown-document":
       return ja ? "未保存の編集または書き込み可否が不明です" : "Unsaved edits or write eligibility is unknown";
@@ -114,7 +118,10 @@ export function createWorkspaceSkillUpdateAdapter(
   context: vscode.ExtensionContext,
   operations: Operations,
 ): {
-  present(targets: readonly WorkspaceUpdateTarget[]): Promise<readonly WorkspaceUpdateOutcome[]>;
+  present(
+    targets: readonly WorkspaceUpdateTarget[],
+    initialAction?: "bulk",
+  ): Promise<readonly WorkspaceUpdateOutcome[]>;
   dispose(): void;
 } {
   const contents = new Map<string, string>();
@@ -176,10 +183,12 @@ export function createWorkspaceSkillUpdateAdapter(
       const ja = isJapanese();
       const bulk = ja ? "まとめて更新" : "Update All";
       const details = ja ? "詳細" : "Details";
+      const firstSync = targets.filter((target) => target.initialRevision).length;
+      const changed = targets.length - firstSync;
       const choice = await vscode.window.showInformationMessage(
         ja
-          ? `${targets.length} 件の配布元に変更があります。まとめて更新では、基準なし・不明・ローカル編集・未保存の項目をスキップします。共有・同期の検出は完全ではありません。`
-          : `${targets.length} upstream update(s) found. Bulk update skips missing baselines, unknowns, local edits, and unsaved files. Sharing and synchronization detection is incomplete.`,
+          ? `変更済み ${changed} 件、初回同期 ${firstSync} 件の候補があります。まとめて更新ではローカル編集・未保存の項目をスキップします。初回同期はローカル内容を置き換える場合があります。共有・同期の検出は完全ではありません。`
+          : `${changed} changed and ${firstSync} first-sync candidate(s) found. Bulk update skips local edits and unsaved files. First sync can replace local content. Sharing and synchronization detection is incomplete.`,
         bulk,
         details,
       );
@@ -190,7 +199,7 @@ export function createWorkspaceSkillUpdateAdapter(
       const ja = isJapanese();
       const items = targets.map((target) => ({
         label: text(target.label),
-        description: text(target.workspace.fsPath, 500),
+        description: `${target.initialRevision ? (ja ? "初回同期" : "First sync") + " · " : ""}${text(target.workspace.fsPath, 500)}`,
         detail: text(target.target.fsPath, 500),
         target,
       }));
@@ -237,8 +246,8 @@ export function createWorkspaceSkillUpdateAdapter(
       const edited = candidate.localChanges.length > 0;
       const notPreviewed = unavailable.get(candidate) || 0;
       const detail = ja
-        ? `${edited ? "保存済みのローカル編集を上書きします。 " : ""}${notPreviewed ? `${notPreviewed} 件のファイルは差分を表示できません。 ` : ""}共有・同期は完全には検出できません。未保存または確認後に変更されたファイルは更新しません。`
-        : `${edited ? "Saved local edits will be overwritten. " : ""}${notPreviewed ? `${notPreviewed} file(s) cannot be previewed. ` : ""}Sharing and synchronization cannot be fully detected. Unsaved or changed-after-check files will not be updated.`;
+        ? `${candidate.firstSync ? "初回同期では配布元と異なる内容を上書きし、成功後に旧コピーを削除します。 " : edited ? "保存済みのローカル編集を上書きします。 " : ""}${notPreviewed ? `${notPreviewed} 件のファイルは差分を表示できません。 ` : ""}共有・同期は完全には検出できません。未保存または確認後に変更されたファイルは更新しません。`
+        : `${candidate.firstSync ? "First sync replaces content that differs from upstream and deletes the old copy after success. " : edited ? "Saved local edits will be overwritten. " : ""}${notPreviewed ? `${notPreviewed} file(s) cannot be previewed. ` : ""}Sharing and synchronization cannot be fully detected. Unsaved or changed-after-check files will not be updated.`;
       return (await vscode.window.showWarningMessage(
         ja ? "この候補を更新しますか？" : "Update this candidate?",
         { modal: true, detail },
@@ -289,12 +298,19 @@ export function createWorkspaceSkillUpdateAdapter(
   };
 
   const adapter = {
-    present(targets: readonly WorkspaceUpdateTarget[]) {
+    present(
+      targets: readonly WorkspaceUpdateTarget[],
+      initialAction?: "bulk",
+    ) {
       if (disposed) {
         return Promise.reject(new Error("Workspace update adapter disposed"));
       }
       return (async () => {
-        let outcomes = await presentWorkspaceSkillUpdates(targets, ui);
+        let outcomes = await presentWorkspaceSkillUpdates(
+          targets,
+          ui,
+          initialAction,
+        );
         if (retryRequested && !disposed) {
           retryRequested = false;
           const retryTargets = retryable(outcomes).map((entry) => entry.target);

@@ -19,6 +19,7 @@ import {
   getIndexSources,
 } from "./skillIndex";
 import { getInstalledSkillsWithMeta } from "./skillInstaller";
+import { scanUserResources, type UserResource } from "./userResourceScanner";
 import { LocalSkill, scanLocalSkills } from "./localSkillScanner";
 import { isJapanese, messages } from "./i18n";
 import { getSkillId } from "./skillPreview";
@@ -973,6 +974,8 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
     string,
     string | undefined
   >();
+  private installedResourcesLoaded = false;
+  private globalHomeReferences: UserResource[] = [];
 
   private mutedSourceIds: ReadonlySet<string> = new Set();
 
@@ -1030,6 +1033,8 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
     this.skillIndex = undefined;
     this.installedRemoteResourceKeys.clear();
     this.reinstallDisabledResourceReasons.clear();
+    this.installedResourcesLoaded = false;
+    this.globalHomeReferences = [];
     this._onDidChangeTreeData.fire();
   }
 
@@ -1045,6 +1050,8 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
     this.skillIndex = index;
     this.installedRemoteResourceKeys.clear();
     this.reinstallDisabledResourceReasons.clear();
+    this.installedResourcesLoaded = false;
+    this.globalHomeReferences = [];
     this._onDidChangeTreeData.fire();
   }
 
@@ -1056,12 +1063,41 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
       return false;
     }
 
+    if (getResourceKind(skill) === "reference") {
+      return this.getGlobalHomeReferenceMatches(skill).length > 0;
+    }
     return getResourceIdentityKeys(skill).some((key) =>
       this.installedRemoteResourceKeys.has(key),
     );
   }
 
+  private getGlobalHomeReferenceMatches(skill: Skill): UserResource[] {
+    if (getResourceKind(skill) !== "reference" || !skill.source || !skill.path) {
+      return [];
+    }
+    const remotePath = skill.path.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    return this.globalHomeReferences.filter(
+      (resource) =>
+        resource.source === skill.source &&
+        resource.remotePath?.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "") === remotePath,
+    );
+  }
+
+  getGlobalHomeReference(skill: Skill): UserResource | undefined {
+    const matches = this.getGlobalHomeReferenceMatches(skill);
+    return matches.length === 1 ? matches[0] : undefined;
+  }
+
   private getReinstallDisabledReason(skill: Skill): string | null | undefined {
+    if (getResourceKind(skill) === "reference") {
+      const matches = this.getGlobalHomeReferenceMatches(skill);
+      if (matches.length > 1) {
+        return isJapanese() ? "対象が複数あります" : "Multiple matching targets";
+      }
+      return matches[0]?.reinstallDisabled
+        ? matches[0].reinstallDisabledReason ?? null
+        : undefined;
+    }
     for (const key of getResourceIdentityKeys(skill)) {
       if (this.reinstallDisabledResourceReasons.has(key)) {
         return this.reinstallDisabledResourceReasons.get(key) ?? null;
@@ -1081,7 +1117,7 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
     }
 
     // インストール済みスキルを取得（メタデータの name を使用）
-    if (this.installedRemoteResourceKeys.size === 0) {
+    if (!this.installedResourcesLoaded) {
       const wsFolder = vscode.workspace.workspaceFolders?.[0];
       if (wsFolder) {
         const installedMeta = await getInstalledSkillsWithMeta(wsFolder.uri);
@@ -1128,6 +1164,17 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
           }
         });
       }
+      const userResources = await scanUserResources(wsFolder?.uri, false);
+      this.globalHomeReferences = userResources.filter(
+        (resource) =>
+          resource.kind === "reference" &&
+          resource.scope === "globalHome" &&
+          !resource.isReadOnly &&
+          !resource.isAlternateGlobalHome &&
+          !!resource.source &&
+          !!resource.remotePath,
+      );
+      this.installedResourcesLoaded = true;
     }
 
     if (!element) {
@@ -1770,6 +1817,7 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
       const isCore = skill.name === coreSkill;
       const prefix = isCore ? "⭐ " : skill.standalone === false ? "🔗 " : "";
       const kind = getResourceKind(skill);
+      const globalHomeReference = this.getGlobalHomeReference(skill);
       const kindLabel = getResourceKindLabel(kind, isJa);
       const pluginPackageId = getPluginPackageId(skill, pluginPackages);
       const pluginLabel =
@@ -1794,7 +1842,11 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
             ? "最近インストール"
             : "Recently installed"
           : undefined,
-        isInstalled ? (isJa ? "インストール済み" : "Installed") : undefined,
+        isInstalled
+          ? globalHomeReference
+            ? isJa ? "インストール済み (Global Home)" : "Installed (Global Home)"
+            : isJa ? "インストール済み" : "Installed"
+          : undefined,
         reinstallDisabled
           ? isJa
             ? `再インストール無効${reinstallDisabledReason ? ` (${reinstallDisabledReason})` : ""}`
@@ -1821,6 +1873,12 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
         undefined,
         this.skillIndex?.categories,
       );
+      if (globalHomeReference) {
+        item.globalHomeReferenceTarget = {
+          rootFsPath: globalHomeReference.rootFsPath,
+          fullPath: globalHomeReference.fullPath,
+        };
+      }
 
       if (isInstalled) {
         item.iconPath = new vscode.ThemeIcon(
@@ -1842,7 +1900,7 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
             : isJa
               ? "リソースを再インストール"
               : "Reinstall Resource",
-          arguments: [skill],
+          arguments: [skill, item.globalHomeReferenceTarget],
         };
         item.tooltip = `${item.tooltip}\n${isJa ? "状態" : "Status"}: ${
           isRecent
@@ -1893,6 +1951,8 @@ export class BrowseSkillsProvider implements vscode.TreeDataProvider<SkillTreeIt
  * ツリーアイテム
  */
 export class SkillTreeItem extends vscode.TreeItem {
+  globalHomeReferenceTarget?: Pick<UserResource, "rootFsPath" | "fullPath">;
+
   constructor(
     public readonly label: string,
     public readonly description: string,

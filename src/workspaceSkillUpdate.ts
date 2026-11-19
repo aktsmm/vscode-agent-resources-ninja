@@ -18,6 +18,7 @@ import {
   directoryMatchesRevision,
   downloadDirectory,
   fetchFileBytes,
+  refreshSingleSkillMetadata,
   stripSkillMetaLocalPaths,
 } from "./skillInstaller";
 import { isSafePathSegment } from "./pathSafety";
@@ -75,6 +76,7 @@ export interface WorkspaceSkillLocalChange {
 
 export interface WorkspaceSkillCandidate {
   readonly id: string;
+  readonly firstSync: boolean;
   readonly target: vscode.Uri;
   readonly revision: Readonly<SourceRevision>;
   readonly metadata: Readonly<Record<string, unknown>>;
@@ -112,7 +114,7 @@ export type WorkspaceSkillPrepareResult =
 export type WorkspaceSkillApplyResult =
   | { status: "updated"; backup?: vscode.Uri }
   | { status: "blocked"; reason: string }
-  | { status: "rolled-back"; reason: string; backup: vscode.Uri }
+  | { status: "rolled-back"; reason: string; backup?: vscode.Uri }
   | { status: "recovery-required"; reason: string; backup: vscode.Uri };
 
 export type DirtyDocumentGuard = (
@@ -128,6 +130,9 @@ export interface WorkspaceSkillUpdateOptions {
    */
   getSkillsRoots: () => Promise<readonly vscode.Uri[]>;
   token?: string;
+  /** Present only for an explicitly requested first sync of a legacy install. */
+  initialRevision?: SourceRevision;
+  sourceId?: string;
 }
 
 export interface WorkspaceSkillApproval {
@@ -176,6 +181,7 @@ interface InternalCandidate {
   transactionIdentity: FileIdentity;
   revision: SourceRevision;
   localChanges: WorkspaceSkillLocalChange[];
+  firstSync: boolean;
   getSkillsRoots: WorkspaceSkillUpdateOptions["getSkillsRoots"];
   used: boolean;
 }
@@ -403,6 +409,107 @@ function recoveryRecordPath(parent: string, target: string): string {
   return path.join(parent, `.resource-ninja-recovery-${hash(Buffer.from(identity))}.json`);
 }
 
+export interface WorkspaceRecoveryRecord {
+  target: string;
+  transaction: string;
+  backup: string;
+  record: string;
+}
+
+/** Discover records without using their contents as permission to change files. */
+export async function findWorkspaceRecoveryRecords(
+  workspace: vscode.Uri,
+): Promise<{ records: WorkspaceRecoveryRecord[]; incomplete: boolean }> {
+  const records: WorkspaceRecoveryRecord[] = [];
+  let incomplete = false;
+  if (workspace.scheme !== "file" || !path.isAbsolute(workspace.fsPath)) {
+    return { records, incomplete: true };
+  }
+  const root = path.resolve(workspace.fsPath);
+  const equalPath = (a: string, b: string) =>
+    process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+  let parent = path.dirname(root);
+  for (;;) {
+    let names: string[];
+    try {
+      names = await fs.readdir(parent);
+    } catch {
+      incomplete = true;
+      break;
+    }
+    for (const name of names) {
+      if (!/^\.resource-ninja-recovery-[a-f0-9]{64}\.json$/.test(name)) {
+        continue;
+      }
+      const record = path.join(parent, name);
+      try {
+        const info = await fs.lstat(record);
+        if (!info.isFile() || info.isSymbolicLink() || info.size > 64 * 1024) {
+          incomplete = true;
+          continue;
+        }
+        const handle = await fs.open(record, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+        let value: unknown;
+        try {
+          const opened = await handle.stat();
+          // On Windows lstat can report device 0 while fstat reports the volume ID.
+          const sameDevice = opened.dev === info.dev || (process.platform === "win32" && info.dev === 0);
+          if (!opened.isFile() || !sameDevice || opened.ino !== info.ino) {
+            incomplete = true;
+            continue;
+          }
+          const bytes = Buffer.alloc(64 * 1024 + 1);
+          const read = await handle.read(bytes, 0, bytes.length, 0);
+          if (read.bytesRead > 64 * 1024) {
+            incomplete = true;
+            continue;
+          }
+          value = JSON.parse(bytes.subarray(0, read.bytesRead).toString("utf8"));
+        } finally {
+          await handle.close();
+        }
+        if (!value || typeof value !== "object") {
+          incomplete = true;
+          continue;
+        }
+        const entry = value as Record<string, unknown>;
+        if (typeof entry.workspace !== "string" || !path.isAbsolute(entry.workspace)) {
+          incomplete = true;
+          continue;
+        }
+        if (!equalPath(path.resolve(entry.workspace), root)) {
+          continue;
+        }
+        if (entry.version !== 1 || typeof entry.target !== "string" ||
+            typeof entry.transaction !== "string" || typeof entry.backup !== "string" ||
+            !path.isAbsolute(entry.target) || !path.isAbsolute(entry.transaction) ||
+            !path.isAbsolute(entry.backup)) {
+          incomplete = true;
+          continue;
+        }
+        const target = path.resolve(entry.target);
+        const transaction = path.resolve(entry.transaction);
+        const backup = path.resolve(entry.backup);
+        if (!inside(root, target) ||
+            !equalPath(record, recoveryRecordPath(parent, target)) ||
+            !equalPath(path.dirname(transaction), parent) ||
+            !path.basename(transaction).startsWith(".resource-ninja-update-") ||
+            !equalPath(backup, path.join(transaction, "backup"))) {
+          incomplete = true;
+          continue;
+        }
+        records.push({ target, transaction, backup, record });
+      } catch {
+        incomplete = true;
+      }
+    }
+    const next = path.dirname(parent);
+    if (next === parent) { break; }
+    parent = next;
+  }
+  return { records, incomplete };
+}
+
 class PendingRecoveryError extends Error {
   constructor(readonly transaction?: string) {
     super("pending-recovery");
@@ -578,37 +685,51 @@ export async function prepareWorkspaceSkillUpdate(
     const before = await snapshot(target);
     const meta = before.metadataObject;
     const baseline = parseSourceRevision(meta.sourceRevision);
-    if (!baseline || typeof meta.name !== "string" || !meta.name ||
+    const firstSync = meta.sourceRevision == null;
+    const initialRevision = firstSync
+      ? parseSourceRevision(options.initialRevision)
+      : undefined;
+    const comparisonRevision = baseline || initialRevision;
+    if (!comparisonRevision || typeof meta.name !== "string" || !meta.name ||
         typeof meta.source !== "string" || !meta.source ||
         meta.source === "local" || meta.source === "unknown" ||
+        (firstSync && (meta.source !== options.sourceId || !options.sourceId)) ||
         typeof meta.remotePath !== "string" ||
-        meta.remotePath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "") !== baseline.remotePath ||
+        meta.remotePath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "") !== comparisonRevision.remotePath ||
         meta.incomplete === true) {
       throw new Error("invalid-or-local-baseline");
     }
     const resolver = createRevisionResolver(options.token);
     const current = await resolver({
-      owner: baseline.owner, repo: baseline.repo,
-      branch: baseline.ref, remotePath: baseline.remotePath,
+      owner: comparisonRevision.owner, repo: comparisonRevision.repo,
+      branch: comparisonRevision.ref, remotePath: comparisonRevision.remotePath,
     });
-    const status = classifyRevision(baseline, current);
+    const status = classifyRevision(comparisonRevision, current);
     if (status !== "unchanged" && status !== "changed") { throw new Error("different-source"); }
 
     let oldFiles: RevisionFile[];
-    if (baseline.kind === "tree") {
-      const oldResolver = createRevisionResolver(options.token);
-      oldFiles = await oldResolver.listFiles({ ...baseline, ref: baseline.commitSha });
+    const localComparisonRevision = firstSync ? current : comparisonRevision;
+    const pinnedComparisonRevision = firstSync
+      ? localComparisonRevision
+      : { ...localComparisonRevision, ref: localComparisonRevision.commitSha };
+    if (localComparisonRevision.kind === "tree") {
+      const oldResolver = firstSync ? resolver : createRevisionResolver(options.token);
+      oldFiles = await oldResolver.listFiles(pinnedComparisonRevision);
     } else {
-      const oldResolver = createRevisionResolver(options.token);
-      await assertOrdinaryBlob({ ...baseline, ref: baseline.commitSha }, oldResolver);
-      oldFiles = [{ path: "SKILL.md", sha: baseline.contentSha, mode: "100644" }];
+      const oldResolver = firstSync ? resolver : createRevisionResolver(options.token);
+      await assertOrdinaryBlob(pinnedComparisonRevision, oldResolver);
+      oldFiles = [{
+        path: "SKILL.md",
+        sha: localComparisonRevision.contentSha,
+        mode: "100644",
+      }];
     }
     if (oldFiles.some((file) => (file.mode !== "100644" && file.mode !== "100755") ||
         file.path.split("/").some((part) => !isSafePathSegment(part)))) {
       throw new Error("unsupported-baseline");
     }
     const localChanges = await baselineChanges(target, before, oldFiles);
-    if (status === "unchanged") {
+    if (!firstSync && status === "unchanged") {
       if (!samePreviewSnapshot(before, await snapshot(target))) {
         throw new Error("target-changed-during-prepare");
       }
@@ -645,6 +766,7 @@ export async function prepareWorkspaceSkillUpdate(
     const nextMeta = { ...meta, sourceRevision: current, installedAt: new Date().toISOString() };
     stripSkillMetaLocalPaths(nextMeta);
     await fs.writeFile(path.join(stage, META), JSON.stringify(nextMeta, null, 2), { flag: "wx" });
+    await refreshSingleSkillMetadata(vscode.Uri.file(path.join(stage, "SKILL.md")), true);
     const staged = await snapshot(stage);
     if (!staged.entries.has("SKILL.md") ||
         !samePreviewSnapshot(before, await snapshot(target))) {
@@ -653,7 +775,7 @@ export async function prepareWorkspaceSkillUpdate(
     await assertIdentity(stage, "directory", stageIdentity);
     await assertOutsideSkillsRoots(transaction, target, options.getSkillsRoots);
     const candidate: WorkspaceSkillCandidate = Object.freeze({
-      id: randomUUID(), target: options.target,
+      id: randomUUID(), target: options.target, firstSync,
       revision: Object.freeze({ ...current }),
       metadata: Object.freeze(structuredClone(meta)),
       localChanges: Object.freeze(localChanges.map((item) => Object.freeze({ ...item }))),
@@ -663,7 +785,7 @@ export async function prepareWorkspaceSkillUpdate(
     });
     candidates.set(candidate, {
       root, target, transaction, stage, baseline: before, staged,
-      transactionIdentity, revision: current, localChanges,
+      transactionIdentity, revision: current, localChanges, firstSync,
       getSkillsRoots: options.getSkillsRoots, used: false,
     });
     transaction = undefined;
@@ -846,7 +968,7 @@ function ownedFromSnapshot(value: Snapshot): OwnedTree | undefined {
 
 /**
  * Runs only after the switched content was verified. Removes the exact staged
- * copy and, unless saved local edits were overwritten, the exact old copy.
+ * copy and, unless an ordinary update overwrote saved local edits, the exact old copy.
  * Returns whether the old copy is still retained for the user.
  */
 async function cleanupAfterSuccess(
@@ -924,7 +1046,7 @@ async function rollbackUpdate(
 
 /**
  * Applies only the exact approved candidate. The old copy is removed after
- * verification unless saved local edits were overwritten; it is always kept on failure.
+ * verification unless an ordinary update overwrote saved local edits.
  * After moving the original, an uncertain failure never overwrites or deletes another writer.
  */
 export async function applyWorkspaceSkillUpdate(
@@ -1023,15 +1145,29 @@ export async function applyWorkspaceSkillUpdate(
     await assertOutsideSkillsRoots(state.transaction, state.target, state.getSkillsRoots);
     await checkGuard();
     await releaseRecord();
-    const retained = await cleanupAfterSuccess(state, backupPath, state.localChanges.length > 0);
-    return retained ? { status: "updated", backup } : { status: "updated" };
+    const retained = await cleanupAfterSuccess(
+      state, backupPath, !state.firstSync && state.localChanges.length > 0,
+    );
+    return retained
+      ? { status: "updated", backup: state.firstSync ? candidate.recoveryDirectory : backup }
+      : { status: "updated" };
   } catch (error) {
     const reason = safeReason(error, APPLY_REASONS, "apply-failed");
     if (moved) {
       if (!guardFailed && identity) {
         try {
           await rollbackUpdate(state, backupPath, identity, owned, checkGuard);
+          await checkGuard();
+          if (!sameSnapshot(state.baseline, await snapshot(state.target))) {
+            throw new Error("rollback-verification-failed");
+          }
           await releaseRecord();
+          if (state.firstSync) {
+            const retained = await cleanupAfterSuccess(state, backupPath, false);
+            return retained
+              ? { status: "rolled-back", reason, backup: candidate.recoveryDirectory }
+              : { status: "rolled-back", reason };
+          }
           return { status: "rolled-back", reason, backup };
         } catch {
           // Both backup and any competing or partially restored target remain in place.

@@ -802,6 +802,7 @@ export function mergeSharedManifestSources(
 export async function loadSharedStoresIntoSkillIndex(
   context: vscode.ExtensionContext,
   currentIndex: SkillIndex,
+  options?: { readOnly?: boolean },
 ): Promise<SkillIndex> {
   const config = vscode.workspace.getConfiguration("resourceNinja");
   const useSharedSourcesManifest =
@@ -825,7 +826,7 @@ export async function loadSharedStoresIntoSkillIndex(
           { keepUnlistedLocalSources: !reconciled },
         ),
       };
-    } else if (result.status === "missing") {
+    } else if (result.status === "missing" && !options?.readOnly) {
       try {
         const writeResult = await bootstrapSharedSourcesManifest(
           currentIndex.sources.map((source) => ({ ...source })),
@@ -848,7 +849,10 @@ export async function loadSharedStoresIntoSkillIndex(
           error,
         );
       }
-    } else {
+    } else if (result.status === "rejected") {
+      if (options?.readOnly) {
+        throw new Error("shared-sources-unreadable");
+      }
       // Bootstrapping over a file we merely failed to read would replace every
       // source only the sibling extension knows about with our own list.
       logger.warn(
@@ -861,7 +865,7 @@ export async function loadSharedStoresIntoSkillIndex(
     const result = await readSharedResourceIndexResult();
     if (result.status === "valid") {
       nextIndex = applySharedResourceIndexToSkillIndex(nextIndex, result.index);
-    } else if (result.status === "missing") {
+    } else if (result.status === "missing" && !options?.readOnly) {
       try {
         const writeResult = await bootstrapSharedResourceIndex(nextIndex);
         await applySharedStoreRejectionNotice(
@@ -876,7 +880,10 @@ export async function loadSharedStoresIntoSkillIndex(
           error,
         );
       }
-    } else {
+    } else if (result.status === "rejected") {
+      if (options?.readOnly) {
+        throw new Error("shared-index-unreadable");
+      }
       logger.warn(
         `[Resource Ninja] Keeping local resources: the shared resource index was rejected (${result.reason}).`,
       );
