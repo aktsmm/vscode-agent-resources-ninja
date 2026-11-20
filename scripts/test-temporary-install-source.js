@@ -302,6 +302,7 @@ async function main() {
         getPluginRootFromManifestPath: () => undefined,
         isHookConfigFilePath: () => false,
       },
+      ...require("./destination-test-stubs")(requireTypeScriptModule, path.join(__dirname, "..")),
       "./userDataPaths": {
         getVsCodeUserDataPath: () => path.join(workspaceRoot, "user-data"),
       },

@@ -410,6 +410,7 @@ function createUserProvider() {
       },
       "./skillInvocationMode": modeModule,
       "./skillListOptions": optionsModule,
+      ...require("./destination-test-stubs")(requireTypeScriptModule, repoRoot),
     },
   );
   const rootFsPath = "C:\\Users\\Demo\\.copilot";

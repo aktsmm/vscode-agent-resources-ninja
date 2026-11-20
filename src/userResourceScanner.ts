@@ -4,11 +4,19 @@ import {
   DEFAULT_GLOBAL_HOME_DIRECTORY,
   getConfiguredGlobalHomeDirectory,
   getConfiguredGlobalResourceHomePreset,
+  getConfiguredLegacyUserProfileInstallTarget,
   getConfiguredUserAgentsDirectory,
   getConfiguredUserInstructionsDirectory,
   getConfiguredUserPromptsDirectory,
   resolveConfiguredUri,
 } from "./customizationPaths";
+import {
+  USER_PROFILE_DESTINATION_LABEL,
+  classifyInstallDestination,
+  isLegacyUserProfileLocation,
+  type InstallDestinationState,
+} from "./installDestinations";
+import { getHarnessInstructionDirectory } from "./harnessInstructions";
 import {
   dedupePluginManifestsByRoot,
   detectResourceKindFromPath,
@@ -54,6 +62,8 @@ export interface UserResourceRoot {
   alternateHome?: boolean;
   /** Only these top-level directories of the root are walked. */
   topLevelDirectoryAllowlist?: ReadonlySet<string>;
+  /** Whether new installs may target this root; shown in the side view. */
+  installAvailability?: InstallDestinationState;
 }
 
 export interface ScanUserResourcesOptions {
@@ -82,6 +92,8 @@ export interface UserResource {
   isBuiltIn?: boolean;
   isReadOnly?: boolean;
   isAlternateGlobalHome?: boolean;
+  /** Whether new installs may target the folder this resource was found in. */
+  installAvailability?: InstallDestinationState;
   /** A skill folder inside another skill folder; it belongs to that parent skill. */
   isContainedSkill?: boolean;
   incomplete?: boolean;
@@ -256,6 +268,52 @@ function getUserResourceScopeOrder(scope: UserResourceScope): number {
   }
 }
 
+export function getGlobalHomeRootLabel(
+  config: vscode.WorkspaceConfiguration,
+): string {
+  return `${getGlobalHomeToolLabel(config)} (${getConfiguredGlobalHomeDirectory(config)})`;
+}
+
+/**
+ * Personal Claude Code rules and Codex instructions that this extension installs
+ * on explicit request. They are listed only when the folder exists.
+ */
+function getPersonalHarnessInstructionRoots(
+  workspaceUri: vscode.Uri | undefined,
+  activeHomeUri: vscode.Uri,
+): UserResourceRoot[] {
+  const workspaceFsPath = workspaceUri?.fsPath ?? "";
+  const claudeRules = getHarnessInstructionDirectory(
+    "claudeUserRules",
+    workspaceFsPath,
+  );
+  const codexInstructions = getHarnessInstructionDirectory(
+    "codexUserInstructions",
+    workspaceFsPath,
+  );
+  return [
+    {
+      scope: "globalHome" as const,
+      label: "Claude Code rules (~/.claude/rules)",
+      tool: "Claude Code",
+      uri: vscode.Uri.file(claudeRules),
+      installAvailability: "installable" as const,
+    },
+    {
+      scope: "globalHome" as const,
+      label: process.env.CODEX_HOME?.trim()
+        ? "Codex instructions ($CODEX_HOME/instructions)"
+        : "Codex instructions (~/.codex/instructions)",
+      tool: "Codex",
+      uri: vscode.Uri.file(codexInstructions),
+      installAvailability: "installable" as const,
+    },
+  ].filter(
+    (root) =>
+      getRootIdentity(root.uri.fsPath) !== getRootIdentity(activeHomeUri.fsPath),
+  );
+}
+
 function getGlobalHomeToolLabel(config: vscode.WorkspaceConfiguration): string {
   if (config.get<string>("globalHomeDirectory")?.trim()) {
     return "Custom resource home";
@@ -295,6 +353,7 @@ function getAlternateGlobalHomeRoots(
         uri,
         readOnly: true,
         alternateHome: true,
+        installAvailability: "read-only" as const,
         topLevelDirectoryAllowlist:
           home.directoryAllowlist ?? ALTERNATE_GLOBAL_HOME_DIRECTORY_ALLOWLIST,
       },
@@ -344,54 +403,63 @@ function getKnownRoots(
   const userDataUri = vscode.Uri.file(
     getVsCodeUserDataPath({ appName: vscode.env.appName }),
   );
+  const legacyInstallTargetEnabled =
+    getConfiguredLegacyUserProfileInstallTarget(config);
+  // Old VS Code User Profile folders stay visible, but they are only offered for
+  // new installs when the compatibility setting asks for it.
+  const userProfileRoot = (uri: vscode.Uri): UserResourceRoot => ({
+    scope: "userData",
+    label: USER_PROFILE_DESTINATION_LABEL,
+    tool: "VS Code",
+    uri,
+    installAvailability: classifyInstallDestination({
+      legacyUserProfile: isLegacyUserProfileLocation(
+        uri.fsPath,
+        userDataUri.fsPath,
+      ),
+      legacyInstallTargetEnabled,
+    }),
+  });
   roots.push(
-    {
-      scope: "userData",
-      label: "VS Code User Customizations",
-      tool: "VS Code",
-      uri: resolveConfiguredUri(
+    userProfileRoot(
+      resolveConfiguredUri(
         workspaceUri,
         getConfiguredUserAgentsDirectory(config),
         vscode.Uri.joinPath(userDataUri, "agents").fsPath,
       ),
-    },
-    {
-      scope: "userData",
-      label: "VS Code User Customizations",
-      tool: "VS Code",
-      uri: resolveConfiguredUri(
+    ),
+    userProfileRoot(
+      resolveConfiguredUri(
         workspaceUri,
         getConfiguredUserInstructionsDirectory(config),
         vscode.Uri.joinPath(userDataUri, "instructions").fsPath,
       ),
-    },
-    {
-      scope: "userData",
-      label: "VS Code User Customizations",
-      tool: "VS Code",
-      uri: resolveConfiguredUri(
+    ),
+    userProfileRoot(
+      resolveConfiguredUri(
         workspaceUri,
         getConfiguredUserPromptsDirectory(config),
         vscode.Uri.joinPath(userDataUri, "prompts").fsPath,
       ),
-    },
+    ),
   );
 
-  const globalHomeTool = getGlobalHomeToolLabel(config);
   const globalHomeRoot: UserResourceRoot = {
     scope: "globalHome",
-    label: `${globalHomeTool} (${getConfiguredGlobalHomeDirectory(config)})`,
-    tool: globalHomeTool,
+    label: getGlobalHomeRootLabel(config),
+    tool: getGlobalHomeToolLabel(config),
     uri: resolveConfiguredUri(
       workspaceUri,
       getConfiguredGlobalHomeDirectory(config),
       DEFAULT_GLOBAL_HOME_DIRECTORY,
     ),
+    installAvailability: "installable",
   };
   roots.push(globalHomeRoot);
   if (includeAlternateGlobalHomes) {
     roots.push(...getAlternateGlobalHomeRoots(workspaceUri, globalHomeRoot.uri));
   }
+  roots.push(...getPersonalHarnessInstructionRoots(workspaceUri, globalHomeRoot.uri));
 
   if (includeBuiltInResources) {
     roots.push(
@@ -911,6 +979,7 @@ async function parseResourceFile(
     isBuiltIn,
     isReadOnly,
     isAlternateGlobalHome: root.alternateHome ? true : undefined,
+    installAvailability: isReadOnly ? "read-only" : root.installAvailability,
     metadataStatus:
       installMetaResult.status === "unreadable" ||
       installMetaResult.status === "invalid"

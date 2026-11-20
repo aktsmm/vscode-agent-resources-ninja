@@ -12,6 +12,10 @@ import {
 } from "./userResourceScanner";
 import { isJapanese } from "./i18n";
 import {
+  getInstallDestinationStateLabel,
+  getInstallDestinationStateReason,
+} from "./installDestinations";
+import {
   getPluginIdFromPath,
   getResourceIdentityKeys,
   isHookConfigFilePath,
@@ -129,18 +133,27 @@ function formatScopeDescription(
     const extensionCount = new Set(resources.map((item) => item.tool)).size;
     return `${extensionCount} extensions · ${count} resources`;
   }
+  const stateLabel = resource.installAvailability
+    ? getInstallDestinationStateLabel(
+        resource.installAvailability,
+        isJapanese(),
+      )
+    : undefined;
   const details =
     resource.scope === "globalHome"
       ? [
-          resource.isAlternateGlobalHome
-            ? isJapanese()
-              ? "読み取り専用"
-              : "read-only"
-            : isJapanese()
-              ? "インストール先"
-              : "install target",
+          stateLabel ??
+            (resource.isAlternateGlobalHome
+              ? isJapanese()
+                ? "読み取り専用"
+                : "read-only"
+              : isJapanese()
+                ? "インストール先"
+                : "install target"),
         ]
-      : [resource.tool];
+      : stateLabel
+        ? [resource.tool, stateLabel]
+        : [resource.tool];
   return `${count} resources · ${details.join(" · ")}`;
 }
 
@@ -320,7 +333,11 @@ export class UserResourcesProvider implements vscode.TreeDataProvider<UserResour
           resource.rootFsPath,
         );
         item.iconPath = new vscode.ThemeIcon(getScopeIcon(resource.scope));
-        item.tooltip = `${resource.scopeLabel}\n${formatScopeDescription(resource, count, scopedResources)}\n${resource.rootFsPath}`;
+        item.tooltip = `${resource.scopeLabel}\n${formatScopeDescription(resource, count, scopedResources)}\n${resource.rootFsPath}${
+          resource.installAvailability
+            ? `\n${getInstallDestinationStateReason(resource.installAvailability, isJapanese()) ?? ""}`.trimEnd()
+            : ""
+        }`;
         return item;
       });
 

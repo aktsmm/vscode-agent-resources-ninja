@@ -177,6 +177,7 @@ async function main() {
               ),
               detectResourceKindFromPath: () => "skill",
             },
+            ...require("./destination-test-stubs")(requireTypeScriptModule, path.join(__dirname, "..")),
             "./userDataPaths": {
               getCopilotHomePath: () => "/tmp/.copilot",
               getVsCodeUserDataPath: () => "/tmp/vscode-user-data",

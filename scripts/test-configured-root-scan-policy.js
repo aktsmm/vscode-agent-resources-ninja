@@ -661,6 +661,7 @@ const { collectMarkdownFiles } = requireTypeScriptModule(
     "./userDataPaths": { getVsCodeUserDataPath: () => FIXTURE_ROOT },
     "./skillInvocationMode": skillInvocationModeModule,
     "./skillInstaller": { stripSkillMetaLocalPaths: () => undefined },
+    ...require("./destination-test-stubs")(requireTypeScriptModule, repoRoot),
   },
 );
 

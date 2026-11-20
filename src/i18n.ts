@@ -259,6 +259,23 @@ const jaMessages = {
     "参照メモ「{0}」の保存先 {1} にはファイルが既にあります。上書きしないため、何もインストールしていません。インストール済みの項目は再インストール操作から確認してください。",
   referenceInstallIncomplete:
     "参照メモ「{0}」の管理情報を保存できませんでした。ファイル {1} は残っています。内容と管理情報を確認してください。",
+  reinstallDestinationMismatch:
+    "「{0}」の再インストール先 {2} は、元の場所 {1} の外です。元のファイルを削除してから別の場所へ書くことを避けるため、何も変更していません。インストールし直す場合は、Browse から保存先を選んでください。",
+  legacyProfileDefaultReselect:
+    "既定のインストール先が旧 VS Code ユーザープロファイル（{0}）ですが、新規インストール先の候補から外れています。別の場所へは書き込んでいません。保存先を選び直すか、設定 resourceNinja.legacyUserProfileInstallTarget で旧候補を戻してください。",
+  legacyProfileChooseAction: "保存先を選ぶ",
+  legacyProfileOpenSettingAction: "設定を開く",
+  harnessRuleDeferred:
+    "「{0}」は Claude Code のルールに同じ意味で変換できないため、何もインストールしていません（{1}）。常時読み込むルールとして入れたい場合は、確認で選んでください。",
+  harnessAlwaysOnAction: "常時読込のルールとして入れる",
+  harnessInstallAction: "インストールする",
+  harnessLinkBlockedOverride:
+    "AGENTS.override.md があるため、{0} は変更していません。次の案内を {1} に手で追記してください。",
+  harnessLinkBlockedMarkers:
+    "{0} の管理マーカーが壊れているため、AGENTS.md は変更していません。マーカーを確認してください。",
+  harnessReasonNoApplyTo: "applyTo がありません",
+  harnessReasonUnsupported: "applyTo を同じ意味に変換できません: {0}",
+  harnessReasonInvalid: "フロントマターを読み取れません",
 } as const;
 
 type MessageKey = keyof typeof jaMessages;
@@ -518,6 +535,23 @@ const enMessages: MessageDictionary = {
     'The destination {1} for reference note "{0}" already holds a file. It was not overwritten and nothing was installed. Use the reinstall action to review an installed item.',
   referenceInstallIncomplete:
     'Metadata for reference note "{0}" could not be saved. The file at {1} remains; review it and its metadata.',
+  reinstallDestinationMismatch:
+    'The reinstall destination {2} for "{0}" is outside its current folder {1}. To avoid deleting the file and writing it somewhere else, nothing was changed. To install it again, choose a destination from Browse.',
+  legacyProfileDefaultReselect:
+    "The default install target is the legacy VS Code User Profile ({0}), which is no longer offered for new installs. Nothing was written elsewhere. Choose a destination again, or turn the old option back on with resourceNinja.legacyUserProfileInstallTarget.",
+  legacyProfileChooseAction: "Choose destination",
+  legacyProfileOpenSettingAction: "Open setting",
+  harnessRuleDeferred:
+    'Nothing was installed: "{0}" cannot be converted to a Claude Code rule with the same meaning ({1}). Choose the always-loaded option in the confirmation if you want it that way.',
+  harnessAlwaysOnAction: "Install as always-loaded rule",
+  harnessInstallAction: "Install",
+  harnessLinkBlockedOverride:
+    "AGENTS.override.md exists, so {0} was not changed. Add the following guidance to {1} yourself.",
+  harnessLinkBlockedMarkers:
+    "The managed markers in {0} are damaged, so AGENTS.md was not changed. Check the markers.",
+  harnessReasonNoApplyTo: "no applyTo",
+  harnessReasonUnsupported: "applyTo cannot be converted with the same meaning: {0}",
+  harnessReasonInvalid: "the front matter cannot be read",
 };
 
 /**
@@ -887,6 +921,28 @@ export const messages = {
     localize("referenceInstallConflict", name, target),
   referenceInstallIncomplete: (name: string, target: string) =>
     localize("referenceInstallIncomplete", name, target),
+  reinstallDestinationMismatch: (
+    name: string,
+    currentRoot: string,
+    destination: string,
+  ) => localize("reinstallDestinationMismatch", name, currentRoot, destination),
+  legacyProfileDefaultReselect: (location: string) =>
+    localize("legacyProfileDefaultReselect", location),
+  legacyProfileChooseAction: () => localize("legacyProfileChooseAction"),
+  legacyProfileOpenSettingAction: () =>
+    localize("legacyProfileOpenSettingAction"),
+  harnessRuleDeferred: (name: string, reason: string) =>
+    localize("harnessRuleDeferred", name, reason),
+  harnessAlwaysOnAction: () => localize("harnessAlwaysOnAction"),
+  harnessInstallAction: () => localize("harnessInstallAction"),
+  harnessLinkBlockedOverride: (agentsPath: string, overridePath: string) =>
+    localize("harnessLinkBlockedOverride", agentsPath, overridePath),
+  harnessLinkBlockedMarkers: (agentsPath: string) =>
+    localize("harnessLinkBlockedMarkers", agentsPath),
+  harnessReasonNoApplyTo: () => localize("harnessReasonNoApplyTo"),
+  harnessReasonUnsupported: (detail: string) =>
+    localize("harnessReasonUnsupported", detail),
+  harnessReasonInvalid: () => localize("harnessReasonInvalid"),
 };
 
 export default messages;

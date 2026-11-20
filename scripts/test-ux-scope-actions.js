@@ -836,8 +836,13 @@ test("global resource home tree description is not repetitive", () => {
   assert.match(scannerSource, /GitHub Copilot CLI/);
   assert.match(
     scannerSource,
-    /label: `\$\{globalHomeTool\} \(\$\{getConfiguredGlobalHomeDirectory\(config\)\}\)`/,
+    /return `\$\{getGlobalHomeToolLabel\(config\)\} \(\$\{getConfiguredGlobalHomeDirectory\(config\)\}\)`/,
     "the selected home group is named by tool and root, not a generic label",
+  );
+  assert.match(
+    scannerSource,
+    /label: getGlobalHomeRootLabel\(config\)/,
+    "the side view and the install picker take the same name from one function",
   );
   assert.match(scannerSource, /label: `\$\{home\.toolLabel\} \(\$\{home\.directory\}\)`/);
 });

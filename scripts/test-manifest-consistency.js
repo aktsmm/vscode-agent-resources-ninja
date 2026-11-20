@@ -411,7 +411,7 @@ test("bundle install uses selectable resource checklist", () => {
   assert.match(extensionSource, /MCP config の有効化方法/);
   assert.match(
     extensionSource,
-    /const installTarget = await pickInstallTarget\(pickedItems\[0\]\.skill\)/,
+    /const installTarget = await pickInstallTarget\(\s*pickedItems\[0\]\.skill,\s*pickedItems\.map\(/,
   );
   assert.match(
     extensionSource,

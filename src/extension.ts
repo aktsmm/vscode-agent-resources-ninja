@@ -45,6 +45,7 @@ import {
   InstallSkillResult,
   InstallTargetScope,
   getResourceTargetUri,
+  isFileNotFoundError,
   isSkillNotFoundHandledError,
   SkillMeta,
   uninstallSkill,
@@ -58,7 +59,28 @@ import {
   refreshSkillMetadata,
   refreshSingleSkillMetadata,
   stripSkillMetaLocalPaths,
+  releaseCodexInstructionsLinkForRemovedFile,
 } from "./skillInstaller";
+import {
+  HarnessInstallScope,
+  HarnessInstructionDeferredError,
+  formatHarnessInstallPreview,
+  getCodexGuidanceFiles,
+  getHarnessInstructionDirectory,
+  isCodexHarnessScope,
+  isHarnessInstallScope,
+  previewCodexInstructionsLink,
+} from "./harnessInstructions";
+import { createVsCodeHarnessFileSystem } from "./harnessInstructionsFs";
+import {
+  USER_PROFILE_DESTINATION_LABEL,
+  allowsNewInstall,
+  classifyInstallDestination,
+  decideDefaultUserDataTarget,
+  formatInstallDestinationDetail,
+  isLegacyUserProfileLocation,
+  isReinstallDestinationInOriginalRoot,
+} from "./installDestinations";
 import {
   findInstallCollisions,
   keepFirstOfEachCollision,
@@ -159,7 +181,12 @@ import {
   getResourceMetadataPath,
   isFileBackedHookResourcePath,
 } from "./resourceKinds";
-import { scanUserResources, UserResource, getUserResourceRootUris } from "./userResourceScanner";
+import {
+  scanUserResources,
+  UserResource,
+  getUserResourceRootUris,
+  getGlobalHomeRootLabel,
+} from "./userResourceScanner";
 import {
   DEFAULT_GLOBAL_HOME_DIRECTORY,
   DEFAULT_WORKSPACE_AGENTS_DIRECTORY,
@@ -171,6 +198,7 @@ import {
   getConfiguredAutoUpdateResourcesOnUpgrade,
   getConfiguredGlobalHomeDirectory,
   getConfiguredInstructionFilePath,
+  getConfiguredLegacyUserProfileInstallTarget,
   getInstructionBlockKinds,
   getConfiguredStaleSourceIndexUpdateMode,
   getConfiguredSkillsDirectory,
@@ -189,7 +217,11 @@ import {
   resolveInstructionFileUri,
 } from "./customizationPaths";
 import { getVsCodeUserDataPath } from "./userDataPaths";
-import { isDeletableWithin, isRealPathStrictlyInside } from "./pathSafety";
+import {
+  isContainedPath,
+  isDeletableWithin,
+  isRealPathStrictlyInside,
+} from "./pathSafety";
 import {
   formatBatchCancellationSuffix,
   formatBatchFailureMessage,
@@ -640,6 +672,30 @@ function collectMissingIndexedInstalledSkillSources(
   );
 }
 
+function describeHarnessDeferral(error: HarnessInstructionDeferredError): string {
+  switch (error.reason) {
+    case "no-applyTo":
+      return messages.harnessReasonNoApplyTo();
+    case "invalid-frontmatter":
+      return messages.harnessReasonInvalid();
+    case "unsupported-applyTo":
+    default:
+      return messages.harnessReasonUnsupported(error.detail ?? "");
+  }
+}
+
+/** A notice for an AGENTS.md link that was deliberately not written, or undefined when nothing needs saying. */
+function formatHarnessLinkNotice(
+  link: InstallSkillResult["harnessLink"],
+): string | undefined {
+  if (link?.action !== "blocked") {
+    return undefined;
+  }
+  return link.blockedReason === "override-file"
+    ? messages.harnessLinkBlockedOverride(link.agentsPath, link.overridePath)
+    : messages.harnessLinkBlockedMarkers(link.agentsPath);
+}
+
 async function deleteInstalledResourceByPath(
   kind: ResourceKind,
   fullPath: string,
@@ -690,6 +746,9 @@ async function deleteInstalledResourceByPath(
       );
     } catch {
       // Sidecar metadata may not exist for older installs.
+    }
+    if (kind === "instruction") {
+      await releaseCodexInstructionsLinkForRemovedFile(fullPath);
     }
   }
 }
@@ -845,7 +904,9 @@ async function offerPluginLocationRegistration(
 }
 
 type CreateResourceScope = "workspace" | "userData" | "globalHome" | "custom";
-type DefaultInstallTargetScope = Exclude<InstallTargetScope, "custom"> | "ask";
+type DefaultInstallTargetScope =
+  | Exclude<InstallTargetScope, "custom" | HarnessInstallScope>
+  | "ask";
 const MAX_CREATE_RESOURCE_SLUG_LENGTH = 80;
 const MAX_CREATE_RESOURCE_DESCRIPTION_LENGTH = 1000;
 const MAX_CREATE_RESOURCE_PATH_LENGTH = 240;
@@ -885,6 +946,7 @@ const RESETTABLE_RESOURCE_NINJA_SETTINGS = [
   "refCatalogFormat",
   "singleClickInstall",
   "defaultInstallTarget",
+  "legacyUserProfileInstallTarget",
   "showBuiltInResources",
   "remoteResourceViewMode",
   "useSharedSourcesManifest",
@@ -3009,6 +3071,45 @@ export async function activate(
       }
     }
 
+    // The scanned copy is removed before the install writes. Refuse up front when the
+    // install would write outside the folder the copy came from, instead of deleting
+    // in one place and creating in another.
+    {
+      let expectedDestination: string | undefined;
+      try {
+        expectedDestination = getResourceTargetUri(
+          wsFolder.uri,
+          vscode.workspace.getConfiguration("resourceNinja"),
+          fullSkill,
+          { targetScope },
+        ).fsPath;
+      } catch {
+        expectedDestination = undefined;
+      }
+      if (
+        !expectedDestination ||
+        !isReinstallDestinationInOriginalRoot(
+          resource.rootFsPath,
+          expectedDestination,
+        )
+      ) {
+        if (!suppressSuccessMessage) {
+          vscode.window.showWarningMessage(
+            messages.reinstallDestinationMismatch(
+              resource.name,
+              resource.rootFsPath,
+              expectedDestination ?? "-",
+            ),
+          );
+        }
+        return createUnstartedReinstallRecord(
+          resource.name,
+          "other",
+          resource.kind,
+        );
+      }
+    }
+
     const installOptions: InstallSkillOptions = {
       targetScope,
       suppressRecoveryPrompt,
@@ -3945,7 +4046,7 @@ export async function activate(
       return;
     }
 
-    const installTarget = await pickInstallTarget(installable[0]);
+    const installTarget = await pickInstallTarget(installable[0], installable);
     if (!installTarget) {
       return;
     }
@@ -3998,6 +4099,8 @@ export async function activate(
     let cancelled = false;
     let installedSkills = 0;
     const failedResources: string[] = [];
+    const harnessNotices = new Set<string>();
+    const deferredHarnessRules: string[] = [];
     const mcpConfigSummaries: string[] = [];
     const installedPluginUris: vscode.Uri[] = [];
 
@@ -4032,6 +4135,12 @@ export async function activate(
             if (mcpConfigSummary) {
               mcpConfigSummaries.push(`${skill.name}: ${mcpConfigSummary}`);
             }
+            const harnessNotice = formatHarnessLinkNotice(
+              installResult.harnessLink,
+            );
+            if (harnessNotice) {
+              harnessNotices.add(harnessNotice);
+            }
             markRecentlyInstalled(skill);
             if (getResourceKind(skill) === "skill") {
               installedSkills++;
@@ -4042,6 +4151,11 @@ export async function activate(
           } catch (error) {
             logger.error(`Failed to install ${skill.name}:`, error);
             failedResources.push(skill.name);
+            if (error instanceof HarnessInstructionDeferredError) {
+              deferredHarnessRules.push(
+                `${skill.name} (${describeHarnessDeferral(error)})`,
+              );
+            }
           }
           completed++;
         }
@@ -4049,6 +4163,17 @@ export async function activate(
     );
 
     const failed = failedResources.length;
+    if (deferredHarnessRules.length > 0) {
+      vscode.window.showWarningMessage(
+        messages.harnessRuleDeferred(
+          deferredHarnessRules.slice(0, 3).join(", "),
+          isJa ? "applyTo を変換できない" : "applyTo cannot be converted",
+        ),
+      );
+    }
+    for (const notice of harnessNotices) {
+      vscode.window.showWarningMessage(notice);
+    }
     const cancelSuffix = cancelled
       ? getBatchCancellationSuffix(completed, toInstall.length)
       : "";
@@ -4150,7 +4275,10 @@ export async function activate(
     return picked && picked.length > 0 ? picked.map((item) => item.skill) : undefined;
   }
 
-  async function pickInstallTarget(skill: Skill): Promise<
+  async function pickInstallTarget(
+    skill: Skill,
+    selection: Skill[] = [skill],
+  ): Promise<
     | {
         targetScope: InstallTargetScope;
         customTargetUri?: vscode.Uri;
@@ -4214,46 +4342,191 @@ export async function activate(
     const userDataPreview = previewTargetPath(skill, "userData");
     const globalHomePreview = previewTargetPath(skill, "globalHome");
 
-    const selected = await vscode.window.showQuickPick(
-      [
-        {
-          label: `$(repo) ${messages.installTargetWorkspaceLabel()}`,
-          description: messages.installTargetWorkspaceDescription(
-            previewTargetPath(skill, "workspace"),
-          ),
-          targetScope: "workspace" as InstallTargetScope,
-        },
-        // Kinds with no VS Code user-data location of their own resolve to the
-        // global home, so offering both scopes would list the same folder twice.
-        ...(userDataPreview === globalHomePreview
-          ? []
-          : [
-              {
-                label: `$(account) ${messages.installTargetUserProfileLabel()}`,
-                description:
-                  messages.installTargetUserProfileDescription(userDataPreview),
-                targetScope: "userData" as InstallTargetScope,
-              },
-            ]),
-        {
-          label: `$(home) ${messages.installTargetCopilotHomeLabel()}`,
-          description:
-            messages.installTargetCopilotHomeDescription(globalHomePreview),
-          targetScope: "globalHome" as InstallTargetScope,
-        },
-        {
-          label: `$(folder) ${messages.installTargetCustomLabel()}`,
-          description: messages.installTargetCustomDescription(),
-          targetScope: "custom" as InstallTargetScope,
-        },
-      ],
-      {
-        placeHolder: messages.installTargetPlaceholder(skill.name),
-      },
+    const isJa = isJapanese();
+    const pickerConfig = vscode.workspace.getConfiguration("resourceNinja");
+    const userDataRootFsPath = getVsCodeUserDataPath({
+      appName: vscode.env.appName,
+    });
+    const legacyUserProfileEnabled =
+      getConfiguredLegacyUserProfileInstallTarget(pickerConfig);
+    const targetFsPath = (scope: InstallTargetScope): string =>
+      getResourceTargetUri(activeWorkspaceFolder.uri, pickerConfig, skill, {
+        targetScope: scope,
+      }).fsPath;
+    // `undefined` means the folder could not be inspected; a missing one is empty.
+    const hasEntries = async (fsPath: string): Promise<boolean | undefined> => {
+      try {
+        const entries = await vscode.workspace.fs.readDirectory(
+          vscode.Uri.file(path.dirname(fsPath)),
+        );
+        return entries.length > 0;
+      } catch (error) {
+        return isFileNotFoundError(error) ? false : undefined;
+      }
+    };
+    const workspacePath = targetFsPath("workspace");
+    const userDataPath = targetFsPath("userData");
+    const globalHomePath = targetFsPath("globalHome");
+    const userDataLegacy = isLegacyUserProfileLocation(
+      userDataPath,
+      userDataRootFsPath,
     );
+    const workspaceState = classifyInstallDestination({
+      hasExistingEntries: await hasEntries(workspacePath),
+    });
+    const userDataState = classifyInstallDestination({
+      legacyUserProfile: userDataLegacy,
+      legacyInstallTargetEnabled: legacyUserProfileEnabled,
+      hasExistingEntries: await hasEntries(userDataPath),
+    });
+    const globalHomeState = classifyInstallDestination({
+      hasExistingEntries: await hasEntries(globalHomePath),
+    });
+    // The same root names the side view uses, followed by the real path.
+    const destinationDetail = (
+      rootLabel: string,
+      state: Parameters<typeof formatInstallDestinationDetail>[0],
+      fsPath: string,
+    ): string =>
+      `${rootLabel} · ${formatInstallDestinationDetail(state, fsPath, isJa)}`;
 
-    if (!selected) {
+    type InstallTargetPickItem = vscode.QuickPickItem & {
+      targetScope?: InstallTargetScope;
+    };
+    const offerUserProfile =
+      userDataPreview !== globalHomePreview && allowsNewInstall(userDataState);
+    const pickItems: InstallTargetPickItem[] = [
+      {
+        label: `$(repo) ${messages.installTargetWorkspaceLabel()}`,
+        description: messages.installTargetWorkspaceDescription(
+          previewTargetPath(skill, "workspace"),
+        ),
+        detail: destinationDetail(
+          activeWorkspaceFolder.name,
+          workspaceState,
+          workspacePath,
+        ),
+        targetScope: "workspace" as InstallTargetScope,
+      },
+      // Kinds with no VS Code user-data location of their own resolve to the
+      // global home, so offering both scopes would list the same folder twice.
+      ...(userDataPreview === globalHomePreview || !offerUserProfile
+        ? []
+        : [
+            {
+              label: `$(account) ${messages.installTargetUserProfileLabel()}`,
+              description:
+                messages.installTargetUserProfileDescription(userDataPreview),
+              detail: destinationDetail(
+                USER_PROFILE_DESTINATION_LABEL,
+                userDataState,
+                userDataPath,
+              ),
+              targetScope: "userData" as InstallTargetScope,
+            },
+          ]),
+      {
+        label: `$(home) ${messages.installTargetCopilotHomeLabel()}`,
+        description:
+          messages.installTargetCopilotHomeDescription(globalHomePreview),
+        detail: destinationDetail(
+          getGlobalHomeRootLabel(pickerConfig),
+          globalHomeState,
+          globalHomePath,
+        ),
+        targetScope: "globalHome" as InstallTargetScope,
+      },
+      {
+        label: `$(folder) ${messages.installTargetCustomLabel()}`,
+        description: messages.installTargetCustomDescription(),
+        targetScope: "custom" as InstallTargetScope,
+      },
+    ];
+
+    if (userDataPreview !== globalHomePreview && !offerUserProfile) {
+      // Not selectable on purpose: the folder stays visible in the side view,
+      // and this line says why it is missing here.
+      pickItems.push({
+        label: isJa
+          ? `閲覧のみ（旧 User Profile・新規インストール対象外）: ${userDataPath}`
+          : `Browse only (legacy User Profile, not offered for new installs): ${userDataPath}`,
+        kind: vscode.QuickPickItemKind.Separator,
+      });
+    }
+
+    const offerHarnessTargets =
+      selection.length > 0 &&
+      selection.every((entry) => getResourceKind(entry) === "instruction");
+    if (offerHarnessTargets) {
+      const harnessItem = (
+        scope: HarnessInstallScope,
+        icon: string,
+        name: string,
+      ): InstallTargetPickItem => {
+        const directory = getHarnessInstructionDirectory(
+          scope,
+          activeWorkspaceFolder.uri.fsPath,
+        );
+        const codexFiles = isCodexHarnessScope(scope)
+          ? getCodexGuidanceFiles(scope, activeWorkspaceFolder.uri.fsPath)
+          : undefined;
+        const personal =
+          scope === "claudeUserRules" || scope === "codexUserInstructions";
+        const summary = codexFiles
+          ? isJa
+            ? "AGENTS.md に管理リンクを追加 · 自動読込は保証されません"
+            : "Adds a managed link to AGENTS.md · not auto-loaded"
+          : isJa
+            ? "自動検出 · applyTo は同じ意味に変換できるものだけ"
+            : "Auto-discovered · applyTo converted only when equivalent";
+        return {
+          label: `${icon} ${name}`,
+          description: personal
+            ? `${isJa ? "全プロジェクトに影響" : "Affects every project"} · ${summary}`
+            : summary,
+          detail: codexFiles
+            ? `${directory} · AGENTS.md: ${codexFiles.agentsPath}`
+            : directory,
+          targetScope: scope,
+        };
+      };
+      pickItems.push(
+        {
+          label: isJa
+            ? "他のエージェント向け（ワークスペース）"
+            : "Other agents (workspace)",
+          kind: vscode.QuickPickItemKind.Separator,
+        },
+        harnessItem("claudeRules", "$(terminal)", "Claude Code rules"),
+        harnessItem("codexInstructions", "$(terminal)", "Codex instructions"),
+        {
+          label: isJa
+            ? "他のエージェント向け（個人用・明示選択のみ）"
+            : "Other agents (personal, explicit choice only)",
+          kind: vscode.QuickPickItemKind.Separator,
+        },
+        harnessItem("claudeUserRules", "$(account)", "Claude Code rules (personal)"),
+        harnessItem(
+          "codexUserInstructions",
+          "$(account)",
+          "Codex instructions (personal)",
+        ),
+      );
+    }
+
+    const selected = await vscode.window.showQuickPick(pickItems, {
+      placeHolder: messages.installTargetPlaceholder(skill.name),
+      matchOnDetail: true,
+    });
+
+    if (!selected?.targetScope) {
       return undefined;
+    }
+
+    if (isHarnessInstallScope(selected.targetScope)) {
+      return (await confirmHarnessInstall(selected.targetScope, selection))
+        ? { targetScope: selected.targetScope }
+        : undefined;
     }
 
     if (selected.targetScope !== "custom") {
@@ -4273,6 +4546,67 @@ export async function activate(
     }
 
     return { targetScope: "custom", customTargetUri };
+  }
+
+  async function confirmHarnessInstall(
+    scope: HarnessInstallScope,
+    selection: Skill[],
+  ): Promise<boolean> {
+    const activeWorkspaceFolder = workspaceFolder;
+    if (!activeWorkspaceFolder) {
+      return false;
+    }
+    const isJa = isJapanese();
+    const config = vscode.workspace.getConfiguration("resourceNinja");
+    const destinationDirectory = getHarnessInstructionDirectory(
+      scope,
+      activeWorkspaceFolder.uri.fsPath,
+    );
+    let codex: Awaited<ReturnType<typeof previewCodexInstructionsLink>> | undefined;
+    if (isCodexHarnessScope(scope)) {
+      try {
+        codex = await previewCodexInstructionsLink(
+          createVsCodeHarnessFileSystem(),
+          getCodexGuidanceFiles(scope, activeWorkspaceFolder.uri.fsPath),
+        );
+      } catch (error) {
+        logger.warn(
+          "[Resource Ninja] AGENTS.md could not be inspected for the preview",
+          error instanceof Error ? error.name : "",
+        );
+        vscode.window.showErrorMessage(
+          isJa
+            ? "AGENTS.md を確認できなかったため、何もインストールしていません。"
+            : "AGENTS.md could not be inspected, so nothing was installed.",
+        );
+        return false;
+      }
+    }
+    const fileNames = selection.map((entry) =>
+      path.basename(
+        getResourceTargetUri(activeWorkspaceFolder.uri, config, entry, {
+          targetScope: scope,
+        }).fsPath,
+      ),
+    );
+    const action = messages.harnessInstallAction();
+    const choice = await vscode.window.showInformationMessage(
+      isJa
+        ? "インストール先と AGENTS.md の変更を確認してください"
+        : "Review the destination and the AGENTS.md change",
+      {
+        modal: true,
+        detail: formatHarnessInstallPreview({
+          scope,
+          destinationDirectory,
+          fileNames,
+          codex,
+          isJa,
+        }),
+      },
+      action,
+    );
+    return choice === action;
   }
 
   function getDefaultInstallTarget(): DefaultInstallTargetScope {
@@ -4323,6 +4657,42 @@ export async function activate(
           : "This resource type has no VS Code User Profile destination. Installing in Global Resource Home instead.",
       );
       return { targetScope: "globalHome" };
+    }
+    if (defaultTarget === "userData" && workspaceFolder) {
+      const config = vscode.workspace.getConfiguration("resourceNinja");
+      const userDataFsPath = getResourceTargetUri(
+        workspaceFolder.uri,
+        config,
+        skill,
+        { targetScope: "userData" },
+      ).fsPath;
+      const decision = decideDefaultUserDataTarget({
+        aliasesGlobalHome: false,
+        legacyUserProfile: isLegacyUserProfileLocation(
+          userDataFsPath,
+          getVsCodeUserDataPath({ appName: vscode.env.appName }),
+        ),
+        legacyInstallTargetEnabled:
+          getConfiguredLegacyUserProfileInstallTarget(config),
+      });
+      if (decision === "reselect") {
+        // Never redirect to another folder on the user's behalf.
+        const choose = messages.legacyProfileChooseAction();
+        const openSetting = messages.legacyProfileOpenSettingAction();
+        const answer = await vscode.window.showWarningMessage(
+          messages.legacyProfileDefaultReselect(path.dirname(userDataFsPath)),
+          choose,
+          openSetting,
+        );
+        if (answer === openSetting) {
+          void vscode.commands.executeCommand(
+            "workbench.action.openSettings",
+            "resourceNinja.legacyUserProfileInstallTarget",
+          );
+          return undefined;
+        }
+        return answer === choose ? pickInstallTarget(skill) : undefined;
+      }
     }
     return { targetScope: defaultTarget };
   }
@@ -6533,6 +6903,12 @@ export async function activate(
       setTimeout(() => statusBarItem.hide(), 4000);
 
       vscode.window.showInformationMessage(messages.installSuccess(skill.name));
+      const harnessLinkNotice = formatHarnessLinkNotice(
+        installResult?.harnessLink,
+      );
+      if (harnessLinkNotice) {
+        vscode.window.showWarningMessage(harnessLinkNotice);
+      }
       const hookConfigSummary = formatHookConfigUpdateSummary(
         installResult?.hookConfigUpdate,
       );
@@ -6614,6 +6990,40 @@ export async function activate(
     } catch (error) {
       if (isSkillNotFoundHandledError(error)) {
         return false;
+      }
+      if (error instanceof HarnessInstructionDeferredError) {
+        const alwaysOn = messages.harnessAlwaysOnAction();
+        const answer = await vscode.window.showWarningMessage(
+          messages.harnessRuleDeferred(
+            skill.name,
+            describeHarnessDeferral(error),
+          ),
+          alwaysOn,
+        );
+        if (answer !== alwaysOn) {
+          return false;
+        }
+        try {
+          const retryResult = await installSkill(skill, wsFolder.uri, context, {
+            ...installTarget,
+            claudeAlwaysOnWhenDeferred: true,
+          });
+          markRecentlyInstalled(skill);
+          workspaceProvider.refresh();
+          browseProvider.refresh();
+          userResourcesProvider.refresh();
+          vscode.window.showInformationMessage(
+            messages.installSuccess(skill.name),
+          );
+          return installWasClean(retryResult);
+        } catch (retryError) {
+          vscode.window.showErrorMessage(
+            messages.installFailed(
+              retryError instanceof Error ? retryError.message : String(retryError),
+            ),
+          );
+          return false;
+        }
       }
       if (installWasClean(installResult)) {
         logger.warn(
@@ -7827,6 +8237,43 @@ export async function activate(
     }
 
     const installOptions = { suppressRecoveryPrompt };
+    // A rule or instruction installed for Claude Code / Codex lives outside the
+    // Copilot folders; reinstalling it here would delete it and write elsewhere.
+    if (resourceKind === "instruction" && relativePath) {
+      const removedFsPath = path.isAbsolute(relativePath)
+        ? relativePath
+        : path.join(wsFolder.uri.fsPath, relativePath);
+      const configuredInstructionsRoot = resolveConfiguredUri(
+        wsFolder.uri,
+        getConfiguredWorkspaceInstructionsDirectory(
+          vscode.workspace.getConfiguration("resourceNinja"),
+        ),
+        DEFAULT_WORKSPACE_INSTRUCTIONS_DIRECTORY,
+      );
+      const harnessRoot = (["claudeRules", "codexInstructions"] as const)
+        .map((scope) =>
+          getHarnessInstructionDirectory(scope, wsFolder.uri.fsPath),
+        )
+        .find((root) => isContainedPath(root, removedFsPath));
+      if (
+        harnessRoot &&
+        !isReinstallDestinationInOriginalRoot(
+          harnessRoot,
+          configuredInstructionsRoot.fsPath,
+        )
+      ) {
+        if (!suppressSuccessMessage) {
+          vscode.window.showWarningMessage(
+            messages.reinstallDestinationMismatch(
+              skill.name,
+              harnessRoot,
+              configuredInstructionsRoot.fsPath,
+            ),
+          );
+        }
+        return undefined;
+      }
+    }
     let record: ReinstallBatchRecord<InstallSkillResult> | undefined;
     try {
       // The uninstall below removes the plugin folder and its registration. The
@@ -8351,7 +8798,10 @@ export async function activate(
         return;
       }
 
-      const installTarget = await pickInstallTarget(pickedItems[0].skill);
+      const installTarget = await pickInstallTarget(
+        pickedItems[0].skill,
+        pickedItems.map(({ skill: pickedSkill }) => pickedSkill),
+      );
       if (!installTarget) {
         return;
       }
@@ -8423,6 +8873,8 @@ export async function activate(
       let cancelled = false;
       let installedSkills = 0;
       const failedResources: string[] = [];
+      const bundleHarnessNotices = new Set<string>();
+      const bundleDeferredRules: string[] = [];
       const mcpConfigSummaries: string[] = [];
       const installedPluginUris: vscode.Uri[] = [];
 
@@ -8471,6 +8923,12 @@ export async function activate(
                 mcpConfigSummaries.push(`${skill.name}: ${mcpConfigSummary}`);
               }
               markRecentlyInstalled(skill);
+              const bundleHarnessNotice = formatHarnessLinkNotice(
+                installResult.harnessLink,
+              );
+              if (bundleHarnessNotice) {
+                bundleHarnessNotices.add(bundleHarnessNotice);
+              }
               if (getResourceKind(skill) === "skill") {
                 installedSkills++;
               }
@@ -8481,11 +8939,30 @@ export async function activate(
               logger.error(`Failed to install ${skill.name}:`, error);
               failed++;
               failedResources.push(skill.name);
+              if (error instanceof HarnessInstructionDeferredError) {
+                bundleDeferredRules.push(
+                  `${skill.name} (${describeHarnessDeferral(error)})`,
+                );
+              }
             }
             completed++;
           }
         },
       );
+
+      if (bundleDeferredRules.length > 0) {
+        vscode.window.showWarningMessage(
+          messages.harnessRuleDeferred(
+            bundleDeferredRules.slice(0, 3).join(", "),
+            isJapanese()
+              ? "applyTo を変換できない"
+              : "applyTo cannot be converted",
+          ),
+        );
+      }
+      for (const notice of bundleHarnessNotices) {
+        vscode.window.showWarningMessage(notice);
+      }
 
       // 結果を表示
       if (failed > 0) {
@@ -10314,17 +10791,28 @@ export async function activate(
     ];
 
     if (kind !== "skill" && kind !== "hook") {
-      targetOptions.push({
-        label: isJa ? "User Profile" : "User Profile",
-        description: isJa ? "VS Code User Data" : "VS Code User Data",
-        detail: getResourceRootUri(
-          workspaceFolder.uri,
-          config,
-          kind,
-          "userData",
-        ).fsPath,
-        scope: "userData",
-      });
+      const userProfileRoot = getResourceRootUri(
+        workspaceFolder.uri,
+        config,
+        kind,
+        "userData",
+      );
+      // The old VS Code User Profile is not offered for new files unless the
+      // compatibility setting is on; a folder the user configured elsewhere is.
+      if (
+        !isLegacyUserProfileLocation(
+          userProfileRoot.fsPath,
+          getVsCodeUserDataPath({ appName: vscode.env.appName }),
+        ) ||
+        getConfiguredLegacyUserProfileInstallTarget(config)
+      ) {
+        targetOptions.push({
+          label: isJa ? "User Profile" : "User Profile",
+          description: isJa ? "VS Code User Data" : "VS Code User Data",
+          detail: userProfileRoot.fsPath,
+          scope: "userData",
+        });
+      }
     }
 
     targetOptions.push(

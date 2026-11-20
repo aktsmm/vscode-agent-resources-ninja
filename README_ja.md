@@ -557,6 +557,30 @@ workspace skill を主 Workspace Skill Directory 以外に置く場合は、`add
 |  38  | `resourceNinja.defaultPluginHost`                               | `auto`                 | 互換 plugin host のおすすめと表示順（`auto` / `ask` / `vscode-copilot` / `copilot-cli` / `claude-code` / `codex` / `cursor`） |
 |  39  | `resourceNinja.autoManageGitignore`                             | `true`                 | workspace skill 保存先の Resources Ninja gitignore ブロックを管理                                                             |
 |  40  | `resourceNinja.instructionBlock.includeExplicitOnlySkills`      | `false`                | 手動専用 skill（`disable-model-invocation: true`）を生成する instruction block に含める                                       |
+|  41  | `resourceNinja.legacyUserProfileInstallTarget`                  | `false`                | 旧 VS Code User Profile（`%APPDATA%\Code\User\instructions`、`User\prompts`）を新規インストール／新規作成の候補として表示する |
+
+### インストール先
+
+インストール先の選択画面は、サイドビューと同じ名前と実パスで保存先を表示します。**Workspace**、**VS Code User Customizations**（旧 VS Code User Profile）、選択中の Global Resource Home（例: `GitHub Copilot CLI (~/.copilot)`）です。各行には、そこで何ができるかも表示します。
+
+- **空 · 初回インストールで作成** - まだファイルがなく、最初のインストールでフォルダーを作ります。
+- **閲覧のみ · 新規インストール対象外** - 既存ファイルは表示され、その場での再インストールもできますが、新規インストールの候補には出しません。
+- **読み取り専用** - 他ツールのホームや組み込みリソースで、この拡張は書き込みません。
+
+旧 VS Code User Profile は、既定では新規インストールと新規作成の候補から外れます。Copilot の個人用 Instructions は `~/.copilot/instructions`（Global Resource Home）に移ったためです。移動も削除もしません。旧フォルダーのファイルはサイドビューに残ります。候補に戻すには `legacyUserProfileInstallTarget` を ON にします。設定がオフのまま `defaultInstallTarget` が `userData` の場合は、別の場所へ書かずに保存先の選び直しを案内します。再インストールは、そのコピーが見つかったフォルダーへ書き戻す場合だけ行い、別の場所になる場合は何も削除せず中止します。
+
+### Codex／Claude Code 向け Instructions
+
+選択したリソースがすべて Instructions のとき、**Install Resource** に他のエージェント向けの保存先も表示します。ファイルと `AGENTS.md` の変更を事前にプレビューします。
+
+| エージェント | Workspace                                                         | 個人用（明示選択のみ・全プロジェクトに影響）             |
+| ------------ | ----------------------------------------------------------------- | -------------------------------------------------------- |
+| Claude Code  | `.claude/rules/`（自動検出。`CLAUDE.md` は変更しません）          | `~/.claude/rules/`                                       |
+| Codex        | `AGENTS.md` と同じ階層の `instructions/` と、`AGENTS.md` の管理ブロック1つ | `$CODEX_HOME`（既定 `~/.codex`）の `instructions/` と `AGENTS.md` |
+
+- **Codex** には、自動で読み込む Instructions フォルダーがありません。管理ブロック（`<!-- resource-ninja-instructions-START -->` ～ `END`）はフォルダーへのリンク1つで、ファイルごとの一覧ではありません。そのため自動読込はされず、Copilot の `applyTo` も適用されません。読むかどうかは Codex の判断です。マーカー外の本文は変更しません。`AGENTS.override.md` がある場合は `AGENTS.md` を変更せず、追記すべきブロックを表示します。再インストールでブロックは重複せず、最後の Instructions を削除したときだけこのブロックを外します。
+- **Claude Code** は `applyTo` ではなく `paths` を読みます。単純な glob は意味が一致する場合だけ変換します（`*.py` のような名前パターンは VS Code ではルート直下だけ、Claude Code では全体に一致するため `/*.py` にします）。`applyTo` がない・複数行・特殊な書式のものは、自動で常時適用にせず何もインストールしません。常時読み込むルールとして入れるかは選べます。
+- ファイルが配置されたことは、エージェントが読んだ証拠ではありません。対象エージェントの新しいセッションで確認してください。
 
 `autoManageGitignore` は外部 skill のフォルダーと自作 skill の metadata だけを除外し、既存ルールと Skills Ninja のブロックを保持します。OFF は Resources のブロックだけを除去します。導入後、保存先・設定変更、**ビュー更新**で現在と過去の管理先を同期し、起動だけでは作成しません。User/Global の保存先と skill 以外は対象外です。未保存の ignore file や不正な Ninja マーカーを検出した場合は原本を上書きせず停止します。警告には原因と対象フォルダーを表示し、**フォルダーを表示**、残った `.gitignore.agent-ninja.lock` が原因のときは**ロックファイルを表示**も選べます。ロックは自動では削除しません。他の VS Code ウィンドウや Agent Skills Ninja が動いていないことを確認してから、必要な場合だけ手動で削除してください。原因を解消後にビューを更新してください。拡張が停止中の設定変更も次のビュー更新で同期します。
 

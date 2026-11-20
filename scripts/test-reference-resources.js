@@ -455,7 +455,7 @@ function fileKey(uri) {
   return uri.fsPath.replace(/\\/g, "/");
 }
 
-function createInstaller(files) {
+function createInstaller(files, options = {}) {
   const logs = [];
   const vscodeStub = {
     version: "test",
@@ -588,6 +588,15 @@ function createInstaller(files) {
         },
         resolveSkillsDirectoryUri: () => makeUri("/ws/.github/skills"),
       },
+      ...require("./destination-test-stubs")(requireTypeScriptModule, repoRoot),
+      // The same in-memory files back the AGENTS.md handling when a test asks for it.
+      ...(options.harnessFileSystem
+        ? {
+            "./harnessInstructionsFs": {
+              createVsCodeHarnessFileSystem: () => options.harnessFileSystem,
+            },
+          }
+        : {}),
       "./userDataPaths": {
         getVsCodeUserDataPath: () => "/user-data",
       },
@@ -1010,6 +1019,7 @@ test("the global home scan lists references/ separately from instructions", asyn
         ),
         "./i18n": { isJapanese: () => false },
         "./logger": silentLogger,
+        ...require("./destination-test-stubs")(requireTypeScriptModule, repoRoot),
         "./userDataPaths": {
           getVsCodeUserDataPath: () => path.join(fakeHome, "user-data"),
         },
@@ -1081,6 +1091,184 @@ test("generated instruction blocks never include references", () => {
     kindOrder[1].includes('"reference"'),
     false,
     "reference notes must stay out of every generated catalog",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Instructions for Codex and Claude Code, through the real installer
+// ---------------------------------------------------------------------------
+
+function createMapHarnessFileSystem(files) {
+  const key = (fsPath) => fsPath.replace(/\\/g, "/");
+  return {
+    readText: async (fsPath) => files.get(key(fsPath)),
+    writeTextAtomic: async (fsPath, text) => {
+      files.set(key(fsPath), text);
+    },
+    exists: async (fsPath) => files.has(key(fsPath)),
+    listFileNames: async (directory) =>
+      [...files.keys()]
+        .filter((entry) => path.posix.dirname(entry) === key(directory))
+        .map((entry) => path.posix.basename(entry)),
+    remove: async (fsPath) => {
+      files.delete(key(fsPath));
+    },
+    isDirty: async () => false,
+  };
+}
+
+function instructionSkill(overrides = {}) {
+  return {
+    kind: "instruction",
+    name: "ts-rules",
+    source: "octo/notes",
+    path: ".github/instructions/ts-rules.instructions.md",
+    categories: [],
+    description: "",
+    ...overrides,
+  };
+}
+
+const TS_RULE =
+  '---\nname: ts-rules\ndescription: TypeScript\napplyTo: "**/*.ts"\n---\n# TS\n';
+const CODEX_FILE = "/ws/instructions/ts-rules.instructions.md";
+const CLAUDE_FILE = "/ws/.claude/rules/ts-rules.instructions.md";
+
+function installForHarness(files, body, scope, extra = {}) {
+  const { installer, vscodeStub } = createInstaller(files, {
+    harnessFileSystem: createMapHarnessFileSystem(files),
+  });
+  stubRawDownload(body);
+  return {
+    vscodeStub,
+    run: () =>
+      installer.installSkill(instructionSkill(), WORKSPACE, {}, {
+        targetScope: scope,
+        suppressRecoveryPrompt: true,
+        ...extra,
+      }),
+    installer,
+  };
+}
+
+test("a Codex install keeps the file as is and links the folder once", async () => {
+  const files = new Map([["/ws/AGENTS.md", "# Mine\n\nhand written\n"]]);
+  const { run } = installForHarness(files, TS_RULE, "codexInstructions");
+
+  const first = await run();
+  assert.strictEqual(fileKey(first.destinationUri), CODEX_FILE);
+  assert.strictEqual(files.get(CODEX_FILE), TS_RULE, "applyTo stays in the file");
+  assert.strictEqual(first.harnessLink.action, "append");
+  const agents = files.get("/ws/AGENTS.md");
+  assert.ok(agents.startsWith("# Mine\n\nhand written\n"));
+  assert.strictEqual(agents.split("resource-ninja-instructions-START").length - 1, 1);
+  assert.ok(!agents.includes("ts-rules"), "the block never lists files");
+
+  const second = await run();
+  assert.strictEqual(second.harnessLink.action, "unchanged");
+  assert.strictEqual(files.get("/ws/AGENTS.md"), agents, "a reinstall adds no second block");
+});
+
+test("a Claude install writes the converted rule and edits neither AGENTS.md nor CLAUDE.md", async () => {
+  const files = new Map();
+  const { run } = installForHarness(files, TS_RULE, "claudeRules");
+
+  const result = await run();
+  assert.strictEqual(fileKey(result.destinationUri), CLAUDE_FILE);
+  const written = files.get(CLAUDE_FILE);
+  assert.match(written, /paths:\n {2}- "\*\*\/\*\.ts"/);
+  assert.ok(!/applyTo/.test(written.replace(/# Converted from applyTo:.*\n/, "")));
+  assert.ok(written.endsWith("---\n# TS\n"));
+  assert.strictEqual(files.has("/ws/AGENTS.md"), false);
+  assert.strictEqual(files.has("/ws/CLAUDE.md"), false);
+  assert.strictEqual(result.harnessLink, undefined);
+  assert.ok(files.has(`${CLAUDE_FILE}.resource-ninja.json`));
+});
+
+test("an instruction Claude cannot take as is writes nothing until always-on is chosen", async () => {
+  const body = "# Rules\n\nNo applyTo here.\n";
+  const files = new Map();
+  const first = installForHarness(files, body, "claudeRules");
+  await assert.rejects(first.run(), (error) => {
+    return error.name === "HarnessInstructionDeferredError" && error.reason === "no-applyTo";
+  });
+  assert.strictEqual(files.size, 0, "no file and no sidecar");
+
+  const second = installForHarness(files, body, "claudeRules", {
+    claudeAlwaysOnWhenDeferred: true,
+  });
+  await second.run();
+  assert.strictEqual(files.get(CLAUDE_FILE), body);
+});
+
+test("an AGENTS.override.md keeps AGENTS.md untouched while the install still lands", async () => {
+  const files = new Map([["/ws/AGENTS.override.md", "# Override\n"]]);
+  const { run } = installForHarness(files, TS_RULE, "codexInstructions");
+
+  const result = await run();
+  assert.strictEqual(result.harnessLink.action, "blocked");
+  assert.strictEqual(result.harnessLink.blockedReason, "override-file");
+  assert.strictEqual(files.has("/ws/AGENTS.md"), false);
+  assert.strictEqual(files.get("/ws/AGENTS.override.md"), "# Override\n");
+  assert.strictEqual(files.get(CODEX_FILE), TS_RULE);
+});
+
+test("a failed file write takes the new AGENTS.md link back out", async () => {
+  const files = new Map();
+  const { run, vscodeStub } = installForHarness(files, TS_RULE, "codexInstructions");
+  vscodeStub.workspace.fs.writeFile = async (uri, content) => {
+    if (fileKey(uri) === CODEX_FILE) {
+      throw new Error("disk full");
+    }
+    files.set(fileKey(uri), Buffer.from(content).toString("utf-8"));
+  };
+
+  await assert.rejects(run(), /disk full/);
+  assert.strictEqual(files.has("/ws/AGENTS.md"), false, "the block that only this install added is gone");
+  assert.strictEqual(files.has(CODEX_FILE), false);
+  assert.deepStrictEqual([...files.keys()], []);
+});
+
+test("a failed file write leaves a pre-existing AGENTS.md exactly as it was", async () => {
+  const original = "# Mine\n\nhand written\n";
+  const files = new Map([["/ws/AGENTS.md", original]]);
+  const { run, vscodeStub } = installForHarness(files, TS_RULE, "codexInstructions");
+  vscodeStub.workspace.fs.writeFile = async (uri, content) => {
+    if (fileKey(uri) === CODEX_FILE) {
+      throw new Error("disk full");
+    }
+    files.set(fileKey(uri), Buffer.from(content).toString("utf-8"));
+  };
+
+  await assert.rejects(run(), /disk full/);
+  assert.strictEqual(files.get("/ws/AGENTS.md"), original);
+});
+
+test("destinations for other agents accept instructions only", () => {
+  const { installer, vscodeStub } = createInstaller(new Map());
+  const config = vscodeStub.workspace.getConfiguration();
+  for (const kind of ["agent", "prompt", "skill", "hook", "mcp"]) {
+    for (const scope of ["claudeRules", "codexInstructions"]) {
+      assert.throws(
+        () =>
+          installer.getResourceTargetUri(
+            WORKSPACE,
+            config,
+            instructionSkill({ kind, path: "x/y.md" }),
+            { targetScope: scope },
+          ),
+        /accept instructions only/,
+        `${kind} ${scope}`,
+      );
+    }
+  }
+  assert.strictEqual(
+    fileKey(
+      installer.getResourceTargetUri(WORKSPACE, config, instructionSkill(), {
+        targetScope: "claudeRules",
+      }),
+    ),
+    CLAUDE_FILE,
   );
 });
 

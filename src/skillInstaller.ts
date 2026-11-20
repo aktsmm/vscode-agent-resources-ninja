@@ -92,23 +92,46 @@ import {
   McpConfigUpdateResult,
   updateMcpConfigForInstall,
 } from "./mcpConfigManager";
+import {
+  HarnessInstallScope,
+  HarnessInstructionDeferredError,
+  applyCodexInstructionsLink,
+  convertInstructionForClaudeRule,
+  getCodexGuidanceFiles,
+  getHarnessInstructionDirectory,
+  isCodexHarnessScope,
+  isHarnessInstallScope,
+  reconcileCodexInstructionsLinkAfterRemoval,
+  type CodexLinkPlan,
+} from "./harnessInstructions";
+import { createVsCodeHarnessFileSystem } from "./harnessInstructionsFs";
 
 export type InstallTargetScope =
   | "workspace"
   | "userData"
   | "globalHome"
-  | "custom";
+  | "custom"
+  | HarnessInstallScope;
 
 export interface InstallSkillOptions {
   targetScope?: InstallTargetScope;
   customTargetUri?: vscode.Uri;
   expectedReferenceTarget?: vscode.Uri;
   suppressRecoveryPrompt?: boolean;
+  /** Claude rules only: install an instruction whose `applyTo` cannot be converted as an always-loaded rule. */
+  claudeAlwaysOnWhenDeferred?: boolean;
   mcpInstallMode?: "copyOnly" | "mergeIntoWorkspace";
   confirmMcpServerOverwrite?: (
     serverKeys: string[],
     configUri: vscode.Uri,
   ) => Promise<string[]>;
+}
+
+export interface HarnessLinkOutcome {
+  action: CodexLinkPlan["action"];
+  blockedReason?: CodexLinkPlan["blockedReason"];
+  agentsPath: string;
+  overridePath: string;
 }
 
 export interface InstallSkillResult {
@@ -126,6 +149,8 @@ export interface InstallSkillResult {
   errors?: string[];
   hookConfigUpdate?: HookConfigUpdateResult;
   mcpConfigUpdate?: McpConfigUpdateResult;
+  /** Codex only: what happened to the AGENTS.md link. */
+  harnessLink?: HarnessLinkOutcome;
 }
 
 /**
@@ -809,6 +834,23 @@ export function getResourceTargetUri(
           skill.name,
   );
 
+  if (isHarnessInstallScope(targetScope)) {
+    if (kind !== "instruction") {
+      throw new Error(
+        `Codex and Claude Code destinations accept instructions only: ${skill.name}`,
+      );
+    }
+    if (!isSafePathSegment(fileName)) {
+      throw new Error(`Unsafe instruction file name: ${fileName}`);
+    }
+    return vscode.Uri.joinPath(
+      vscode.Uri.file(
+        getHarnessInstructionDirectory(targetScope, workspaceUri.fsPath),
+      ),
+      fileName,
+    );
+  }
+
   if (kind === "plugin") {
     const pluginFolderName = getPluginInstallRootName(skill);
     if (targetScope === "custom" && options.customTargetUri) {
@@ -1101,6 +1143,13 @@ function getUninstallAllowedRootUris(
 
   for (const additionalRoot of getConfiguredAdditionalSkillRoots(config)) {
     roots.push(resolveConfiguredUri(workspaceUri, additionalRoot, ""));
+  }
+
+  // Personal Claude Code rules and Codex instructions installed on request.
+  for (const scope of ["claudeUserRules", "codexUserInstructions"] as const) {
+    roots.push(
+      vscode.Uri.file(getHarnessInstructionDirectory(scope, workspaceUri.fsPath)),
+    );
   }
 
   const configuredDirectories: Array<[string | undefined, string]> = [
@@ -1715,6 +1764,90 @@ export async function checkSkillRevisionStatus(
   return current ? classifyRevision(baseline, current) : "unknown";
 }
 
+/**
+ * After an instruction file was removed: drops the extension's AGENTS.md block when
+ * it was the last file in the folder the block points at. It never throws, because
+ * the file itself is already gone and a failed tidy-up must not look like a failed
+ * delete.
+ */
+export async function releaseCodexInstructionsLinkForRemovedFile(
+  removedFileFsPath: string,
+): Promise<void> {
+  try {
+    await reconcileCodexInstructionsLinkAfterRemoval(
+      createVsCodeHarnessFileSystem(),
+      removedFileFsPath,
+    );
+  } catch (error) {
+    logger.warn(
+      "[Resource Ninja] The AGENTS.md instructions link was left in place",
+      error instanceof Error ? error.name : "",
+    );
+  }
+}
+
+interface HarnessPreparedContent {
+  content: Uint8Array;
+  /** The bytes differ from the upstream file, so no upstream baseline applies. */
+  transformed: boolean;
+  /** The AGENTS.md block was created or changed by this install. */
+  linkChanged: boolean;
+  link?: HarnessLinkOutcome;
+}
+
+/**
+ * Settles everything that must be decided before the instruction file is written:
+ * the Claude rule conversion, or the Codex AGENTS.md link. A deferred rule throws
+ * before anything on disk has changed.
+ */
+async function prepareHarnessInstructionContent(
+  skill: Skill,
+  content: Uint8Array,
+  scope: HarnessInstallScope,
+  workspaceUri: vscode.Uri,
+  options: InstallSkillOptions,
+): Promise<HarnessPreparedContent> {
+  if (isCodexHarnessScope(scope)) {
+    const files = getCodexGuidanceFiles(scope, workspaceUri.fsPath);
+    const plan = await applyCodexInstructionsLink(
+      createVsCodeHarnessFileSystem(),
+      files,
+    );
+    return {
+      content,
+      transformed: false,
+      linkChanged:
+        plan.action === "create" ||
+        plan.action === "append" ||
+        plan.action === "update",
+      link: {
+        action: plan.action,
+        blockedReason: plan.blockedReason,
+        agentsPath: files.agentsPath,
+        overridePath: files.overridePath,
+      },
+    };
+  }
+
+  const text = Buffer.from(content).toString("utf8");
+  const conversion = convertInstructionForClaudeRule(text, {
+    alwaysOnWhenDeferred: options.claudeAlwaysOnWhenDeferred === true,
+  });
+  if (conversion.status === "deferred") {
+    throw new HarnessInstructionDeferredError(
+      skill.name,
+      conversion.reason,
+      conversion.detail,
+    );
+  }
+  const changed = conversion.content !== text;
+  return {
+    content: changed ? Buffer.from(conversion.content, "utf8") : content,
+    transformed: changed,
+    linkChanged: false,
+  };
+}
+
 export async function installSkill(
   skill: Skill,
   workspaceUri: vscode.Uri,
@@ -1905,6 +2038,7 @@ export async function installSkill(
       const resourceParentExisted = await uriExists(resourceParentUri);
       const resourcePathExisted = await uriExists(skillPath);
       let downloadErrors: string[] = [];
+      let harnessPrepared: HarnessPreparedContent | undefined;
       await vscode.workspace.fs.createDirectory(resourceParentUri);
       try {
         const isHookConfigFile =
@@ -1926,7 +2060,7 @@ export async function installSkill(
           downloadErrors = result.errors;
         } else {
           const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeGitRefForPath(skillDownloadRef)}/${encodeGitHubPathForUrl(remotePath)}`;
-          const content = await fetchFileBytes(
+          const rawContent = await fetchFileBytes(
             rawUrl,
             token,
             buildGitHubContentsApiUrl(owner, repo, skillDownloadRef, remotePath),
@@ -1937,6 +2071,17 @@ export async function installSkill(
             installRootUri,
             "resource write",
           );
+          let content = rawContent;
+          if (isHarnessInstallScope(options.targetScope)) {
+            harnessPrepared = await prepareHarnessInstructionContent(
+              skill,
+              rawContent,
+              options.targetScope,
+              workspaceUri,
+              options,
+            );
+            content = harnessPrepared.content;
+          }
           if (resourceKind === "reference") {
             await writeNewReferenceFile(skillPath, content);
           } else {
@@ -1947,7 +2092,7 @@ export async function installSkill(
           downloadErrors.length === 0
             ? await verifiedInstallRevision(
                 isHookFolder ? resourceParentUri : skillPath,
-                baselineRevision,
+                harnessPrepared?.transformed ? undefined : baselineRevision,
                 token,
                 ".resource-ninja.json",
                 options.suppressRecoveryPrompt === true,
@@ -1974,6 +2119,20 @@ export async function installSkill(
             false,
             resourceParentUri,
           );
+        }
+        if (harnessPrepared?.linkChanged) {
+          // The link was added for this install; take it out again when nothing is left to point at.
+          try {
+            await reconcileCodexInstructionsLinkAfterRemoval(
+              createVsCodeHarnessFileSystem(),
+              skillPath.fsPath,
+            );
+          } catch (reconcileError) {
+            logger.warn(
+              "[Resource Ninja] Could not remove the AGENTS.md link after a failed install",
+              reconcileError instanceof Error ? reconcileError.name : "",
+            );
+          }
         }
         await deleteDirectoryIfCreatedAndEmpty(
           resourceParentUri,
@@ -2018,7 +2177,10 @@ export async function installSkill(
         );
         return { destinationUri: skillPath, mcpConfigUpdate };
       }
-      return { destinationUri: skillPath };
+      return {
+        destinationUri: skillPath,
+        ...(harnessPrepared?.link ? { harnessLink: harnessPrepared.link } : {}),
+      };
     }
 
     // パスが .md で終わる場合は単独ファイル
@@ -2636,6 +2798,9 @@ export async function uninstallSkillByPath(
             ...normalizedPath.split("/").filter(Boolean),
           );
       await deleteResourceInstallMetadata(resourceUri, kind);
+      if (kind === "instruction") {
+        await releaseCodexInstructionsLinkForRemovedFile(resourceUri.fsPath);
+      }
     }
     if (kind === "skill") {
       await synchronizeSkillGitignore(

@@ -562,6 +562,30 @@ Use `additionalSkillRoots` when workspace skills are stored outside the primary 
 |  38   | `resourceNinja.defaultPluginHost`                               | `auto`                 | Recommend and order compatible plugin hosts (`auto` / `ask` / `vscode-copilot` / `copilot-cli` / `claude-code` / `codex` / `cursor`) |
 |  39   | `resourceNinja.autoManageGitignore`                             | `true`                 | Manage the Resources Ninja gitignore block in workspace skill roots                                                                  |
 |  40   | `resourceNinja.instructionBlock.includeExplicitOnlySkills`      | `false`                | Include manual-only skills (`disable-model-invocation: true`) in generated instruction blocks                                        |
+|  41   | `resourceNinja.legacyUserProfileInstallTarget`                  | `false`                | Offer the old VS Code User Profile (`%APPDATA%\Code\User\instructions`, `User\prompts`) for new installs and new files               |
+
+### Install destinations
+
+The install picker names each destination the way the side view does and shows the real path: **Workspace**, **VS Code User Customizations** (the old VS Code User Profile), and the selected Global Resource Home such as `GitHub Copilot CLI (~/.copilot)`. Each line also says what you can do there:
+
+- **Empty · created on first install** - nothing is there yet; the first install creates the folder.
+- **Browse only · not offered for new installs** - existing files stay visible and can be reinstalled in place, but the folder is not offered for new installs.
+- **Read-only** - other tools' homes and built-in resources; this extension never writes there.
+
+The old VS Code User Profile is hidden from new installs and new files by default, because Copilot's personal instructions now live in `~/.copilot/instructions` (the Global Resource Home). Nothing is moved or deleted: files in the old folders stay in the side view. Turn on `legacyUserProfileInstallTarget` to offer them again. If `defaultInstallTarget` is `userData` while the option is off, an install asks you to choose a destination and never writes somewhere else for you. A reinstall only writes back to the folder the copy was found in; otherwise it stops before removing anything.
+
+### Instructions for Codex and Claude Code
+
+When every selected resource is an instruction, **Install Resource** also offers destinations for other agents, after a preview of the files and the `AGENTS.md` change:
+
+| Agent       | Workspace                                                         | Personal (explicit choice, affects every project)       |
+| ----------- | ----------------------------------------------------------------- | ------------------------------------------------------- |
+| Claude Code | `.claude/rules/` (discovered automatically; `CLAUDE.md` is untouched) | `~/.claude/rules/`                                  |
+| Codex       | `instructions/` next to `AGENTS.md`, plus one managed block in `AGENTS.md` | `instructions/` and `AGENTS.md` in `$CODEX_HOME` (default `~/.codex`) |
+
+- **Codex** has no instructions folder it loads on its own. The managed block (`<!-- resource-ninja-instructions-START -->` ... `END`) is one link to the folder, not a list of files, so the files are not loaded automatically and Copilot's `applyTo` is not applied; Codex decides whether to read them. Text outside the markers is never changed. If `AGENTS.override.md` exists, `AGENTS.md` is left alone and the block to add is shown instead. Reinstalling does not duplicate the block, and removing the last installed instruction removes only this block.
+- **Claude Code** reads `paths`, not `applyTo`. A plain glob is converted only when the meaning is the same (a name pattern such as `*.py` matches only the root in VS Code but everywhere in Claude Code, so it becomes `/*.py`). A missing, multi-line or unusual `applyTo` is never turned into an always-loaded rule on its own: nothing is installed, and you can choose to install it as an always-loaded rule.
+- A file on disk is not proof that an agent reads it. Confirm in a new session of the target agent.
 
 `autoManageGitignore` ignores external skill folders and only metadata for local skills, preserving user rules and the Skills Ninja block. Disabling it removes only the Resources block. Installs, destination/setting changes, and **Refresh View** synchronize current and previously managed roots; activation alone does not create an ignore file. User/global roots and non-skill resources are excluded. Unsaved ignore files or malformed Ninja markers stop the update without overwriting the original. The warning names the cause and the folder, with **Show Folder** and, when a leftover `.gitignore.agent-ninja.lock` is the cause, **Show Lock File**. The lock is never deleted for you: check that no other VS Code window or Agent Skills Ninja is running first. Resolve the cause, then refresh the view. Changes made while the extension was inactive are reconciled on the next refresh.
 

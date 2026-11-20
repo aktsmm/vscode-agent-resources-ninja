@@ -179,6 +179,7 @@ function loadScanner(preset, overrides) {
         stripSkillMetaLocalPaths: () => undefined,
         readJsonObject: async () => ({ status: "missing" }),
       },
+      ...require("./destination-test-stubs")(requireTypeScriptModule, repoRoot),
     },
   );
 }

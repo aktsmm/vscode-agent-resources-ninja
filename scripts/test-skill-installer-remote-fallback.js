@@ -333,6 +333,7 @@ function loadInstaller(writes, options = {}) {
         `${resourcePath}.resource-meta.json`,
       isHookConfigFilePath: () => false,
     },
+    ...require("./destination-test-stubs")(requireTypeScriptModule, path.join(__dirname, "..")),
     "./userDataPaths": {
       getCopilotHomePath: () => "/tmp/.copilot",
       getVsCodeUserDataPath: () => "/tmp/vscode-user-data",
@@ -571,6 +572,7 @@ function loadWindowsInstaller(recorded, options = {}) {
         `${resourcePath}.resource-meta.json`,
       isHookConfigFilePath: () => false,
     },
+    ...require("./destination-test-stubs")(requireTypeScriptModule, path.join(__dirname, "..")),
     "./userDataPaths": {
       getCopilotHomePath: () => "C:\\Users\\test\\.copilot",
       getVsCodeUserDataPath: () => "C:\\Users\\test\\AppData\\Roaming\\Code",

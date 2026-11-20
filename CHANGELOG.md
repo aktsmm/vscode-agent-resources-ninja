@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.72] - 2026-11-21
+### Added
+
+- **Instructions for Codex and Claude Code / Codex・Claude Code 向け Instructions** - When every selected resource is an instruction, **Install Resource** can install to `.claude/rules/` (Claude Code) or to an `instructions/` folder next to `AGENTS.md` (Codex), in the workspace or, as an explicit choice, in your personal `~/.claude` / `$CODEX_HOME`. A preview shows the files and the `AGENTS.md` change first. Codex gets one managed link block (not a file list; it is not auto-loaded and `applyTo` is not applied); text outside the markers is preserved, `AGENTS.override.md` is never edited, reinstalling does not duplicate the block, and removing the last instruction removes only that block. For Claude Code, `applyTo` becomes `paths` only when the meaning is the same; anything unclear is not installed unless you choose an always-loaded rule / 選択したリソースがすべて Instructions のとき、**Install Resource** から `.claude/rules/`（Claude Code）または `AGENTS.md` と同じ階層の `instructions/`（Codex）へインストールできます。保存先は Workspace、または明示選択の個人用 `~/.claude` / `$CODEX_HOME` です。事前にファイルと `AGENTS.md` の変更をプレビューします。Codex にはファイル一覧ではなく管理リンクのブロックを1つ追加し（自動読込ではなく、`applyTo` も適用されません）、マーカー外の本文は保持し、`AGENTS.override.md` は変更せず、再インストールでブロックは重複せず、最後の Instructions を削除したときだけそのブロックを外します。Claude Code では `applyTo` を意味が一致する場合だけ `paths` に変換し、不明なものは常時適用ルールとして入れると選ばない限りインストールしません。
+- **Destination Names, Paths and States / 保存先の名前・実パス・状態** - The install picker names each destination like the side view and shows its real path and state: empty and created on first install, browse only, or read-only. The side view shows the same state / インストール先の選択画面が、サイドビューと同じ名前と実パス、状態（空で初回作成／閲覧のみ／読み取り専用）を表示します。サイドビューにも同じ状態を表示します。
+- **`legacyUserProfileInstallTarget` Setting / 設定 `legacyUserProfileInstallTarget`** - Turns the old VS Code User Profile back on as a destination for new installs and new files / 旧 VS Code User Profile を新規インストール／新規作成の保存先候補に戻します。
+
+### Changed
+
+- **Old VS Code User Profile Is Hidden From New Installs / 旧 User Profile を新規インストール候補から既定で除外** - The user-data folder (for example `%APPDATA%\Code\User\instructions`, `User\prompts`) is no longer offered for new installs and new files unless `legacyUserProfileInstallTarget` is on. Files there stay visible and are never moved or deleted. When `defaultInstallTarget` is `userData`, the install asks you to choose a destination instead of writing elsewhere. Workspace and a configured Global Resource Home are unchanged / user-data フォルダー（例: `%APPDATA%\Code\User\instructions`、`User\prompts`）は、`legacyUserProfileInstallTarget` を有効にしない限り新規インストールと新規作成の候補から外れます。既存ファイルは表示され、移動も削除もしません。`defaultInstallTarget` が `userData` の場合は、別の場所へ書かずに保存先の選び直しを案内します。Workspace と設定済みの Global Resource Home は変わりません。
+
+### Fixed
+
+- **Reinstall Never Deletes Then Writes Elsewhere / 再インストールで削除後に別の場所へ書かない** - A reinstall of a user or global resource now stops before removing anything when the install would write outside the folder the copy was found in. Instructions installed for Claude Code or Codex in the workspace are not reinstalled into the Copilot folders / User／Global のリソースの再インストールは、元のコピーが見つかったフォルダーの外へ書く場合、何も削除せずに中止します。ワークスペースの Claude Code／Codex 向け Instructions も Copilot のフォルダーへは再インストールしません。
+
 ## [0.2.71] - 2026-11-19
 
 ### Added

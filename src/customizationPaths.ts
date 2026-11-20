@@ -474,6 +474,13 @@ export function getConfiguredUserPromptsDirectory(
   return config.get<string>("userPromptsDirectory") || undefined;
 }
 
+/** The old VS Code User Profile is offered for new installs only when this is on. */
+export function getConfiguredLegacyUserProfileInstallTarget(
+  config: vscode.WorkspaceConfiguration,
+): boolean {
+  return config.get<boolean>("legacyUserProfileInstallTarget", false) === true;
+}
+
 export function getDefaultGlobalHomeDirectoryForPreset(
   preset: string | undefined,
 ): string {

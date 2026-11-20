@@ -102,6 +102,7 @@ const providerModule = requireTypeScriptModule(providerPath, {
   "./hookConfigManager": {
     getHookConfigDiagnostics: async () => ({ eventCounts: {} }),
   },
+  ...require("./destination-test-stubs")(requireTypeScriptModule, repoRoot),
 });
 
 const {

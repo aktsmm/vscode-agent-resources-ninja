@@ -121,6 +121,28 @@ export function getConfiguredWorkspaceResourceRoots(
     detectionBase: "skills",
   }));
 
+  const instructionsRootUri = resolveConfiguredUri(
+    workspaceUri,
+    getConfiguredWorkspaceInstructionsDirectory(config),
+    DEFAULT_WORKSPACE_INSTRUCTIONS_DIRECTORY,
+  );
+  // Instructions installed for other agents: Claude Code reads `.claude/rules` and
+  // Codex gets an `instructions/` folder next to AGENTS.md.
+  const otherAgentInstructionRoots: ConfiguredResourceRoot[] = [
+    { directory: ".claude/rules", glob: "**/*.instructions.md" },
+    { directory: "instructions", glob: "*.instructions.md" },
+  ]
+    .map(({ directory, glob }) => ({
+      rootUri: vscode.Uri.joinPath(workspaceUri, ...directory.split("/")),
+      glob,
+      detectionBase: "instructions",
+    }))
+    .filter(
+      (root) =>
+        root.rootUri.fsPath.toLowerCase() !==
+        instructionsRootUri.fsPath.toLowerCase(),
+    );
+
   return [
     ...skillRoots,
     {
@@ -133,14 +155,11 @@ export function getConfiguredWorkspaceResourceRoots(
       detectionBase: "agents",
     },
     {
-      rootUri: resolveConfiguredUri(
-        workspaceUri,
-        getConfiguredWorkspaceInstructionsDirectory(config),
-        DEFAULT_WORKSPACE_INSTRUCTIONS_DIRECTORY,
-      ),
+      rootUri: instructionsRootUri,
       glob: "**/*.instructions.md",
       detectionBase: "instructions",
     },
+    ...otherAgentInstructionRoots,
     {
       rootUri: resolveConfiguredUri(
         workspaceUri,
