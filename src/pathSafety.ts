@@ -152,6 +152,67 @@ export function isRealPathStrictlyInside(
   );
 }
 
+const activeSkillPathOperations: { path: string }[] = [];
+
+type SkillInstallGuard = (fsPath: string) => Promise<boolean>;
+let skillInstallGuard: SkillInstallGuard | undefined;
+
+/**
+ * Lets the extension veto an install into a folder it cannot safely write, for
+ * example one with an unresolved update recovery record. The guard answers true to
+ * block. Kept here so the installer needs no import from the updater.
+ */
+export function setSkillInstallGuard(guard: SkillInstallGuard | undefined): void {
+  skillInstallGuard = guard;
+}
+
+/** A guard that throws is treated as "not blocked": an unknown state must not stop every install. */
+export async function isSkillInstallBlocked(fsPath: string): Promise<boolean> {
+  if (!skillInstallGuard) {
+    return false;
+  }
+  try {
+    return (await skillInstallGuard(fsPath)) === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True while a skill install or update in this extension host holds `fsPath`, a
+ * folder above it or a folder below it. A parent and a child are one tree on disk.
+ */
+export function isSkillPathBusy(fsPath: string): boolean {
+  if (typeof fsPath !== "string" || fsPath.length === 0) {
+    return false;
+  }
+  return activeSkillPathOperations.some(
+    (entry) =>
+      isContainedPath(entry.path, fsPath) ||
+      isContainedPath(fsPath, entry.path),
+  );
+}
+
+/**
+ * Claims `fsPath` for one operation. Returns undefined when any claimed path
+ * overlaps it; otherwise a release function that is safe to call more than once.
+ */
+export function beginSkillPathOperation(
+  fsPath: string,
+): (() => void) | undefined {
+  if (typeof fsPath !== "string" || fsPath.length === 0 || isSkillPathBusy(fsPath)) {
+    return undefined;
+  }
+  const entry = { path: path.resolve(fsPath) };
+  activeSkillPathOperations.push(entry);
+  return () => {
+    const index = activeSkillPathOperations.indexOf(entry);
+    if (index >= 0) {
+      activeSkillPathOperations.splice(index, 1);
+    }
+  };
+}
+
 export function isDeletableWithinOnPlatform(
   rootFsPath: string,
   candidateFsPath: string,

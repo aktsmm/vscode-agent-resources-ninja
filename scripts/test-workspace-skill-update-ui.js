@@ -229,6 +229,56 @@ async function main() {
     assert.deepEqual(result.map((item) => item.status), ["recovery-required", "updated"]);
     assert.equal(result[0].recoveryDirectory.toString(), "retained");
   }
+  {
+    // An explicit single reinstall opens neither the notification nor the picker.
+    const { ui, calls, candidates } = fixture();
+    const edited = candidate(a, [{ path: "SKILL.md", kind: "modified" }]);
+    candidates.set(a, edited);
+    ui.notify = async () => { throw new Error("notify must not run"); };
+    ui.chooseTarget = async () => { throw new Error("picker must not run"); };
+    const result = await presentWorkspaceSkillUpdates([a], ui, "single");
+    assert.deepEqual(result.map((item) => item.status), ["updated"]);
+    const apply = calls.find((entry) => entry[0] === "apply");
+    assert.deepEqual(apply[2], { candidateId: edited.id, mode: "single", overwriteLocalChanges: true });
+    assert.ok(calls.some((entry) => entry[0] === "details"));
+  }
+  {
+    // Declining the review writes nothing and discards the staged candidate.
+    const { ui, calls } = fixture();
+    ui.showDetails = async () => "close";
+    const result = await presentWorkspaceSkillUpdates([a], ui, "single");
+    assert.equal(result[0].status, "skipped");
+    assert.equal(result[0].reason, "not-approved");
+    assert.ok(!calls.some((entry) => entry[0] === "apply"));
+    assert.ok(calls.some((entry) => entry[0] === "discard"));
+  }
+  {
+    // An already-current copy is reported as unchanged and is never replaced.
+    const { ui, calls } = fixture();
+    ui.prepare = async () => ({ status: "unchanged" });
+    const result = await presentWorkspaceSkillUpdates([a], ui, "single");
+    assert.equal(result[0].status, "unchanged");
+    assert.ok(!calls.some((entry) => entry[0] === "apply" || entry[0] === "details"));
+  }
+  {
+    // A blocked location stops the reinstall without touching the skill.
+    const { ui, calls } = fixture();
+    ui.prepare = async () => ({ status: "blocked", reason: "known-synchronized-location", failureKind: "other" });
+    const result = await presentWorkspaceSkillUpdates([a], ui, "single");
+    assert.equal(result[0].status, "skipped");
+    assert.ok(!calls.some((entry) => entry[0] === "apply"));
+  }
+  {
+    // After a rate limit the remaining targets are not prepared.
+    const { ui, calls } = fixture();
+    ui.prepare = async (item) => {
+      calls.push(["prepare", item.label]);
+      return { status: "blocked", reason: "rate-limit", failureKind: "rate-limit" };
+    };
+    const result = await presentWorkspaceSkillUpdates([a, b], ui, "single");
+    assert.deepEqual(result.map((item) => item.reason), ["rate-limit", "rate-limit"]);
+    assert.equal(calls.filter((entry) => entry[0] === "prepare").length, 1);
+  }
   console.log("PASS workspace skill update UI controller");
 }
 

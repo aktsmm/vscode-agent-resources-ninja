@@ -14,6 +14,8 @@ export interface WorkspaceUpdateTarget {
   readonly label: string;
   readonly initialRevision?: Readonly<SourceRevision>;
   readonly sourceId?: string;
+  /** An explicit single reinstall: stage upstream even when the baseline already matches it. */
+  readonly repair?: boolean;
 }
 
 /** Bytes must be verified against the candidate's saved and staged snapshots. */
@@ -77,8 +79,11 @@ export interface WorkspaceUpdateUiDependencies {
 export async function presentWorkspaceSkillUpdates(
   targets: readonly WorkspaceUpdateTarget[],
   ui: WorkspaceUpdateUiDependencies,
-  /** Set only when the user has already pressed a bulk action, such as retrying failures. */
-  initialAction?: "bulk",
+  /**
+   * Set only when the user already pressed an action: "bulk" for retrying failures,
+   * "single" for an explicit reinstall of the given targets one at a time.
+   */
+  initialAction?: "bulk" | "single",
 ): Promise<readonly WorkspaceUpdateOutcome[]> {
   const outcomes: WorkspaceUpdateOutcome[] = [];
   let stopReason: "rate-limit" | "recovery-required" | undefined;
@@ -259,7 +264,15 @@ export async function presentWorkspaceSkillUpdates(
 
   try {
     const action = initialAction ?? (await ui.notify(targets));
-    if (action === "bulk") {
+    if (action === "single") {
+      for (const target of targets) {
+        if (ui.isCancelled() || stopReason) {
+          outcomes.push({ target, status: "skipped", reason: stopReason ?? "cancelled" });
+          continue;
+        }
+        await process(target, "single");
+      }
+    } else if (action === "bulk") {
       if (await ui.confirmBulk(targets)) {
         for (const target of targets) {
           await process(target, "bulk");

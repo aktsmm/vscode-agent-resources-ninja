@@ -261,6 +261,30 @@ const jaMessages = {
     "参照メモ「{0}」の管理情報を保存できませんでした。ファイル {1} は残っています。内容と管理情報を確認してください。",
   reinstallDestinationMismatch:
     "「{0}」の再インストール先 {2} は、元の場所 {1} の外です。元のファイルを削除してから別の場所へ書くことを避けるため、何も変更していません。インストールし直す場合は、Browse から保存先を選んでください。",
+  skillOperationInProgress:
+    "「{0}」は別のインストールまたは更新の処理中です。完了してからやり直してください。何も変更していません。",
+  skillRecoveryPending:
+    "「{0}」は前回の更新が中断され、保管されたコピーの確認が終わっていません。内容を確認して復旧記録を解除するまで、このスキルにはインストールしません。何も変更していません。",
+  singleReinstallBlockedKind:
+    "「{0}」（{1}）は、現在のコピーを残したまま安全に置き換える方法がまだないため、1 件の再インストールでは何も変更していません。まとめて再インストールはごみ箱へ移してから入れ直します。個別に入れ直す場合は、削除してからインストールしてください。",
+  singleReinstallBlockedScope:
+    "「{0}」はワークスペース外（ユーザー／グローバル）のスキルです。現在のコピーを残したまま安全に置き換える方法がまだないため、1 件の再インストールでは何も変更していません。まとめて再インストールはごみ箱へ移してから入れ直します。",
+  singleReinstallAlreadyCurrent:
+    "「{0}」は配布元と同じ内容です。変更はありません。",
+  singleReinstallBaselineUnavailable:
+    "「{0}」の配布元の版を確認できないため、何も変更していません。インデックスを更新してから再度お試しください。",
+  singleReinstallFileConfirm:
+    "「{0}」を再インストールしますか？\n{1}\n配布元の内容を取得・検証してから上書きします。失敗した場合は元のファイルとメタデータに戻します。保存済みの変更は上書きされます。",
+  singleReinstallFileRestored:
+    "「{0}」の再インストールに失敗したため、元のファイルとメタデータに戻しました。",
+  singleReinstallFileRestoreFailed:
+    "「{0}」の再インストールに失敗し、元に戻すことも確認できませんでした。元の内容は {1} に保存してあります。",
+  singleReinstallFileChanged:
+    "「{0}」は確認の後に変更されたため、何も変更していません。",
+  singleReinstallFileUnreadable:
+    "「{0}」の現在のファイルを安全に読めないため（リンク、大きすぎる、または読み取り不可）、何も変更していません。",
+  singleReinstallFileDirty:
+    "「{0}」に未保存の編集があります。保存するか閉じてから再度お試しください。何も変更していません。",
   legacyProfileDefaultReselect:
     "既定のインストール先が旧 VS Code ユーザープロファイル（{0}）ですが、新規インストール先の候補から外れています。別の場所へは書き込んでいません。保存先を選び直すか、設定 resourceNinja.legacyUserProfileInstallTarget で旧候補を戻してください。",
   legacyProfileChooseAction: "保存先を選ぶ",
@@ -537,6 +561,30 @@ const enMessages: MessageDictionary = {
     'Metadata for reference note "{0}" could not be saved. The file at {1} remains; review it and its metadata.',
   reinstallDestinationMismatch:
     'The reinstall destination {2} for "{0}" is outside its current folder {1}. To avoid deleting the file and writing it somewhere else, nothing was changed. To install it again, choose a destination from Browse.',
+  skillOperationInProgress:
+    'Another install or update is working on "{0}". Try again after it finishes. Nothing was changed.',
+  skillRecoveryPending:
+    'An earlier update of "{0}" was interrupted and its retained copy has not been reviewed. Nothing is installed over it until you review the retained copy and clear the recovery record. Nothing was changed.',
+  singleReinstallBlockedKind:
+    'Nothing was changed: "{0}" ({1}) has no safe way yet to replace the current copy while keeping it, so a single reinstall is not available. Reinstall All moves current copies to the trash first. To reinstall one item, uninstall it and install it again.',
+  singleReinstallBlockedScope:
+    'Nothing was changed: "{0}" is a skill outside the workspace (user or global). There is no safe way yet to replace the current copy while keeping it, so a single reinstall is not available. Reinstall All moves current copies to the trash first.',
+  singleReinstallAlreadyCurrent:
+    '"{0}" already matches upstream. Nothing changed.',
+  singleReinstallBaselineUnavailable:
+    'Nothing was changed: the upstream version of "{0}" could not be determined. Update the index and try again.',
+  singleReinstallFileConfirm:
+    'Reinstall "{0}"?\n{1}\nUpstream is downloaded and verified before the file is overwritten. If that fails, the original file and its metadata are put back. Saved changes will be overwritten.',
+  singleReinstallFileRestored:
+    'Reinstalling "{0}" failed, so the original file and its metadata were put back.',
+  singleReinstallFileRestoreFailed:
+    'Reinstalling "{0}" failed and the original could not be verified as restored. A copy of the original is kept at {1}.',
+  singleReinstallFileChanged:
+    'Nothing was changed: "{0}" changed after it was checked.',
+  singleReinstallFileUnreadable:
+    'Nothing was changed: the current file for "{0}" cannot be read safely (linked, too large or unreadable).',
+  singleReinstallFileDirty:
+    '"{0}" has unsaved edits. Save or close it and try again. Nothing was changed.',
   legacyProfileDefaultReselect:
     "The default install target is the legacy VS Code User Profile ({0}), which is no longer offered for new installs. Nothing was written elsewhere. Choose a destination again, or turn the old option back on with resourceNinja.legacyUserProfileInstallTarget.",
   legacyProfileChooseAction: "Choose destination",
@@ -926,6 +974,30 @@ export const messages = {
     currentRoot: string,
     destination: string,
   ) => localize("reinstallDestinationMismatch", name, currentRoot, destination),
+  skillOperationInProgress: (name: string) =>
+    localize("skillOperationInProgress", name),
+  skillRecoveryPending: (name: string) =>
+    localize("skillRecoveryPending", name),
+  singleReinstallBlockedKind: (name: string, kind: string) =>
+    localize("singleReinstallBlockedKind", name, kind),
+  singleReinstallBlockedScope: (name: string) =>
+    localize("singleReinstallBlockedScope", name),
+  singleReinstallAlreadyCurrent: (name: string) =>
+    localize("singleReinstallAlreadyCurrent", name),
+  singleReinstallBaselineUnavailable: (name: string) =>
+    localize("singleReinstallBaselineUnavailable", name),
+  singleReinstallFileConfirm: (name: string, target: string) =>
+    localize("singleReinstallFileConfirm", name, target),
+  singleReinstallFileRestored: (name: string) =>
+    localize("singleReinstallFileRestored", name),
+  singleReinstallFileRestoreFailed: (name: string, backup: string) =>
+    localize("singleReinstallFileRestoreFailed", name, backup),
+  singleReinstallFileChanged: (name: string) =>
+    localize("singleReinstallFileChanged", name),
+  singleReinstallFileUnreadable: (name: string) =>
+    localize("singleReinstallFileUnreadable", name),
+  singleReinstallFileDirty: (name: string) =>
+    localize("singleReinstallFileDirty", name),
   legacyProfileDefaultReselect: (location: string) =>
     localize("legacyProfileDefaultReselect", location),
   legacyProfileChooseAction: () => localize("legacyProfileChooseAction"),

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.73] - 2026-11-27
+
+### Added
+
+- **Detected Skill Folders / 標準 skill フォルダーの自動検出** - `.github/skills`, `.agents/skills` and `.claude/skills` that already hold a `SKILL.md` and are not configured are now listed in Installed Skills and offered in the install-target picker for skills. They are display and an explicit target only: not added to the generated skill list, `.gitignore` management, install metadata, updates or reinstall, and a folder reached through a symbolic link is never detected. Turn it off with `resourceNinja.autoDetectWorkspaceSkillRoots` / 設定されていない `.github/skills`・`.agents/skills`・`.claude/skills` に `SKILL.md` があれば、インストール済みスキルに表示し、スキルのインストール先の選択にも出します。表示と明示的なインストール先だけで、生成されるスキル一覧・`.gitignore` の管理・インストール情報・更新・再インストールには含めません。シンボリックリンク経由のフォルダーは検出しません。`resourceNinja.autoDetectWorkspaceSkillRoots` で止められます。
+
+### Changed
+
+- **Single Skill Reinstall Keeps the Current Copy / 1 件のスキル再インストールは現在のコピーを残したまま** - Reinstalling one workspace skill now downloads and verifies upstream in a staging folder first, shows the differences, asks before overwriting saved edits, and swaps it in; a failure restores the previous copy or keeps a backup. A skill with no recorded baseline is bound to its exact index entry, and a copy that already matches upstream is reported as unchanged. Reinstall All, group and multiple-selection reinstall keep the trash-first repair behavior / ワークスペースのスキルを 1 件再インストールするときは、先に配布元を検証用フォルダーへ取得・検証し、差分を表示し、保存済みの編集を上書きする前に確認してから入れ替えます。失敗時は元のコピーを復元するか、バックアップを残します。比較基準のないスキルはインデックスの正確な項目に結び付け、配布元と同じ内容なら変更なしと表示します。まとめて・グループ・複数選択の再インストールは、従来どおりごみ箱へ移してから入れ直す修復操作です。
+- **Single Reinstall Of A Plain File Keeps The Current Copy / 1 ファイルの再インストールは現在のコピーを残したまま** - Reinstalling one agent, prompt, instruction or cursor rule saves the current file and its metadata first, downloads and verifies upstream, and overwrites only then, after a confirmation. If anything fails or the install is incomplete, both are written back and verified; if that cannot be verified the saved copy is kept and its location shown. Unsaved editor changes, a change after the check, a link, a file above 5 MiB or a changed destination stop it before anything is written / エージェント・プロンプト・Instructions・Cursor ルールを 1 件再インストールするときは、先に現在のファイルとメタデータを保存し、配布元を取得・検証してから、確認のうえで上書きします。失敗または不完全な場合は両方を書き戻して検証し、確認できないときは保存したコピーを残して場所を表示します。未保存の編集、確認後の変更、リンク、5 MiB 超のファイル、保存先の変更がある場合は、書き込む前に中止します。
+- **Single Reinstall Is Refused Where No Safe Replacement Exists / 安全に置き換えられない対象の 1 件再インストールは中止** - Reinstalling a single hook, MCP config or plugin, or a skill outside the workspace (user or global), no longer removes the current copy first. It stops with the reason before changing anything; Reinstall All or uninstall and install again remain available. See `docs/changed-only-updates.md` / 1 件のフック・MCP 設定・プラグイン、またはワークスペース外（ユーザー／グローバル）のスキルを再インストールするとき、先に現在のコピーを削除しなくなりました。理由を示して何も変更せずに中止します。まとめて再インストール、または削除してからのインストールは引き続き使えます。詳細は `docs/changed-only-updates.md` を参照してください。
+
+### Fixed
+
+- **Installs and Updates No Longer Overlap / インストールと更新が同じフォルダーで重ならない** - A skill install, a reinstall and an update now claim their folder, and a parent or child folder, inside one extension host. A second operation on an overlapping path stops before writing anything and says another install or update is running. A skill whose interrupted update still has a retained copy is not installed over until the recovery record is cleared / スキルのインストール・再インストール・更新は、1 つの拡張ホスト内で対象フォルダーと親子関係のフォルダーを占有します。重なる 2 つ目の操作は、何も書き込まず、別のインストールまたは更新の処理中であることを示して中止します。中断された更新の保管コピーが残っているスキルには、復旧記録を解除するまでインストールしません。
+
 ## [0.2.72] - 2026-11-21
 ### Added
 

@@ -44,6 +44,7 @@ import {
   InstallSkillOptions,
   InstallSkillResult,
   InstallTargetScope,
+  InstalledSkillScanResult,
   getResourceTargetUri,
   isFileNotFoundError,
   isSkillNotFoundHandledError,
@@ -142,6 +143,7 @@ import { messages, isJapanese } from "./i18n";
 import { showSkillPreview, getSkillId } from "./skillPreview";
 import {
   LocalSkill,
+  getConfiguredWorkspaceResourceRoots,
   registerLocalSkill,
   scanLocalSkills,
   unregisterLocalSkill,
@@ -199,6 +201,8 @@ import {
   getConfiguredGlobalHomeDirectory,
   getConfiguredInstructionFilePath,
   getConfiguredLegacyUserProfileInstallTarget,
+  getConfiguredAutoDetectWorkspaceSkillRoots,
+  findAutoDetectedSkillRoots,
   getInstructionBlockKinds,
   getConfiguredStaleSourceIndexUpdateMode,
   getConfiguredSkillsDirectory,
@@ -221,6 +225,7 @@ import {
   isContainedPath,
   isDeletableWithin,
   isRealPathStrictlyInside,
+  setSkillInstallGuard,
 } from "./pathSafety";
 import {
   formatBatchCancellationSuffix,
@@ -287,11 +292,22 @@ import {
   collectStaleSources,
   selectStaleSourcesForStartup,
 } from "./sourceFreshness";
-import { createRevisionResolver, createSharedRevisionJsonReader } from "./resourceRevision";
+import {
+  createRevisionResolver,
+  createSharedRevisionJsonReader,
+  parseSourceRevision,
+  type SourceRevision,
+} from "./resourceRevision";
+import {
+  decideSingleReinstall,
+  isExplicitSingleReinstall,
+} from "./singleReinstallPolicy";
+import { captureSingleFile, replaceSingleFile } from "./singleFileReplace";
 import {
   applyWorkspaceSkillUpdate,
   discardWorkspaceSkillUpdate,
   findWorkspaceRecoveryRecords,
+  hasPendingSkillRecovery,
   listWorkspaceSkillUpdateFiles,
   prepareWorkspaceSkillUpdate,
   readWorkspaceSkillUpdateFile,
@@ -928,6 +944,7 @@ const RESETTABLE_RESOURCE_NINJA_SETTINGS = [
   "resourcesDirectory",
   "resourcesDirectoryPreset",
   "additionalSkillRoots",
+  "autoDetectWorkspaceSkillRoots",
   "autoManageGitignore",
   "workspaceAgentsDirectory",
   "workspaceInstructionsDirectory",
@@ -2969,6 +2986,26 @@ export async function activate(
     if (!resource || resource.isBuiltIn || resource.isReadOnly) {
       return undefined;
     }
+    if (
+      isExplicitSingleReinstall({
+        suppressSuccessMessage,
+        suppressRecoveryPrompt,
+        beforeRemove,
+      })
+    ) {
+      const decision = decideSingleReinstall(
+        resource.kind,
+        resource.scope === "userData" ? "userData" : "globalHome",
+      );
+      if (decision.mode === "blocked") {
+        void vscode.window.showWarningMessage(
+          decision.reason === "scope"
+            ? messages.singleReinstallBlockedScope(resource.name)
+            : messages.singleReinstallBlockedKind(resource.name, resource.kind),
+        );
+        return undefined;
+      }
+    }
     if (resource.reinstallDisabled) {
       if (!suppressSuccessMessage) {
         vscode.window.showInformationMessage(
@@ -3117,6 +3154,23 @@ export async function activate(
         ? { expectedReferenceTarget: vscode.Uri.file(resource.fullPath) }
         : {}),
     };
+    if (
+      isExplicitSingleReinstall({
+        suppressSuccessMessage,
+        suppressRecoveryPrompt,
+        beforeRemove,
+      }) &&
+      decideSingleReinstall(resource.kind, targetScope).mode === "in-place-file"
+    ) {
+      await reinstallSingleFileInPlace({
+        name: resource.name,
+        existingFsPath: resource.fullPath,
+        skill: fullSkill,
+        wsFolder,
+        installOptions: { targetScope, suppressRecoveryPrompt: true },
+      });
+      return undefined;
+    }
     let record: ReinstallBatchRecord<InstallSkillResult> | undefined;
     try {
       // A plugin always installs into the fixed Global Home `plugins`
@@ -4275,6 +4329,129 @@ export async function activate(
     return picked && picked.length > 0 ? picked.map((item) => item.skill) : undefined;
   }
 
+  /**
+   * An explicit single reinstall of one plain file (agent, prompt, instruction, cursor
+   * rule). The current file and its metadata sidecar stay in place until the download is
+   * verified and written, and are put back when anything fails. Nothing is moved to the
+   * trash first.
+   */
+  async function reinstallSingleFileInPlace(input: {
+    name: string;
+    existingFsPath: string;
+    skill: Skill;
+    wsFolder: vscode.WorkspaceFolder;
+    installOptions: InstallSkillOptions;
+  }): Promise<boolean> {
+    const { name, existingFsPath, skill, wsFolder, installOptions } = input;
+    const kind = getResourceKind(skill);
+    let expected = "";
+    try {
+      expected = getResourceTargetUri(
+        wsFolder.uri,
+        vscode.workspace.getConfiguration("resourceNinja"),
+        skill,
+        installOptions,
+      ).fsPath;
+    } catch {
+      expected = "";
+    }
+    if (
+      !expected ||
+      normalizeResourceRootIdentity(expected) !==
+        normalizeResourceRootIdentity(existingFsPath)
+    ) {
+      void vscode.window.showWarningMessage(
+        messages.reinstallDestinationMismatch(
+          name,
+          path.dirname(existingFsPath),
+          expected || "-",
+        ),
+      );
+      return false;
+    }
+    const existingIdentity = normalizeResourceRootIdentity(existingFsPath);
+    if (
+      vscode.workspace.textDocuments.some(
+        (document) =>
+          document.isDirty &&
+          document.uri.scheme === "file" &&
+          normalizeResourceRootIdentity(document.uri.fsPath) === existingIdentity,
+      )
+    ) {
+      void vscode.window.showWarningMessage(messages.singleReinstallFileDirty(name));
+      return false;
+    }
+    const captured = await captureSingleFile(
+      existingFsPath,
+      getResourceMetadataPath(existingFsPath, kind),
+    );
+    if (captured.status !== "captured") {
+      void vscode.window.showWarningMessage(
+        messages.singleReinstallFileUnreadable(name),
+      );
+      return false;
+    }
+    const confirm = isJapanese() ? "再インストール" : "Reinstall";
+    const choice = await vscode.window.showWarningMessage(
+      messages.singleReinstallFileConfirm(name, existingFsPath),
+      { modal: true },
+      confirm,
+    );
+    if (choice !== confirm) {
+      return false;
+    }
+    let outcome: Awaited<ReturnType<typeof replaceSingleFile>> | undefined;
+    try {
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: isJapanese()
+            ? `${name} を再インストール中...`
+            : `Reinstalling ${name}...`,
+        },
+        async () => {
+          outcome = await replaceSingleFile(
+            captured.snapshot,
+            path.join(context.globalStorageUri.fsPath, "reinstall-backups"),
+            async () =>
+              installWasClean(
+                await installSkill(skill, wsFolder.uri, context, installOptions),
+              ),
+          );
+        },
+      );
+    } finally {
+      workspaceProvider.refresh();
+      userResourcesProvider.refresh();
+      browseProvider.refresh();
+    }
+    switch (outcome?.status) {
+      case "updated":
+        markRecentlyInstalled(skill);
+        void vscode.window.showInformationMessage(
+          isJapanese()
+            ? `${name} を再インストールしました`
+            : `Reinstalled ${name}`,
+        );
+        return true;
+      case "restored":
+        void vscode.window.showErrorMessage(
+          messages.singleReinstallFileRestored(name),
+        );
+        return false;
+      case "restore-failed":
+        void vscode.window.showErrorMessage(
+          messages.singleReinstallFileRestoreFailed(name, outcome.backup),
+        );
+        return false;
+      default:
+        void vscode.window.showWarningMessage(
+          messages.singleReinstallFileChanged(name),
+        );
+        return false;
+    }
+  }
+
   async function pickInstallTarget(
     skill: Skill,
     selection: Skill[] = [skill],
@@ -4392,6 +4569,7 @@ export async function activate(
 
     type InstallTargetPickItem = vscode.QuickPickItem & {
       targetScope?: InstallTargetScope;
+      customTargetUri?: vscode.Uri;
     };
     const offerUserProfile =
       userDataPreview !== globalHomePreview && allowsNewInstall(userDataState);
@@ -4514,6 +4692,46 @@ export async function activate(
       );
     }
 
+    // Standard skill folders that already hold skills but were never configured.
+    // An explicit choice only: nothing about them is tracked after the install.
+    if (
+      selection.length > 0 &&
+      selection.every((entry) => getResourceKind(entry) === "skill") &&
+      activeWorkspaceFolder.uri.scheme === "file" &&
+      getConfiguredAutoDetectWorkspaceSkillRoots(pickerConfig)
+    ) {
+      const detectedRoots = await findAutoDetectedSkillRoots(
+        activeWorkspaceFolder.uri.fsPath,
+        getConfiguredWorkspaceResourceRoots(
+          activeWorkspaceFolder.uri,
+          pickerConfig,
+        )
+          .filter((root) => root.detectionBase === "skills")
+          .map((root) => root.rootUri.fsPath),
+      );
+      if (detectedRoots.length > 0) {
+        pickItems.push({
+          label: isJa
+            ? "検出した skill フォルダー（明示選択のみ）"
+            : "Detected skill folders (explicit choice only)",
+          kind: vscode.QuickPickItemKind.Separator,
+        });
+        for (const detected of detectedRoots) {
+          pickItems.push({
+            label: `$(folder) ${path
+              .relative(activeWorkspaceFolder.uri.fsPath, detected)
+              .replace(/\\/g, "/")}`,
+            description: isJa
+              ? "設定外のフォルダー · 生成物・更新の対象にはなりません"
+              : "Not configured · excluded from generated output and updates",
+            detail: detected,
+            targetScope: "custom" as InstallTargetScope,
+            customTargetUri: vscode.Uri.file(detected),
+          });
+        }
+      }
+    }
+
     const selected = await vscode.window.showQuickPick(pickItems, {
       placeHolder: messages.installTargetPlaceholder(skill.name),
       matchOnDetail: true,
@@ -4527,6 +4745,10 @@ export async function activate(
       return (await confirmHarnessInstall(selected.targetScope, selection))
         ? { targetScope: selected.targetScope }
         : undefined;
+    }
+
+    if (selected.targetScope === "custom" && selected.customTargetUri) {
+      return { targetScope: "custom", customTargetUri: selected.customTargetUri };
     }
 
     if (selected.targetScope !== "custom") {
@@ -7351,6 +7573,7 @@ export async function activate(
     "network-or-unknown-volume", "unknown-volume", "different-volume",
     "linked-or-invalid-directory", "linked-or-special-entry", "pending-recovery",
     "dirty-or-unknown-document", "approval-required-or-invalid-candidate",
+    "update-in-progress",
   ]);
   const isRateLimitError = (error: unknown): boolean =>
     isGitHubResponseError(error) &&
@@ -7374,6 +7597,22 @@ export async function activate(
   let workspaceUpdateAdapter:
     | ReturnType<typeof createWorkspaceSkillUpdateAdapter>
     | undefined;
+  // An install must not write over a skill whose interrupted update still has a retained copy.
+  setSkillInstallGuard((fsPath) => {
+    const folder = vscode.workspace.workspaceFolders?.find(
+      (candidate) =>
+        candidate.uri.scheme === "file" &&
+        isDocumentInsideDirectory(candidate.uri.fsPath, fsPath),
+    );
+    return folder
+      ? hasPendingSkillRecovery({
+          workspace: folder.uri,
+          target: vscode.Uri.file(fsPath),
+          getSkillsRoots: async () => getUserResourceRootUris(folder.uri),
+        })
+      : Promise.resolve(false);
+  });
+  context.subscriptions.push({ dispose: () => setSkillInstallGuard(undefined) });
   const getWorkspaceUpdateAdapter = () =>
     (workspaceUpdateAdapter ??= createWorkspaceSkillUpdateAdapter(context, {
       prepare: async (target) =>
@@ -7386,6 +7625,7 @@ export async function activate(
             ? { ...target.initialRevision }
             : undefined,
           sourceId: target.sourceId,
+          forceReplace: target.repair === true,
         }),
       apply: applyWorkspaceSkillUpdate,
       discard: discardWorkspaceSkillUpdate,
@@ -7424,7 +7664,7 @@ export async function activate(
   const workspaceUpdateReservedTargets = new Set<string>();
   const presentWorkspaceUpdates = (
     targets: WorkspaceUpdateCheckSummary["targets"],
-    mode?: "always",
+    mode?: "always" | "single",
   ) => {
     const key = (target: WorkspaceUpdateCheckSummary["targets"][number]) =>
       `${target.workspace.toString()}\0${target.target.toString()}`;
@@ -7446,7 +7686,7 @@ export async function activate(
         }
         return await getWorkspaceUpdateAdapter().present(
           unique,
-          mode === "always" ? "bulk" : undefined,
+          mode === "always" ? "bulk" : mode === "single" ? "single" : undefined,
         );
       } finally {
         unique.forEach((target) => workspaceUpdateReservedTargets.delete(key(target)));
@@ -7456,6 +7696,53 @@ export async function activate(
     return result;
   };
   const sharedStartupRevisionReader = createSharedRevisionJsonReader();
+  /**
+   * The upstream revision of an install that recorded none. Only an exact source
+   * and path match in the index identifies it; a name alone never does.
+   */
+  const resolveLegacyWorkspaceBaseline = async (
+    meta: InstalledSkillScanResult["metas"][number],
+    resolver: ReturnType<typeof createRevisionResolver>,
+    token: string | undefined,
+    signal: AbortSignal | undefined,
+    loadIndex: () => Promise<SkillIndex>,
+  ): Promise<SourceRevision | undefined> => {
+    if (
+      !meta.source ||
+      typeof meta.remotePath !== "string" ||
+      !meta.remotePath
+    ) {
+      return undefined;
+    }
+    const index = await loadIndex();
+    const sources = getIndexSources(index).filter(
+      (entry) => entry.id === meta.source,
+    );
+    const remotePath = normalizeInstalledRemotePath(meta.remotePath);
+    const skills = getIndexResources(index).filter(
+      (entry: Skill) =>
+        getResourceKind(entry) === "skill" &&
+        entry.source === meta.source &&
+        normalizeInstalledRemotePath(entry.path) === remotePath,
+    );
+    if (sources.length !== 1 || skills.length !== 1) {
+      return undefined;
+    }
+    const [source] = sources;
+    const [skill] = skills;
+    const ownerRepo = source && getGitHubOwnerRepo(source);
+    const [owner, repo] = ownerRepo?.split("/") ?? [];
+    if (!source || !skill || !remotePath || !owner || !repo) {
+      return undefined;
+    }
+    const branch = await getSourceBranch(source, token, skill.path, true, signal);
+    return resolver({
+      owner,
+      repo,
+      branch,
+      remotePath,
+    });
+  };
   const findWorkspaceSkillUpdates = async (
     workspaces: readonly vscode.Uri[],
     signal?: AbortSignal,
@@ -7473,44 +7760,14 @@ export async function activate(
     return findChangedWorkspaceSkills(workspaces, {
       scan: getInstalledSkillsWithMetaResult,
       resolve: resolver,
-      resolveMissingBaseline: async (meta) => {
-        if (
-          !meta.source ||
-          typeof meta.remotePath !== "string" ||
-          !meta.remotePath
-        ) {
-          return undefined;
-        }
-        legacyIndex ??= loadSkillIndex(context, { readOnly: true });
-        const index = await legacyIndex;
-        const sources = getIndexSources(index).filter(
-          (entry) => entry.id === meta.source,
-        );
-        const remotePath = normalizeInstalledRemotePath(meta.remotePath);
-        const skills = getIndexResources(index).filter(
-          (entry: Skill) =>
-            getResourceKind(entry) === "skill" &&
-            entry.source === meta.source &&
-            normalizeInstalledRemotePath(entry.path) === remotePath,
-        );
-        if (sources.length !== 1 || skills.length !== 1) {
-          return undefined;
-        }
-        const [source] = sources;
-        const [skill] = skills;
-        const ownerRepo = source && getGitHubOwnerRepo(source);
-        const [owner, repo] = ownerRepo?.split("/") ?? [];
-        if (!source || !skill || !remotePath || !owner || !repo) {
-          return undefined;
-        }
-        const branch = await getSourceBranch(source, token, skill.path, true, signal);
-        return resolver({
-          owner,
-          repo,
-          branch,
-          remotePath,
-        });
-      },
+      resolveMissingBaseline: (meta) =>
+        resolveLegacyWorkspaceBaseline(
+          meta,
+          resolver,
+          token,
+          signal,
+          () => (legacyIndex ??= loadSkillIndex(context, { readOnly: true })),
+        ),
       isRateLimit: isRateLimitError,
       isCancelled: () => signal?.aborted === true,
       log: (message, error) =>
@@ -8036,13 +8293,133 @@ export async function activate(
     },
   );
 
+  /**
+   * An explicit single reinstall of a workspace skill. The current copy stays in
+   * place until upstream is downloaded and verified in a staging folder; a swap
+   * failure restores it. Anything the staged flow cannot guarantee is reported
+   * and leaves the skill untouched, never falling back to delete-and-install.
+   */
+  const reinstallWorkspaceSkillInPlace = async (
+    name: string,
+    meta: SkillMeta | undefined,
+    wsFolder: vscode.WorkspaceFolder,
+  ): Promise<void> => {
+    const skillFile =
+      typeof meta?.skillFilePath === "string" ? meta.skillFilePath : "";
+    const remotePath =
+      typeof meta?.remotePath === "string" ? meta.remotePath : "";
+    if (
+      !meta ||
+      !skillFile ||
+      !remotePath ||
+      !meta.source ||
+      meta.source === "local" ||
+      meta.source === "unknown" ||
+      meta.incomplete === true
+    ) {
+      void vscode.window.showWarningMessage(
+        messages.singleReinstallBaselineUnavailable(name),
+      );
+      return;
+    }
+    if (vscode.env.remoteName !== undefined) {
+      void vscode.window.showWarningMessage(
+        messages.singleReinstallBlockedScope(name),
+      );
+      return;
+    }
+    let initialRevision: SourceRevision | undefined;
+    if (meta.sourceRevision === undefined || meta.sourceRevision === null) {
+      const token = await getGitHubToken();
+      try {
+        initialRevision = await resolveLegacyWorkspaceBaseline(
+          meta,
+          createRevisionResolver(token),
+          token,
+          undefined,
+          () => loadSkillIndex(context, { readOnly: true }),
+        );
+      } catch (error) {
+        logger.warn(
+          "[Resource Ninja] Could not resolve the upstream revision for a single reinstall",
+          error instanceof Error ? error.name : "",
+        );
+      }
+      if (!initialRevision) {
+        void vscode.window.showWarningMessage(
+          messages.singleReinstallBaselineUnavailable(name),
+        );
+        return;
+      }
+    } else if (!parseSourceRevision(meta.sourceRevision)) {
+      void vscode.window.showWarningMessage(
+        messages.singleReinstallBaselineUnavailable(name),
+      );
+      return;
+    }
+    const outcomes = await presentWorkspaceUpdates(
+      [
+        {
+          workspace: wsFolder.uri,
+          target: vscode.Uri.file(path.dirname(skillFile)),
+          label: name,
+          repair: true,
+          ...(initialRevision
+            ? { initialRevision, sourceId: meta.source }
+            : {}),
+        },
+      ],
+      "single",
+    );
+    if (!outcomes) {
+      void vscode.window.showInformationMessage(
+        isJapanese()
+          ? "更新の通知がすでに表示されています。先にそちらを操作してください。"
+          : "An update notification is already open. Use it first.",
+      );
+      return;
+    }
+    if (outcomes.some((outcome) => outcome.status === "unchanged")) {
+      void vscode.window.showInformationMessage(
+        messages.singleReinstallAlreadyCurrent(name),
+      );
+    }
+    if (outcomes.some((outcome) => outcome.status !== "unchanged")) {
+      workspaceProvider.refresh();
+      browseProvider.refresh();
+    }
+    if (
+      outcomes.some((outcome) => outcome.status === "updated") &&
+      vscode.workspace
+        .getConfiguration("resourceNinja")
+        .get<boolean>("autoUpdateInstruction")
+    ) {
+      try {
+        await updateInstructionFile(wsFolder.uri, context);
+      } catch (error) {
+        logger.warn(
+          "[Resource Ninja] Instruction output was not regenerated after a single reinstall",
+          error instanceof Error ? error.name : "",
+        );
+      }
+    }
+  };
+
   // Command: Reinstall single remote-installed resource
   const reinstallResource = async (
     item?: SkillTreeItem,
     optionsOrSuppressSuccessMessage?: boolean | ReinstallCommandOptions,
   ): Promise<ReinstallBatchRecord<InstallSkillResult> | undefined> => {
-    const { suppressSuccessMessage = false, suppressRecoveryPrompt = false } =
-      normalizeReinstallCommandOptions(optionsOrSuppressSuccessMessage);
+    const {
+      suppressSuccessMessage = false,
+      suppressRecoveryPrompt = false,
+      beforeRemove,
+    } = normalizeReinstallCommandOptions(optionsOrSuppressSuccessMessage);
+    const explicitSingleReinstall = isExplicitSingleReinstall({
+      suppressSuccessMessage,
+      suppressRecoveryPrompt,
+      beforeRemove,
+    });
     if (
       item?.contextValue === "installedRemoteResource" &&
       item.skill &&
@@ -8079,6 +8456,15 @@ export async function activate(
     }
 
     const resourceKind = getResourceKind(skill);
+    if (explicitSingleReinstall) {
+      const decision = decideSingleReinstall(resourceKind, "workspace");
+      if (decision.mode === "blocked") {
+        void vscode.window.showWarningMessage(
+          messages.singleReinstallBlockedKind(skill.name, resourceKind),
+        );
+        return undefined;
+      }
+    }
     let source = skill.source;
     let remotePath = skill.remotePath || skill.path;
     let relativePath = skill.relativePath || skill.path;
@@ -8150,6 +8536,10 @@ export async function activate(
             ),
           );
         }
+        return undefined;
+      }
+      if (explicitSingleReinstall) {
+        await reinstallWorkspaceSkillInPlace(skill.name, meta, wsFolder);
         return undefined;
       }
       if (meta) {
@@ -8273,6 +8663,22 @@ export async function activate(
         }
         return undefined;
       }
+    }
+    if (
+      explicitSingleReinstall &&
+      decideSingleReinstall(resourceKind, "workspace").mode === "in-place-file"
+    ) {
+      const existingFsPath = path.isAbsolute(relativePath)
+        ? relativePath
+        : path.join(wsFolder.uri.fsPath, relativePath);
+      await reinstallSingleFileInPlace({
+        name: skill.name,
+        existingFsPath,
+        skill: fullSkill,
+        wsFolder,
+        installOptions: { suppressRecoveryPrompt: true },
+      });
+      return undefined;
     }
     let record: ReinstallBatchRecord<InstallSkillResult> | undefined;
     try {

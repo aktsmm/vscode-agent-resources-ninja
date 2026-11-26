@@ -2,7 +2,7 @@
   "name": "agent-resources-ninja",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.72",
+  "version": "0.2.73",
   "publisher": "yamapan",
   "license": "CC-BY-NC-SA-4.0",
   "icon": "resources/icon.png",
@@ -1885,6 +1885,12 @@
           "default": false,
           "order": 41,
           "markdownDescription": "%config.legacyUserProfileInstallTarget.markdownDescription%"
+        },
+        "resourceNinja.autoDetectWorkspaceSkillRoots": {
+          "type": "boolean",
+          "default": true,
+          "order": 42,
+          "markdownDescription": "%config.autoDetectWorkspaceSkillRoots.markdownDescription%"
         },
         "resourceNinja.versionInfo": {
           "type": "null",

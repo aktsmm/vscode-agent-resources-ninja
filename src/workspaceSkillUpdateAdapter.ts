@@ -77,6 +77,8 @@ function reasonText(reason: string | undefined, ja: boolean): string {
       return ja ? "候補の削除を確認できません。保存先を確認してください" : "Candidate cleanup could not be verified; inspect the retained location";
     case "pending-recovery":
       return ja ? "前回の更新に復旧が必要です" : "A previous update requires recovery";
+    case "update-in-progress":
+      return ja ? "別のインストールまたは更新の処理中です" : "Another install or update is working on this skill";
     case "operation-failed":
       return ja ? "処理に失敗しました。出力ログを確認してください" : "Operation failed; see the output log";
     default:
@@ -120,7 +122,7 @@ export function createWorkspaceSkillUpdateAdapter(
 ): {
   present(
     targets: readonly WorkspaceUpdateTarget[],
-    initialAction?: "bulk",
+    initialAction?: "bulk" | "single",
   ): Promise<readonly WorkspaceUpdateOutcome[]>;
   dispose(): void;
 } {
@@ -300,7 +302,7 @@ export function createWorkspaceSkillUpdateAdapter(
   const adapter = {
     present(
       targets: readonly WorkspaceUpdateTarget[],
-      initialAction?: "bulk",
+      initialAction?: "bulk" | "single",
     ) {
       if (disposed) {
         return Promise.reject(new Error("Workspace update adapter disposed"));

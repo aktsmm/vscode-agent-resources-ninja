@@ -105,6 +105,17 @@ const request = async (url) => {
       name, type: "file", download_url: `https://example.invalid/${name}`,
     })));
   }
+  if (url.endsWith(`/contents/${remotePath}?ref=${oldCommit}`)) {
+    return response(Object.keys(oldFiles).map((name) => ({
+      name, type: "file", download_url: `https://example.invalid/${name}`,
+    })));
+  }
+  const oldRawPrefix = `https://raw.githubusercontent.com/octo/demo/${oldCommit}/${remotePath}/`;
+  if (url.startsWith(oldRawPrefix)) {
+    const bytes = oldFiles[decodeURIComponent(url.slice(oldRawPrefix.length))];
+    assert.ok(bytes, `unexpected raw URL ${url}`);
+    return response(bytes);
+  }
   const rawPrefix = `https://raw.githubusercontent.com/octo/demo/${newCommit}/${remotePath}/`;
   if (url.startsWith(rawPrefix)) {
     if (failDownload) {
@@ -157,13 +168,23 @@ const vscode = {
 const originalLoad = Module._load;
 const originalTsLoader = require.extensions[".ts"];
 const originalExecFile = childProcess.execFile;
+// Each prepare asks PowerShell for the logical-disk type and shares (about 5 s here), which
+// made this script run past the suite's 5-minute limit. The first query stays real so the
+// actual PowerShell path is exercised once; later ones return the same local-disk answer.
+let realShareQueryDone = false;
 childProcess.execFile = function (file, args, options, callback) {
-  if (injectedShare && args.includes("-Command")) {
+  const isShareQuery = Array.isArray(args) && args.includes("-Command");
+  if (injectedShare && isShareQuery) {
     queueMicrotask(() => callback(null, JSON.stringify({
       drive: 3, shares: [{ Name: injectedShareName, Path: injectedShare }],
     }), ""));
     return {};
   }
+  if (!injectedShare && realShareQueryDone && isShareQuery) {
+    queueMicrotask(() => callback(null, JSON.stringify({ drive: 3, shares: [] }), ""));
+    return {};
+  }
+  if (isShareQuery) { realShareQueryDone = true; }
   return originalExecFile.call(this, file, args, options, callback);
 };
 const hookedExecFile = childProcess.execFile;
@@ -191,6 +212,7 @@ require.extensions[".ts"] = (loaded, filename) => {
   }).outputText, filename);
 };
 const update = require(path.join(repo, "src", "workspaceSkillUpdate.ts"));
+const pathSafety = require(path.join(repo, "src", "pathSafety.ts"));
 const { GitHubResponseError } = require(path.join(repo, "src", "githubResponse.ts"));
 childProcess.execFile = originalExecFile;
 Module._load = originalLoad;
@@ -240,6 +262,11 @@ async function main() {
     await fsp.writeFile(record, JSON.stringify(value));
     const discovered = await update.findWorkspaceRecoveryRecords(Uri.file(workspace));
     assert.ok(discovered.records.some((entry) => entry.record === record && entry.backup === backup), JSON.stringify(discovered));
+    // A fresh install into the same skill folder is blocked while the record exists.
+    const pendingOptions = { workspace: Uri.file(workspace), target: Uri.file(target), getSkillsRoots: async () => roots() };
+    assert.equal(await update.hasPendingSkillRecovery(pendingOptions), true);
+    assert.equal(await update.hasPendingSkillRecovery({ ...pendingOptions, target: Uri.file(path.join(skills, "other")) }), false);
+    assert.equal(await update.hasPendingSkillRecovery({ ...pendingOptions, target: Uri.file(path.join(fixture, "outside", "x")) }), false);
     assert.equal(fs.existsSync(target), false);
     assert.equal(fs.existsSync(backup), true);
     assert.equal(JSON.parse(await fsp.readFile(record, "utf8")).target, target);
@@ -320,6 +347,43 @@ async function main() {
   assert.deepEqual((await fsp.readdir(skills)), ["sample"]);
   assert.equal((await update.applyWorkspaceSkillUpdate(candidate, approve(candidate))).status, "blocked");
   await assert.rejects(update.listWorkspaceSkillUpdateFiles(candidate));
+
+  // An install or update holding the folder, a parent or a child stops the apply before any write.
+  await reset();
+  result = await prepare();
+  assert.equal(result.status, "ready", result.reason);
+  candidate = result.candidate;
+  for (const claimed of [path.dirname(target), path.join(target, "nested"), target]) {
+    const release = pathSafety.beginSkillPathOperation(claimed);
+    assert.ok(release, claimed);
+    const busy = await update.applyWorkspaceSkillUpdate(candidate, approve(candidate));
+    assert.equal(busy.status, "blocked");
+    assert.equal(busy.reason, "update-in-progress");
+    assert.deepEqual(await bytesAt("SKILL.md"), oldFiles["SKILL.md"]);
+    assert.equal(await update.discardWorkspaceSkillUpdate(candidate), "preserved");
+    release();
+  }
+  assert.equal((await update.applyWorkspaceSkillUpdate(candidate, approve(candidate))).status, "updated");
+  assert.equal(pathSafety.isSkillPathBusy(target), false);
+
+  // An explicit reinstall can restore upstream even when the baseline already matches it.
+  await reset();
+  unchangedRemote = true;
+  await fsp.writeFile(path.join(target, "SKILL.md"), "edited\n");
+  assert.equal((await prepare()).status, "unchanged");
+  result = await prepare({ forceReplace: true });
+  assert.equal(result.status, "ready", result.reason);
+  candidate = result.candidate;
+  assert.deepEqual(candidate.localChanges, [{ path: "SKILL.md", kind: "modified" }]);
+  assert.equal((await update.applyWorkspaceSkillUpdate(candidate, approve(candidate))).status, "blocked");
+  assert.deepEqual(await bytesAt("SKILL.md"), Buffer.from("edited\n"));
+  const forced = await update.applyWorkspaceSkillUpdate(candidate, approve(candidate, { overwriteLocalChanges: true }));
+  assert.equal(forced.status, "updated", forced.reason);
+  assert.deepEqual(await bytesAt("SKILL.md"), oldFiles["SKILL.md"]);
+  assert.ok(forced.backup, "overwritten local edits keep the old copy");
+  await reset();
+  unchangedRemote = true;
+  assert.equal((await prepare({ forceReplace: true })).status, "unchanged");
 
   await reset();
   const legacyMeta = { ...meta() };
@@ -612,6 +676,7 @@ async function main() {
 
   await reset();
   result = await prepare();
+  assert.equal(result.status, "ready", result.reason);
   candidate = result.candidate;
   const duringReadFile = path.join(candidate.recoveryDirectory.fsPath, "candidate", "data.bin");
   const originalRead = fsp.readFile;

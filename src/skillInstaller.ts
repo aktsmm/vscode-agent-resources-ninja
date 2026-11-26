@@ -68,10 +68,13 @@ import {
 } from "./resourceKinds";
 import { getVsCodeUserDataPath } from "./userDataPaths";
 import {
+  beginSkillPathOperation,
   isContainedPath,
   isDeletableWithin,
   isRealPathStrictlyInside,
   isSafePathSegment,
+  isSkillInstallBlocked,
+  isSkillPathBusy,
 } from "./pathSafety";
 import {
   collectPluginLocationKeysForRemoval,
@@ -1856,6 +1859,37 @@ export async function installSkill(
 ): Promise<InstallSkillResult> {
   resetGitHubCredentialBlocklist();
   const config = vscode.workspace.getConfiguration("resourceNinja");
+  const claimedPath =
+    getResourceKind(skill) === "skill"
+      ? getResourceTargetUri(workspaceUri, config, skill, options)
+      : undefined;
+  // A skill folder is one tree: an install must not run while an update or
+  // another install holds the same folder, a parent or a child of it.
+  let release: (() => void) | undefined;
+  if (claimedPath?.scheme === "file") {
+    release = beginSkillPathOperation(claimedPath.fsPath);
+    if (!release) {
+      throw new Error(messages.skillOperationInProgress(skill.name));
+    }
+  }
+  try {
+    if (claimedPath?.scheme === "file" && (await isSkillInstallBlocked(claimedPath.fsPath))) {
+      throw new Error(messages.skillRecoveryPending(skill.name));
+    }
+    return await installSkillUnguarded(skill, workspaceUri, context, options);
+  } finally {
+    release?.();
+  }
+}
+
+async function installSkillUnguarded(
+  skill: Skill,
+  workspaceUri: vscode.Uri,
+  context: vscode.ExtensionContext,
+  options: InstallSkillOptions = {},
+): Promise<InstallSkillResult> {
+  resetGitHubCredentialBlocklist();
+  const config = vscode.workspace.getConfiguration("resourceNinja");
   const resourceKind = getResourceKind(skill);
   const skillPath = getResourceTargetUri(workspaceUri, config, skill, options);
   const installRootUri = getResourceInstallRootUri(skillPath);
@@ -2437,7 +2471,7 @@ export async function installSkill(
       // 削除に失敗したら半削除の上へ書かず、不完全のまま失敗を返す。
       if (await deleteIncompleteSkillDirectory(skillPath, installRootUri)) {
         // 再試行では prompt を抑制するので、失敗しても再帰的にダイアログが出ない。
-        return await installSkill(skill, workspaceUri, context, {
+        return await installSkillUnguarded(skill, workspaceUri, context, {
           ...options,
           suppressRecoveryPrompt: true,
         });
@@ -2628,6 +2662,26 @@ export async function unregisterPluginLocations(
 }
 
 /**
+ * A skill folder is removed only when nothing else holds it and no interrupted update
+ * still points at it. Without this, a trash-first reinstall would delete the folder and
+ * then have its install refused for the same reasons, leaving the copy only in the trash.
+ */
+async function assertSkillFolderRemovable(
+  skillPath: vscode.Uri,
+  name: string,
+): Promise<void> {
+  if (skillPath.scheme !== "file") {
+    return;
+  }
+  if (isSkillPathBusy(skillPath.fsPath)) {
+    throw new Error(messages.skillOperationInProgress(name));
+  }
+  if (await isSkillInstallBlocked(skillPath.fsPath)) {
+    throw new Error(messages.skillRecoveryPending(name));
+  }
+}
+
+/**
  * スキルをアンインストールする
  */
 export async function uninstallSkill(
@@ -2648,6 +2702,7 @@ export async function uninstallSkill(
     skillPath = vscode.Uri.joinPath(skillsRootUri, safeName);
   }
 
+  await assertSkillFolderRemovable(skillPath, skillName);
   try {
     if (!isDeleteTargetAllowed(skillPath, skillsRootUri, "skill uninstall")) {
       throw new Error(
@@ -2756,6 +2811,10 @@ export async function uninstallSkillByPath(
       ? vscode.Uri.file(pluginRootFsPath)
       : resourceUri;
     deleteRootUri = workspaceUri;
+  }
+
+  if (kind === "skill") {
+    await assertSkillFolderRemovable(skillPath, path.basename(skillPath.fsPath));
   }
 
   let hookConfigUpdate: HookConfigUpdateResult | undefined;

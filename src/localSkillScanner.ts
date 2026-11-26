@@ -34,7 +34,9 @@ import {
   DEFAULT_WORKSPACE_PLUGINS_DIRECTORY,
   DEFAULT_WORKSPACE_PROMPTS_DIRECTORY,
   DEFAULT_SKILLS_DIRECTORY,
+  findAutoDetectedSkillRoots,
   getConfiguredAdditionalSkillRoots,
+  getConfiguredAutoDetectWorkspaceSkillRoots,
   getConfiguredInstructionFilePath,
   getConfiguredIncludeLocalResources,
   getConfiguredIncludeExplicitOnlySkills,
@@ -87,6 +89,11 @@ type WorkspaceFallbackMode = "auto" | "always" | "none";
 
 interface ScanLocalSkillsOptions {
   workspaceFallback?: WorkspaceFallbackMode;
+  /**
+   * List standard skill folders that were never configured. For display only:
+   * callers that generate output, metadata or updates must leave this off.
+   */
+  includeAutoDetectedSkillRoots?: boolean;
 }
 
 function normalizeSeparators(value: string): string {
@@ -284,11 +291,18 @@ async function findConfiguredWorkspaceCandidates(
   workspaceUri: vscode.Uri,
   config: vscode.WorkspaceConfiguration,
   includeNonSkillResources: boolean,
+  autoDetectedSkillRoots: readonly vscode.Uri[] = [],
 ): Promise<ScanCandidate[]> {
-  const roots = getConfiguredWorkspaceResourceRoots(
-    workspaceUri,
-    config,
-  ).filter(
+  const roots = [
+    ...getConfiguredWorkspaceResourceRoots(workspaceUri, config),
+    ...autoDetectedSkillRoots.map(
+      (rootUri): ConfiguredResourceRoot => ({
+        rootUri,
+        glob: "**/SKILL.md",
+        detectionBase: "skills",
+      }),
+    ),
+  ].filter(
     (root) => includeNonSkillResources || root.detectionBase === "skills",
   );
 
@@ -541,10 +555,24 @@ export async function scanLocalSkills(
   );
 
   const workspaceFallback = options.workspaceFallback || "auto";
+  const autoDetectedSkillRoots =
+    options.includeAutoDetectedSkillRoots === true &&
+    workspaceUri.scheme === "file" &&
+    getConfiguredAutoDetectWorkspaceSkillRoots(config)
+      ? (
+          await findAutoDetectedSkillRoots(
+            workspaceUri.fsPath,
+            getConfiguredWorkspaceResourceRoots(workspaceUri, config)
+              .filter((root) => root.detectionBase === "skills")
+              .map((root) => root.rootUri.fsPath),
+          )
+        ).map((root) => vscode.Uri.file(root))
+      : [];
   const configuredCandidates = await findConfiguredWorkspaceCandidates(
     workspaceUri,
     config,
     includeNonSkillResources,
+    autoDetectedSkillRoots,
   );
   const builtInNodeModuleFiles = includeBuiltInResources
     ? await vscode.workspace.findFiles(

@@ -21,7 +21,7 @@ import {
   refreshSingleSkillMetadata,
   stripSkillMetaLocalPaths,
 } from "./skillInstaller";
-import { isSafePathSegment } from "./pathSafety";
+import { beginSkillPathOperation, isSafePathSegment, isSkillPathBusy } from "./pathSafety";
 import {
   getConfiguredAdditionalSkillRoots,
   getConfiguredSkillsDirectory,
@@ -133,6 +133,12 @@ export interface WorkspaceSkillUpdateOptions {
   /** Present only for an explicitly requested first sync of a legacy install. */
   initialRevision?: SourceRevision;
   sourceId?: string;
+  /**
+   * An explicit single-skill reinstall: when the baseline already equals
+   * upstream but saved files differ from it, still stage upstream so the
+   * user can restore the pristine copy. Never set by passive checks.
+   */
+  forceReplace?: boolean;
 }
 
 export interface WorkspaceSkillApproval {
@@ -187,7 +193,6 @@ interface InternalCandidate {
 }
 
 const candidates = new WeakMap<WorkspaceSkillCandidate, InternalCandidate>();
-const activeTargets = new Set<string>();
 
 function hash(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -541,6 +546,30 @@ async function assertNoPendingRecovery(parent: string, target: string): Promise<
   throw new PendingRecoveryError(transaction);
 }
 
+/**
+ * True only when an unresolved recovery record exists for `target`. Any other
+ * failure to look (a path outside the workspace, an unreadable folder) answers false,
+ * because an unknown state must not block every install.
+ */
+export async function hasPendingSkillRecovery(options: {
+  workspace: vscode.Uri;
+  target: vscode.Uri;
+  getSkillsRoots: WorkspaceSkillUpdateOptions["getSkillsRoots"];
+}): Promise<boolean> {
+  if (options.workspace.scheme !== "file" || options.target.scheme !== "file") {
+    return false;
+  }
+  try {
+    const root = path.resolve(options.workspace.fsPath);
+    const target = path.resolve(options.target.fsPath);
+    const parent = await transactionParent(root, target, options.getSkillsRoots);
+    await assertNoPendingRecovery(parent, target);
+    return false;
+  } catch (error) {
+    return error instanceof PendingRecoveryError;
+  }
+}
+
 async function snapshot(directory: string, requireMetadata = true): Promise<Snapshot> {
   const entries = new Map<string, Entry>();
   const identities = new Map<string, FileIdentity>();
@@ -729,7 +758,8 @@ export async function prepareWorkspaceSkillUpdate(
       throw new Error("unsupported-baseline");
     }
     const localChanges = await baselineChanges(target, before, oldFiles);
-    if (!firstSync && status === "unchanged") {
+    if (!firstSync && status === "unchanged" &&
+        !(options.forceReplace === true && localChanges.length > 0)) {
       if (!samePreviewSnapshot(before, await snapshot(target))) {
         throw new Error("target-changed-during-prepare");
       }
@@ -1061,9 +1091,8 @@ export async function applyWorkspaceSkillUpdate(
         (approval.mode === "bulk" || approval.overwriteLocalChanges !== true))) {
     return { status: "blocked", reason: "approval-required-or-invalid-candidate" };
   }
-  const key = process.platform === "win32" ? state.target.toLowerCase() : state.target;
-  if (activeTargets.has(key)) { return { status: "blocked", reason: "update-in-progress" }; }
-  activeTargets.add(key);
+  const releaseTarget = beginSkillPathOperation(state.target);
+  if (!releaseTarget) { return { status: "blocked", reason: "update-in-progress" }; }
   let moved = false;
   let guardFailed = false;
   let identity: RollbackIdentity | undefined;
@@ -1194,7 +1223,7 @@ export async function applyWorkspaceSkillUpdate(
     state.used = false;
     return { status: "blocked", reason };
   } finally {
-    activeTargets.delete(key);
+    releaseTarget();
   }
 }
 
@@ -1204,8 +1233,7 @@ export async function discardWorkspaceSkillUpdate(
 ): Promise<"discarded" | "preserved"> {
   const state = candidates.get(candidate);
   if (!state || state.used) { return "preserved"; }
-  const key = process.platform === "win32" ? state.target.toLowerCase() : state.target;
-  if (activeTargets.has(key)) { return "preserved"; }
+  if (isSkillPathBusy(state.target)) { return "preserved"; }
   state.used = true;
   try {
     await assertIdentity(state.transaction, "directory", state.transactionIdentity);
@@ -1229,8 +1257,7 @@ export async function discardWorkspaceSkillUpdate(
 function previewState(candidate: WorkspaceSkillCandidate): InternalCandidate {
   const state = candidates.get(candidate);
   if (!state || state.used) { throw new Error("invalid-preview-candidate"); }
-  const key = process.platform === "win32" ? state.target.toLowerCase() : state.target;
-  if (activeTargets.has(key)) { throw new Error("update-in-progress"); }
+  if (isSkillPathBusy(state.target)) { throw new Error("update-in-progress"); }
   return state;
 }
 

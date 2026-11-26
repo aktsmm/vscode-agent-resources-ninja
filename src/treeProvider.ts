@@ -786,6 +786,7 @@ export class WorkspaceSkillsProvider implements vscode.TreeDataProvider<SkillTre
       true,
       true,
       false,
+      { includeAutoDetectedSkillRoots: true },
     );
 
     // 2. インストール済みスキル（メタデータ付き）

@@ -1,4 +1,5 @@
 import * as os from "os";
+import { lstat, readdir } from "node:fs/promises";
 import * as path from "path";
 import * as vscode from "vscode";
 import { ResourceKind } from "./skillIndex";
@@ -479,6 +480,111 @@ export function getConfiguredLegacyUserProfileInstallTarget(
   config: vscode.WorkspaceConfiguration,
 ): boolean {
   return config.get<boolean>("legacyUserProfileInstallTarget", false) === true;
+}
+
+/** Standard workspace skill folders that are listed when they hold a skill and are not configured. */
+export const STANDARD_WORKSPACE_SKILL_ROOTS: readonly string[] = [
+  ".github/skills",
+  ".agents/skills",
+  ".claude/skills",
+];
+
+const AUTO_DETECT_MAX_DEPTH = 3;
+const AUTO_DETECT_MAX_ENTRIES = 2000;
+
+export function getConfiguredAutoDetectWorkspaceSkillRoots(
+  config: vscode.WorkspaceConfiguration,
+): boolean {
+  return config.get<boolean>("autoDetectWorkspaceSkillRoots", true) !== false;
+}
+
+function foldPathCase(value: string): string {
+  return process.platform === "win32" ? value.toLowerCase() : value;
+}
+
+/** Every segment from the workspace down must be a real directory, never a link. */
+async function isRealDirectoryChain(
+  workspaceFsPath: string,
+  segments: readonly string[],
+): Promise<boolean> {
+  let current = workspaceFsPath;
+  for (const segment of segments) {
+    current = path.join(current, segment);
+    try {
+      const info = await lstat(current);
+      if (info.isSymbolicLink() || !info.isDirectory()) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** True when a real, non-linked `SKILL.md` exists below `root`, within a few levels. */
+async function containsSkillFile(root: string): Promise<boolean> {
+  let visited = 0;
+  const visit = async (directory: string, depth: number): Promise<boolean> => {
+    let children;
+    try {
+      children = await readdir(directory, { withFileTypes: true });
+    } catch {
+      return false;
+    }
+    for (const child of children) {
+      if (++visited > AUTO_DETECT_MAX_ENTRIES) {
+        return false;
+      }
+      if (child.isSymbolicLink()) {
+        continue;
+      }
+      if (child.isFile() && child.name === "SKILL.md" && depth > 0) {
+        return true;
+      }
+      if (
+        child.isDirectory() &&
+        depth < AUTO_DETECT_MAX_DEPTH &&
+        (await visit(path.join(directory, child.name), depth + 1))
+      ) {
+        return true;
+      }
+    }
+    return false;
+  };
+  return visit(root, 0);
+}
+
+/**
+ * Absolute paths of the standard skill folders that exist under the workspace,
+ * hold at least one skill, and are not already one of the configured roots.
+ * A folder reached through a symbolic link is never reported.
+ */
+export async function findAutoDetectedSkillRoots(
+  workspaceFsPath: string,
+  configuredRootFsPaths: readonly string[],
+): Promise<string[]> {
+  if (!workspaceFsPath || !path.isAbsolute(workspaceFsPath)) {
+    return [];
+  }
+  const configured = new Set(
+    configuredRootFsPaths.map((root) => foldPathCase(path.resolve(root))),
+  );
+  const found: string[] = [];
+  for (const relative of STANDARD_WORKSPACE_SKILL_ROOTS) {
+    const segments = relative.split("/");
+    const absolute = path.join(workspaceFsPath, ...segments);
+    if (configured.has(foldPathCase(path.resolve(absolute)))) {
+      continue;
+    }
+    if (
+      (await isRealDirectoryChain(workspaceFsPath, segments)) &&
+      (await containsSkillFile(absolute))
+    ) {
+      found.push(absolute);
+    }
+  }
+  return found;
 }
 
 export function getDefaultGlobalHomeDirectoryForPreset(

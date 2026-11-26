@@ -69,6 +69,9 @@ function loadCustomizationPathsExports() {
     if (id === "path") {
       return require("path");
     }
+    if (id === "node:fs/promises") {
+      return require("node:fs/promises");
+    }
     throw new Error(`Unexpected require: ${id}`);
   };
 
