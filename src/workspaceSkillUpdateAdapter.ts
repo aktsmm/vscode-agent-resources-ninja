@@ -72,6 +72,10 @@ function reasonText(reason: string | undefined, ja: boolean): string {
     case "linked-or-invalid-directory":
     case "linked-or-special-entry":
       return ja ? "共有・同期・ネットワークまたはリンクを含む対象です" : "Shared, synchronized, network, or linked location";
+    case "unknown-share-status":
+      return ja
+        ? "この場所が共有されているか確認できませんでした。しばらくしてからもう一度お試しください。何も変更していません"
+        : "Could not check whether this location is shared. Try again in a moment; nothing was changed";
     case "candidate-preserved":
     case "discard-failed":
       return ja ? "候補の削除を確認できません。保存先を確認してください" : "Candidate cleanup could not be verified; inspect the retained location";
@@ -79,6 +83,16 @@ function reasonText(reason: string | undefined, ja: boolean): string {
       return ja ? "前回の更新に復旧が必要です" : "A previous update requires recovery";
     case "update-in-progress":
       return ja ? "別のインストールまたは更新の処理中です" : "Another install or update is working on this skill";
+    case "child-conflicts-with-upstream":
+      return ja
+        ? "独立して入れた子スキルと同じパスを、配布元の新しい版が使っています。子スキルを移すか削除してから更新してください"
+        : "The new upstream version uses the same path as a child skill you installed separately; move or remove that child first";
+    case "unsafe-or-oversize-file":
+      return ja
+        ? "ファイルが大きすぎるため更新できません（1 ファイル 100 MiB、合計 500 MiB まで）"
+        : "A file is too large to update safely (up to 100 MiB per file and 500 MiB in total)";
+    case "copy-verification-failed":
+      return ja ? "コピーの検証に失敗しました。何も変更していません" : "A copy could not be verified; nothing was changed";
     case "operation-failed":
       return ja ? "処理に失敗しました。出力ログを確認してください" : "Operation failed; see the output log";
     default:
@@ -148,6 +162,10 @@ export function createWorkspaceSkillUpdateAdapter(
       entry.reason !== "rate-limit" && entry.reason !== "target-mismatch");
 
   const openDiff = async (item: WorkspaceUpdateDiff, ja: boolean): Promise<void> => {
+    if (item.unavailable) {
+      await vscode.window.showWarningMessage(previewError(item.unavailable, ja));
+      return;
+    }
     const local = previewText(item.local);
     const staged = previewText(item.staged);
     if ("error" in local || "error" in staged) {
@@ -217,7 +235,7 @@ export function createWorkspaceSkillUpdateAdapter(
       const files = diffs.map((diff) => {
         const local = previewText(diff.local);
         const staged = previewText(diff.staged);
-        const error = "error" in local ? local.error : "error" in staged ? staged.error : undefined;
+        const error = diff.unavailable ?? ("error" in local ? local.error : "error" in staged ? staged.error : undefined);
         return {
           label: `$(diff) ${text(diff.path)}`,
           description: error ? previewError(error, ja) : undefined,
@@ -247,9 +265,10 @@ export function createWorkspaceSkillUpdateAdapter(
       const confirm = ja ? "更新する" : "Update";
       const edited = candidate.localChanges.length > 0;
       const notPreviewed = unavailable.get(candidate) || 0;
+      const kept = candidate.carriedChildren?.length ?? 0;
       const detail = ja
-        ? `${candidate.firstSync ? "初回同期では配布元と異なる内容を上書きし、成功後に旧コピーを削除します。 " : edited ? "保存済みのローカル編集を上書きします。 " : ""}${notPreviewed ? `${notPreviewed} 件のファイルは差分を表示できません。 ` : ""}共有・同期は完全には検出できません。未保存または確認後に変更されたファイルは更新しません。`
-        : `${candidate.firstSync ? "First sync replaces content that differs from upstream and deletes the old copy after success. " : edited ? "Saved local edits will be overwritten. " : ""}${notPreviewed ? `${notPreviewed} file(s) cannot be previewed. ` : ""}Sharing and synchronization cannot be fully detected. Unsaved or changed-after-check files will not be updated.`;
+        ? `${candidate.firstSync ? "初回同期では配布元と異なる内容を上書きし、成功後に旧コピーを削除します。 " : edited ? "保存済みのローカル編集を上書きします。 " : ""}${kept ? `独立してインストールした子スキル ${kept} 件は、そのまま新しいコピーへ引き継ぎます。 ` : ""}${notPreviewed ? `${notPreviewed} 件のファイルは差分を表示できません。 ` : ""}共有・同期は完全には検出できません。未保存または確認後に変更されたファイルは更新しません。`
+        : `${candidate.firstSync ? "First sync replaces content that differs from upstream and deletes the old copy after success. " : edited ? "Saved local edits will be overwritten. " : ""}${kept ? `${kept} separately installed child skill(s) are carried over unchanged. ` : ""}${notPreviewed ? `${notPreviewed} file(s) cannot be previewed. ` : ""}Sharing and synchronization cannot be fully detected. Unsaved or changed-after-check files will not be updated.`;
       return (await vscode.window.showWarningMessage(
         ja ? "この候補を更新しますか？" : "Update this candidate?",
         { modal: true, detail },

@@ -135,6 +135,42 @@ test("blob verification preserves binary bytes and line endings", () => {
   assert.ok(!revision.matchesGitBlob(Buffer.from([0xfe, 13, 10, 0x00]), hash));
 });
 
+test("a large file is verified by streaming, with the same answer as the in-memory check", async () => {
+  const { createHash } = require("node:crypto");
+  const os = require("node:os");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "resource-ninja-stream-"));
+  try {
+    const bytes = Buffer.alloc(3 * 1024 * 1024 + 17, 5);
+    bytes[1000] = 0;
+    bytes[2 * 1024 * 1024] = 13;
+    const first = path.join(directory, "first.bin");
+    const second = path.join(directory, "second.bin");
+    const other = path.join(directory, "other.bin");
+    fs.writeFileSync(first, bytes);
+    fs.writeFileSync(second, bytes);
+    const changed = Buffer.from(bytes);
+    changed[bytes.length - 1] = 6;
+    fs.writeFileSync(other, changed);
+    const blob = createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
+    assert.ok(revision.matchesGitBlob(bytes, blob));
+    assert.equal(await revision.gitBlobShaOfFile(first, bytes.length), blob);
+    assert.ok(await revision.fileMatchesGitBlob(first, bytes.length, blob.toUpperCase()));
+    assert.ok(!(await revision.fileMatchesGitBlob(other, bytes.length, blob)));
+    assert.ok(!(await revision.fileMatchesGitBlob(first, bytes.length, "not-a-sha")));
+    // A file that is not the size it was said to be is never reported as a match.
+    assert.equal(await revision.gitBlobShaOfFile(first, bytes.length - 1), undefined);
+    assert.equal(await revision.gitBlobShaOfFile(first, bytes.length + 1), undefined);
+    assert.equal(await revision.gitBlobShaOfFile(first, -1), undefined);
+    assert.ok(await revision.filesHaveSameBytes(first, second, bytes.length));
+    assert.ok(!(await revision.filesHaveSameBytes(first, other, bytes.length)));
+    assert.ok(!(await revision.filesHaveSameBytes(first, second, bytes.length + 1)));
+    assert.ok(revision.HASH_IN_MEMORY_LIMIT_BYTES < revision.MAX_SKILL_FILE_BYTES);
+    assert.ok(revision.MAX_SKILL_FILE_BYTES < revision.MAX_SKILL_TOTAL_BYTES);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("a skill folder resolves to its tree id at the branch commit", async () => {
   const { request } = fakeGitHub();
   const resolve = revision.createRevisionResolver(undefined, undefined, request);

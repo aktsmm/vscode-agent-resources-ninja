@@ -22,7 +22,11 @@ import { fetchGitHubWithOptionalAuthRetry } from "./githubFetch";
 import {
   classifyRevision,
   createRevisionResolver,
+  fileMatchesGitBlob,
+  HASH_IN_MEMORY_LIMIT_BYTES,
   matchesGitBlob,
+  MAX_SKILL_FILE_BYTES,
+  MAX_SKILL_TOTAL_BYTES,
   type RevisionResolver,
   type RevisionStatus,
   type RevisionTarget,
@@ -1563,26 +1567,40 @@ function getSharedRevisionResolver(
   return sharedRevisionResolver.resolve;
 }
 
-const MAX_BASELINE_FILE_BYTES = 20 * 1024 * 1024;
-const MAX_BASELINE_TOTAL_BYTES = 100 * 1024 * 1024;
 const MAX_BASELINE_FILES = 10_000;
+
+/**
+ * Compares one installed file with a Git blob. A file above the in-memory limit is
+ * streamed instead of being refused, but only on the local file system, which is
+ * the only place it can be read without loading it.
+ */
+async function entryMatchesGitBlob(
+  entryUri: vscode.Uri,
+  size: number,
+  expectedSha: string,
+): Promise<boolean> {
+  if (size <= HASH_IN_MEMORY_LIMIT_BYTES) {
+    return matchesGitBlob(
+      await vscode.workspace.fs.readFile(entryUri),
+      expectedSha,
+    );
+  }
+  return (
+    entryUri.scheme === "file" &&
+    size <= MAX_SKILL_FILE_BYTES &&
+    (await fileMatchesGitBlob(entryUri.fsPath, size, expectedSha))
+  );
+}
 
 async function fileMatchesRevision(
   fileUri: vscode.Uri,
   revision: SourceRevision,
 ): Promise<boolean> {
   const stat = await vscode.workspace.fs.stat(fileUri);
-  if (
-    revision.kind !== "blob" ||
-    stat.type !== vscode.FileType.File ||
-    stat.size > MAX_BASELINE_FILE_BYTES
-  ) {
+  if (revision.kind !== "blob" || stat.type !== vscode.FileType.File) {
     return false;
   }
-  return matchesGitBlob(
-    await vscode.workspace.fs.readFile(fileUri),
-    revision.contentSha,
-  );
+  return entryMatchesGitBlob(fileUri, stat.size, revision.contentSha);
 }
 
 export async function directoryMatchesRevision(
@@ -1645,9 +1663,9 @@ export async function directoryMatchesRevision(
         totalBytes += stat.size;
         if (
           stat.type !== vscode.FileType.File ||
-          stat.size > MAX_BASELINE_FILE_BYTES ||
-          totalBytes > MAX_BASELINE_TOTAL_BYTES ||
-          !matchesGitBlob(await vscode.workspace.fs.readFile(entryUri), expectedSha)
+          stat.size > MAX_SKILL_FILE_BYTES ||
+          totalBytes > MAX_SKILL_TOTAL_BYTES ||
+          !(await entryMatchesGitBlob(entryUri, stat.size, expectedSha))
         ) {
           return false;
         }

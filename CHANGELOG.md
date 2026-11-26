@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.74] - 2026-11-27
+
+### Changed
+
+- **Large Skill Files Can Be Updated / 大きいファイルを含むスキルも更新できる** - A skill with files above 20 MiB (up to 100 MiB per file, 500 MiB in total) is no longer refused. Between two looks at the same file it is compared by size and modification time instead of being read into memory, and against upstream it is streamed into its Git blob id, so installs record a baseline and a saved edit of a large file is still found. Just before the switch, large files that are part of upstream are streamed once more, so a same-size, same-time rewrite stops the update. A large file has no text preview; it is listed as "cannot be previewed" when it differs from upstream. Anything above the caps is still refused before anything is written, and is shown as skipped / 20 MiB を超えるファイル（1 ファイル 100 MiB、合計 500 MiB まで）を含むスキルも、拒否されなくなりました。同じファイルを時間を置いて比べるときは、メモリに読み込まず、サイズと更新時刻で比べます。配布元とは Git blob ID をストリーミングで計算して照合するため、インストール時に比較基準を記録でき、大きいファイルの保存済みの編集も検出できます。入れ替えの直前には、配布元に含まれる大きいファイルをもう一度ストリーミングで照合するため、サイズも更新時刻も同じ書き換えは更新を中止します。大きいファイルにはテキスト差分がなく、配布元と異なる場合は「差分を表示できません」と表示します。上限を超えるものは、何も書き込まずに従来どおり拒否し、失敗ではなくスキップとして表示します。
+
+### Fixed
+
+- **Independent Child Skills Are Carried Over / 独立した子スキルを引き継ぐ** - A folder inside a skill that upstream does not ship and that holds a skill of its own (a `SKILL.md` and a `.skill-meta.json` naming the skill and its source) is no longer a saved local edit. It is copied byte for byte into the new copy after the new version is verified, so the update no longer needs the overwrite confirmation, **Update All** no longer skips the parent, and the child no longer ends up only in the retained old copy. The confirmation says how many are carried. A folder without such a sidecar stays a local addition, and an update that would collide with the path of a carried child stops before staging / スキルの中にある、配布元にないフォルダーのうち、自分の skill（`SKILL.md` と、skill 名と配布元を持つ `.skill-meta.json`）を持つものは、保存済みのローカル編集として扱わなくなりました。新しい版を検証した後に、バイト単位で新しいコピーへ引き継ぐため、上書きの確認は不要になり、**まとめて更新** も親をスキップせず、子が旧コピー側にだけ残ることもありません。確認画面に引き継ぐ件数を表示します。同様の管理情報がないフォルダーは従来どおりローカル追加として扱い、引き継ぐ子スキルと同じパスを新しい版が使う場合は、ステージングの前に更新を中止します。
+
+- **A Brief File Lock No Longer Undoes a Finished Update / 一時的なファイルロックで完了した更新が失敗扱いにならない** - After the new copy is verified, the update removes its recovery record. On Windows, antivirus or an indexer can hold that file for a moment, which turned a successful switch into "recovery required". Removing the record now retries a few times with a short delay for temporary lock errors only; any other error, or a lock that does not clear, still stops as before / 新しいコピーを検証した後、更新は復旧用の記録を削除します。Windows ではウイルス対策やインデクサーがこのファイルを一時的に掴むことがあり、成功した入れ替えが「復旧が必要」になっていました。一時的なロックによるエラーに限り、短い間隔で数回再試行するようにしました。それ以外のエラーや、解消しないロックは従来どおり停止します。
+
+- **A Slow Share Check Is Retried and Explained / 共有確認が遅いときは再試行し、理由を分かりやすく表示する** - Before an update, Windows is asked whether the skill folder is shared. That query can occasionally time out on a cold start, which blocked the update with only a generic failure. It is now tried once more, and if it still fails the update stops before anything is written with "Could not check whether this location is shared; try again" / 更新の前に、Windows へスキルのフォルダーが共有されているかを問い合わせます。この問い合わせは、起動直後などにまれにタイムアウトし、一般的な失敗表示のまま更新が止まっていました。もう一度だけ試し、それでも失敗した場合は、何も書き込まずに「この場所が共有されているか確認できませんでした。しばらくしてからもう一度お試しください」と表示して中止します。
+
 ## [0.2.73] - 2026-11-27
 
 ### Added

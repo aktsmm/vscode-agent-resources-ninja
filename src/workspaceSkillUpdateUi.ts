@@ -23,6 +23,8 @@ export interface WorkspaceUpdateDiff {
   readonly path: string;
   readonly local?: Uint8Array;
   readonly staged?: Uint8Array;
+  /** The file is above the in-memory limit: its bytes are not read, so no text diff exists. */
+  readonly unavailable?: "large";
 }
 
 export interface WorkspaceUpdateOutcome {

@@ -100,15 +100,25 @@ const request = async (url) => {
       });
     }
   }
-  if (url.endsWith(`/contents/${remotePath}?ref=${newCommit}`)) {
-    return response(Object.keys(newFiles).map((name) => ({
-      name, type: "file", download_url: `https://example.invalid/${name}`,
-    })));
-  }
-  if (url.endsWith(`/contents/${remotePath}?ref=${oldCommit}`)) {
-    return response(Object.keys(oldFiles).map((name) => ({
-      name, type: "file", download_url: `https://example.invalid/${name}`,
-    })));
+  const listingMatch = /\/contents\/skills\/sample((?:\/[^?]+)?)\?ref=([0-9a-f]{40})$/.exec(url);
+  if (listingMatch && (listingMatch[2] === newCommit || listingMatch[2] === oldCommit)) {
+    const files = listingMatch[2] === newCommit ? newFiles : oldFiles;
+    const base = decodeURIComponent(listingMatch[1]).replace(/^\//, "");
+    const prefix = base ? `${base}/` : "";
+    const seenDirectories = new Set();
+    const listed = [];
+    for (const name of Object.keys(files)) {
+      if (!name.startsWith(prefix)) { continue; }
+      const rest = name.slice(prefix.length);
+      const slash = rest.indexOf("/");
+      if (slash < 0) {
+        listed.push({ name: rest, type: "file", download_url: `https://example.invalid/${name}` });
+      } else if (!seenDirectories.has(rest.slice(0, slash))) {
+        seenDirectories.add(rest.slice(0, slash));
+        listed.push({ name: rest.slice(0, slash), type: "dir" });
+      }
+    }
+    return response(listed);
   }
   const oldRawPrefix = `https://raw.githubusercontent.com/octo/demo/${oldCommit}/${remotePath}/`;
   if (url.startsWith(oldRawPrefix)) {
@@ -172,8 +182,14 @@ const originalExecFile = childProcess.execFile;
 // made this script run past the suite's 5-minute limit. The first query stays real so the
 // actual PowerShell path is exercised once; later ones return the same local-disk answer.
 let realShareQueryDone = false;
+let shareQueryFailures = 0;
 childProcess.execFile = function (file, args, options, callback) {
   const isShareQuery = Array.isArray(args) && args.includes("-Command");
+  if (shareQueryFailures > 0 && isShareQuery) {
+    shareQueryFailures--;
+    queueMicrotask(() => callback(Object.assign(new Error("Command failed: timed out"), { killed: true }), "", ""));
+    return {};
+  }
   if (injectedShare && isShareQuery) {
     queueMicrotask(() => callback(null, JSON.stringify({
       drive: 3, shares: [{ Name: injectedShareName, Path: injectedShare }],
@@ -227,6 +243,7 @@ async function reset() {
   await fsp.rm(fixture, { recursive: true, force: true });
   await fsp.mkdir(target, { recursive: true });
   for (const [name, bytes] of Object.entries(oldFiles)) {
+    await fsp.mkdir(path.dirname(path.join(target, name)), { recursive: true });
     await fsp.writeFile(path.join(target, name), bytes);
   }
   await fsp.writeFile(path.join(target, ".skill-meta.json"), JSON.stringify(meta()));
@@ -312,6 +329,23 @@ async function main() {
   assert.equal(hostResult.status, "blocked");
   assert.equal(hostResult.reason, "unknown-extension-host");
   vscode.env = { remoteName: undefined };
+
+  if (process.platform === "win32") {
+    // A cold or slow share query gets one more try; a second failure is a readable, fail-closed reason.
+    await reset();
+    shareQueryFailures = 1;
+    const retried = await prepare();
+    assert.equal(retried.status, "ready", `one failed share query is retried: ${retried.reason}`);
+    assert.equal(shareQueryFailures, 0);
+    await update.discardWorkspaceSkillUpdate(retried.candidate);
+    await reset();
+    shareQueryFailures = 2;
+    const unknownShare = await prepare();
+    assert.equal(unknownShare.status, "blocked");
+    assert.equal(unknownShare.reason, "unknown-share-status");
+    assert.equal(shareQueryFailures, 0);
+    assert.deepEqual(await bytesAt("SKILL.md"), oldFiles["SKILL.md"], "nothing is changed");
+  }
 
   await reset();
   let result = await prepare();
@@ -619,6 +653,51 @@ async function main() {
   assert.equal((await update.applyWorkspaceSkillUpdate(candidate, approve(candidate), guard)).status, "blocked");
   assert.deepEqual(await bytesAt("SKILL.md"), oldFiles["SKILL.md"]);
   await update.discardWorkspaceSkillUpdate(candidate);
+
+  // A brief lock on the recovery record (antivirus, indexer) must not undo a finished switch.
+  for (const code of ["EBUSY", "EPERM", "EACCES"]) {
+    await reset();
+    result = await prepare();
+    candidate = result.candidate;
+    const realUnlink = fsp.unlink;
+    let lockedCalls = 0;
+    fsp.unlink = async (location, ...rest) => {
+      if (path.basename(String(location)).startsWith(".resource-ninja-recovery-") && ++lockedCalls <= 2) {
+        throw Object.assign(new Error(`transient ${code}`), { code });
+      }
+      return realUnlink(location, ...rest);
+    };
+    let locked;
+    try { locked = await update.applyWorkspaceSkillUpdate(candidate, approve(candidate)); }
+    finally { fsp.unlink = realUnlink; }
+    assert.equal(locked.status, "updated", `${code}: ${locked.reason}`);
+    assert.equal(lockedCalls, 3, `${code}: retried until the record could be removed`);
+    assert.deepEqual(await bytesAt("SKILL.md"), newFiles["SKILL.md"]);
+    assert.ok(!(await fsp.readdir(fixture)).some((name) => name.startsWith(".resource-ninja-recovery-")), "the record is gone");
+  }
+  // A lock that never clears, or any other error, is not retried without bound.
+  {
+    await reset();
+    result = await prepare();
+    candidate = result.candidate;
+    const realUnlink = fsp.unlink;
+    let calls = 0;
+    fsp.unlink = async (location, ...rest) => {
+      if (path.basename(String(location)).startsWith(".resource-ninja-recovery-")) {
+        calls++;
+        throw Object.assign(new Error("locked"), { code: "EBUSY" });
+      }
+      return realUnlink(location, ...rest);
+    };
+    let stuck;
+    try { stuck = await update.applyWorkspaceSkillUpdate(candidate, approve(candidate)); }
+    finally { fsp.unlink = realUnlink; }
+    assert.ok(calls >= 2 && calls <= 12, `bounded retries: ${calls}`);
+    assert.notEqual(stuck.status, "blocked");
+    for (const name of (await fsp.readdir(fixture)).filter((entry) => entry.startsWith(".resource-ninja-recovery-"))) {
+      await fsp.rm(path.join(fixture, name), { force: true });
+    }
+  }
 
   await reset();
   result = await prepare();
@@ -978,7 +1057,245 @@ async function main() {
 
   await reset();
   await fsp.link(path.join(target, "data.bin"), path.join(target, "hardlink"));
-  assert.equal((await prepare()).status, "blocked");
+  const hardLinked = await prepare();
+  assert.equal(hardLinked.status, "blocked");
+  assert.equal(hardLinked.reason, "linked-or-special-entry", "a hard link is not reported as a size problem");
+
+  // --- Files above the in-memory hashing threshold (20 MiB) are no longer refused ---
+  {
+    const mib = 1024 * 1024;
+    const big = (fill) => Buffer.alloc(21 * mib, fill);
+    oldFiles["big.bin"] = big(1);
+    newFiles["big.bin"] = big(2);
+    try {
+      await reset();
+      result = await prepare();
+      assert.equal(result.status, "ready", `a 21 MiB file must not block the update: ${result.reason}`);
+      candidate = result.candidate;
+      assert.deepEqual(candidate.localChanges, []);
+      const listed = await update.listWorkspaceSkillUpdateFiles(candidate);
+      const bigEntry = listed.find((entry) => entry.path === "big.bin");
+      assert.ok(bigEntry && bigEntry.large === true && bigEntry.identical === false, JSON.stringify(bigEntry));
+      const smallEntry = listed.find((entry) => entry.path === "data.bin");
+      assert.ok(smallEntry && !smallEntry.large);
+      await assert.rejects(update.readWorkspaceSkillUpdateFile(candidate, "local", "big.bin"));
+      const bigUpdate = await update.applyWorkspaceSkillUpdate(candidate, approve(candidate, { mode: "bulk" }));
+      assert.equal(bigUpdate.status, "updated", bigUpdate.reason);
+      assert.ok((await bytesAt("big.bin")).equals(newFiles["big.bin"]));
+      assert.deepEqual((await fsp.readdir(fixture)).sort(), ["workspace"]);
+
+      // A same-size edit of a large file is a saved local edit, found by hashing against upstream.
+      await reset();
+      const edited = big(1);
+      edited[0] = 9;
+      await fsp.writeFile(path.join(target, "big.bin"), edited);
+      result = await prepare();
+      assert.equal(result.status, "ready", result.reason);
+      assert.deepEqual(result.candidate.localChanges, [{ path: "big.bin", kind: "modified" }]);
+      assert.equal((await update.applyWorkspaceSkillUpdate(result.candidate, approve(result.candidate, { mode: "bulk" }))).status, "blocked");
+      assert.ok((await bytesAt("big.bin")).equals(edited), "the large edit is untouched without approval");
+      const overwritten = await update.applyWorkspaceSkillUpdate(result.candidate, approve(result.candidate, { overwriteLocalChanges: true }));
+      assert.equal(overwritten.status, "updated", overwritten.reason);
+      assert.ok(overwritten.backup, "overwritten edits keep the old copy");
+      assert.ok((await fsp.readFile(path.join(overwritten.backup.fsPath, "big.bin"))).equals(edited));
+
+      // The same size and the same modification time are not a change between snapshots, but the
+      // content is checked once more against what was reviewed right before the switch. A file time
+      // cannot be restored exactly from Node, so the time of this one file is frozen instead.
+      await reset();
+      const realLstat = fsp.lstat;
+      fsp.lstat = async (location, options) => {
+        const stat = await realLstat(location, options);
+        return options?.bigint && String(location).endsWith("big.bin")
+          ? Object.create(stat, { mtimeNs: { value: 1n } })
+          : stat;
+      };
+      try {
+        result = await prepare();
+        assert.equal(result.status, "ready", result.reason);
+        const bigPath = path.join(target, "big.bin");
+        const sneaky = big(1);
+        sneaky[5] = 7;
+        await fsp.writeFile(bigPath, sneaky);
+        const sneakyApply = await update.applyWorkspaceSkillUpdate(result.candidate, approve(result.candidate, { mode: "bulk" }));
+        assert.equal(sneakyApply.status, "blocked", "a content change that kept size and time must still stop the switch");
+        assert.ok((await bytesAt("big.bin")).equals(sneaky));
+        await update.discardWorkspaceSkillUpdate(result.candidate);
+      } finally { fsp.lstat = realLstat; }
+
+      // A copy that fails its byte check is still ours, so the switch is rolled back, not left half-built.
+      await reset();
+      result = await prepare();
+      assert.equal(result.status, "ready", result.reason);
+      const realCopy = fsp.copyFile;
+      let corruptedCopies = 0;
+      fsp.copyFile = async (...args) => {
+        await realCopy(...args);
+        if (String(args[1]).replace(/\\/g, "/").endsWith("/sample/big.bin") && ++corruptedCopies === 1) {
+          await fsp.writeFile(args[1], Buffer.from([9]), { flag: "r+" });
+        }
+      };
+      let unverified;
+      try { unverified = await update.applyWorkspaceSkillUpdate(result.candidate, approve(result.candidate, { mode: "bulk" })); }
+      finally { fsp.copyFile = realCopy; }
+      assert.equal(unverified.status, "rolled-back", unverified.reason);
+      assert.ok((await bytesAt("big.bin")).equals(oldFiles["big.bin"]), "the previous copy is back");
+      assert.ok(unverified.backup, "the old copy is kept after a rolled-back switch");
+      assert.ok((await fsp.readFile(path.join(unverified.backup.fsPath, "big.bin"))).equals(oldFiles["big.bin"]));
+      await update.discardWorkspaceSkillUpdate(result.candidate);
+
+      // An unchanged large file is not an update: nothing is staged.
+      await reset();
+      unchangedRemote = true;
+      assert.equal((await prepare()).status, "unchanged");
+      unchangedRemote = false;
+
+      // Above the absolute cap the update is still refused, before anything is written.
+      await reset();
+      await fsp.writeFile(path.join(target, "huge.bin"), Buffer.alloc(0));
+      await fsp.truncate(path.join(target, "huge.bin"), 101 * mib);
+      result = await prepare();
+      assert.equal(result.status, "blocked");
+      assert.equal(result.reason, "unsafe-or-oversize-file");
+      assert.deepEqual(await bytesAt("SKILL.md"), oldFiles["SKILL.md"]);
+
+      // The install-time baseline check streams a large file instead of declining to verify it.
+      const installer = require(path.join(repo, "src", "skillInstaller.ts"));
+      const verifyDirectory = path.join(fixture, "verify");
+      await fsp.rm(verifyDirectory, { recursive: true, force: true });
+      await fsp.mkdir(verifyDirectory, { recursive: true });
+      const verifyFiles = { "SKILL.md": Buffer.from("verify\n"), "big.bin": big(3) };
+      for (const [name, bytes] of Object.entries(verifyFiles)) {
+        await fsp.writeFile(path.join(verifyDirectory, name), bytes);
+      }
+      await fsp.writeFile(path.join(verifyDirectory, ".skill-meta.json"), "{}");
+      const listing = Object.entries(verifyFiles).map(([name, bytes]) => ({ path: name, sha: gitBlob(bytes), mode: "100644" }));
+      const verifyRevision = { ...oldRevision, kind: "tree" };
+      const verify = () => installer.directoryMatchesRevision(
+        Uri.file(verifyDirectory), verifyRevision, { listFiles: async () => listing }, ".skill-meta.json");
+      assert.equal(await verify(), true, "a 21 MiB file that matches its Git object verifies");
+      const corrupted = big(3);
+      corrupted[corrupted.length - 1] = 4;
+      await fsp.writeFile(path.join(verifyDirectory, "big.bin"), corrupted);
+      assert.equal(await verify(), false, "a same-size change is not a match");
+      await fsp.writeFile(path.join(verifyDirectory, "big.bin"), Buffer.alloc(0));
+      await fsp.truncate(path.join(verifyDirectory, "big.bin"), 101 * mib);
+      assert.equal(await verify(), false, "a file above the absolute cap is not verified");
+      await fsp.rm(verifyDirectory, { recursive: true, force: true });
+    } finally {
+      delete oldFiles["big.bin"];
+      delete newFiles["big.bin"];
+    }
+  }
+
+  // --- Independent child skills are carried into the new copy, not treated as local edits ---
+  {
+    const writeChild = async (name, files, metadata = { name, source: "other/repo", remotePath: `skills/${name}` }) => {
+      const dir = path.join(target, ...name.split("/"));
+      await fsp.mkdir(dir, { recursive: true });
+      for (const [file, bytes] of Object.entries(files)) {
+        await fsp.mkdir(path.dirname(path.join(dir, file)), { recursive: true });
+        await fsp.writeFile(path.join(dir, file), bytes);
+      }
+      if (metadata) { await fsp.writeFile(path.join(dir, ".skill-meta.json"), JSON.stringify(metadata)); }
+    };
+    await reset();
+    await writeChild("child", { "SKILL.md": "child skill\n", "refs/data.txt": "child data\n", "payload.bin": Buffer.from([0, 255, 3]) });
+    result = await prepare();
+    assert.equal(result.status, "ready", result.reason);
+    candidate = result.candidate;
+    assert.deepEqual(candidate.localChanges, [], "an independent child is not a local edit");
+    assert.deepEqual(candidate.carriedChildren, ["child"]);
+    const files = (await update.listWorkspaceSkillUpdateFiles(candidate)).map((entry) => entry.path);
+    assert.ok(files.includes("child/SKILL.md"));
+    const childBulk = await update.applyWorkspaceSkillUpdate(candidate, approve(candidate, { mode: "bulk" }));
+    assert.equal(childBulk.status, "updated", childBulk.reason);
+    assert.deepEqual(await bytesAt("SKILL.md"), newFiles["SKILL.md"]);
+    assert.equal((await bytesAt("child/SKILL.md")).toString(), "child skill\n");
+    assert.equal((await bytesAt("child/refs/data.txt")).toString(), "child data\n");
+    assert.deepEqual(await bytesAt("child/payload.bin"), Buffer.from([0, 255, 3]));
+    assert.equal(JSON.parse(await bytesAt("child/.skill-meta.json")).name, "child");
+    assert.deepEqual((await fsp.readdir(fixture)).sort(), ["workspace"], "the old copy is removed once the child is verified in place");
+
+    // A folder without a valid sidecar, or with only a SKILL.md, stays an ordinary local addition.
+    for (const [label, metadata, fileSet] of [
+      ["no sidecar", null, { "SKILL.md": "x\n" }],
+      ["sidecar without name", { source: "other/repo" }, { "SKILL.md": "x\n" }],
+      ["sidecar without a SKILL.md", { name: "c", source: "other/repo" }, { "notes.txt": "x\n" }],
+    ]) {
+      await reset();
+      await writeChild("child", fileSet, metadata);
+      result = await prepare();
+      assert.equal(result.status, "ready", `${label}: ${result.reason}`);
+      assert.ok(result.candidate.localChanges.length > 0, `${label} must stay a local addition`);
+      assert.ok(!result.candidate.carriedChildren?.length, label);
+      await update.discardWorkspaceSkillUpdate(result.candidate);
+    }
+
+    // A child of the same path as an upstream folder is compared normally, never carried.
+    oldFiles["bundled/SKILL.md"] = Buffer.from("bundled old\n");
+    newFiles["bundled/SKILL.md"] = Buffer.from("bundled new\n");
+    try {
+      await reset();
+      await writeChild("bundled", { "SKILL.md": "bundled old\n" }, { name: "bundled", source: "octo/demo", remotePath });
+      result = await prepare();
+      assert.equal(result.status, "ready", result.reason);
+      assert.ok(!result.candidate.carriedChildren?.length);
+      assert.ok(result.candidate.localChanges.some((change) => change.path === "bundled/.skill-meta.json" && change.kind === "added"));
+      await update.discardWorkspaceSkillUpdate(result.candidate);
+    } finally {
+      delete oldFiles["bundled/SKILL.md"];
+      delete newFiles["bundled/SKILL.md"];
+    }
+
+    // A child that changes after the review stops the switch; a child with a link is refused up front.
+    await reset();
+    await writeChild("child", { "SKILL.md": "child skill\n" });
+    result = await prepare();
+    assert.equal(result.status, "ready", result.reason);
+    await fsp.writeFile(path.join(target, "child", "SKILL.md"), "edited after review\n");
+    assert.equal((await update.applyWorkspaceSkillUpdate(result.candidate, approve(result.candidate, { mode: "bulk" }))).status, "blocked");
+    assert.equal((await bytesAt("child/SKILL.md")).toString(), "edited after review\n");
+    await update.discardWorkspaceSkillUpdate(result.candidate);
+    await reset();
+    await writeChild("child", { "SKILL.md": "child skill\n" });
+    await fsp.symlink(skills, path.join(target, "child", "linked"), "junction");
+    assert.equal((await prepare()).status, "blocked");
+
+    // A child under a folder that upstream no longer has cannot be placed in the new copy: stop early.
+    oldFiles["gone/SKILL.md"] = Buffer.from("gone\n");
+    try {
+      await reset();
+      await writeChild("gone/child", { "SKILL.md": "child skill\n" });
+      result = await prepare();
+      assert.equal(result.status, "blocked");
+      assert.equal(result.reason, "child-conflicts-with-upstream");
+      assert.equal((await bytesAt("gone/child/SKILL.md")).toString(), "child skill\n");
+      assert.deepEqual((await fsp.readdir(fixture)).sort(), ["workspace"], "nothing is staged");
+    } finally {
+      delete oldFiles["gone/SKILL.md"];
+    }
+
+    // A failed switch restores the child along with the rest.
+    await reset();
+    await writeChild("child", { "SKILL.md": "child skill\n", "refs/data.txt": "child data\n" });
+    result = await prepare();
+    assert.equal(result.status, "ready", result.reason);
+    const originalCopyFile = fsp.copyFile;
+    let copies = 0;
+    fsp.copyFile = async (...args) => {
+      if (String(args[1]).replace(/\\/g, "/").includes("/sample/child/") && ++copies === 1) {
+        throw new Error("injected-copy-failure");
+      }
+      return originalCopyFile(...args);
+    };
+    let failed;
+    try { failed = await update.applyWorkspaceSkillUpdate(result.candidate, approve(result.candidate, { mode: "bulk" })); }
+    finally { fsp.copyFile = originalCopyFile; }
+    assert.equal(failed.status, "rolled-back", failed.reason);
+    assert.deepEqual(await bytesAt("SKILL.md"), oldFiles["SKILL.md"]);
+    assert.equal((await bytesAt("child/refs/data.txt")).toString(), "child data\n");
+  }
   console.log("workspace skill update tests passed");
 }
 

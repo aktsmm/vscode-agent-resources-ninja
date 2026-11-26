@@ -8,7 +8,12 @@ import * as vscode from "vscode";
 import {
   classifyRevision,
   createRevisionResolver,
+  filesHaveSameBytes,
+  gitBlobShaOfFile,
+  HASH_IN_MEMORY_LIMIT_BYTES,
   matchesGitBlob,
+  MAX_SKILL_FILE_BYTES,
+  MAX_SKILL_TOTAL_BYTES,
   parseSourceRevision,
   RevisionFile,
   RevisionResolver,
@@ -31,9 +36,9 @@ import { isGitHubResponseError } from "./githubResponse";
 import { encodeGitHubPathForUrl, encodeGitRefForPath } from "./gitHubRefSafety";
 
 const execFileAsync = promisify(execFile);
-const MAX_FILE = 20 * 1024 * 1024;
-const MAX_TOTAL = 100 * 1024 * 1024;
 const MAX_ENTRIES = 10000;
+const MAX_CHILD_SIDECAR_BYTES = 64 * 1024;
+const MAX_CARRIED_CHILDREN = 50;
 const META = ".skill-meta.json";
 const PREPARE_REASONS = new Set([
   "linked-or-invalid-directory", "outside-workspace", "network-location",
@@ -46,7 +51,7 @@ const PREPARE_REASONS = new Set([
   "unsafe-or-oversize-file", "file-changed", "invalid-metadata", "missing-metadata",
   "unsupported-blob", "invalid-or-local-baseline", "different-source",
   "unsupported-baseline", "target-changed-during-prepare", "candidate-verification-failed",
-  "pending-recovery",
+  "pending-recovery", "child-conflicts-with-upstream", "copy-verification-failed",
 ]);
 const APPLY_REASONS = new Set([
   ...PREPARE_REASONS, "dirty-or-unknown-document", "snapshot-changed",
@@ -55,7 +60,7 @@ const APPLY_REASONS = new Set([
 const PREVIEW_REASONS = new Set([
   "invalid-preview-candidate", "update-in-progress", "preview-snapshot-changed",
   "invalid-preview-path", "preview-file-not-found", "remote-extension-host",
-  "unknown-extension-host",
+  "unknown-extension-host", "preview-file-too-large",
 ]);
 const CLEANUP_CODES = new Set(["EACCES", "EPERM", "ENOTEMPTY", "EBUSY", "ENOENT"]);
 
@@ -81,6 +86,11 @@ export interface WorkspaceSkillCandidate {
   readonly revision: Readonly<SourceRevision>;
   readonly metadata: Readonly<Record<string, unknown>>;
   readonly localChanges: readonly WorkspaceSkillLocalChange[];
+  /**
+   * Independent child skills inside the folder (their own `SKILL.md` and sidecar, not part of
+   * upstream). They are not local edits: they are copied into the new copy before the switch.
+   */
+  readonly carriedChildren?: readonly string[];
   /** Show this uncertainty in the ordinary update confirmation. */
   readonly synchronization: "unknown";
   /** Local sharing can also be configured outside the checks below. */
@@ -93,6 +103,10 @@ export interface WorkspaceSkillPreviewFile {
   path: string;
   local: boolean;
   staged: boolean;
+  /** Above the in-memory limit: the bytes are never read, so there is no text preview. */
+  large?: boolean;
+  /** For a large file present on both sides, whether the two copies hold the same bytes. */
+  identical?: boolean;
 }
 
 export type WorkspaceSkillPrepareResult =
@@ -148,9 +162,22 @@ export interface WorkspaceSkillApproval {
   overwriteLocalChanges?: boolean;
 }
 
+/**
+ * Stands in for the content of a file above the in-memory limit while two looks at the
+ * same file are compared. It is not proof of equal bytes: a tool that rewrites a file and
+ * restores its time defeats it, which is why `blob` is checked once more before a switch.
+ */
+interface LargeStamp {
+  size: bigint;
+  mtimeNs: bigint;
+}
+
 interface Entry {
   type: "file" | "directory";
   hash?: string;
+  large?: LargeStamp;
+  /** Git blob id streamed from a large file when it was compared with upstream. */
+  blob?: string;
 }
 
 interface Snapshot {
@@ -170,6 +197,7 @@ interface OwnedEntry {
   identity: FileIdentity;
   type: "file" | "directory";
   hash?: string;
+  large?: LargeStamp;
 }
 
 interface OwnedTree {
@@ -204,13 +232,27 @@ function inside(root: string, child: string): boolean {
     !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }
 
-function sameSnapshot(a: Snapshot, b: Snapshot): boolean {
+function sameEntry(a: Entry, b: Entry, copied: boolean): boolean {
+  if (a.type !== b.type) {
+    return false;
+  }
+  if (a.large || b.large) {
+    // A copy gets a new modification time on some platforms; its bytes were verified
+    // while it was made, so only the size is compared afterwards.
+    return !!a.large && !!b.large && a.large.size === b.large.size &&
+      (copied || a.large.mtimeNs === b.large.mtimeNs);
+  }
+  return a.hash === b.hash;
+}
+
+/** `copied` compares a snapshot with a copy of it instead of with the same files at a later time. */
+function sameSnapshot(a: Snapshot, b: Snapshot, copied = false): boolean {
   if (hash(a.metadata) !== hash(b.metadata) || a.entries.size !== b.entries.size) {
     return false;
   }
   for (const [name, entry] of a.entries) {
     const other = b.entries.get(name);
-    if (!other || entry.type !== other.type || entry.hash !== other.hash) {
+    if (!other || !sameEntry(entry, other, copied)) {
       return false;
     }
   }
@@ -274,10 +316,20 @@ async function checkLocation(root: string, target: string): Promise<void> {
       `$disk=Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='${drive}'"; ` +
       `$shares=@(Get-CimInstance Win32_Share | Select-Object Name,Path); ` +
       `@{drive=[int]$disk.DriveType;shares=$shares} | ConvertTo-Json -Compress -Depth 3`;
-    const result = await execFileAsync("powershell.exe", [
-      "-NoProfile", "-NonInteractive", "-Command", command,
-    ], { timeout: 10000, windowsHide: true });
-    const inspection: unknown = JSON.parse(result.stdout);
+    // The first CIM query after a cold start can exceed the limit; one more try is enough, and a
+    // second failure stays fail-closed with a reason the user can read instead of a generic one.
+    let output: string | undefined;
+    for (let attempt = 0; attempt < 2 && output === undefined; attempt++) {
+      try {
+        output = (await execFileAsync("powershell.exe", [
+          "-NoProfile", "-NonInteractive", "-Command", command,
+        ], { timeout: 10000, windowsHide: true })).stdout;
+      } catch {
+        output = undefined;
+      }
+    }
+    let inspection: unknown;
+    try { inspection = JSON.parse(output ?? ""); } catch { throw new Error("unknown-share-status"); }
     if (!inspection || typeof inspection !== "object" ||
         (inspection as { drive?: unknown }).drive !== 3 ||
         !Array.isArray((inspection as { shares?: unknown }).shares)) {
@@ -601,14 +653,27 @@ async function snapshot(directory: string, requireMetadata = true): Promise<Snap
         await visit(location, rel, depth + 1);
         await assertIdentity(location, "directory", identity);
       } else {
-        if (info.nlink > 1n || info.size > BigInt(MAX_FILE) ||
-            (total += Number(info.size)) > MAX_TOTAL) {
+        if (info.nlink > 1n) { throw new Error("linked-or-special-entry"); }
+        if (info.size > BigInt(MAX_SKILL_FILE_BYTES) ||
+            (total += Number(info.size)) > MAX_SKILL_TOTAL_BYTES) {
           throw new Error("unsafe-or-oversize-file");
+        }
+        const isMetadata = !prefix && child.name === META;
+        if (info.size > BigInt(HASH_IN_MEMORY_LIMIT_BYTES)) {
+          if (isMetadata) { throw new Error("invalid-metadata"); }
+          // Not read into memory: its size and modification time stand in for the content.
+          entries.set(rel, { type: "file", large: { size: info.size, mtimeNs: info.mtimeNs } });
+          await assertIdentity(location, "file", identity);
+          const again = await fs.lstat(location, { bigint: true });
+          if (again.size !== info.size || again.mtimeNs !== info.mtimeNs) {
+            throw new Error("file-changed");
+          }
+          continue;
         }
         const bytes = await fs.readFile(location);
         if (BigInt(bytes.length) !== info.size) { throw new Error("file-changed"); }
         await assertIdentity(location, "file", identity);
-        if (!prefix && child.name === META) {
+        if (isMetadata) {
           metadata = bytes;
           const value: unknown = JSON.parse(bytes.toString("utf8"));
           if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -627,17 +692,66 @@ async function snapshot(directory: string, requireMetadata = true): Promise<Snap
   return { entries, metadata, metadataObject, rootIdentity, identities };
 }
 
-function diff(snapshotValue: Snapshot, expectedFiles: RevisionFile[]): WorkspaceSkillLocalChange[] {
-  const expected = new Map(expectedFiles.map((file) => [file.path, file]));
-  const expectedDirectories = new Set<string>();
+function isInside(name: string, folders: ReadonlySet<string>): boolean {
+  for (const folder of folders) {
+    if (name === folder || name.startsWith(`${folder}/`)) { return true; }
+  }
+  return false;
+}
+
+function upstreamDirectories(expectedFiles: RevisionFile[]): Set<string> {
+  const directories = new Set<string>();
   for (const file of expectedFiles) {
     const parts = file.path.split("/");
     for (let index = 1; index < parts.length; index++) {
-      expectedDirectories.add(parts.slice(0, index).join("/"));
+      directories.add(parts.slice(0, index).join("/"));
     }
   }
+  return directories;
+}
+
+/**
+ * Folders that hold a skill of their own: not part of upstream, directly under the skill or an
+ * upstream folder, with a `SKILL.md` and a sidecar that names the skill and its source. They are
+ * kept as they are instead of counting as local edits. A folder without such a sidecar, or one
+ * nested under a local-only folder, stays an ordinary local addition.
+ */
+async function findIndependentChildren(
+  target: string, current: Snapshot, expectedDirectories: ReadonlySet<string>,
+): Promise<string[]> {
+  const found: string[] = [];
+  for (const name of [...current.entries.keys()].sort()) {
+    if (found.length >= MAX_CARRIED_CHILDREN) { break; }
+    if (current.entries.get(name)?.type !== "directory" || expectedDirectories.has(name)) { continue; }
+    const slash = name.lastIndexOf("/");
+    if (slash >= 0 && !expectedDirectories.has(name.slice(0, slash))) { continue; }
+    const sidecar = current.entries.get(`${name}/${META}`);
+    if (current.entries.get(`${name}/SKILL.md`)?.type !== "file" ||
+        sidecar?.type !== "file" || sidecar.large) { continue; }
+    const location = path.join(target, ...name.split("/"), META);
+    const info = await fs.lstat(location);
+    if (!info.isFile() || info.size > MAX_CHILD_SIDECAR_BYTES) { continue; }
+    const bytes = await fs.readFile(location);
+    if (hash(bytes) !== sidecar.hash) { throw new Error("file-changed"); }
+    let value: unknown;
+    try { value = JSON.parse(bytes.toString("utf8")); } catch { continue; }
+    const record = value as { name?: unknown; source?: unknown } | null;
+    if (!record || typeof record !== "object" || Array.isArray(record) ||
+        typeof record.name !== "string" || !record.name ||
+        typeof record.source !== "string" || !record.source) { continue; }
+    found.push(name);
+  }
+  return found;
+}
+
+function diff(
+  snapshotValue: Snapshot, expectedFiles: RevisionFile[], carried: ReadonlySet<string>,
+): WorkspaceSkillLocalChange[] {
+  const expected = new Map(expectedFiles.map((file) => [file.path, file]));
+  const expectedDirectories = upstreamDirectories(expectedFiles);
   const result: WorkspaceSkillLocalChange[] = [];
   for (const [name, entry] of snapshotValue.entries) {
+    if (isInside(name, carried)) { continue; }
     if (entry.type === "directory") {
       if (!expectedDirectories.has(name)) {
         result.push({ path: `${name}/`, kind: "added" });
@@ -657,19 +771,45 @@ function diff(snapshotValue: Snapshot, expectedFiles: RevisionFile[]): Workspace
 
 async function baselineChanges(
   target: string, current: Snapshot, files: RevisionFile[],
-): Promise<WorkspaceSkillLocalChange[]> {
-  const changes = diff(current, files);
+): Promise<{ changes: WorkspaceSkillLocalChange[]; children: string[] }> {
+  const children = await findIndependentChildren(target, current, upstreamDirectories(files));
+  const changes = diff(current, files, new Set(children));
   for (const file of files) {
     const currentEntry = current.entries.get(file.path);
-    if (currentEntry?.type === "file") {
-      const bytes = await fs.readFile(path.join(target, ...file.path.split("/")));
-      if (hash(bytes) !== currentEntry.hash) { throw new Error("file-changed"); }
-      if (!matchesGitBlob(bytes, file.sha)) {
+    if (currentEntry?.type !== "file") { continue; }
+    const location = path.join(target, ...file.path.split("/"));
+    if (currentEntry.large) {
+      // Too large to read at once: stream the Git blob id, and keep it for the check before the switch.
+      const blob = await gitBlobShaOfFile(location, currentEntry.large.size);
+      const again = await fs.lstat(location, { bigint: true });
+      if (blob === undefined || again.size !== currentEntry.large.size ||
+          again.mtimeNs !== currentEntry.large.mtimeNs) {
+        throw new Error("file-changed");
+      }
+      currentEntry.blob = blob;
+      if (blob !== file.sha.toLowerCase()) {
         changes.push({ path: file.path, kind: "modified" });
       }
+      continue;
+    }
+    const bytes = await fs.readFile(location);
+    if (hash(bytes) !== currentEntry.hash) { throw new Error("file-changed"); }
+    if (!matchesGitBlob(bytes, file.sha)) {
+      changes.push({ path: file.path, kind: "modified" });
     }
   }
-  return changes.sort((a, b) => a.path.localeCompare(b.path));
+  return { changes: changes.sort((a, b) => a.path.localeCompare(b.path)), children };
+}
+
+/** Streams every large file that was compared with upstream again and requires the same Git blob id. */
+async function assertLargeContentUnchanged(root: string, value: Snapshot): Promise<void> {
+  for (const [name, entry] of value.entries) {
+    if (entry.type !== "file" || !entry.large || !entry.blob) { continue; }
+    const blob = await gitBlobShaOfFile(
+      path.join(root, ...name.split("/")), entry.large.size,
+    );
+    if (blob !== entry.blob) { throw new Error("snapshot-changed"); }
+  }
 }
 
 async function assertOrdinaryBlob(
@@ -757,7 +897,7 @@ export async function prepareWorkspaceSkillUpdate(
         file.path.split("/").some((part) => !isSafePathSegment(part)))) {
       throw new Error("unsupported-baseline");
     }
-    const localChanges = await baselineChanges(target, before, oldFiles);
+    const { changes: localChanges, children } = await baselineChanges(target, before, oldFiles);
     if (!firstSync && status === "unchanged" &&
         !(options.forceReplace === true && localChanges.length > 0)) {
       if (!samePreviewSnapshot(before, await snapshot(target))) {
@@ -767,6 +907,21 @@ export async function prepareWorkspaceSkillUpdate(
         status, revision: current, metadata: structuredClone(meta),
         localChanges, synchronization: "unknown", sharing: "unknown",
       };
+    }
+    if (children.length) {
+      // A child whose path upstream now uses would collide in the new copy; stop before staging.
+      const newFiles = current.kind === "tree" ? await resolver.listFiles(current) : [];
+      const directories = upstreamDirectories(newFiles);
+      const taken = new Set(directories);
+      for (const file of newFiles) { taken.add(file.path); }
+      // The stage only has the new upstream folders, so a child needs its parent folder to still exist.
+      const orphaned = (child: string): boolean => {
+        const slash = child.lastIndexOf("/");
+        return slash > 0 && !directories.has(child.slice(0, slash));
+      };
+      if (children.some((child) => taken.has(child) || orphaned(child))) {
+        throw new Error("child-conflicts-with-upstream");
+      }
     }
     transaction = await fs.mkdtemp(path.join(parent, ".resource-ninja-update-"));
     transactionIdentity = await fileIdentity(transaction, "directory");
@@ -788,7 +943,7 @@ export async function prepareWorkspaceSkillUpdate(
       const raw = `https://raw.githubusercontent.com/${current.owner}/${current.repo}/${encodeGitRefForPath(current.commitSha)}/${encodeGitHubPathForUrl(current.remotePath)}`;
       const api = `https://api.github.com/repos/${current.owner}/${current.repo}/contents/${encodeGitHubPathForUrl(current.remotePath)}?ref=${encodeURIComponent(current.commitSha)}`;
       const bytes = await fetchFileBytes(raw, options.token, api, true);
-      if (bytes.length > MAX_FILE || !matchesGitBlob(bytes, current.contentSha)) {
+      if (bytes.length > HASH_IN_MEMORY_LIMIT_BYTES || !matchesGitBlob(bytes, current.contentSha)) {
         throw new Error("candidate-verification-failed");
       }
       await fs.writeFile(path.join(stage, "SKILL.md"), bytes, { flag: "wx" });
@@ -797,6 +952,9 @@ export async function prepareWorkspaceSkillUpdate(
     stripSkillMetaLocalPaths(nextMeta);
     await fs.writeFile(path.join(stage, META), JSON.stringify(nextMeta, null, 2), { flag: "wx" });
     await refreshSingleSkillMetadata(vscode.Uri.file(path.join(stage, "SKILL.md")), true);
+    if (children.length) {
+      await copySnapshot(target, stage, before, undefined, (name) => isInside(name, new Set(children)), false);
+    }
     const staged = await snapshot(stage);
     if (!staged.entries.has("SKILL.md") ||
         !samePreviewSnapshot(before, await snapshot(target))) {
@@ -809,6 +967,7 @@ export async function prepareWorkspaceSkillUpdate(
       revision: Object.freeze({ ...current }),
       metadata: Object.freeze(structuredClone(meta)),
       localChanges: Object.freeze(localChanges.map((item) => Object.freeze({ ...item }))),
+      carriedChildren: Object.freeze([...children]),
       synchronization: "unknown",
       sharing: "unknown",
       recoveryDirectory: vscode.Uri.file(transaction),
@@ -867,28 +1026,35 @@ async function assertIdentity(
 
 async function recordOwned(
   owned: OwnedTree | undefined, root: string, name: string,
-  type: "file" | "directory", expectedHash?: string,
+  type: "file" | "directory", expectedHash?: string, large?: LargeStamp,
 ): Promise<void> {
   if (!owned) { return; }
   const location = path.join(root, ...name.split("/"));
   const identity = await fileIdentity(location, type);
-  owned.entries.set(name, { identity, type, hash: expectedHash });
+  owned.entries.set(name, { identity, type, hash: expectedHash, large });
 }
 
+/**
+ * Copies the entries of `value` (all of them, or those `include` accepts) and, unless told
+ * otherwise, the root metadata. A large file is read back and compared byte for byte, because
+ * its snapshot entry holds no content hash.
+ */
 async function copySnapshot(
   source: string, destination: string, value: Snapshot, owned?: OwnedTree,
+  include?: (name: string) => boolean, withMetadata = true,
 ): Promise<void> {
   await assertNoLinks(source);
   await assertNoLinks(destination);
-  const directories = [...value.entries].filter(([, entry]) => entry.type === "directory");
+  const selected = [...value.entries].filter(([name]) => !include || include(name));
+  const directories = selected.filter(([, entry]) => entry.type === "directory");
   directories.sort(([a], [b]) => a.split("/").length - b.split("/").length);
   for (const [name] of directories) {
     const targetDirectory = path.join(destination, ...name.split("/"));
     await assertNoLinks(path.dirname(targetDirectory));
-    await fs.mkdir(targetDirectory);
+    await fs.mkdir(targetDirectory, include ? { recursive: true } : undefined);
     await recordOwned(owned, destination, name, "directory");
   }
-  for (const [name, entry] of value.entries) {
+  for (const [name, entry] of selected) {
     if (entry.type === "file") {
       const sourceFile = path.join(source, ...name.split("/"));
       const targetFile = path.join(destination, ...name.split("/"));
@@ -898,16 +1064,31 @@ async function copySnapshot(
       if (!sourceInfo.isFile() || sourceInfo.isSymbolicLink() || sourceInfo.nlink > 1) {
         throw new Error("linked-or-special-entry");
       }
-      await fs.copyFile(
-        sourceFile,
-        targetFile,
-        constants.COPYFILE_EXCL,
-      );
-      await recordOwned(owned, destination, name, "file", entry.hash);
+      const recordLarge = async (): Promise<void> => {
+        const written = await fs.lstat(targetFile, { bigint: true });
+        await recordOwned(owned, destination, name, "file", entry.hash,
+          { size: written.size, mtimeNs: written.mtimeNs });
+      };
+      try {
+        await fs.copyFile(sourceFile, targetFile, constants.COPYFILE_EXCL);
+      } catch (error) {
+        // A partial large copy is ours; recording it lets rollback remove it.
+        if (entry.large) { await recordLarge().catch(() => undefined); }
+        throw error;
+      }
+      if (entry.large) {
+        await recordLarge();
+        if (!(await filesHaveSameBytes(sourceFile, targetFile, entry.large.size))) {
+          throw new Error("copy-verification-failed");
+        }
+      } else {
+        await recordOwned(owned, destination, name, "file", entry.hash);
+      }
     }
   }
   await assertNoLinks(source);
   await assertNoLinks(destination);
+  if (!withMetadata) { return; }
   const metadataInfo = await fs.lstat(path.join(source, META));
   if (!metadataInfo.isFile() || metadataInfo.isSymbolicLink() || metadataInfo.nlink > 1) {
     throw new Error("linked-or-special-entry");
@@ -920,8 +1101,13 @@ async function assertOwnedEntry(root: string, name: string, entry: OwnedEntry): 
   const location = path.join(root, ...name.split("/"));
   await assertIdentity(location, entry.type, entry.identity);
   if (entry.type === "file") {
-    const info = await fs.lstat(location);
-    if (info.size > MAX_FILE || hash(await fs.readFile(location)) !== entry.hash) {
+    const info = await fs.lstat(location, { bigint: true });
+    if (entry.large) {
+      if (info.size !== entry.large.size || info.mtimeNs !== entry.large.mtimeNs) {
+        throw new Error("owned-content-changed");
+      }
+    } else if (info.size > BigInt(HASH_IN_MEMORY_LIMIT_BYTES) ||
+        hash(await fs.readFile(location)) !== entry.hash) {
       throw new Error("owned-content-changed");
     }
     await assertIdentity(location, entry.type, entry.identity);
@@ -986,7 +1172,7 @@ function ownedFromSnapshot(value: Snapshot): OwnedTree | undefined {
   for (const [name, entry] of value.entries) {
     const identity = value.identities.get(name);
     if (!identity) { return undefined; }
-    owned.entries.set(name, { identity, type: entry.type, hash: entry.hash });
+    owned.entries.set(name, { identity, type: entry.type, hash: entry.hash, large: entry.large });
   }
   const metadataIdentity = value.identities.get(META);
   if (!metadataIdentity) { return undefined; }
@@ -1063,11 +1249,11 @@ async function rollbackUpdate(
   const restoredIdentity = await fileIdentity(state.target, "directory");
   await copySnapshot(backupPath, state.target, state.baseline);
   await assertIdentity(state.target, "directory", restoredIdentity);
-  if (!sameSnapshot(state.baseline, await snapshot(state.target))) {
+  if (!sameSnapshot(state.baseline, await snapshot(state.target), true)) {
     throw new Error("rollback-verification-failed");
   }
   await verifyBackup();
-  if (!sameSnapshot(state.baseline, await snapshot(state.target))) {
+  if (!sameSnapshot(state.baseline, await snapshot(state.target), true)) {
     throw new Error("rollback-verification-failed");
   }
   await assertIdentity(state.target, "directory", restoredIdentity);
@@ -1108,7 +1294,18 @@ export async function applyWorkspaceSkillUpdate(
       throw new Error("recovery-record-changed");
     }
     await assertIdentity(recoveryRecord.path, "file", recoveryRecord.identity);
-    await fs.unlink(recoveryRecord.path);
+    // Antivirus or an indexer can hold the file for a moment on Windows; a bounded retry keeps a
+    // finished switch from being treated as failed.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await fs.unlink(recoveryRecord.path);
+        break;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (attempt >= 4 || (code !== "EPERM" && code !== "EBUSY" && code !== "EACCES")) { throw error; }
+        await new Promise((resolve) => setTimeout(resolve, 100 * 2 ** attempt));
+      }
+    }
     recoveryRecord = undefined;
   };
   const checkGuard = async (): Promise<void> => {
@@ -1131,6 +1328,7 @@ export async function applyWorkspaceSkillUpdate(
         !samePreviewSnapshot(state.staged, await snapshot(state.stage))) {
       throw new Error("snapshot-changed");
     }
+    await assertLargeContentUnchanged(state.target, state.baseline);
     await checkGuard();
     identity = {
       original: await fileIdentity(state.target, "directory"),
@@ -1167,7 +1365,7 @@ export async function applyWorkspaceSkillUpdate(
     await fs.mkdir(state.target);
     owned = { root: await fileIdentity(state.target, "directory"), entries: new Map() };
     await copySnapshot(state.stage, state.target, state.staged, owned);
-    if (!sameSnapshot(state.staged, await snapshot(state.target)) ||
+    if (!sameSnapshot(state.staged, await snapshot(state.target), true) ||
         !sameSnapshot(state.baseline, await snapshot(backupPath))) {
       throw new Error("post-switch-verification-failed");
     }
@@ -1187,7 +1385,7 @@ export async function applyWorkspaceSkillUpdate(
         try {
           await rollbackUpdate(state, backupPath, identity, owned, checkGuard);
           await checkGuard();
-          if (!sameSnapshot(state.baseline, await snapshot(state.target))) {
+          if (!sameSnapshot(state.baseline, await snapshot(state.target), true)) {
             throw new Error("rollback-verification-failed");
           }
           await releaseRecord();
@@ -1292,14 +1490,27 @@ async function listPreviewFiles(
   const state = previewState(candidate);
   await assertPreviewState(candidate, state);
   const names = new Set([...state.baseline.entries.keys(), ...state.staged.entries.keys()]);
-  return [...names].sort().filter((name) =>
-    state.baseline.entries.get(name)?.type === "file" ||
-    state.staged.entries.get(name)?.type === "file",
-  ).map((name) => ({
-    path: name,
-    local: state.baseline.entries.get(name)?.type === "file",
-    staged: state.staged.entries.get(name)?.type === "file",
-  }));
+  const files: WorkspaceSkillPreviewFile[] = [];
+  for (const name of [...names].sort()) {
+    const local = state.baseline.entries.get(name);
+    const staged = state.staged.entries.get(name);
+    if (local?.type !== "file" && staged?.type !== "file") { continue; }
+    const item: WorkspaceSkillPreviewFile = {
+      path: name, local: local?.type === "file", staged: staged?.type === "file",
+    };
+    if (local?.large || staged?.large) {
+      item.large = true;
+      item.identical = !!local?.large && !!staged?.large && local.large.size === staged.large.size &&
+        await filesHaveSameBytes(
+          path.join(state.target, ...name.split("/")),
+          path.join(state.stage, ...name.split("/")),
+          local.large.size,
+        );
+    }
+    files.push(item);
+  }
+  await assertPreviewState(candidate, state);
+  return files;
 }
 
 /** Reads exact bytes only from an unchanged candidate and its saved local snapshot. */
@@ -1329,13 +1540,14 @@ async function readPreviewFile(
   const entry = value.entries.get(relativePath);
   const expectedIdentity = value.identities.get(relativePath);
   if (entry?.type !== "file" || !expectedIdentity) { throw new Error("preview-file-not-found"); }
+  if (entry.large) { throw new Error("preview-file-too-large"); }
   await assertPreviewState(candidate, state);
   const root = side === "local" ? state.target : state.stage;
   const location = path.join(root, ...relativePath.split("/"));
   await assertNoLinks(path.dirname(location));
   await assertIdentity(location, "file", expectedIdentity);
   const bytes = await fs.readFile(location);
-  if (bytes.length > MAX_FILE || hash(bytes) !== entry.hash) {
+  if (bytes.length > HASH_IN_MEMORY_LIMIT_BYTES || hash(bytes) !== entry.hash) {
     throw new Error("preview-snapshot-changed");
   }
   await assertIdentity(location, "file", expectedIdentity);

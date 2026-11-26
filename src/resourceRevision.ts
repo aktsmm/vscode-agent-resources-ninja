@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { fetchGitHubWithOptionalAuthRetry } from "./githubFetch";
 import {
   createGitHubResponseError,
@@ -59,6 +60,75 @@ export function matchesGitBlob(
       .update(bytes)
       .digest("hex") === expectedSha.toLowerCase()
   );
+}
+
+/**
+ * Files up to this size are read into memory and compared by content hash. Larger
+ * ones are streamed for a Git blob check and compared by size and modification time
+ * between two looks at the same file.
+ */
+export const HASH_IN_MEMORY_LIMIT_BYTES = 20 * 1024 * 1024;
+/** A skill file above this is refused: the download holds a whole file in memory. */
+export const MAX_SKILL_FILE_BYTES = 100 * 1024 * 1024;
+export const MAX_SKILL_TOTAL_BYTES = 500 * 1024 * 1024;
+
+/**
+ * Streams a local file into the Git blob hash without holding it in memory.
+ * Returns undefined when the file does not have exactly `expectedSize` bytes, which
+ * means it changed while it was read.
+ */
+export async function gitBlobShaOfFile(
+  location: string,
+  expectedSize: number | bigint,
+): Promise<string | undefined> {
+  const size = Number(expectedSize);
+  if (!Number.isSafeInteger(size) || size < 0) {
+    return undefined;
+  }
+  const digest = createHash("sha1").update(`blob ${size}\0`);
+  let read = 0;
+  for await (const chunk of createReadStream(location, { highWaterMark: 1 << 20 })) {
+    const bytes = chunk as Buffer;
+    read += bytes.byteLength;
+    if (read > size) {
+      return undefined;
+    }
+    digest.update(bytes);
+  }
+  return read === size ? digest.digest("hex") : undefined;
+}
+
+/** True when `matchesGitBlob` would accept a file, for a file too large to read at once. */
+export async function fileMatchesGitBlob(
+  location: string,
+  size: number | bigint,
+  expectedSha: string,
+): Promise<boolean> {
+  if (!sha(expectedSha)) {
+    return false;
+  }
+  return (
+    (await gitBlobShaOfFile(location, size)) === expectedSha.toLowerCase()
+  );
+}
+
+/** Streams two local files and reports whether they hold the same bytes. */
+export async function filesHaveSameBytes(
+  first: string,
+  second: string,
+  size: number | bigint,
+): Promise<boolean> {
+  const digest = async (location: string): Promise<string | undefined> => {
+    const hash = createHash("sha256");
+    let read = 0;
+    for await (const chunk of createReadStream(location, { highWaterMark: 1 << 20 })) {
+      read += (chunk as Buffer).byteLength;
+      hash.update(chunk as Buffer);
+    }
+    return read === Number(size) ? hash.digest("hex") : undefined;
+  };
+  const [a, b] = [await digest(first), await digest(second)];
+  return a !== undefined && a === b;
 }
 
 export class RevisionPathMissingError extends Error {

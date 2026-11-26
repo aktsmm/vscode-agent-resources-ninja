@@ -7573,7 +7573,7 @@ export async function activate(
     "network-or-unknown-volume", "unknown-volume", "different-volume",
     "linked-or-invalid-directory", "linked-or-special-entry", "pending-recovery",
     "dirty-or-unknown-document", "approval-required-or-invalid-candidate",
-    "update-in-progress",
+    "update-in-progress", "child-conflicts-with-upstream", "unsafe-or-oversize-file",
   ]);
   const isRateLimitError = (error: unknown): boolean =>
     isGitHubResponseError(error) &&
@@ -7632,6 +7632,13 @@ export async function activate(
       getVerifiedDiffs: async (candidate) => {
         const diffs = [];
         for (const file of await listWorkspaceSkillUpdateFiles(candidate)) {
+          if (file.large) {
+            // Never read into memory: an identical pair is skipped, a differing one is listed without text.
+            if (!file.identical) {
+              diffs.push({ path: file.path, unavailable: "large" as const });
+            }
+            continue;
+          }
           const local = file.local
             ? await readWorkspaceSkillUpdateFile(candidate, "local", file.path)
             : undefined;

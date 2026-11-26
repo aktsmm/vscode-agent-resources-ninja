@@ -280,6 +280,60 @@ async function main() {
     assert.equal(provider.provideTextDocumentContent(diffs[0].left), "Preview expired.");
     adapter.dispose();
   }
+  // A file above the in-memory limit is listed without text, and carried child skills are announced.
+  for (const [isJa, kept, unavailable] of [
+    [false, /1 separately installed child skill\(s\) are carried over unchanged/, /1 file\(s\) cannot be previewed/],
+    [true, /独立してインストールした子スキル 1 件は、そのまま新しいコピーへ引き継ぎます/, /1 件のファイルは差分を表示できません/],
+  ]) {
+    reset();
+    japanese = isJa;
+    const { item, candidate, context, operations } = fixture();
+    candidate.localChanges = [];
+    candidate.carriedChildren = ["child"];
+    operations.getVerifiedDiffs = async () => [{ path: "huge.bin", unavailable: "large" }];
+    infoChoices.push(isJa ? "詳細" : "Details", undefined);
+    pickChoices.push(
+      (items) => items[0],
+      (items) => items.find((entry) => entry.diff?.path === "huge.bin"),
+      (items) => items.find((entry) => entry.action === "apply"),
+    );
+    warningChoices.push(undefined, isJa ? "更新する" : "Update");
+    const adapter = createWorkspaceSkillUpdateAdapter(context, operations);
+    const result = await adapter.present([item]);
+    assert.equal(result[0].status, "updated");
+    assert.equal(diffs.length, 0, "a large file never opens a text diff");
+    assert.ok(messages.some((message) => message.message.includes(isJa ? "1 MiB を超える" : "1 MiB")));
+    const modal = messages.find((message) => message.actions[0]?.modal);
+    assert.match(modal.actions[0].detail, kept);
+    assert.match(modal.actions[0].detail, unavailable);
+    assert.ok(!/ローカル編集を上書き|Saved local edits will be overwritten/.test(modal.actions[0].detail));
+    adapter.dispose();
+  }
+  reset();
+  japanese = false;
+  // Each engine reason that reaches the user has its own readable text, in both languages.
+  for (const [reason, english, japaneseText] of [
+    ["unknown-share-status", /Could not check whether this location is shared/, /共有されているか確認できませんでした/],
+    ["unsafe-or-oversize-file", /too large/, /大きすぎる/],
+    ["linked-or-special-entry", /linked location/, /リンクを含む/],
+    ["child-conflicts-with-upstream", /child skill/, /子スキル/],
+    ["copy-verification-failed", /could not be verified; nothing was changed/, /検証に失敗/],
+  ]) {
+    for (const isJa of [false, true]) {
+      reset();
+      japanese = isJa;
+      const { item, context, operations } = fixture();
+      infoChoices.push(isJa ? "まとめて更新" : "Update All");
+      operations.prepare = async () => ({ status: "blocked", reason });
+      operations.classifyBlocked = () => "failure";
+      warningChoices.push(isJa ? "結果の詳細" : "Show Results");
+      const adapter = createWorkspaceSkillUpdateAdapter(context, operations);
+      await adapter.present([item]);
+      const detail = pickers[0].items[0].detail;
+      assert.match(detail, isJa ? japaneseText : english, `${reason} (${isJa ? "ja" : "en"}): ${detail}`);
+      adapter.dispose();
+    }
+  }
   reset();
   japanese = false;
   {
